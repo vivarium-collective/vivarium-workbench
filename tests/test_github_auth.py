@@ -60,6 +60,23 @@ def test_mask_token_covers_all_prefixes():
         assert prefix not in ga.mask_token(s)
 
 
+def test_mask_token_redacts_the_basic_auth_header_value():
+    """base64 hides the token's own shape, so the header ``basic_auth_header`` builds
+    (what ``git_https_env`` hands a subprocess) needs its own pattern."""
+    header = ga.basic_auth_header("ghp_" + "a1B2c3D4" * 5)
+    out = ga.mask_token(f"trace: http.extraHeader={header} (exit 1)")
+    assert header.split("basic ")[1] not in out
+    assert out == "trace: http.extraHeader=<redacted> (exit 1)"
+
+
+@pytest.mark.parametrize("count", ["abc", "-1"])
+def test_git_https_env_ignores_a_config_count_that_is_not_a_count(monkeypatch, count):
+    """git rejects such a count itself; adding an entry on top would only misreport it."""
+    monkeypatch.setattr(ga, "current_session",
+                        lambda: ga.Session(login="octocat", token="ghp_" + "a" * 36, source="device_flow"))
+    assert ga.git_https_env({"GIT_CONFIG_COUNT": count}) == {}
+
+
 def test_mask_token_is_idempotent():
     s = "before <redacted> ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa after"
     once = ga.mask_token(s)

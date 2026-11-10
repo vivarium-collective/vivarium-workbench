@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_workbench.lib import env_compat
+from vivarium_workbench.lib import env_compat, github_auth
 from vivarium_workbench.lib import materialization as m
 from vivarium_workbench.lib import remote_build_source as rbs
 from vivarium_workbench.lib import repo_source as rs
@@ -137,6 +137,9 @@ def test_materialize_sets_uv_cache_dir_under_the_store(tmp_path, monkeypatch):
 
     import subprocess
     monkeypatch.setattr(subprocess, "run", fake_run)
+    # Hermetic (module docstring): materialize() resolves the GitHub session for
+    # private git dependencies, and discovery shells out to `gh`. Not under test here.
+    monkeypatch.setattr(github_auth, "current_session", lambda: None)
 
     m.materialize(src)
 

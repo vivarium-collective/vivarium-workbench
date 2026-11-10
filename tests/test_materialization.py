@@ -6,13 +6,17 @@ test touches a real user cache. The offline tests fabricate a venv layout to
 exercise the cache/coordinate logic without running ``uv``; one opt-in test runs
 a real ``uv sync`` of a minimal no-dep project (skipped when ``uv`` is absent).
 """
+import base64
+import os
+import shutil
 import subprocess
 import sys
+import urllib.error
 from pathlib import Path
 
 import pytest
 
-from vivarium_workbench.lib import env_resolver, materialization as m
+from vivarium_workbench.lib import env_resolver, github_auth, materialization as m
 
 
 @pytest.fixture
@@ -143,6 +147,8 @@ def test_materialize_runs_real_uv_sync(store, tmp_path, monkeypatch):
     # Pin uv to the running interpreter so it need not download a managed CPython
     # (materialize inherits os.environ). No deps → the sync is ~1s and offline.
     monkeypatch.setenv("UV_PYTHON", sys.executable)
+    # Not under test: GitHub session discovery shells out to `gh` (ambient on a laptop or CI).
+    monkeypatch.setattr(github_auth, "current_session", lambda: None)
     src = tmp_path / "proj"
     src.mkdir()
     (src / "pyproject.toml").write_text(
@@ -161,3 +167,121 @@ def test_materialize_runs_real_uv_sync(store, tmp_path, monkeypatch):
     assert str(store) in interp                           # built into the store
     assert m.cached_interpreter_for(src) == interp        # now a cache hit
     assert m.materialize(src, timeout=180) == interp      # reuses, no rebuild
+
+
+# -- private git dependencies: the GitHub session must reach the subprocess's git --
+#
+# A managed workspace can pin a PRIVATE git dependency (sms-ecoli pins the private
+# vivarium-collective/v2ecoli). The workbench container has no git credential helper and
+# `uv` runs git with terminal prompts disabled, so unless `materialize` hands the subprocess
+# the signed-in session's token the sync dies with "could not read Username for
+# 'https://github.com'" and the UI shows "Workspace failed to prepare".
+#
+# The oracle is REAL git: a stand-in `uv` (the periphery: it only has to leave an interpreter
+# behind) asks `git config --get-urlmatch http.extraHeader <url>` which header git would send
+# to each URL, given the environment `materialize` handed it. Proven live, not here: GitHub
+# accepts `x-access-token:<token>` Basic auth for a private fetch (uv 0.11.26 and 0.13.7, real
+# sms-ecoli lock, exit 1 without it, exit 0 with it).
+_GIT_PROBES = {
+    "private_dep": "https://github.com/vivarium-collective/v2ecoli.git",
+    "pypi": "https://pypi.org/simple/",
+    "lookalike_host": "https://github.com.evil.example/vivarium-collective/v2ecoli.git",
+    "cleartext": "http://github.com/vivarium-collective/v2ecoli.git",
+}
+_needs_posix_git = pytest.mark.skipif(
+    sys.platform == "win32" or not shutil.which("git"), reason="needs a POSIX shell and git")
+_TOKEN = "ghp_" + "a1B2c3D4" * 5
+
+
+def _materialize_under_probing_uv(tmp_path, monkeypatch) -> dict:
+    """Run ``materialize`` with a stand-in ``uv`` first on PATH; return git's answers."""
+    out = tmp_path / "git-answers"
+    script = ["#!/bin/sh", "set -e",
+              'mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"', ': > "$UV_PROJECT_ENVIRONMENT/bin/python"']
+    for name, url in _GIT_PROBES.items():
+        script.append(
+            f'printf "{name}=%s\\n" "$(git config --get-urlmatch http.extraHeader {url} || true)" >> "{out}"')
+    script.append(f'printf "kept=%s\\n" "$(git config --get vwb.kept || true)" >> "{out}"')
+    script.append(f'printf "count=%s\\n" "${{GIT_CONFIG_COUNT-unset}}" >> "{out}"')
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    uv = bindir / "uv"
+    uv.write_text("\n".join(script) + "\n")
+    uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    # Only what materialize hands the subprocess may influence git's answer.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    m.materialize(_make_project(tmp_path / "proj"), timeout=60)
+    return dict(line.partition("=")[::2] for line in out.read_text().splitlines())
+
+
+def _signed_in(monkeypatch):
+    monkeypatch.setattr(github_auth, "_CACHED_SESSION",
+                        github_auth.Session(login="octocat", token=_TOKEN, source="device_flow"))
+
+
+@_needs_posix_git
+def test_materialize_hands_the_subprocess_the_session_token_for_github_only(store, tmp_path, monkeypatch):
+    _signed_in(monkeypatch)
+    for var in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+        monkeypatch.delenv(var, raising=False)
+    answers = _materialize_under_probing_uv(tmp_path, monkeypatch)
+    basic = base64.b64encode(f"x-access-token:{_TOKEN}".encode()).decode()
+    assert answers["private_dep"] == f"AUTHORIZATION: basic {basic}"
+    # The token goes to https://github.com/ and nowhere else.
+    assert answers["pypi"] == answers["lookalike_host"] == answers["cleartext"] == ""
+
+
+@_needs_posix_git
+def test_materialize_keeps_git_config_the_operator_already_set(store, tmp_path, monkeypatch):
+    _signed_in(monkeypatch)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "vwb.kept")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "yes")
+    answers = _materialize_under_probing_uv(tmp_path, monkeypatch)
+    assert answers["kept"] == "yes"                       # not overwritten
+    assert answers["private_dep"].startswith("AUTHORIZATION: basic ")
+
+
+@_needs_posix_git
+def test_materialize_without_a_session_adds_no_git_credentials(store, tmp_path, monkeypatch):
+    monkeypatch.setattr(github_auth, "current_session", lambda: None)
+    for var in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+        monkeypatch.delenv(var, raising=False)
+    answers = _materialize_under_probing_uv(tmp_path, monkeypatch)
+    assert answers["private_dep"] == ""
+    assert answers["count"] == "unset"
+
+
+@_needs_posix_git
+def test_materialize_builds_without_credentials_when_the_session_lookup_fails(store, tmp_path, monkeypatch):
+    """A build with no private dependency needs no credential: an unreachable GitHub (a
+    machine token is validated against the API), keyring or `gh` must not fail it."""
+    def _unreachable():
+        raise urllib.error.URLError("connection refused")
+    monkeypatch.setattr(github_auth, "current_session", _unreachable)
+    for var in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+        monkeypatch.delenv(var, raising=False)
+    answers = _materialize_under_probing_uv(tmp_path, monkeypatch)   # must not raise
+    assert answers["private_dep"] == ""
+
+
+@_needs_posix_git
+def test_materialize_failure_tail_never_carries_the_credential(store, tmp_path, monkeypatch):
+    """The tail goes to the browser. A tool that echoes the environment git was given
+    (GIT_TRACE_REDACT=0, a verbose wrapper) must not leak the header."""
+    _signed_in(monkeypatch)
+    for var in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+        monkeypatch.delenv(var, raising=False)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    uv = bindir / "uv"
+    uv.write_text('#!/bin/sh\necho "trace: $GIT_CONFIG_KEY_0=$GIT_CONFIG_VALUE_0" >&2\nexit 1\n')
+    uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    with pytest.raises(m.MaterializationError) as exc:
+        m.materialize(_make_project(tmp_path / "proj"), timeout=60)
+    basic = base64.b64encode(f"x-access-token:{_TOKEN}".encode()).decode()
+    assert basic not in exc.value.tail
+    assert "trace: http.https://github.com/.extraHeader=<redacted>" in exc.value.tail

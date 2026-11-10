@@ -30,6 +30,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vivarium_workbench.lib import github_auth
 from vivarium_workbench.lib.env_compat import get_env, home_or_tmp_default
 
 # Long timeout — a ``uv sync`` on a v2ecoli-scale repo is minutes, a different cost
@@ -151,8 +152,12 @@ def materialize(source: Path, *, timeout: float = _DEFAULT_TIMEOUT_S) -> str:
     # that store_root()'s own writable-temp-dir fallback doesn't cover on its
     # own. Keep uv's download cache under the same store root so it inherits
     # the same fallback.
+    # git_https_env: a workspace can pin a PRIVATE git dependency (sms-ecoli pins
+    # the private v2ecoli); uv runs git with prompts disabled and the container has
+    # no credential helper, so the signed-in GitHub session must reach it here.
     env = dict(
         os.environ,
+        **github_auth.git_https_env(),
         UV_PROJECT_ENVIRONMENT=str(venv_dir),
         UV_CACHE_DIR=str(store_root() / ".uv-cache"),
     )
@@ -171,7 +176,8 @@ def materialize(source: Path, *, timeout: float = _DEFAULT_TIMEOUT_S) -> str:
         raise MaterializationError("uv not found on PATH", tail="") from e
 
     if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "")[-2000:]
+        # The tail goes to the browser: scrub the credential handed to git above.
+        tail = github_auth.mask_token((proc.stderr or proc.stdout or "")[-2000:])
         raise MaterializationError("environment build failed", tail=tail)
 
     py = _venv_python(venv_dir)
