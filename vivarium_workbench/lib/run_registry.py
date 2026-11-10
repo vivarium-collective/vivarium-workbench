@@ -17,7 +17,6 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
-import sys
 from pathlib import Path
 
 import psutil
@@ -58,8 +57,18 @@ def spawn_detached(request_path: Path, *, workspace: Path,
         # so a detached runner whose cwd resolves a different workspace.yaml can't
         # hash a divergent tree for the same out/cache.
         env["V2E_ROOT"] = str(workspace)
+        # Issue #1573: run the detached runner on the WORKSPACE's interpreter, not
+        # the server's. When the workspace lives in its own venv (the published
+        # image's layout), the server's interpreter lacks the workspace package,
+        # so a generator composite never registers and the run dies with
+        # "composite spec not found". `resolve_run_interpreter` picks the
+        # workspace venv when it exists AND can import the workbench, else keeps
+        # this interpreter (and says why) — the same seam the study-run path uses
+        # (composite_subprocess.py). Mock-free regression: test_run_interpreter_own_venv.
+        from vivarium_workbench.lib import env_resolver
+        python = env_resolver.resolve_run_interpreter(workspace)
         proc = subprocess.Popen(
-            [sys.executable, "-m", "vivarium_workbench.cli",
+            [python, "-m", "vivarium_workbench.cli",
              "run-composite", "--request", str(request_path)],
             cwd=str(workspace),
             stdout=log_fh,
