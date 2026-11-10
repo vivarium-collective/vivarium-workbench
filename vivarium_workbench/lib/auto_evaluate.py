@@ -252,7 +252,7 @@ def _evaluator_test_runner(
     optional ``[evaluator]`` extra (``viva_emitters.RunReader``) is absent — the
     orchestrator turns both into a clean ``status`` rather than a crash.
     """
-    from discovery_engine.study.evaluator import _resolve_run_store, evaluate_study  # noqa: PLC0415
+    from discovery_engine.study.evaluator import resolve_run_store, evaluate_study  # noqa: PLC0415
 
     # #1472: grade only the tests whose requires_simulation / given target names
     # THIS run's arm. Tests targeting another arm are dropped from the spec the
@@ -262,7 +262,7 @@ def _evaluator_test_runner(
     run_spec.pop("tests", None)
     run_spec["behavior_tests"] = _tests_for_run(spec, run)
 
-    store = _resolve_run_store(run, study_dir, ws_root)
+    store = resolve_run_store(run, study_dir, ws_root)
     if store is None:
         if run.get("evaluation_only"):
             # Store-less grading for a run-less (params-only) study: its behavior
