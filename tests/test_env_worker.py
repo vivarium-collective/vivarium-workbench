@@ -437,6 +437,25 @@ def test_discover_composites_returns_generator_entries():
 
 
 @pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
+def test_discover_composites_does_not_execute_generator_bodies(tmp_path, monkeypatch):
+    """Regression for #1574: a read-only composite listing must never run a
+    generator's BODY. The fixture's ``side_effect_probe`` generator writes a
+    sentinel file when its body runs (as v2ecoli's ``parca_prep`` kicks off a
+    full ParCa — ~163s, ~4.5 GB of untracked files — inside its body). Listing
+    composites must not build the document, so the sentinel must not appear."""
+    pytest.importorskip("viva_superpowers")
+    sentinel = tmp_path / "generator_body_ran.sentinel"
+    monkeypatch.setenv("VWB_TEST_DISCOVER_SENTINEL", str(sentinel))
+    with EnvWorker(_FIXTURE.resolve()) as w:
+        gens = w.call("discover_composites")["generators"]
+    # The generator is still enumerated (the listing stays functional) ...
+    assert any(g.endswith("composites.side_effect_probe") for g in gens), gens
+    # ... but its body was never called, so no side effect on disk.
+    assert not sentinel.exists(), (
+        "composite listing executed a generator body (side effect) — #1574")
+
+
+@pytest.mark.skipif(not _FIXTURE.is_dir(), reason="fixture workspace not present")
 def test_discover_all_composites_merges_specs_and_worker_generators():
     pytest.importorskip("viva_superpowers")
     from vivarium_workbench.lib import composite_lookup as cl
