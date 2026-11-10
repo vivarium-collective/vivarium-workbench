@@ -134,6 +134,15 @@ def require_capabilities(client: SmsApiClient, *names: str) -> ServerCapabilitie
 #: ``dispatch`` values of :func:`backend_profile`.
 DISPATCH_LEGACY = "legacy"            # /compose/v1 + /api/v1/simulations, as before
 DISPATCH_DOCUMENT = "viva-v1-document"    # POST /viva/v1/composites {environment, document}
+DISPATCH_COMPOSE = "compose-api"      # POST /simulation/run (compose-api, docs/backend-compose-api.md)
+
+#: The operations that make a backend compose-api for the workbench. compose-api has no capabilities
+#: route; its operation ids are its stable public contract (pbest's client methods are named for them),
+#: so they are read from its OpenAPI document by membership, never by version.
+COMPOSE_OPERATIONS = frozenset({
+    "run-simulation", "get-simulation-status", "get-simulation-results-file", "list-environments",
+    "get-environment-manifest", "list-registry-entries",
+})
 
 
 def backend_profile(client: SmsApiClient) -> dict:
@@ -149,6 +158,10 @@ def backend_profile(client: SmsApiClient) -> dict:
       process-bigraph document and run by ``POST /viva/v1/composites``. This is
       the general route: a backend serving composites only BY ID (today: the one
       ``ecoli-simulation`` on SMS) cannot run an arbitrary workspace composite;
+    * ``compose-api``: no ``/viva/v1`` composites surface, and ``GET /openapi.json``
+      lists every operation in :data:`COMPOSE_OPERATIONS` -- the composite is
+      exported and run by compose-api's ``POST /simulation/run`` in a registered
+      environment (:mod:`remote_run_compose`);
     * ``legacy``: anything else (no capabilities route, older deployment, run
       surface without documents) -- the existing path, unchanged.
 
@@ -166,6 +179,13 @@ def backend_profile(client: SmsApiClient) -> dict:
     out["version"] = caps.version
     out["capabilities"] = sorted(caps.capabilities)
     if not caps.supports(CAPABILITY_VIVA_V1_COMPOSITES):
+        try:
+            version, operations = client.openapi_operations()
+        except (SmsApiError, ValueError):  # ValueError: an /openapi.json that is not JSON is not compose-api
+            version, operations = None, frozenset()
+        if COMPOSE_OPERATIONS <= operations:
+            out["dispatch"] = DISPATCH_COMPOSE
+            out["version"] = version or out["version"]
         return out
     try:
         out["services"] = dict(client.health_v1().get("services") or {})
@@ -205,6 +225,13 @@ def explicit_backend_profile() -> "dict | None":
     profile = backend_profile(SmsApiClient.for_("probe", base))
     _PROFILE_CACHE[base] = (now, profile)
     return profile
+
+
+def compose_dispatch_active() -> bool:
+    """True only when a backend was named explicitly AND it is compose-api. False (no network
+    call at all) otherwise."""
+    profile = explicit_backend_profile()
+    return bool(profile and profile["dispatch"] == DISPATCH_COMPOSE)
 
 
 def viva_v1_dispatch_active() -> bool:

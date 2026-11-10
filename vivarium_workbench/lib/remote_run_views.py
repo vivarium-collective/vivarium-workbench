@@ -28,7 +28,7 @@ from pathlib import Path
 from vivarium_workbench.lib import git_status
 from vivarium_workbench.lib import github_auth
 from vivarium_workbench.lib import remote_pinned
-from vivarium_workbench.lib import remote_run_viva_v1
+from vivarium_workbench.lib import remote_run_compose, remote_run_viva_v1
 from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib.investigations import load_spec
 from vivarium_workbench.lib.remote_run_jobs import (
@@ -388,6 +388,10 @@ def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:
     :meth:`SmsApiClient.run_simulation`; unset when absent/blank, matching
     every other optional field here."""
     body = body or {}
+    if not body.get("simulator_id") and remote_pinned.uses_compose_dispatch(ws_root):
+        # The operator named compose-api: the composite runs in the environment its registry lists for this
+        # workspace (remote_run_compose), so there is no simulator id to ask for here either.
+        return remote_run_compose.submit(ws_root, body)
     if not body.get("simulator_id") and remote_pinned.uses_viva_v1_dispatch(ws_root):
         # The operator named a backend that runs documents (serve --backend-base-url):
         # the declaration authorizes the dispatch, and no simulator id exists to ask for.
@@ -520,6 +524,8 @@ def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
     folded in yet (landing again later will pick it up).
     """
     body = body or {}
+    if remote_run_compose.is_run_id(body.get("simulation_id")):  # only compose-api has these ids
+        return remote_run_compose.land(ws_root, body)
     if remote_run_viva_v1.is_run_id(body.get("simulation_id")) and remote_pinned.uses_viva_v1_dispatch(ws_root):
         # A /viva/v1 run (its id is the backend's string) on a backend the operator named for document runs:
         # that declaration authorizes it, as it did the dispatch.
@@ -709,6 +715,9 @@ def remote_run_status(params: dict) -> tuple[dict, int]:
     (build phase) or ``analysis_id`` (analysis phase). Maps the raw sms-api
     status into a UI ``phase``."""
     params = params or {}
+    for key in ("run_id", "simulation_id"):  # a compose-api id first: the checks below take any non-digit id
+        if remote_run_compose.is_run_id(params.get(key)):
+            return remote_run_compose.status(str(params[key]).strip())
     if params.get("run_id"):
         return remote_run_viva_v1.status(str(params["run_id"]))
     if remote_run_viva_v1.is_run_id(params.get("simulation_id")):
@@ -801,6 +810,9 @@ def remote_run_chain_progress(params: dict) -> tuple[dict, int]:
     distinct, meaningful phases rather than collapsing into one generic error,
     so the frontend can tell "not a campaign" apart from "genuinely broken"."""
     params = params or {}
+    for key in ("run_id", "simulation_id"):
+        if remote_run_compose.is_run_id(params.get(key)):
+            return remote_run_compose.progress(str(params[key]).strip())
     if params.get("run_id"):
         return remote_run_viva_v1.progress(str(params["run_id"]))
     sim_id = params.get("simulation_id")
@@ -862,6 +874,9 @@ def remote_run_cancel(body: dict) -> tuple[dict, int]:
     convention of not collapsing every viva-api error into one generic
     message."""
     body = body or {}
+    for key in ("run_id", "simulation_id"):
+        if remote_run_compose.is_run_id(body.get(key)):
+            return remote_run_compose.cancel(str(body[key]).strip())
     run_id = body.get("run_id") or (
         body.get("simulation_id") if remote_run_viva_v1.is_run_id(body.get("simulation_id")) else None)
     if run_id:
