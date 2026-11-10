@@ -34,6 +34,7 @@ import importlib
 import importlib.util
 import json
 import os
+import shutil
 import socket
 import tempfile
 import contextlib
@@ -4227,8 +4228,61 @@ def _provision_cache_dir() -> "str | None":
         return None
 
 
+def _interpreter_has_pip(interpreter: str) -> bool:
+    """Does ``interpreter`` have an importable ``pip``?
+
+    uv-created venvs do NOT ship ``pip`` (#1575), so ``<py> -m pip install``
+    fails there with ``No module named pip`` and provisioning reports every
+    declared module as failed. We probe in-process when ``interpreter`` is this
+    worker (cheap, honors a monkeypatched ``find_spec`` in tests); for a foreign
+    interpreter we ask it directly."""
+    if interpreter == sys.executable:
+        try:
+            return importlib.util.find_spec("pip") is not None
+        except Exception:  # noqa: BLE001
+            return False
+    try:
+        proc = subprocess.run([interpreter, "-c", "import pip"],
+                              capture_output=True, timeout=30)
+        return proc.returncode == 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _interpreter_can_import(interpreter: str, module: str) -> bool:
+    """Is ``module`` importable in ``interpreter``? In-process for this worker
+    (so a monkeypatched ``find_spec`` still drives the skip tests), else probed
+    out-of-process against the real target interpreter."""
+    if interpreter == sys.executable:
+        return importlib.util.find_spec(module) is not None
+    probe = ("import importlib.util, sys; "
+             f"sys.exit(0 if importlib.util.find_spec({module!r}) else 1)")
+    proc = subprocess.run([interpreter, "-c", probe],
+                          capture_output=True, timeout=60)
+    return proc.returncode == 0
+
+
+def _install_command(pkg: str, target: str, interpreter: str) -> "list[str] | None":
+    """The command to install ``pkg`` into ``target`` for ``interpreter``.
+
+    Prefer the interpreter's own ``pip`` when it has one; otherwise fall back to
+    ``uv pip install --python <interpreter>``, which installs without needing pip
+    inside the (uv-created) venv — the fix for #1575. Returns ``None`` when
+    neither is available, so the caller reports a clean failure instead of
+    crashing. ``--no-deps`` keeps the install cheap and hang-proof (see
+    _provision_modules)."""
+    if _interpreter_has_pip(interpreter):
+        return [interpreter, "-m", "pip", "install", "--no-deps", "--target", target, pkg]
+    uv = shutil.which("uv")
+    if uv:
+        return [uv, "pip", "install", "--no-deps",
+                "--python", interpreter, "--target", target, pkg]
+    return None
+
+
 def _provision_modules(specs: "list[dict] | None", *, target: "str | None" = None,
-                       timeout: float = 600.0) -> "list[dict]":
+                       timeout: float = 600.0,
+                       interpreter: "str | None" = None) -> "list[dict]":
     """pip-install each spec into ``target`` and make them importable.
 
     Returns one ``{name, ok, detail}`` per spec. Never raises.
@@ -4240,6 +4294,7 @@ def _provision_modules(specs: "list[dict] | None", *, target: "str | None" = Non
     any real install reuse wheels across restarts.
     """
     target = target or _provision_target()
+    interpreter = interpreter or sys.executable
     results: list[dict] = []
     try:
         os.makedirs(target, exist_ok=True)
@@ -4261,7 +4316,7 @@ def _provision_modules(specs: "list[dict] | None", *, target: "str | None" = Non
         imp = _import_name_for_spec(spec)
         if imp:
             try:
-                if importlib.util.find_spec(imp) is not None:
+                if _interpreter_can_import(interpreter, imp):
                     # Already importable here — no reinstall needed; the
                     # install_modules handler still re-scans discovery.
                     results.append({"name": name, "ok": True, "detail": "already importable"})
@@ -4284,9 +4339,15 @@ def _provision_modules(specs: "list[dict] | None", *, target: "str | None" = Non
             # pod-startup stall. The find_spec skip above catches the common case;
             # ``--no-deps`` makes the fallback install cheap and hang-proof when a
             # package's import name doesn't match its spec (so the skip misses).
+            cmd = _install_command(pkg, target, interpreter)
+            if cmd is None:
+                # Neither pip (uv venvs ship none — #1575) nor uv is available to
+                # perform the install; report cleanly rather than crash.
+                results.append({"name": name, "ok": False,
+                                "detail": "no pip or uv available to install"})
+                continue
             proc = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "--no-deps", "--target", target, pkg],
-                capture_output=True, text=True, timeout=timeout, env=sub_env,
+                cmd, capture_output=True, text=True, timeout=timeout, env=sub_env,
             )
         except subprocess.TimeoutExpired:
             results.append({"name": name, "ok": False, "detail": f"install timed out after {timeout:.0f}s"})
