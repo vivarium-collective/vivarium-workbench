@@ -165,8 +165,14 @@ def composites_via_subprocess(ws_root: Path, *, bypass_cache: bool = False) -> d
         data = json.loads(json_text)
     except (json.JSONDecodeError, ValueError):
         return None
-    # Cache successful discovery only; failures (None above) are never cached so
-    # a transient import error re-tries on the next request.
+    # Cache successful discovery only; failures are never cached so a transient
+    # error re-tries on the next request. A failure is `None` above, but ALSO a
+    # payload carrying an `error`: the child turns an exception into
+    # `{"composites": [], "error": ...}` (for example a cold env worker that timed
+    # out). That is returned to the caller but not remembered, in memory or on disk,
+    # or the tab stays empty after the cause is gone.
+    if isinstance(data, dict) and data.get("error"):
+        return data
     _COMPOSITES_CACHE[ws_root_str] = {"data": data, "ts": now}
     catalog_disk_cache.store(ws_root, "composites", sig, data)
     return data
