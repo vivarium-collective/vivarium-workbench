@@ -96,6 +96,13 @@ class SmsApiError(Exception):
 #: Callers can still pass an explicit ``timeout=`` per call.
 DOWNLOAD_TIMEOUT = 1800.0  # 30 minutes
 
+#: viva-api holds a relay request open for as long as the worker takes to dial back (``accept_timeout``: pod
+#: schedule + a cold image pull, 300 s by default) or for a call's own ``timeout``. The HTTP request must outlive
+#: that by this margin, or it is abandoned while viva-api is still waiting: with the 30-60 s client default the
+#: first call on a cold hosted stack failed with "timed out" although the worker came up fine minutes later.
+RELAY_DEFAULT_ACCEPT_TIMEOUT = 300.0
+RELAY_HTTP_MARGIN = 30.0
+
 #: Bounded retry policy for idempotent GET/status calls ONLY. Never applied to
 #: POST (a retried `run_simulation`/`compose_submit`/`register_simulator` could
 #: double-submit a run) or DELETE. Exponential backoff between attempts:
@@ -685,7 +692,9 @@ class SmsApiClient:
             body["session_key"] = session_key
         if accept_timeout is not None:
             body["accept_timeout"] = accept_timeout
-        return self._post("/env-worker/v1/relay/workers", json_body=body)
+        wait = accept_timeout if accept_timeout is not None else RELAY_DEFAULT_ACCEPT_TIMEOUT
+        return self._post("/env-worker/v1/relay/workers", json_body=body,
+                          timeout=max(self.timeout, wait + RELAY_HTTP_MARGIN))
 
     def call_relayed_env_worker(self, job_name: str, *, method: str,
                                 params: dict | None = None,
@@ -694,7 +703,8 @@ class SmsApiClient:
         body: dict = {"method": method, "params": params or {}}
         if timeout is not None:
             body["timeout"] = timeout
-        return self._post(f"/env-worker/v1/relay/workers/{job_name}/call", json_body=body)
+        wait = max(self.timeout, timeout + RELAY_HTTP_MARGIN) if timeout is not None else None
+        return self._post(f"/env-worker/v1/relay/workers/{job_name}/call", json_body=body, timeout=wait)
 
     def stop_relayed_env_worker(self, job_name: str) -> dict:
         """DELETE /env-worker/v1/relay/workers/{job_name} — idempotent."""
@@ -1090,7 +1100,8 @@ class SmsApiClient:
         except (URLError, OSError) as e:
             raise SmsApiError(f"DELETE {url} failed (sms-api unreachable): {e}") from e
 
-    def _post(self, path: str, params: dict | None = None, json_body: dict | None = None) -> dict:
+    def _post(self, path: str, params: dict | None = None, json_body: dict | None = None,
+              *, timeout: float | None = None) -> dict:
         # doseq=True so list-valued params become repeated keys (?observables=a&observables=b)
         # Fail fast when the tunnel is known-down (CircuitOpen, an SmsApiError).
         self._link().check(force=self.force_link)
@@ -1103,7 +1114,7 @@ class SmsApiClient:
             headers["Content-Type"] = "application/json"
         req = Request(url, data=data, method="POST", headers=headers)
         try:
-            with urlopen(req, timeout=self.timeout) as r:  # noqa: S310
+            with urlopen(req, timeout=timeout if timeout is not None else self.timeout) as r:  # noqa: S310
                 payload = json.loads(r.read().decode())
             self._mark_link_up()
             return payload
