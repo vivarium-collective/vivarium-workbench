@@ -28,3 +28,26 @@ jobs:
           node-version: "20"
       - name: run JS tests
         run: bash scripts/run_js_tests.sh
+
+  # bigraph-loom (vivarium_workbench/loom) is a Vite/React app with its own vitest
+  # suite. It was never wired to CI, so the suite rotted; this runs the typecheck,
+  # the production build, and the unit tests so future changes stay covered.
+  loom:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: vivarium_workbench/loom
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: vivarium_workbench/loom/package-lock.json
+      - name: install
+        run: npm ci
+      - name: typecheck + build
+        run: npm run build
+      - name: unit tests
+        run: npm run test

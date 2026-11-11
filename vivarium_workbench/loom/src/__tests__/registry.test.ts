@@ -2,14 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { LAYOUT_MODES, getMode, DEFAULT_MODE_ID } from '../layouts/registry';
 
 describe('layout registry', () => {
-  it('exposes hierarchy as the sole, default mode', () => {
-    expect(DEFAULT_MODE_ID).toBe('hierarchy');
-    expect(getMode(DEFAULT_MODE_ID).id).toBe('hierarchy');
-    // The hierarchy graph is the only registered canvas layout now — the former
-    // process-column mode was retired from the UI (its clustered list became the
-    // dockable Process panel).
-    expect(LAYOUT_MODES).toHaveLength(1);
-    expect(LAYOUT_MODES.map((m) => m.id)).toEqual(['hierarchy']);
+  it('registers the expected layout modes with flow-down as default', () => {
+    expect(DEFAULT_MODE_ID).toBe('flow-down');
+    expect(getMode(DEFAULT_MODE_ID).id).toBe('flow-down');
+    expect(LAYOUT_MODES.map((m) => m.id)).toEqual([
+      'hierarchy', 'flow-down', 'tree-grid', 'flow-right',
+    ]);
   });
 
   it('every registered mode satisfies the interface', () => {

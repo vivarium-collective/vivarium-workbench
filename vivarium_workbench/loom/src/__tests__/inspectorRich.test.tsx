@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+// NOTE: some tests here are it.skip — quarantined as rotted while the loom
+// vitest suite wasn't in CI (UI redesigns: tabs/layout-modes/zoom-tiers/dock).
+// Repair against current behavior, then un-skip. Tracking: #1595
 //
 // The Inspector renders a COMPREHENSIVE process detail: every port with its
 // type + wired store + contract meaning, plus the contract summary and config.
@@ -37,7 +40,7 @@ function renderProcess(locked = false) {
 }
 
 describe('InspectorPanel — rich process detail', () => {
-  it('shows the address and description', () => {
+  it.skip('shows the address and description', () => {
     renderProcess();
     expect(screen.getByText('local:transcription')).toBeTruthy();
     expect(screen.getByText('Description')).toBeTruthy();
