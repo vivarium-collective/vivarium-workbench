@@ -768,24 +768,8 @@ body.focus-mode.focus-composite-explore .page.active{
   position:relative;
   overflow:hidden;
 }
-/* While actively dragging the resize handle, kill the width transition so the
-   rail tracks the pointer 1:1 instead of lagging behind. */
-.viv-rail.viv-rail-resizing{ transition:none; }
-/* Right-edge drag handle: widen the rail to see full study names/details.
-   Snaps to normal width; dragging narrower snaps to the collapsed bar. */
-.viv-rail-resize-handle{
-  position:absolute; top:0; right:0; bottom:0; width:6px;
-  cursor:col-resize; z-index:6; background:transparent;
-  transition:background .12s ease;
-}
-.viv-rail-resize-handle:hover,
-.viv-rail.viv-rail-resizing .viv-rail-resize-handle{ background:#c7d2fe; }
-body.viv-rail-resizing-active{ cursor:col-resize !important; user-select:none; }
-/* During a rail drag, isolate the (potentially large) study list's layout so each
-   width change reflows it as an independent subtree rather than rippling through the
-   page — paired with the rAF-coalesced width writes in walkthrough.js. Scoped to the
-   drag only, so there is no steady-state behavior change. */
-body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
+/* The expanded sidebar is a FIXED width (var(--rail-w), default 240px) — it is
+   not drag-resizable. Only the collapse toggle changes its size. */
 .viv-rail-header{
   display:flex; align-items:center; gap:10px;
   /* Left inset 19px = the nav-link icon inset (16px padding + 3px accent border),
