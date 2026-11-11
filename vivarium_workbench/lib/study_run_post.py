@@ -363,6 +363,16 @@ def render_study_visualizations(ws_root, study_dir, spec, spec_id):
             if cls:
                 v["address"] = f"local:{cls}"
 
+    # A viz with no resolvable address after the fallback is pre-rendered
+    # externally (it declares a `rendered` file but no live render class — e.g.
+    # a workspace's own figure script). render_visualizations would KeyError on
+    # the missing 'address' and overwrite its good pre-rendered html with a
+    # "Failed to render … KeyError: 'address'" stub. Exclude it here so a run
+    # flush never clobbers an externally-rendered figure.
+    merged = [v for v in merged if v.get("address")]
+    if not merged:
+        return [], []
+
     effective_spec = dict(spec)
     effective_spec["visualizations"] = merged
 
