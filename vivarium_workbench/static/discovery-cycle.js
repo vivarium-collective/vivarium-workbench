@@ -645,12 +645,9 @@
   // what it's waiting on, which studies it points at (jump-in links), and — for
   // decisions — the controls to decide it here or let the AI steer it.
   function fitemHtml(it) {
-    var chips = [];
-    if (it.op) chips.push('<span class="dcyc-fchip op">' + esc(it.op) + "</span>");
-    if (it.consequence)
-      chips.push('<span class="dcyc-fchip ' + (it.human ? "human" : "run") + '">' +
-        esc(it.consequence) + (it.human ? " · human" : " · runnable") + "</span>");
-    if (it.blocking) chips.push('<span class="dcyc-fchip blkc">blocks closure</span>');
+    // The engine's op/consequence/human/runnable chips are omitted — the bucket
+    // ("Needs you" vs "The engine can do these") already says which, and a
+    // blocking item keeps its red border, so the chips were just noise.
     // jump-in links to the studies this gate points at
     var links = (it.studies || []).map(function (s) {
       return '<button class="dcyc-btn dcyc-btn-sm dcyc-flink" data-study="' + esc(s.slug) +
@@ -704,7 +701,6 @@
       '<div class="dcyc-fbody">' +
       '<div class="dcyc-fkind">' + esc(it.kind_label || it.kind || "") + "</div>" +
       (desc ? '<div class="dcyc-ftarget">' + esc(desc) + "</div>" : "") +
-      '<div class="dcyc-fchips">' + chips.join("") + "</div>" +
       actionRow + form +
       "</div></div>";
   }

@@ -74,6 +74,14 @@ def test_buckets_are_collapsible():
     assert "data-bucket" in JS and "S.bucketOpen" in JS and "function bucketOpen(" in JS
 
 
+def test_noisy_op_consequence_chips_removed():
+    # the op ("steer"/"build_viz") and "consequence · human/runnable" chips are gone
+    # — the bucket conveys human-vs-engine and a blocking item keeps its red border.
+    assert "dcyc-fchip op" not in JS
+    assert '" · human" : " · runnable"' not in JS
+    assert "blocks closure" not in JS
+
+
 def test_runnable_builds_go_to_the_engine_not_needs_you():
     # a buildable, non-human item (e.g. "render · runnable" figure) is engine work
     assert '(it.buildable || it.buildable_gap) && !it.human && !it.decision && !it.resolvable) return "engine"' in JS
