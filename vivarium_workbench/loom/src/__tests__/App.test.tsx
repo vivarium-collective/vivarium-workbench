@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, act, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import App from '../App';
 import { DEFAULT_MODE_ID } from '../layouts/registry';
@@ -15,6 +15,18 @@ beforeAll(() => {
     };
   }
 });
+
+// Rendering <App/> fires passive effects that fetch relative URLs (e.g.
+// /api/composite-layout persistence). node's fetch rejects on a relative URL,
+// which surfaces as an unhandled rejection (vitest fails the run) even though the
+// assertions pass. Default fetch to a resolved no-op so unmocked renders are
+// quiet; tests that need real responses override with their own vi.stubGlobal.
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true, status: 200, json: async () => ({}), text: async () => '',
+  })) as unknown as typeof fetch);
+});
+afterEach(() => { vi.unstubAllGlobals(); });
 
 function postCompositeLoad(metadata: Record<string, unknown>) {
   act(() => {
