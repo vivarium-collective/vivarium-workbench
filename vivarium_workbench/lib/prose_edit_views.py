@@ -31,6 +31,8 @@ _STUDY_FIELDS = (
     r"hypothesis",
     r"objective",
     r"description",
+    r"claim",
+    r"result",
     r"purpose\.question",
     r"conclusion",
     r"conclusion\.summary",
@@ -95,7 +97,11 @@ def _set_path(data: dict, path: str, value: str) -> None:
         raise ValueError("cannot set a list item directly; address its field")
     if not isinstance(node, dict):
         raise KeyError("parent is not a mapping")
-    if key not in node:
+    # A whitelisted TOP-LEVEL scalar (single-segment path) may be created if
+    # absent — this is how an unauthored field like `claim:` or `result:` gets
+    # written the first time. Nested/indexed leaves (purpose.question,
+    # findings[id].statement) still require their parent key to already exist.
+    if key not in node and len(segs) > 1:
         raise KeyError(f"{key} not present (refusing to create new keys)")
     node[key] = value
 

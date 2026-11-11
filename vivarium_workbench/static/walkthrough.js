@@ -8212,8 +8212,8 @@
 
   function _vivToggleRail() {
     // Flip the rail between the collapsed icon bar and the expanded, labelled
-    // sidebar, persisting the choice. The expanded width + edge-drag resize are
-    // driven by _vivRailResizeStart / the saved vivarium.rail-width.
+    // sidebar, persisting the choice. The expanded width is the fixed
+    // _RAIL_NORMAL constant (no drag-resize).
     var rail = document.getElementById('viv-rail');
     if (!rail) return;
     var collapsed = !rail.classList.contains('viv-rail-collapsed');  // target state
@@ -8254,13 +8254,13 @@
   window._vivToggleRailSearch = _vivToggleRailSearch;
 
   function _vivRestoreRailState() {
-    // Restore the rail's collapsed/expanded choice (defaults to collapsed for a
-    // first visit). The expanded width comes from the saved vivarium.rail-width;
-    // the header toggle + edge-drag keep both in sync.
+    // Restore the rail's collapsed/expanded choice. Defaults to EXPANDED (labelled
+    // sidebar) on a first visit so newcomers can read the nav; only an explicit
+    // saved '1' collapses it. The expanded width is a fixed constant (no drag).
     var rail = document.getElementById('viv-rail');
     if (!rail) return;
-    var collapsed = true;
-    try { collapsed = localStorage.getItem('vivarium.rail-collapsed') !== '0'; } catch (e) { /* private mode */ }
+    var collapsed = false;
+    try { collapsed = localStorage.getItem('vivarium.rail-collapsed') === '1'; } catch (e) { /* private mode */ }
     if (collapsed) {
       rail.classList.add('viv-rail-collapsed');
     } else {
@@ -8310,122 +8310,18 @@
   }
   window._vivInitRailFlyoutPositioning = _vivInitRailFlyoutPositioning;
 
-  // ---- Rail resize (drag the right edge to widen; snap to normal; drag
-  //      narrower to snap into the collapsed bar) ----------------------------
-  var _RAIL_NORMAL = 240;      // the "normal" snap width (matches CSS default)
-  var _RAIL_MIN = 160;         // expanded floor (~2/3 of normal) — narrower than this collapses
-  var _RAIL_MAX = 560;         // don't let the rail eat the whole viewport
-  var _RAIL_COLLAPSE_AT = 140; // drag below this (px from left edge) → collapse
-  var _RAIL_SNAP = 28;         // within this of normal → snap to exactly normal
+  // ---- Rail width (fixed) --------------------------------------------------
+  // The expanded sidebar is a FIXED width — it is not drag-resizable. Collapsing
+  // to the compact icon bar is the only size change, driven by the toggle in the
+  // Settings popover (_vivToggleRail). `_RAIL_NORMAL` is that one reasonable width.
+  var _RAIL_NORMAL = 240;      // fixed expanded width (matches the CSS --rail-w default)
 
   function _vivRailSavedWidth() {
-    var raw = null;
-    try { raw = localStorage.getItem('vivarium.rail-width'); } catch (e) {}
-    var w = parseInt(raw, 10);
-    if (!w || isNaN(w)) return _RAIL_NORMAL;
-    return Math.min(_RAIL_MAX, Math.max(_RAIL_MIN, w));
+    return _RAIL_NORMAL;       // always the fixed width — no persisted/dragged override
   }
   function _vivRailApplyWidth(rail, w) {
     rail.style.setProperty('--rail-w', w + 'px');
   }
-  function _vivRailResizeStart(ev) {
-    if (ev.button !== undefined && ev.button !== 0) return;   // left button only
-    ev.preventDefault();
-    var rail = document.getElementById('viv-rail');
-    if (!rail) return;
-    // CAPTURE the pointer on the handle so the drag keeps tracking (and ENDS on
-    // release) even while the pointer is over an iframe — the study porthole and
-    // native-viz iframes otherwise swallow the mousemove/mouseup, which left the
-    // rail "following the mouse after you let go" and unable to widen.
-    var handle = (ev.currentTarget && ev.currentTarget.setPointerCapture)
-      ? ev.currentTarget : document.getElementById('viv-rail-resize-handle');
-    var pointerId = (ev.pointerId != null) ? ev.pointerId : null;
-    try { if (handle && handle.setPointerCapture && pointerId != null) handle.setPointerCapture(pointerId); } catch (e) { /* unsupported */ }
-    rail.classList.add('viv-rail-resizing');
-    document.body.classList.add('viv-rail-resizing-active');
-    var railLeft = rail.getBoundingClientRect().left;
-    var lastW = _vivRailSavedWidth();
-
-    // mousemove fires far faster than the display refreshes; writing --rail-w on
-    // every event forces a synchronous reflow of the whole rail each time, which on
-    // a workspace with a large study list (e.g. sms-ecoli) makes the drag stutter.
-    // Coalesce to at most ONE style write per animation frame: mousemove only records
-    // the target state (cheap), and rAF applies it. lastW is tracked synchronously so
-    // the saved width on mouse-up is always the latest pointer position.
-    var _raf = 0, _pending = null;
-    function _flush() {
-      _raf = 0;
-      if (!_pending) return;
-      if (_pending.collapsed) { rail.classList.add('viv-rail-collapsed'); }
-      else { rail.classList.remove('viv-rail-collapsed'); _vivRailApplyWidth(rail, _pending.w); }
-    }
-    function _move(e) {
-      var raw = e.clientX - railLeft;         // desired width: left edge → pointer
-      // HYSTERESIS so the rail doesn't flicker at the threshold and has no dead
-      // zone: when collapsed, keep it collapsed until the pointer is pulled clearly
-      // OUT (past EXPAND_ABOVE); when expanded, keep it expanded until pushed
-      // clearly IN (below COLLAPSE_BELOW). The gap between the two is a stable hold
-      // band, so small jitter near the edge never toggles the state.
-      var EXPAND_ABOVE = 150, COLLAPSE_BELOW = 110;
-      var curCollapsed = rail.classList.contains('viv-rail-collapsed');
-      var collapsed = curCollapsed ? (raw < EXPAND_ABOVE) : (raw < COLLAPSE_BELOW);
-      if (collapsed) {
-        _pending = { collapsed: true };
-      } else {
-        var w = Math.min(_RAIL_MAX, Math.max(_RAIL_MIN, raw));
-        if (Math.abs(w - _RAIL_NORMAL) <= _RAIL_SNAP) w = _RAIL_NORMAL;  // snap to normal
-        lastW = w;
-        _pending = { collapsed: false, w: w };
-      }
-      if (!_raf) _raf = requestAnimationFrame(_flush);
-    }
-    var _ended = false;
-    function _up() {
-      if (_ended) return; _ended = true;
-      if (handle) {
-        handle.removeEventListener('pointermove', _move);
-        handle.removeEventListener('pointerup', _up);
-        handle.removeEventListener('pointercancel', _up);
-        try { if (handle.releasePointerCapture && pointerId != null) handle.releasePointerCapture(pointerId); } catch (e) { /* ignore */ }
-      }
-      document.removeEventListener('mousemove', _move);   // legacy fallback, if bound
-      document.removeEventListener('mouseup', _up);
-      if (_raf) { cancelAnimationFrame(_raf); _raf = 0; }
-      _flush();                               // apply the final pointer position now
-      rail.classList.remove('viv-rail-resizing');
-      document.body.classList.remove('viv-rail-resizing-active');
-      var collapsed = rail.classList.contains('viv-rail-collapsed');
-      try {
-        localStorage.setItem('vivarium.rail-collapsed', collapsed ? '1' : '0');
-        if (!collapsed) localStorage.setItem('vivarium.rail-width', String(lastW));
-      } catch (e) { /* private mode */ }
-      if (typeof _vivSyncRailToggleLabel === 'function') _vivSyncRailToggleLabel(collapsed);
-    }
-    // Prefer pointer events on the captured handle; fall back to document mouse
-    // events if pointer capture is unavailable.
-    if (handle && handle.setPointerCapture && pointerId != null) {
-      handle.addEventListener('pointermove', _move);
-      handle.addEventListener('pointerup', _up);
-      handle.addEventListener('pointercancel', _up);
-    } else {
-      document.addEventListener('mousemove', _move);
-      document.addEventListener('mouseup', _up);
-    }
-  }
-  window._vivRailResizeStart = _vivRailResizeStart;
-
-  function _vivRailResizeReset() {
-    var rail = document.getElementById('viv-rail');
-    if (!rail) return;
-    rail.classList.remove('viv-rail-collapsed');
-    _vivRailApplyWidth(rail, _RAIL_NORMAL);
-    try {
-      localStorage.setItem('vivarium.rail-collapsed', '0');
-      localStorage.setItem('vivarium.rail-width', String(_RAIL_NORMAL));
-    } catch (e) { /* private mode */ }
-    if (typeof _vivSyncRailToggleLabel === 'function') _vivSyncRailToggleLabel(false);
-  }
-  window._vivRailResizeReset = _vivRailResizeReset;
 
   // -------------------------------------------------------------------------
   // Vivarium left rail — Investigations grouping (V4)

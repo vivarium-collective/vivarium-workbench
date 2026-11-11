@@ -169,8 +169,6 @@
   .viv-rail.viv-rail-collapsed .viv-workspace-name,
   .viv-rail.viv-rail-collapsed .viv-rail-footer,
   .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-header { justify-content: flex-start !important; }
-  /* The right-edge drag-resize handle is meaningless for a drawer. */
-  .viv-rail-resize-handle { display: none; }
 
   /* Dim the page behind the open drawer; tap it to dismiss (mobile-nav.js). */
   .viv-mobile-backdrop {
