@@ -21,7 +21,7 @@
 
   var ctl = null, popoutWin = null, initDone = false, built = false;
   // panel state (persists while the panel is mounted)
-  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "", summary: null, applyReport: null, delta: null, gatesOpen: true, decideFor: null };
+  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "", summary: null, applyReport: null, delta: null, gatesOpen: true, decideFor: null, detailsOpen: false, genOpen: {}, statusOpen: false, bucketOpen: { you: true, engine: true } };
 
   function el(id) { return document.getElementById(id); }
   function base() { return global.__BASE_PATH__ || ""; }
@@ -135,7 +135,48 @@
       ".dcyc-flink{border-color:#c7d2fe;background:rgba(37,99,235,.05);color:#1d4ed8}",
       ".dcyc-decide{margin-top:8px;border-top:1px dashed var(--viv-border,#e3e6ec);padding-top:8px}",
       ".dcyc-decide-ta{width:100%;box-sizing:border-box;font:inherit;font-size:12px;min-height:58px;padding:6px 8px;border-radius:7px;border:1px solid var(--viv-border,#ccd);background:var(--viv-bg,#fff);color:inherit;resize:vertical}",
-      ".dcyc-decide .dcyc-row-actions{margin-top:6px}"
+      ".dcyc-decide .dcyc-row-actions{margin-top:6px}",
+      // simplified panel: one-line status + two action buckets + a Details disclosure
+      ".dcyc-status{margin:2px 0 10px}",
+      ".dcyc-statusline{display:flex;align-items:center;gap:7px;border-radius:9px;padding:7px 11px;border:1px solid var(--viv-border,#e1e3ea);font-weight:650;font-size:13px}",
+      ".dcyc-statusline .dcyc-sl-head{flex:1;min-width:0}",
+      ".dcyc-statusline-nav{cursor:pointer}",
+      ".dcyc-statusline-nav:hover{filter:brightness(.98)}",
+      ".dcyc-status-body{border:1px solid var(--viv-border,#e1e3ea);border-top:0;border-radius:0 0 9px 9px;margin-top:-3px;padding:4px 10px 9px;display:flex;flex-direction:column;gap:5px}",
+      ".dcyc-bucket{border:1px solid var(--viv-border,#e1e3ea);border-radius:10px;margin:0 0 10px;overflow:hidden}",
+      ".dcyc-bucket-h{display:flex;align-items:center;gap:8px;padding:8px 11px;font-weight:650;font-size:12px;letter-spacing:.02em;text-transform:uppercase;cursor:pointer}",
+      ".dcyc-bucket.exp>.dcyc-bucket-h{border-bottom:1px solid var(--viv-border,#eceef3)}",
+      ".dcyc-bucket-h .dcyc-caret{text-transform:none;font-weight:400}",
+      ".dcyc-bucket-h .dcyc-bcount{margin-left:auto}",
+      ".dcyc-bucket-you .dcyc-bucket-h{background:rgba(180,83,9,.08);color:#9a3412}",
+      ".dcyc-bucket-engine .dcyc-bucket-h{background:rgba(22,163,74,.08);color:#15803d}",
+      ".dcyc-bcount{margin-left:auto;font-size:11px;font-weight:650;background:var(--viv-bg,#fff);border:1px solid var(--viv-border,#dcdfe6);border-radius:999px;padding:0 7px;color:var(--viv-fg-muted,#667)}",
+      ".dcyc-bucket>.dcyc-fitem{margin:0;border:0;border-radius:0;background:transparent;padding:9px 11px;border-bottom:1px solid var(--viv-border,#f0f1f5)}",
+      ".dcyc-bucket>.dcyc-fitem.blk{background:rgba(220,38,38,.04)}",
+      ".dcyc-bucket>.dcyc-fitem:last-child{border-bottom:0}",
+      ".dcyc-grouprow:last-child{border-bottom:0}",
+      ".dcyc-empty-bucket{padding:10px 11px;font-size:12px;color:var(--viv-fg-muted,#778)}",
+      ".dcyc-bucket-foot{display:flex;align-items:center;gap:9px;padding:9px 11px;background:var(--viv-bg-alt,#f7f8fa)}",
+      ".dcyc-note-inline{font-size:11px;color:var(--viv-fg-muted,#889)}",
+      ".dcyc-grouprow{display:flex;align-items:center;gap:7px;padding:8px 11px;border-bottom:1px solid var(--viv-border,#f0f1f5);cursor:pointer;font-size:12.5px}",
+      ".dcyc-grouprow:hover{background:var(--viv-bg-alt,#f7f8fa)}",
+      ".dcyc-gcount{min-width:22px;text-align:center;font-weight:650;font-size:11px;background:var(--viv-bg-alt,#eef1f5);border-radius:6px;padding:1px 5px;color:var(--viv-fg,#334)}",
+      ".dcyc-gtargets{list-style:none;margin:0;padding:2px 11px 9px 40px;font-size:11.5px;color:var(--viv-fg-muted,#667)}",
+      ".dcyc-gtargets li{margin:3px 0}",
+      ".dcyc-glabel{flex:1;min-width:0}",
+      ".dcyc-gtone{color:var(--viv-fg-muted,#778);font-weight:400}",
+      ".dcyc-gdesc{font-size:11px;color:var(--viv-fg-muted,#889);padding:0 11px 8px 40px;line-height:1.35}",
+      ".dcyc-grouprow-nav .dcyc-go{color:#2563eb}",
+      ".dcyc-gtarget-link{appearance:none;-webkit-appearance:none;background:none;border:0;padding:0;margin:0;font:inherit;font-size:11.5px;color:#2563eb;cursor:pointer;text-align:left}",
+      ".dcyc-gtarget-link:hover{text-decoration:underline}",
+      ".dcyc-details{border:1px solid var(--viv-border,#e1e3ea);border-radius:10px;margin:2px 0 8px;overflow:hidden}",
+      ".dcyc-details-h{display:flex;align-items:center;gap:7px;padding:8px 11px;cursor:pointer;background:var(--viv-bg-alt,#f7f8fa);font-size:12px;font-weight:650}",
+      ".dcyc-details-h:hover{background:var(--viv-bg-alt,#eef1f5)}",
+      ".dcyc-details-h .dcyc-note-inline{font-weight:400;margin-left:4px}",
+      ".dcyc-details-body{padding:6px 10px 10px}",
+      ".dcyc-sub-h{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--viv-fg-muted,#9aa3af);margin:12px 2px 4px}",
+      ".dcyc-switch-link{font-size:11px;color:#2563eb;text-decoration:none;margin-left:4px}",
+      ".dcyc-switch-link:hover{text-decoration:underline}"
     ].join("\n");
     var st = document.createElement("style");
     st.id = "dcyc-style"; st.textContent = css;
@@ -153,10 +194,9 @@
       '    <div class="dcyc-current" id="dcyc-current"></div>' +
       '    <div class="dcyc-controls">' +
       '      <select id="dcyc-inv"><option value="">Loading…</option></select>' +
-      '      <button id="dcyc-switch" class="dcyc-btn" disabled title="Show this investigation in the main window (its investigation graph) — switch freely between the graph and the cycle">Switch ▸</button>' +
-      '      <button id="dcyc-run" class="dcyc-btn dcyc-btn-primary" disabled>Run</button>' +
-      '      <button id="dcyc-run-cont" class="dcyc-btn" disabled title="Advance toward closure in a sandboxed copy — never touches your real files">Advance ▸</button>' +
-      '      <button id="dcyc-apply" class="dcyc-btn" disabled title="Write the cycle\'s findings back to the real investigation + studies (verdicts, edges, cycle-state), committed to git">Apply to investigation ▸</button>' +
+      '      <button id="dcyc-run" class="dcyc-btn dcyc-btn-primary" disabled title="Re-derive the cycle from the current files — read-only, changes nothing">Analyze</button>' +
+      '      <button id="dcyc-run-cont" class="dcyc-btn" disabled title="Do the queued work in a sandboxed copy — never touches your real files">Advance ▸</button>' +
+      '      <button id="dcyc-apply" class="dcyc-btn" disabled title="Write the cycle\'s findings back to the real investigation + studies (verdicts, edges, cycle-state), committed to git">Apply ▸</button>' +
       '    </div>' +
       '    <div id="dcyc-status" class="dcyc-status"></div>' +
       '  </div>' +
@@ -167,7 +207,6 @@
     var r = el("dcyc-run"); if (r) r.addEventListener("click", runCycle);
     var rc = el("dcyc-run-cont"); if (rc) rc.addEventListener("click", runContinuous);
     var ap = el("dcyc-apply"); if (ap) ap.addEventListener("click", applyCycle);
-    var sw = el("dcyc-switch"); if (sw) sw.addEventListener("click", switchToInvestigation);
     built = true;
     return true;
   }
@@ -199,7 +238,10 @@
     if (!cur) { box.innerHTML = '<span>No investigation open in the workbench.</span>'; return; }
     var name = currentTitle(cur);
     if (cur === S.slug) {
-      box.innerHTML = 'Cycle: <b>' + esc(name) + "</b>";
+      box.innerHTML = 'Cycle: <b>' + esc(name) + "</b> " +
+        '<a href="#" id="dcyc-switch-link" class="dcyc-switch-link" title="Show this investigation (its graph) in the main window">show in main ▸</a>';
+      var sl = el("dcyc-switch-link");
+      if (sl) sl.addEventListener("click", function (ev) { ev.preventDefault(); switchToInvestigation(); });
     } else {
       box.innerHTML = 'Open in workbench: <b>' + esc(name) + "</b> " +
         '<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" id="dcyc-load-current">Load into cycle ▸</button>';
@@ -231,7 +273,7 @@
   function renderSnapshotNote() {
     var sel = el("dcyc-inv");
     if (sel) { sel.innerHTML = '<option value="">Live workbench only</option>'; sel.disabled = true; }
-    ["dcyc-switch", "dcyc-run", "dcyc-run-cont", "dcyc-apply"].forEach(function (id) {
+    ["dcyc-run", "dcyc-run-cont", "dcyc-apply"].forEach(function (id) {
       var b = el(id); if (b) b.disabled = true;
     });
     var cur = currentSlug();
@@ -299,9 +341,9 @@
     lsSet(K_SLUG, S.slug);
     el("dcyc-run").disabled = !S.slug;
     el("dcyc-run-cont").disabled = !S.slug;
-    var sw = el("dcyc-switch"); if (sw) sw.disabled = !S.slug;
     var ap = el("dcyc-apply"); if (ap) ap.disabled = true;   // re-enabled after a run
-    S.applyReport = null;
+    S.applyReport = null; S.detailsOpen = false; S.genOpen = {};
+    S.statusOpen = false; S.bucketOpen = { you: true, engine: true };
     setStatus("");
     syncCurrent();
     if (!S.slug) {
@@ -398,29 +440,204 @@
       .finally(function () { S.busy = false; });
   }
 
-  function bannerHtml() {
+  // One-line standing: closed/open + how many open items. The detail that used to
+  // crowd this banner (next_action, runnable count, viz-appropriateness) now lives
+  // in the two action buckets below and in the Details disclosure.
+  function statusLineHtml(tracked) {
     var m = S.summary;
     if (!m || m.closed == null) return "";
     var closed = !!m.closed;
-    var na = m.next_action;
     var cls = closed ? "dcyc-bn-closed" : "dcyc-bn-open";
     var head = closed
       ? "✓ Closed · " + (m.frontier_size || 0) + " open (non-blocking)"
       : "◷ Open · " + (m.frontier_size || 0) + " on the frontier";
-    var runline = "";
-    if (m.runnable === 0 && m.human_decisions > 0) {
-      runline = '<div class="dcyc-bn-sub">Nothing to auto-run — ' + m.human_decisions +
-        " human decision(s) pending. Running a cycle analyzes; it won't advance these.</div>";
-    } else if (m.runnable > 0) {
-      runline = '<div class="dcyc-bn-sub">' + m.runnable + " runnable step(s) — use Advance (sandbox).</div>";
-    }
-    var naline = na
-      ? '<div class="dcyc-bn-sub">Next: <b>' + esc(na.op || na.kind) + "</b>" +
-        (na.consequence ? ' <span class="dcyc-chip">' + esc(na.consequence) + "</span>" : "") +
-        (na.target ? " — " + esc(String(na.target).slice(0, 90)) : "") + "</div>"
+    var hasTracked = !!(tracked && tracked.length);
+    var open = !!S.statusOpen;
+    var caret = hasTracked ? '<span class="dcyc-caret">' + (open ? "▾" : "▸") + "</span>" : "";
+    var body = (open && hasTracked)
+      ? ('<div class="dcyc-status-body"><div class="dcyc-sub-h">Tracked — non-blocking (' + tracked.length +
+         ')</div>' + tracked.map(fitemHtml).join("") + "</div>")
       : "";
-    return '<div class="dcyc-banner ' + cls + '"><div class="dcyc-bn-h">' + head + "</div>" +
-      naline + runline + vizApprHtml() + "</div>";
+    return '<div class="dcyc-status' + (open ? " exp" : "") + '">' +
+      '<div class="dcyc-statusline ' + cls + (hasTracked ? " dcyc-statusline-nav" : "") + '"' +
+      (hasTracked ? ' id="dcyc-status-h"' : "") + ">" +
+      '<span class="dcyc-sl-head">' + esc(head) + "</span>" + caret + "</div>" + body + "</div>";
+  }
+
+  // ---- the two action buckets --------------------------------------------
+  // The frontier + the typed generation requests are one question — "what now?" —
+  // so we show ONE prioritized to-do split into "Needs you" (human decisions /
+  // reviews) and "The engine can do these" (auto / runnable), instead of three
+  // parallel lists. Each actionable frontier item is rendered by the same
+  // fitemHtml used before (all its buttons + inline forms are preserved); the
+  // generation requests are grouped by kind so the repetitive ones collapse.
+
+  var KIND_LABELS = {
+    author_tests: "author behaviour tests",
+    interpret_finding: "write the claim line",
+    resolve_decision: "resolve a decision",
+    author_viz: "author a figure",
+    propose_viz: "propose a figure",
+    build_model: "build a model mechanism",
+    seed: "seed a follow-up study",
+  };
+  function kindLabel(k) { return KIND_LABELS[k] || String(k == null ? "" : k).replace(/_/g, " "); }
+
+  // Generation-request kinds whose `target` is a study slug (so it can be opened
+  // directly), and which tab of that study to land on. resolve_decision's target
+  // is free-text decision prose, not a slug — it navigates to the investigation.
+  var KIND_STUDY_TAB = {
+    author_tests: "tests",
+    interpret_finding: "overview",
+    author_viz: "visualizations",
+    propose_viz: "visualizations",
+    seed: "overview",
+    build_model: "overview",
+  };
+  function studyTabFor(kind) { return KIND_STUDY_TAB[kind]; }
+  function isStudyKind(kind) { return Object.prototype.hasOwnProperty.call(KIND_STUDY_TAB, kind); }
+
+  // One line saying what the act does, so a row isn't just a jargon label.
+  var KIND_DESC = {
+    author_tests: "Generate the behaviour tests that check each study's claim against its runs.",
+    interpret_finding: "Write the one-line claim that states what each study found.",
+    resolve_decision: "A choice the cycle is waiting on — open it to decide.",
+    author_viz: "Author the figure each study still needs.",
+    propose_viz: "Propose a figure for each study.",
+    seed: "Seed a follow-up study the cycle proposed.",
+    build_model: "Build the model mechanism each study needs.",
+  };
+
+  // Which bucket a frontier item belongs in: a human action, engine-runnable, or
+  // just tracked (no action — informational, shown in Details).
+  function bucketOf(it) {
+    // Runnable, non-human work the engine can do (render a figure, build a gap) is
+    // the engine's — even when it also offers a manual Build button.
+    if ((it.buildable || it.buildable_gap) && !it.human && !it.decision && !it.resolvable) return "engine";
+    if (it.decision || it.acceptable || it.acceptable_gap || it.declarable || it.resolvable || it.human) return "you";
+    if (it.buildable || it.buildable_gap) return "engine";
+    return "tracked";
+  }
+  function partitionFrontier() {
+    var fr = (S.summary && S.summary.frontier) || [];
+    var out = { you: [], engine: [], tracked: [] };
+    fr.forEach(function (it) { out[bucketOf(it)].push(it); });
+    ["you", "engine", "tracked"].forEach(function (k) {
+      out[k].sort(function (a, b) { return (b.priority || 0) - (a.priority || 0); });
+    });
+    return out;
+  }
+  function genReqs(gate) {
+    return (((S.genRequests && S.genRequests.requests) || [])
+      .filter(function (r) { return r.gate === gate; }));
+  }
+  function groupReqs(reqs) {
+    var by = {};
+    reqs.forEach(function (r) { (by[r.kind || "other"] || (by[r.kind || "other"] = [])).push(r.target); });
+    return Object.keys(by).map(function (k) {
+      return { kind: k, label: kindLabel(k), count: by[k].length, targets: by[k] };
+    }).sort(function (a, b) { return b.count - a.count; });
+  }
+  // A grouped generation-request row: "9 · write the claim line" + a line saying
+  // what it does, with each target a link that jumps to that study (or, for a
+  // decision, to the investigation's Decisions tab). A single-target group is one
+  // clickable row that navigates straight there.
+  function genTargetLink(kind, t) {
+    if (isStudyKind(kind)) {
+      return '<button class="dcyc-gtarget-link" data-genstudy="' + esc(t) +
+        '" data-gentab="' + esc(studyTabFor(kind) || "overview") + '">' + esc(t) + " ▸</button>";
+    }
+    return '<button class="dcyc-gtarget-link" data-gendecide="' + esc(t) + '">' +
+      esc(String(t).slice(0, 90)) + (String(t).length > 90 ? "…" : "") + " ▸</button>";
+  }
+  function genGroupHtml(gp, gate) {
+    var key = gate + ":" + gp.kind;
+    var desc = KIND_DESC[gp.kind];
+    var descLine = desc ? '<div class="dcyc-gdesc">' + esc(desc) + "</div>" : "";
+    // single target → the whole row navigates straight to it
+    if (gp.count === 1) {
+      var t0 = gp.targets[0];
+      var nav = isStudyKind(gp.kind)
+        ? ('data-genstudy="' + esc(t0) + '" data-gentab="' + esc(studyTabFor(gp.kind) || "overview") + '"')
+        : ('data-gendecide="' + esc(t0) + '"');
+      var tone = isStudyKind(gp.kind) ? esc(t0)
+        : esc(String(t0).slice(0, 64)) + (String(t0).length > 64 ? "…" : "");
+      return '<div class="dcyc-grouprow dcyc-grouprow-nav" ' + nav + '>' +
+        '<span class="dcyc-gcount">1</span>' +
+        '<span class="dcyc-glabel">' + esc(gp.label) + '<span class="dcyc-gtone"> · ' + tone + "</span></span>" +
+        '<span class="dcyc-caret dcyc-go">▸</span></div>' + descLine;
+    }
+    var open = !!(S.genOpen && S.genOpen[key]);
+    var head = '<div class="dcyc-grouprow" data-gengroup="' + esc(key) + '">' +
+      '<span class="dcyc-gcount">' + gp.count + "</span>" +
+      '<span class="dcyc-glabel">' + esc(gp.label) + "</span>" +
+      '<span class="dcyc-caret">' + (open ? "▾" : "▸") + "</span></div>";
+    var list = open
+      ? '<ul class="dcyc-gtargets">' + gp.targets.map(function (t) {
+          return "<li>" + genTargetLink(gp.kind, t) + "</li>";
+        }).join("") + "</ul>"
+      : "";
+    return head + descLine + list;
+  }
+
+  function bucketOpen(which) { return S.bucketOpen ? S.bucketOpen[which] !== false : true; }
+
+  function needsYouHtml(you, reviewReqs) {
+    var items = you.map(fitemHtml).join("");
+    var groups = groupReqs(reviewReqs).map(function (gp) { return genGroupHtml(gp, "review"); }).join("");
+    if (!items && !groups) return "";
+    var n = you.length + reviewReqs.length;
+    var open = bucketOpen("you");
+    return '<div class="dcyc-bucket dcyc-bucket-you' + (open ? " exp" : "") + '">' +
+      '<div class="dcyc-bucket-h" data-bucket="you"><span class="dcyc-caret">' + (open ? "▾" : "▸") +
+      "</span> Needs you <span class=\"dcyc-bcount\">" + n + "</span></div>" +
+      (open ? (items + groups) : "") + "</div>";
+  }
+
+  function engineHtml(engine, autoReqs) {
+    var items = engine.map(fitemHtml).join("");
+    var groups = groupReqs(autoReqs).map(function (gp) { return genGroupHtml(gp, "auto"); }).join("");
+    if (!items && !groups) return "";
+    var n = engine.length + autoReqs.length;
+    var open = bucketOpen("engine");
+    var foot = '<div class="dcyc-bucket-foot">' +
+      '<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-adv="1">Advance ▸</button>' +
+      '<span class="dcyc-note-inline">runs these in a sandbox — never touches your files</span></div>';
+    return '<div class="dcyc-bucket dcyc-bucket-engine' + (open ? " exp" : "") + '">' +
+      '<div class="dcyc-bucket-h" data-bucket="engine"><span class="dcyc-caret">' + (open ? "▾" : "▸") +
+      "</span> The engine can do these <span class=\"dcyc-bcount\">" + n + "</span></div>" +
+      (open ? (items + groups + foot) : "") + "</div>";
+  }
+
+  // The phase step-trace (was rendered inline in renderGraph) — now tucked in Details.
+  function phaseTraceHtml() {
+    if (!S.steps.length) return "";
+    var phases = [];
+    S.steps.forEach(function (s) { if (phases.indexOf(s.phase) < 0) phases.push(s.phase); });
+    return '<div class="dcyc-sub-h">Cycle trace</div>' + phases.map(function (ph) {
+      var nodes = S.steps.filter(function (s) { return s.phase === ph; });
+      return '<div class="dcyc-phase-h">' + esc(ph) + "</div>" + nodes.map(nodeHtml).join("");
+    }).join("");
+  }
+
+  // Everything the buckets don't need up front: what changed, the raw generation
+  // requests (scores + autonomy presets), tracked/non-actionable frontier items,
+  // the figure-appropriateness toggle, and the full step trace. Collapsed by default.
+  function detailsHtml() {
+    var hasAny = (S.delta || S.genRequests || S.steps.length ||
+      (S.summary && S.summary.viz_untied_enabled != null));
+    if (!hasAny) return "";
+    var open = !!S.detailsOpen;
+    var inner = open ? (
+      deltaHtml() +
+      requestsHtml() +
+      (S.summary && S.summary.viz_untied_enabled != null ? ('<div class="dcyc-sub-h">Figures</div>' + vizApprHtml()) : "") +
+      phaseTraceHtml()
+    ) : "";
+    return '<div class="dcyc-details' + (open ? " exp" : "") + '">' +
+      '<div class="dcyc-details-h" id="dcyc-details-h"><span class="dcyc-caret">' + (open ? "▾" : "▸") +
+      '</span> Details <span class="dcyc-note-inline">what changed · scores · gates · trace</span></div>' +
+      (open ? ('<div class="dcyc-details-body">' + inner + "</div>") : "") + "</div>";
   }
 
   // The gate inspector: every open item on the engine's frontier, split into the
@@ -428,12 +645,9 @@
   // what it's waiting on, which studies it points at (jump-in links), and — for
   // decisions — the controls to decide it here or let the AI steer it.
   function fitemHtml(it) {
-    var chips = [];
-    if (it.op) chips.push('<span class="dcyc-fchip op">' + esc(it.op) + "</span>");
-    if (it.consequence)
-      chips.push('<span class="dcyc-fchip ' + (it.human ? "human" : "run") + '">' +
-        esc(it.consequence) + (it.human ? " · human" : " · runnable") + "</span>");
-    if (it.blocking) chips.push('<span class="dcyc-fchip blkc">blocks closure</span>');
+    // The engine's op/consequence/human/runnable chips are omitted — the bucket
+    // ("Needs you" vs "The engine can do these") already says which, and a
+    // blocking item keeps its red border, so the chips were just noise.
     // jump-in links to the studies this gate points at
     var links = (it.studies || []).map(function (s) {
       return '<button class="dcyc-btn dcyc-btn-sm dcyc-flink" data-study="' + esc(s.slug) +
@@ -487,7 +701,6 @@
       '<div class="dcyc-fbody">' +
       '<div class="dcyc-fkind">' + esc(it.kind_label || it.kind || "") + "</div>" +
       (desc ? '<div class="dcyc-ftarget">' + esc(desc) + "</div>" : "") +
-      '<div class="dcyc-fchips">' + chips.join("") + "</div>" +
       actionRow + form +
       "</div></div>";
   }
@@ -681,36 +894,6 @@
       '<ul style="list-style:none;padding-left:4px;margin:6px 0 0">' + rows + "</ul></div>";
   }
 
-  function frontierHtml() {
-    var m = S.summary;
-    if (!m || !m.frontier || !m.frontier.length) return "";
-    var items = m.frontier.slice();
-    var blocking = items.filter(function (x) { return x.blocking; })
-      .sort(function (a, b) { return (b.priority || 0) - (a.priority || 0); });
-    var tracked = items.filter(function (x) { return !x.blocking; })
-      .sort(function (a, b) { return (b.priority || 0) - (a.priority || 0); });
-    var exp = !!S.gatesOpen;
-    var count = items.length + " open · " + blocking.length + " blocking · " + tracked.length + " tracked";
-    var dotColor = m.closed ? "#16a34a" : (blocking.length ? "#dc2626" : "#2563eb");
-    function group(title, arr) {
-      if (!arr.length) return "";
-      return '<div class="dcyc-fgroup-h">' + esc(title) + " (" + arr.length + ")</div>" +
-        arr.map(fitemHtml).join("");
-    }
-    var body = group("Blocking — must clear to close", blocking) +
-      group("Tracked — non-blocking", tracked);
-    var foot = blocking.length
-      ? ""
-      : '<div class="dcyc-gates-foot">No blocking gates — the investigation is closed. ' +
-        "The items above are tracked (decisions, debts, questions) but don't block closure.</div>";
-    return '<div class="dcyc-gates' + (exp ? " exp" : "") + '">' +
-      '<div class="dcyc-gates-h" id="dcyc-gates-h">' +
-      '<span class="dcyc-dot" style="background:' + dotColor + '"></span>' +
-      '<span class="gt">Gates &amp; frontier</span> <span class="gcount">' + count + "</span>" +
-      '<span class="dcyc-caret">▸</span></div>' +
-      (exp ? ('<div class="dcyc-gates-body">' + body + foot + "</div>") : "") +
-      "</div>";
-  }
 
   // ---- gate-item actions --------------------------------------------------
   function openStudyLink(slug, tab) {
@@ -725,6 +908,21 @@
         setStatus("Can't open a study from here (no live workbench).");
       }
     } catch (e) { setStatus("Couldn't open the study."); }
+  }
+
+  // A generation-request decision isn't an inline frontier item here — navigate to
+  // the investigation's Decisions tab (in the main window), where it's resolved.
+  function openDecision() {
+    if (!S.slug) return;
+    try {
+      if (typeof global._openInvestigationDetail === "function") global._openInvestigationDetail(S.slug);
+      if (typeof global._aigOpenDecisionsTab === "function") {
+        setTimeout(function () { try { global._aigOpenDecisionsTab(); } catch (e) { /* ignore */ } }, 120);
+        setStatus("Opened the Decisions tab for “" + currentTitle(S.slug) + "”.");
+      } else {
+        setStatus("Showing “" + currentTitle(S.slug) + "” in the main window — see its Decisions tab.");
+      }
+    } catch (e) { setStatus("Couldn't open the decision."); }
   }
 
   function submitDecision(target, kind) {
@@ -823,17 +1021,44 @@
   function renderGraph() {
     var g = el("dcyc-graph");
     if (!g) return;
-    if (!S.steps.length) { g.innerHTML = '<p class="empty-state">Load an investigation to see its cycle.</p>'; return; }
-    var phases = [];
-    S.steps.forEach(function (s) { if (phases.indexOf(s.phase) < 0) phases.push(s.phase); });
-    g.innerHTML = applyReportHtml() + deltaHtml() + bannerHtml() + requestsHtml() + frontierHtml() + phases.map(function (ph) {
-      var nodes = S.steps.filter(function (s) { return s.phase === ph; });
-      return '<div class="dcyc-phase-h">' + esc(ph) + "</div>" + nodes.map(nodeHtml).join("");
-    }).join("");
+    if (!S.steps.length && !S.summary) {
+      g.innerHTML = '<p class="empty-state">Load an investigation, then Analyze to see what\'s next.</p>'; return;
+    }
+    var P = partitionFrontier();
+    var you = needsYouHtml(P.you, genReqs("review"));
+    var engine = engineHtml(P.engine, genReqs("auto"));
+    var nothing = (!you && !engine && S.summary)
+      ? '<div class="dcyc-bucket dcyc-bucket-you"><div class="dcyc-bucket-h">Needs you</div>' +
+        '<div class="dcyc-empty-bucket">Nothing needs you right now — the investigation is up to date.</div></div>'
+      : "";
+    g.innerHTML = applyReportHtml() + statusLineHtml(P.tracked) + you + engine + nothing + detailsHtml();
     var dm = el("dcyc-apply-dismiss");
     if (dm) dm.addEventListener("click", function () { S.applyReport = null; renderGraph(); });
-    var gh = el("dcyc-gates-h");
-    if (gh) gh.addEventListener("click", function () { S.gatesOpen = !S.gatesOpen; renderGraph(); });
+    var sh = el("dcyc-status-h");
+    if (sh) sh.addEventListener("click", function () { S.statusOpen = !S.statusOpen; renderGraph(); });
+    Array.prototype.forEach.call(g.querySelectorAll("[data-bucket]"), function (b) {
+      b.addEventListener("click", function () {
+        var k = b.getAttribute("data-bucket"); S.bucketOpen = S.bucketOpen || { you: true, engine: true };
+        S.bucketOpen[k] = S.bucketOpen[k] === false ? true : false; renderGraph();
+      });
+    });
+    var dh = el("dcyc-details-h");
+    if (dh) dh.addEventListener("click", function () { S.detailsOpen = !S.detailsOpen; renderGraph(); });
+    Array.prototype.forEach.call(g.querySelectorAll("[data-gengroup]"), function (b) {
+      b.addEventListener("click", function () {
+        var k = b.getAttribute("data-gengroup"); S.genOpen = S.genOpen || {};
+        S.genOpen[k] = !S.genOpen[k]; renderGraph();
+      });
+    });
+    // grouped generation-request targets: jump to the study, or to the decision
+    Array.prototype.forEach.call(g.querySelectorAll("[data-genstudy]"), function (b) {
+      b.addEventListener("click", function (ev) {
+        ev.stopPropagation(); openStudyLink(b.getAttribute("data-genstudy"), b.getAttribute("data-gentab"));
+      });
+    });
+    Array.prototype.forEach.call(g.querySelectorAll("[data-gendecide]"), function (b) {
+      b.addEventListener("click", function (ev) { ev.stopPropagation(); openDecision(); });
+    });
     // generation-request autonomy presets: persist discovery.gates, then re-emit
     Array.prototype.forEach.call(g.querySelectorAll("[data-genpreset]"), function (b) {
       b.addEventListener("click", function () {
