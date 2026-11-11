@@ -1,18 +1,15 @@
 // @vitest-environment jsdom
-// NOTE: some tests here are it.skip — quarantined as rotted while the loom
-// vitest suite wasn't in CI (UI redesigns: tabs/layout-modes/zoom-tiers/dock).
-// Repair against current behavior, then un-skip. Tracking: #1595
-// Task 10: lock the auto-advance-to-Results behavior.
-//
-// App.tsx wires `onCompleted={() => setTab('results')}` on the SetupRunPanel
-// it renders for the 'setup' tab; SetupRunPanel's poll loop (beginPolling/tick
-// in src/panels/SetupRunPanel.tsx) calls onCompleted() once fetchRunStatus
-// reports a terminal `status: 'completed'`. This test drives a full run
-// lifecycle through <App/> (same postMessage + fetch-mocking patterns as
-// App.test.tsx and RunPanel.test.tsx) and asserts the UI actually lands on
-// the Results tab — not just that a callback fired — so a regression in
-// either wiring (App.tsx's onCompleted prop, or SetupRunPanel's terminal-
-// status branch) fails this test.
+// SKIPPED — tests behavior that was REMOVED, not merely drifted (tracking: #1595).
+// The old design had a tab strip and auto-advanced to a 'Results' TAB on run
+// completion (`onCompleted={() => setTab('results')}`). The redesign removed the
+// tab strip: there is no 'results' tab (TabId is 'setup'|'outputs'|'wiring'|
+// 'document'), the Outputs section is permanently docked (its 'Results' heading
+// is always present), and `onCompleted` is now a no-op (App.tsx ~L2879) — on
+// completion `setOutputsOpen(true)` just OPENS the docked Outputs.
+// The successor behavior worth covering is "a completed run opens the docked
+// Outputs and populates Results", but driving the full SetupRunPanel poll loop
+// to a terminal status is flaky under jsdom. Left skipped for a dedicated
+// rewrite rather than a fragile or assert-to-pass test.
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
 import App from '../App';

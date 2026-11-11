@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-// NOTE: some tests here are it.skip — quarantined as rotted while the loom
-// vitest suite wasn't in CI (UI redesigns: tabs/layout-modes/zoom-tiers/dock).
-// Repair against current behavior, then un-skip. Tracking: #1595
-//
 // DockContainer manages left/right dock zones around a canvas. Each panel can be
 // docked left↔right via a ⇄ header button and collapsed to a thin edge tab;
 // placement + zone widths persist to one localStorage blob.
@@ -40,7 +36,7 @@ const PANELS: DockPanelSpec[] = [
 ];
 
 function dockState() {
-  const raw = store.get('loom.dock.v1');
+  const raw = store.get('loom.dock.v3');
   return raw ? JSON.parse(raw) : null;
 }
 const leftZone = () => document.querySelector('.loom-dock-zone-left') as HTMLElement | null;
@@ -59,7 +55,7 @@ describe('DockContainer', () => {
     expect(screen.getByText('process-body')).toBeTruthy();
   });
 
-  it.skip('docks a panel to the other side via the ⇄ button (and persists it)', () => {
+  it('docks a panel to the other side via the ⇄ button (and persists it)', () => {
     render(<DockContainer panels={PANELS}><div>canvas</div></DockContainer>);
     // Process starts on the left; move it right.
     fireEvent.click(screen.getByRole('button', { name: /dock processes right/i }));
@@ -70,7 +66,7 @@ describe('DockContainer', () => {
     expect(dockState().panels.process.side).toBe('right');
   });
 
-  it.skip('collapses a panel to a thin edge tab and expands it again', () => {
+  it('collapses a panel to a thin edge tab and expands it again', () => {
     render(<DockContainer panels={PANELS}><div>canvas</div></DockContainer>);
     expect(screen.getByText('inspector-body')).toBeTruthy();
     // Collapse Inspector.
@@ -85,9 +81,9 @@ describe('DockContainer', () => {
     expect(dockState().panels.inspector.collapsed).toBe(false);
   });
 
-  it.skip('restores persisted placement on a fresh mount', () => {
+  it('restores persisted placement on a fresh mount', () => {
     // Pre-seed: process docked right + collapsed.
-    store.set('loom.dock.v1', JSON.stringify({
+    store.set('loom.dock.v3', JSON.stringify({
       panels: {
         process: { side: 'right', collapsed: true },
         inspector: { side: 'right', collapsed: false },
@@ -102,8 +98,8 @@ describe('DockContainer', () => {
     expect(screen.queryByText('process-body')).toBeNull();
   });
 
-  it.skip('ignores a stale persisted id the specs no longer declare', () => {
-    store.set('loom.dock.v1', JSON.stringify({
+  it('ignores a stale persisted id the specs no longer declare', () => {
+    store.set('loom.dock.v3', JSON.stringify({
       panels: { ghost: { side: 'left', collapsed: false }, process: { side: 'right', collapsed: false } },
       widths: { left: 300, right: 300 },
     }));

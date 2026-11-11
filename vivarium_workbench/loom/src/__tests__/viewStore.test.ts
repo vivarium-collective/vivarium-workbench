@@ -1,6 +1,3 @@
-// NOTE: some tests here are it.skip — quarantined as rotted while the loom
-// vitest suite wasn't in CI (UI redesigns: tabs/layout-modes/zoom-tiers/dock).
-// Repair against current behavior, then un-skip. Tracking: #1595
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   loadViewStore, listViews, saveView, deleteView, setDefault,
@@ -84,9 +81,12 @@ describe('viewStore CRUD', () => {
 });
 
 describe('view encode/decode', () => {
-  it.skip('round-trips a view through the URL encoding', () => {
+  it('round-trips a view through the URL encoding', () => {
     const enc = encodeView(sampleView);
     expect(typeof enc).toBe('string');
+    // Faithful round-trip: decode(encode(v)) is the normalized v. encodeView
+    // normalizes before compressing and decodeView normalizes after parsing,
+    // so this also asserts normalizeView is idempotent on the canonical form.
     expect(decodeView(enc)).toEqual(normalizeView(sampleView));
   });
 
@@ -96,12 +96,30 @@ describe('view encode/decode', () => {
     expect(decodeView(null)).toBeNull();
   });
 
-  it.skip('normalizeView fills gaps and drops junk', () => {
-    expect(normalizeView({})).toEqual({
-      v: 1, positions: {}, collapsed: [], hidden: [], mode: 'hierarchy', pins: [],
-    });
+  it('normalizeView fills gaps and drops junk', () => {
+    // The full canonical View shape with every default filled in. Defaults per
+    // normalizeView in viewStore.ts: mode→'hierarchy', detail→null,
+    // collapse/hyperedges→false, fontScale→1, and detailOverrides→all 'auto'
+    // (same five keys whether or not overrides were supplied — the default must
+    // match the present-branch shape so normalizeView is idempotent).
+    const canonicalEmpty = {
+      v: 1,
+      positions: {},
+      collapsed: [],
+      hidden: [],
+      mode: 'hierarchy',
+      pins: [],
+      detail: null,
+      collapse: false,
+      hyperedges: false,
+      detailOverrides: { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', symbols: 'auto' },
+      fontScale: 1,
+    };
+    expect(normalizeView({})).toEqual(canonicalEmpty);
+    // Known fields are kept; unknown keys (`extra`) are dropped.
     expect(normalizeView({ collapsed: ['x'], extra: 'nope' })).toEqual({
-      v: 1, positions: {}, collapsed: ['x'], hidden: [], mode: 'hierarchy', pins: [],
+      ...canonicalEmpty,
+      collapsed: ['x'],
     });
   });
 

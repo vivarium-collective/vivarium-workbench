@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-// NOTE: some tests here are it.skip — quarantined as rotted while the loom
-// vitest suite wasn't in CI (UI redesigns: tabs/layout-modes/zoom-tiers/dock).
-// Repair against current behavior, then un-skip. Tracking: #1595
-//
 // The Inspector renders a COMPREHENSIVE process detail: every port with its
 // type + wired store + contract meaning, plus the contract summary and config.
 import { describe, it, expect, afterEach } from 'vitest';
@@ -40,10 +36,14 @@ function renderProcess(locked = false) {
 }
 
 describe('InspectorPanel — rich process detail', () => {
-  it.skip('shows the address and description', () => {
+  it('shows the address and description', () => {
     renderProcess();
+    // Address is shown in its (collapsed-by-default) Address section.
     expect(screen.getByText('local:transcription')).toBeTruthy();
-    expect(screen.getByText('Description')).toBeTruthy();
+    // A docstring-only process (no declared structured contract) renders its
+    // description under the "Notes" section — the prominent "Description" callout
+    // is reserved for a declared contract.summary (see InspectorPanel.ProcessDetail).
+    expect(screen.getByText('Notes')).toBeTruthy();
     expect(screen.getByText(/Synthesizes RNA from DNA\./)).toBeTruthy();
   });
 

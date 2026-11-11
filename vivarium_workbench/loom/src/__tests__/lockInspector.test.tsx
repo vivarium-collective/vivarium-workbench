@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-// NOTE: some tests here are it.skip — quarantined as rotted while the loom
-// vitest suite wasn't in CI (UI redesigns: tabs/layout-modes/zoom-tiers/dock).
-// Repair against current behavior, then un-skip. Tracking: #1595
-//
 // A plain click on a canvas process LOCKS it: it selects (populates the
 // Inspector), pins its wiring (counts as pinned in the focus hint), marks the
 // card locked, and keeps the Inspector visible. Clicking empty canvas unlocks.
@@ -51,16 +47,18 @@ async function loadOntoWiringTab() {
 }
 
 describe('click-to-lock', () => {
-  it.skip('selects + populates the Inspector on a plain click', async () => {
+  it('selects + populates the Inspector on a plain click', async () => {
     await loadOntoWiringTab();
-    // Before any click, the Inspector prompts for a selection.
-    expect(screen.getByText(/Click a node to inspect/i)).toBeTruthy();
+    // The Inspector dock panel starts collapsed (DockContainer defaultCollapsed),
+    // so its body isn't rendered and no process detail is on screen yet. The Ports
+    // section header is unique to the Inspector (the canvas card does not render
+    // it), so its absence proves the detail hasn't populated.
+    expect(screen.queryByText(/Ports \(1 in \/ 0 out\)/)).toBeNull();
 
     fireEvent.click(canvas().getByText('p1'));
 
-    // Inspector now shows the process detail. The Ports section header is unique
-    // to the Inspector (the canvas card does not render it), so it proves the
-    // Inspector populated with THIS process.
+    // A plain click reveals (inspectorReveal nonce) AND populates the Inspector
+    // with THIS process — p1 has 1 input port (a) and 0 outputs.
     expect(screen.getByText(/Ports \(1 in \/ 0 out\)/)).toBeTruthy();
     // The address (a rich-detail field) is present too.
     expect(screen.getAllByText('local:test').length).toBeGreaterThan(0);

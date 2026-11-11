@@ -178,7 +178,7 @@ export function normalizeView(v: any): View {
           contract: typeof v.detailOverrides.contract === 'string' ? v.detailOverrides.contract : 'auto',
           symbols: typeof (v.detailOverrides as { symbols?: string }).symbols === 'string' ? (v.detailOverrides as { symbols?: string }).symbols : 'auto',
         }
-      : { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto' },
+      : { ports: 'auto', stores: 'auto', config: 'auto', contract: 'auto', symbols: 'auto' },
     // Node text scale; absent/invalid → 1 (default).
     fontScale: (typeof v?.fontScale === 'number' && v.fontScale > 0) ? v.fontScale : 1,
   };
