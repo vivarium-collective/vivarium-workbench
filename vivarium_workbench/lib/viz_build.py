@@ -21,11 +21,16 @@ import yaml
 
 
 def find_study_dir(ws_root, study: str) -> Path | None:
-    ws = Path(ws_root)
-    direct = ws / "studies" / study
+    # Resolve through the workspace layout — a workspace may relocate studies via
+    # the `layout:` map (e.g. `studies: workspace/studies`), so never hardcode
+    # `studies/` / `investigations/` here (that made Build fail with
+    # "no study.yaml for '<slug>'" on any layout-mapped workspace).
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+    wp = WorkspacePaths.load(Path(ws_root))
+    direct = wp.studies / study
     if (direct / "study.yaml").is_file():
         return direct
-    for p in sorted((ws / "investigations").glob(f"*/studies/{study}")):
+    for p in sorted(wp.investigations.glob(f"*/studies/{study}")):
         if (p / "study.yaml").is_file():
             return p
     return None
