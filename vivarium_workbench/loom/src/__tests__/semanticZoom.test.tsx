@@ -1,6 +1,7 @@
-// NOTE: some tests here are it.skip — quarantined as rotted while the loom
-// vitest suite wasn't in CI (UI redesigns: tabs/layout-modes/zoom-tiers/dock).
-// Repair against current behavior, then un-skip. Tracking: #1595
+// Burndown DONE for this file (#1595): every previously-quarantined test has
+// been repaired against current behavior and un-skipped — no it.skip remains.
+// Tests cover the six-tier semantic-zoom ladder (glyph/ports/types/config/
+// contract/full) in layouts/tiers.ts and the tiered ProcessNode body.
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
@@ -13,21 +14,30 @@ import ProcessNode from '../nodes/ProcessNode';
 afterEach(cleanup);
 
 describe('tierForZoom', () => {
-  it.skip('maps zoom onto the five tiers', () => {
-    expect(tierForZoom(0.1)).toBe('glyph');
-    expect(tierForZoom(0.3)).toBe('ports');
-    expect(tierForZoom(0.7)).toBe('types');
-    expect(tierForZoom(1.2)).toBe('contract');
-    expect(tierForZoom(2.0)).toBe('full');
+  it('maps zoom onto the six tiers', () => {
+    // The ladder gained a `config` tier (minZoom 0.7) between `types` and
+    // `contract` — see TIERS in layouts/tiers.ts. One representative zoom per
+    // tier (each strictly inside that tier's [minZoom, nextMinZoom) band).
+    expect(tierForZoom(0.1)).toBe('glyph');    // >=0,   <0.25
+    expect(tierForZoom(0.3)).toBe('ports');    // >=0.25,<0.5
+    expect(tierForZoom(0.6)).toBe('types');    // >=0.5, <0.7
+    expect(tierForZoom(0.8)).toBe('config');   // >=0.7, <0.9
+    expect(tierForZoom(1.2)).toBe('contract'); // >=0.9, <1.6
+    expect(tierForZoom(2.0)).toBe('full');     // >=1.6
   });
 
-  it.skip('holds the current tier inside the hysteresis margin', () => {
-    expect(tierForZoom(0.88, 'contract')).toBe('contract');
-    expect(tierForZoom(0.80, 'contract')).toBe('types');
+  it('holds the current tier inside the hysteresis margin', () => {
+    // contract.minZoom = 0.9, TIER_HYSTERESIS = 0.05 → hold contract while
+    // zoom >= 0.85 when zooming out; below that the raw tier (now `config`,
+    // which owns 0.7..0.9) takes over. (tiers.ts: tierForZoom zoom-out branch.)
+    expect(tierForZoom(0.88, 'contract')).toBe('contract'); // 0.88 >= 0.85 → hold
+    expect(tierForZoom(0.80, 'contract')).toBe('config');   // 0.80 <  0.85 → drop
   });
 
-  it.skip('is stable when no current tier is supplied', () => {
-    expect(tierForZoom(0.88)).toBe('types');
+  it('is stable when no current tier is supplied', () => {
+    // No `current` → the raw tier for the zoom. 0.88 lands in `config`'s band
+    // (0.7 <= 0.88 < 0.9), not `types` as before the config tier existed.
+    expect(tierForZoom(0.88)).toBe('config');
   });
 
   // ---- UPWARD transitions (zoom-in) — the direction that was broken ---------
@@ -43,27 +53,33 @@ describe('tierForZoom', () => {
     expect(tierForZoom(1.6, 'types')).toBe('full');
   });
 
-  it.skip('steps through every tier on a rising zoom sweep from glyph', () => {
+  it('steps through every tier on a rising zoom sweep from glyph', () => {
     // Thread the returned tier back in as `current`, exactly as onMove does.
+    // 0.7 now enters the new `config` tier (minZoom 0.7); 0.9 then enters
+    // `contract`. Zoom-in advances immediately (no hysteresis up — tiers.ts).
     const sweep = [0.1, 0.25, 0.35, 0.5, 0.7, 0.9, 1.2, 1.6, 2.0];
     let cur: ZoomTierId = 'glyph';
     const seen: ZoomTierId[] = [];
     for (const z of sweep) { cur = tierForZoom(z, cur); seen.push(cur); }
     expect(seen).toEqual([
-      'glyph', 'ports', 'ports', 'types', 'types',
+      'glyph', 'ports', 'ports', 'types', 'config',
       'contract', 'contract', 'full', 'full',
     ]);
-    // Every one of the five tiers must be reachable on the way up.
-    expect(new Set(seen)).toEqual(new Set(['glyph', 'ports', 'types', 'contract', 'full']));
+    // Every one of the six tiers must be reachable on the way up.
+    expect(new Set(seen)).toEqual(
+      new Set(['glyph', 'ports', 'types', 'config', 'contract', 'full']),
+    );
   });
 
-  it.skip('steps down through tiers on a falling zoom sweep from full', () => {
+  it('steps down through tiers on a falling zoom sweep from full', () => {
     const sweep = [1.5, 1.0, 0.7, 0.4, 0.2, 0.1];
     let cur: ZoomTierId = 'full';
     const seen: ZoomTierId[] = [];
     for (const z of sweep) { cur = tierForZoom(z, cur); seen.push(cur); }
-    // 0.2 holds at 'ports' (== ports.minZoom - hysteresis), then drops at 0.1.
-    expect(seen).toEqual(['contract', 'contract', 'types', 'ports', 'ports', 'glyph']);
+    // 1.5 drops full→contract (1.5 < full.minZoom 1.6 - 0.05); 0.7 drops
+    // contract→config (now the raw tier at 0.7); 0.4 drops config→ports; 0.2
+    // holds at 'ports' (== ports.minZoom - hysteresis), then 0.1 drops to glyph.
+    expect(seen).toEqual(['contract', 'contract', 'config', 'ports', 'ports', 'glyph']);
   });
 });
 
@@ -100,10 +116,18 @@ describe('ProcessNode tiers', () => {
     expect(screen.queryByText(/2 in \/ 1 out/)).toBeNull();
   });
 
-  it.skip('ports adds port counts and port names', () => {
-    renderAt('ports');
-    expect(screen.getByText(/2 in \/ 1 out/)).toBeTruthy();
+  it('ports adds the meta line and port names', () => {
+    const { container } = renderAt('ports');
+    // Arity is now shown by the port columns, not a "2 in / 1 out" string — the
+    // meta line renders the process type + interval instead (ProcessNode meta:
+    // "the in/out counts are omitted — the port columns show the arity").
+    const meta = container.querySelector('.process-node-meta');
+    expect(meta).not.toBeNull();
+    expect(meta?.textContent).toMatch(/step/);
+    expect(screen.queryByText(/2 in \/ 1 out/)).toBeNull();
+    // Port NAME labels appear inside the card from the ports tier up.
     expect(screen.getByText('RNAs')).toBeTruthy();
+    // Port TYPES only show from the types tier up, so no "3 fields" here.
     expect(screen.queryByText(/3 fields/)).toBeNull();
   });
 
@@ -149,14 +173,17 @@ describe('ProcessNode tiers', () => {
     expect(container.querySelector('.process-node-math .katex')).not.toBeNull();
   });
 
-  it.skip('keeps the port handles at every tier so wires still attach', () => {
+  it('keeps the port handles at every tier so wires still attach', () => {
     // Edges connect to handles by port id (convert.ts writes targetHandle=port);
     // dropping them would break focused-process wiring. Even the glyph tier,
-    // which shows no port labels, must keep every input+output handle.
-    for (const t of ['glyph', 'ports', 'types', 'contract', 'full']) {
+    // which shows no port labels, must keep every input+output handle. The
+    // tiered body also emits two place-graph handles (top-place/bottom-place for
+    // nesting edges — ProcessNode); filter those out to assert the PORT handles.
+    for (const t of ['glyph', 'ports', 'types', 'config', 'contract', 'full']) {
       const { container } = renderAt(t);
       const ids = Array.from(container.querySelectorAll('[data-handleid]'))
         .map((el) => el.getAttribute('data-handleid'))
+        .filter((id) => id !== 'top-place' && id !== 'bottom-place')
         .sort();
       // inputs bulk, RNAs + output bulk (one handle per port slot).
       expect(ids).toEqual(['RNAs', 'bulk', 'bulk']);

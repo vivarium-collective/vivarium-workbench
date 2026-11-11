@@ -1,11 +1,8 @@
 // @vitest-environment jsdom
-// NOTE: some tests here are it.skip — quarantined as rotted while the loom
-// vitest suite wasn't in CI (UI redesigns: tabs/layout-modes/zoom-tiers/dock).
-// Repair against current behavior, then un-skip. Tracking: #1595
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
-import { render, screen, act, cleanup } from '@testing-library/react';
+import { render, screen, act, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import App from '../App';
-import { LAYOUT_MODES, DEFAULT_MODE_ID } from '../layouts/registry';
+import { DEFAULT_MODE_ID } from '../layouts/registry';
 import { encodeView } from '../viewStore';
 
 // React Flow relies on ResizeObserver, which jsdom doesn't provide.
@@ -35,22 +32,23 @@ describe('App static mode initial tab', () => {
   });
   afterEach(() => { vi.unstubAllGlobals(); });
 
-  it.skip('static mode shows all tabs and defaults to Setup & Run', () => {
+  it('static mode renders the explorer read-only with a docked Outputs section', () => {
     window.history.pushState({}, '', '?static=1');
     render(<App />);
     postCompositeLoad({ id: 'test.composites.demo', name: 'demo' });
 
-    // The tab strip is visible in static mode and includes every tab.
-    expect(screen.getByRole('button', { name: /Setup & Run/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /^Results$/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /^Visualizations$/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /^Explore$/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /^Document$/i })).toBeTruthy();
-    // Default tab is Setup & Run → its read-only note renders.
-    expect(screen.getByText(/read-only preview|live dashboard/i)).toBeTruthy();
+    // The old tab strip (Explore / Setup & Run / Results / …) was replaced by an
+    // always-on graph plus a docked Outputs section. In static mode (no live
+    // server) the UI renders read-only, with Outputs → Results + Visualizations
+    // and a Run control present (disabled read-only, but mounted).
+    expect(screen.getAllByText(/read-only|live dashboard/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Outputs/i)).toBeTruthy();
+    expect(screen.getAllByText(/^Results$/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/^Visualizations$/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Run/i })).toBeTruthy();
   });
 
-  it.skip('static loader seeds parameters + steps from a resolve-dict stateUrl', async () => {
+  it('static loader seeds parameters from a resolve-dict stateUrl', async () => {
     const resolveDict = {
       id: 'test.composites.demo', name: 'demo',
       state: { top: {} },
@@ -62,11 +60,19 @@ describe('App static mode initial tab', () => {
     }) as any);
     window.history.pushState({}, '', '?static=1&stateUrl=/x.json');
     render(<App />);
-    // The Setup & Run form should show the published parameter + its default.
-    // findAllByText: both the <code>seed</code> key and the "RNG seed" description render.
-    expect((await screen.findAllByText((t) => t.includes('seed'))).length).toBeGreaterThan(0);
-    const input = await screen.findByLabelText(/seed/i) as HTMLInputElement;
-    expect(input.value).toBe('7');
+    // The published parameter loads into the Configure form (its own side tab).
+    // Wait for the tab to report its 1 input (params fetched) before opening it.
+    const cfgTab = await screen.findByRole('tab', { name: /Configure.*1/ });
+    fireEvent.click(cfgTab);
+    let seed: HTMLInputElement | undefined;
+    await waitFor(() => {
+      seed = Array.from(document.querySelectorAll<HTMLInputElement>('input')).find(
+        (i) => i.id.includes('seed') || (i.getAttribute('aria-label') || '').includes('seed'),
+      );
+      expect(seed).toBeTruthy();
+    });
+    // It carries the published default (7).
+    expect(seed!.value).toBe('7');
   });
 });
 
@@ -88,23 +94,25 @@ function installStorage(): Map<string, string> {
   return m;
 }
 
-describe('App single-layout (no mode dropdown)', () => {
+describe('App layout modes', () => {
   afterEach(() => {
     cleanup();
     window.history.pushState({}, '', '/');
   });
 
-  it.skip('renders no layout-mode <select> — the hierarchy graph is the sole layout', () => {
+  it('offers the registered layout modes via the Layout menu', () => {
     render(<App />);
     postCompositeLoad({ id: 'test.composites.demo', name: 'demo' });
-    // The mode switcher was retired; there is no "Layout mode" control at all.
-    expect(screen.queryByTitle('Layout mode')).toBeNull();
-    // And exactly one canvas layout is registered.
-    expect(LAYOUT_MODES).toHaveLength(1);
-    expect(DEFAULT_MODE_ID).toBe('hierarchy');
+    // The single-hierarchy design was replaced by a multi-mode registry exposed
+    // through the Layout menu (flow-down is the default).
+    fireEvent.click(screen.getByTitle(/Layout — direction/i));
+    for (const label of ['Tree', 'Grid', 'Packing', 'Flow']) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+    expect(DEFAULT_MODE_ID).toBe('flow-down');
   });
 
-  it.skip('a view naming an unregistered mode falls back to the default', async () => {
+  it('a view naming an unregistered mode falls back to the default', async () => {
     // A ?view= link or .view.json from a build that had a mode this one does
     // not. `normalizeView` only checks the field is a string, so the id reaches
     // `applyView` unvalidated; the registry is what must reject it. Otherwise
@@ -121,10 +129,11 @@ describe('App single-layout (no mode dropdown)', () => {
 
     // The layout key is the observable proof of which mode state settled on:
     // the view's positions must land under the DEFAULT mode's key, and no key
-    // may name the phantom mode. The default is now 'hierarchy', whose key is
-    // un-suffixed (see layoutStore.keyFor). Asserting the whole set at once also
-    // shows the view really WAS applied, so this can't pass vacuously.
-    const defaultKey = 'bigraph-loom:layout:v2:test.composites.demo';
+    // may name the phantom mode. The default is now 'flow-down', which (not being
+    // 'hierarchy') gets a ':<modeId>' suffix (see layoutStore.keyFor). Asserting
+    // the whole set at once also shows the view really WAS applied, so this can't
+    // pass vacuously.
+    const defaultKey = 'bigraph-loom:layout:v2:test.composites.demo:flow-down';
     expect([...stored.keys()].filter((k) => k.startsWith('bigraph-loom:layout:')))
       .toEqual([defaultKey]);
     expect(stored.get(defaultKey)).toContain('"x"');
