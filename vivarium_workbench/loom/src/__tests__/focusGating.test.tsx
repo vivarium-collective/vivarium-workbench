@@ -7,7 +7,7 @@
 // So App wires up onNodeMouseEnter/Leave, renders the focus hint, and prunes
 // pins. `focus.clear()` still runs on every composite:load.
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, act, within } from '@testing-library/react';
+import { render, fireEvent, cleanup, act, within } from '@testing-library/react';
 import App from '../App';
 
 // The Process panel lists each process by the same label the canvas node shows,
@@ -54,7 +54,6 @@ async function loadOntoWiringTab(metadata: Record<string, unknown>) {
   window.history.pushState({}, '', '?static=1');
   render(<App />);
   postCompositeLoad(ONE_PROCESS_STATE, metadata);
-  fireEvent.click(screen.getByRole('button', { name: /^Explore$/i }));
   // Scope the wait to the canvas so this doesn't throw on the Process panel's
   // matching 'p1' row.
   const label = await canvas().findByText('p1');
@@ -66,7 +65,6 @@ describe('cluster-grid graph — App focus wiring', () => {
     render(<App />);
     window.history.pushState({}, '', '?static=1');
     postCompositeLoad(ONE_PROCESS_STATE, { id: 'test.composites.hover-a', name: 'hover-a' });
-    fireEvent.click(screen.getByRole('button', { name: /^Explore$/i }));
     await canvas().findByText('p1');
 
     // Focus-culling (hover / pin to reveal wiring) is a DENSITY tool now gated
