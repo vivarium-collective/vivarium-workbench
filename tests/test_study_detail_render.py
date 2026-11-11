@@ -63,6 +63,43 @@ def test_render_study_detail_html_preserves_explicit_kind(monkeypatch, tmp_path)
 
 
 # ---------------------------------------------------------------------------
+# Overview edit-affordance consistency — every authored Overview text block is
+# inline-editable (carries data-edit-field) EVEN WHEN the underlying field is
+# empty, so the ✎ pencil appears uniformly. Previously Claim / Model / Result
+# gated the attribute behind `{% if study.claim %}` etc., so a study with no
+# `claim:` showed feedback (💬, block-level) but no edit — the inconsistency the
+# Background block never had.
+# ---------------------------------------------------------------------------
+
+def test_overview_text_blocks_are_editable_even_when_fields_empty(tmp_path, inproc_client):
+    ws = tmp_path / "ws"
+    sd = ws / "studies" / "edit-affordance-study"
+    sd.mkdir(parents=True)
+    (ws / "workspace.yaml").write_text("name: ws\n")
+    # Only a top-level question — NO claim, objective, or result.
+    (sd / "study.yaml").write_text(yaml.safe_dump({
+        "schema_version": 3,
+        "name": "edit-affordance-study",
+        "baseline": [{"name": "core", "composite": "pkg.composites.core"}],
+        "variants": [],
+        "question": "Does island area set equilibrium richness?",
+        "status": "in_progress",
+    }))
+
+    html = inproc_client(ws).get("/studies/edit-affordance-study").text
+
+    # Claim block — editable even though `claim:` is absent (edits the claim field).
+    assert 'data-edit-field="claim"' in html
+    # Model & approach — editable even though `objective:` is absent.
+    assert 'data-edit-field="objective"' in html
+    # Result — editable even though `result:` is absent.
+    assert 'data-edit-field="result"' in html
+    # Header Q headline — the question text span is editable (glyph preserved).
+    assert 'class="study-question-headline-text"' in html
+    assert html.count('data-edit-field="question"') >= 2  # header Q + Background
+
+
+# ---------------------------------------------------------------------------
 # Task 4: header restructure (7 elements -> 3) — real served-HTML assertions.
 # ---------------------------------------------------------------------------
 

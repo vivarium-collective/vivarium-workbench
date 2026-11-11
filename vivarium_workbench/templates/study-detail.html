@@ -94,7 +94,7 @@
    as the study's second line, not buried in an Overview panel. Replaces the
    removed "Spine at a glance" (#spine-summary) table below. #}
 {% set _q = (study.purpose.question if study.purpose else none) or study.question %}
-{% if _q %}<p id="study-question-headline" class="study-question-headline"><span class="q-glyph">Q</span> {{ _q }}</p>{% endif %}
+{% if _q %}<p id="study-question-headline" class="study-question-headline"><span class="q-glyph">Q</span> <span class="study-question-headline-text" data-edit-kind="study" data-edit-field="question" data-edit-value="{{ study.question }}" data-edit-multiline data-edit-label="Question">{{ _q }}</span></p>{% endif %}
 
 <nav class="study-tabs" aria-label="Study sections">
   {# 5-tab study layout (Phase 1 + mockup refinement): one centered row of
@@ -615,7 +615,7 @@
 
     <div class="ctr-block">
       <h2 class="overview-label ctr-h">Claim</h2>
-      <p class="ctr-text"{% if study.claim %} data-edit-kind="study" data-edit-field="claim" data-edit-value="{{ study.claim }}" data-edit-multiline data-edit-label="Claim"{% endif %}>{{ study.claim or study.question or '' }}</p>
+      <p class="ctr-text" data-edit-kind="study" data-edit-field="claim" data-edit-value="{{ study.claim }}" data-edit-multiline data-edit-label="Claim">{{ study.claim or study.question or '' }}</p>
       {% if study.biological_summary %}
       <div class="ctr-context">{{ study.biological_summary }}</div>
       {% endif %}
@@ -633,7 +633,7 @@
 
     <div class="ctr-block">
       <h2 class="overview-label ctr-h">Model &amp; approach</h2>
-      <p class="ctr-text"{% if study.objective %} data-edit-kind="study" data-edit-field="objective" data-edit-value="{{ study.objective }}" data-edit-multiline data-edit-label="Objective"{% endif %}>{{ study.experiment or study.objective or '' }}</p>
+      <p class="ctr-text" data-edit-kind="study" data-edit-field="objective" data-edit-value="{{ study.objective }}" data-edit-multiline data-edit-label="Objective">{{ study.experiment or study.objective or '' }}</p>
       <div class="ctr-meta">
         {% if _bl %}<div class="ctr-meta-row"><span class="ctr-meta-k">Model</span> {% for b in _bl %}<code>{{ b.name or b.composite }}</code>{% if not loop.last %}, {% endif %}{% endfor %}<a class="ov-tablink" href="#" onclick="_setStudyTab('compose');return false;">model →</a></div>{% endif %}
         {% if study.implemented_methods %}
@@ -674,7 +674,7 @@
     <div class="ctr-block">
       <h2 class="overview-label ctr-h">Result</h2>
       {% set _result_text = study.result or _report.main_insight or (_f0.statement if _f0 else '') or '' %}
-      <p class="ctr-text"{% if _result_text %} data-edit-kind="study" data-edit-field="result" data-edit-value="{{ _result_text }}" data-edit-multiline data-edit-label="Result"{% endif %}>{{ _result_text }}</p>
+      <p class="ctr-text" data-edit-kind="study" data-edit-field="result" data-edit-value="{{ study.result }}" data-edit-multiline data-edit-label="Result">{{ _result_text }}</p>
       {% set _metrics = _report.key_metrics or derived_metrics %}
       {% if _metrics %}
       <div class="ov-metrics">
