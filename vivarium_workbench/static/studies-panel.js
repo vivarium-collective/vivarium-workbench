@@ -26,6 +26,7 @@
   var ctl = null;
   var popoutWin = null;   // the ?popout=studies window, while one is open
   var initDone = false;   // guards returnInline against init-time close events
+  var autoOpened = false; // one-shot latch: the default-open has fired once studies appeared
 
   function el(id) { return document.getElementById(id); }
 
@@ -95,7 +96,14 @@
     // Never auto-open/close in a popped-out window — it IS the panel, and a
     // transient close there would trigger returnInline (closing the window).
     if (!ctl || inPopout() || isMobile() || lsGet(K_USERSET, '0') === '1') return;
-    if (hasStudies()) { if (!ctl.isOpen()) ctl.open(); }
+    if (hasStudies()) {
+      // Auto-open ONCE — when studies first appear (the list loads async, so the
+      // first render with leaves may be well after init). After that, never
+      // re-open: later rail re-renders are programmatic (a discovery-cycle Run
+      // refreshing the investigations rail, a graph/needs-attention refresh), and
+      // re-opening then would pop the panel back over work the user has moved to.
+      if (!autoOpened) { autoOpened = true; if (!ctl.isOpen()) ctl.open(); }
+    }
     else { if (ctl.isOpen()) ctl.close(); }
     // Keep the rail "Studies" launcher highlight in sync even when the panel was
     // ALREADY open (restored from stored state at init) — in that case ctl.open()
