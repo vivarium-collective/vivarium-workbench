@@ -376,11 +376,17 @@ def run_composite_subprocess(
             from vivarium_workbench.lib import emitters as _emitters
 
             _default_emitter = _emitters.default_emitter({"runtime": _runtime}, None)
-            _max_generations = int(_runtime.get("max_generations") or 3)
+            # Default to a SINGLE generation. A plain study run should not silently
+            # force cell divisions; a division/lineage study declares its count via
+            # runtime.max_generations. Single-generation is also what lets the
+            # persistent generic-xarray write path (the resolved default emitter) run
+            # for a non-v2ecoli workspace — a multi-generation default forced the
+            # sqlite fallback, which dropped the composite's declared emit scalars.
+            _max_generations = int(_runtime.get("max_generations") or 1)
             _single_daughters = bool(_runtime.get("single_daughters") or False)
         except Exception:
             _default_emitter = "sqlite"
-            _max_generations = 3
+            _max_generations = 1
             _single_daughters = False
         if study_emitter:
             _default_emitter = str(study_emitter).lower()
