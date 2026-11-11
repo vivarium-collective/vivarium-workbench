@@ -21,7 +21,7 @@
 
   var ctl = null, popoutWin = null, initDone = false, built = false;
   // panel state (persists while the panel is mounted)
-  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "", summary: null, applyReport: null, delta: null, gatesOpen: true, decideFor: null, detailsOpen: false, genOpen: {} };
+  var S = { slug: "", title: "", steps: [], byId: {}, open: {}, busy: false, current: "", summary: null, applyReport: null, delta: null, gatesOpen: true, decideFor: null, detailsOpen: false, genOpen: {}, statusOpen: false, bucketOpen: { you: true, engine: true } };
 
   function el(id) { return document.getElementById(id); }
   function base() { return global.__BASE_PATH__ || ""; }
@@ -137,9 +137,17 @@
       ".dcyc-decide-ta{width:100%;box-sizing:border-box;font:inherit;font-size:12px;min-height:58px;padding:6px 8px;border-radius:7px;border:1px solid var(--viv-border,#ccd);background:var(--viv-bg,#fff);color:inherit;resize:vertical}",
       ".dcyc-decide .dcyc-row-actions{margin-top:6px}",
       // simplified panel: one-line status + two action buckets + a Details disclosure
-      ".dcyc-statusline{border-radius:9px;padding:7px 11px;margin:2px 0 10px;border:1px solid var(--viv-border,#e1e3ea);font-weight:650;font-size:13px}",
+      ".dcyc-status{margin:2px 0 10px}",
+      ".dcyc-statusline{display:flex;align-items:center;gap:7px;border-radius:9px;padding:7px 11px;border:1px solid var(--viv-border,#e1e3ea);font-weight:650;font-size:13px}",
+      ".dcyc-statusline .dcyc-sl-head{flex:1;min-width:0}",
+      ".dcyc-statusline-nav{cursor:pointer}",
+      ".dcyc-statusline-nav:hover{filter:brightness(.98)}",
+      ".dcyc-status-body{border:1px solid var(--viv-border,#e1e3ea);border-top:0;border-radius:0 0 9px 9px;margin-top:-3px;padding:4px 10px 9px;display:flex;flex-direction:column;gap:5px}",
       ".dcyc-bucket{border:1px solid var(--viv-border,#e1e3ea);border-radius:10px;margin:0 0 10px;overflow:hidden}",
-      ".dcyc-bucket-h{display:flex;align-items:center;gap:8px;padding:8px 11px;font-weight:650;font-size:12px;letter-spacing:.02em;text-transform:uppercase;border-bottom:1px solid var(--viv-border,#eceef3)}",
+      ".dcyc-bucket-h{display:flex;align-items:center;gap:8px;padding:8px 11px;font-weight:650;font-size:12px;letter-spacing:.02em;text-transform:uppercase;cursor:pointer}",
+      ".dcyc-bucket.exp>.dcyc-bucket-h{border-bottom:1px solid var(--viv-border,#eceef3)}",
+      ".dcyc-bucket-h .dcyc-caret{text-transform:none;font-weight:400}",
+      ".dcyc-bucket-h .dcyc-bcount{margin-left:auto}",
       ".dcyc-bucket-you .dcyc-bucket-h{background:rgba(180,83,9,.08);color:#9a3412}",
       ".dcyc-bucket-engine .dcyc-bucket-h{background:rgba(22,163,74,.08);color:#15803d}",
       ".dcyc-bcount{margin-left:auto;font-size:11px;font-weight:650;background:var(--viv-bg,#fff);border:1px solid var(--viv-border,#dcdfe6);border-radius:999px;padding:0 7px;color:var(--viv-fg-muted,#667)}",
@@ -335,6 +343,7 @@
     el("dcyc-run-cont").disabled = !S.slug;
     var ap = el("dcyc-apply"); if (ap) ap.disabled = true;   // re-enabled after a run
     S.applyReport = null; S.detailsOpen = false; S.genOpen = {};
+    S.statusOpen = false; S.bucketOpen = { you: true, engine: true };
     setStatus("");
     syncCurrent();
     if (!S.slug) {
@@ -434,7 +443,7 @@
   // One-line standing: closed/open + how many open items. The detail that used to
   // crowd this banner (next_action, runnable count, viz-appropriateness) now lives
   // in the two action buckets below and in the Details disclosure.
-  function statusLineHtml() {
+  function statusLineHtml(tracked) {
     var m = S.summary;
     if (!m || m.closed == null) return "";
     var closed = !!m.closed;
@@ -442,7 +451,17 @@
     var head = closed
       ? "✓ Closed · " + (m.frontier_size || 0) + " open (non-blocking)"
       : "◷ Open · " + (m.frontier_size || 0) + " on the frontier";
-    return '<div class="dcyc-statusline ' + cls + '">' + esc(head) + "</div>";
+    var hasTracked = !!(tracked && tracked.length);
+    var open = !!S.statusOpen;
+    var caret = hasTracked ? '<span class="dcyc-caret">' + (open ? "▾" : "▸") + "</span>" : "";
+    var body = (open && hasTracked)
+      ? ('<div class="dcyc-status-body"><div class="dcyc-sub-h">Tracked — non-blocking (' + tracked.length +
+         ')</div>' + tracked.map(fitemHtml).join("") + "</div>")
+      : "";
+    return '<div class="dcyc-status' + (open ? " exp" : "") + '">' +
+      '<div class="dcyc-statusline ' + cls + (hasTracked ? " dcyc-statusline-nav" : "") + '"' +
+      (hasTracked ? ' id="dcyc-status-h"' : "") + ">" +
+      '<span class="dcyc-sl-head">' + esc(head) + "</span>" + caret + "</div>" + body + "</div>";
   }
 
   // ---- the two action buckets --------------------------------------------
@@ -492,6 +511,9 @@
   // Which bucket a frontier item belongs in: a human action, engine-runnable, or
   // just tracked (no action — informational, shown in Details).
   function bucketOf(it) {
+    // Runnable, non-human work the engine can do (render a figure, build a gap) is
+    // the engine's — even when it also offers a manual Build button.
+    if ((it.buildable || it.buildable_gap) && !it.human && !it.decision && !it.resolvable) return "engine";
     if (it.decision || it.acceptable || it.acceptable_gap || it.declarable || it.resolvable || it.human) return "you";
     if (it.buildable || it.buildable_gap) return "engine";
     return "tracked";
@@ -558,14 +580,18 @@
     return head + descLine + list;
   }
 
+  function bucketOpen(which) { return S.bucketOpen ? S.bucketOpen[which] !== false : true; }
+
   function needsYouHtml(you, reviewReqs) {
     var items = you.map(fitemHtml).join("");
     var groups = groupReqs(reviewReqs).map(function (gp) { return genGroupHtml(gp, "review"); }).join("");
     if (!items && !groups) return "";
     var n = you.length + reviewReqs.length;
-    return '<div class="dcyc-bucket dcyc-bucket-you">' +
-      '<div class="dcyc-bucket-h">Needs you <span class="dcyc-bcount">' + n + "</span></div>" +
-      items + groups + "</div>";
+    var open = bucketOpen("you");
+    return '<div class="dcyc-bucket dcyc-bucket-you' + (open ? " exp" : "") + '">' +
+      '<div class="dcyc-bucket-h" data-bucket="you"><span class="dcyc-caret">' + (open ? "▾" : "▸") +
+      "</span> Needs you <span class=\"dcyc-bcount\">" + n + "</span></div>" +
+      (open ? (items + groups) : "") + "</div>";
   }
 
   function engineHtml(engine, autoReqs) {
@@ -573,12 +599,14 @@
     var groups = groupReqs(autoReqs).map(function (gp) { return genGroupHtml(gp, "auto"); }).join("");
     if (!items && !groups) return "";
     var n = engine.length + autoReqs.length;
+    var open = bucketOpen("engine");
     var foot = '<div class="dcyc-bucket-foot">' +
       '<button class="dcyc-btn dcyc-btn-sm dcyc-btn-primary" data-adv="1">Advance ▸</button>' +
       '<span class="dcyc-note-inline">runs these in a sandbox — never touches your files</span></div>';
-    return '<div class="dcyc-bucket dcyc-bucket-engine">' +
-      '<div class="dcyc-bucket-h">The engine can do these <span class="dcyc-bcount">' + n + "</span></div>" +
-      items + groups + foot + "</div>";
+    return '<div class="dcyc-bucket dcyc-bucket-engine' + (open ? " exp" : "") + '">' +
+      '<div class="dcyc-bucket-h" data-bucket="engine"><span class="dcyc-caret">' + (open ? "▾" : "▸") +
+      "</span> The engine can do these <span class=\"dcyc-bcount\">" + n + "</span></div>" +
+      (open ? (items + groups + foot) : "") + "</div>";
   }
 
   // The phase step-trace (was rendered inline in renderGraph) — now tucked in Details.
@@ -595,16 +623,13 @@
   // Everything the buckets don't need up front: what changed, the raw generation
   // requests (scores + autonomy presets), tracked/non-actionable frontier items,
   // the figure-appropriateness toggle, and the full step trace. Collapsed by default.
-  function detailsHtml(tracked) {
-    var hasAny = (S.delta || S.genRequests || S.steps.length || (tracked && tracked.length) ||
+  function detailsHtml() {
+    var hasAny = (S.delta || S.genRequests || S.steps.length ||
       (S.summary && S.summary.viz_untied_enabled != null));
     if (!hasAny) return "";
     var open = !!S.detailsOpen;
     var inner = open ? (
       deltaHtml() +
-      (tracked && tracked.length
-        ? ('<div class="dcyc-sub-h">Tracked — non-blocking</div>' + tracked.map(fitemHtml).join(""))
-        : "") +
       requestsHtml() +
       (S.summary && S.summary.viz_untied_enabled != null ? ('<div class="dcyc-sub-h">Figures</div>' + vizApprHtml()) : "") +
       phaseTraceHtml()
@@ -1010,9 +1035,17 @@
       ? '<div class="dcyc-bucket dcyc-bucket-you"><div class="dcyc-bucket-h">Needs you</div>' +
         '<div class="dcyc-empty-bucket">Nothing needs you right now — the investigation is up to date.</div></div>'
       : "";
-    g.innerHTML = applyReportHtml() + statusLineHtml() + you + engine + nothing + detailsHtml(P.tracked);
+    g.innerHTML = applyReportHtml() + statusLineHtml(P.tracked) + you + engine + nothing + detailsHtml();
     var dm = el("dcyc-apply-dismiss");
     if (dm) dm.addEventListener("click", function () { S.applyReport = null; renderGraph(); });
+    var sh = el("dcyc-status-h");
+    if (sh) sh.addEventListener("click", function () { S.statusOpen = !S.statusOpen; renderGraph(); });
+    Array.prototype.forEach.call(g.querySelectorAll("[data-bucket]"), function (b) {
+      b.addEventListener("click", function () {
+        var k = b.getAttribute("data-bucket"); S.bucketOpen = S.bucketOpen || { you: true, engine: true };
+        S.bucketOpen[k] = S.bucketOpen[k] === false ? true : false; renderGraph();
+      });
+    });
     var dh = el("dcyc-details-h");
     if (dh) dh.addEventListener("click", function () { S.detailsOpen = !S.detailsOpen; renderGraph(); });
     Array.prototype.forEach.call(g.querySelectorAll("[data-gengroup]"), function (b) {

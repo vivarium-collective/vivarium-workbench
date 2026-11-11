@@ -42,7 +42,7 @@ def test_details_disclosure_holds_the_raw_view():
 
 def test_renderGraph_composes_the_new_structure():
     # the one assembly line is status + buckets + details, not the old 6-part stack
-    assert "applyReportHtml() + statusLineHtml() + you + engine + nothing + detailsHtml(" in JS
+    assert "applyReportHtml() + statusLineHtml(P.tracked) + you + engine + nothing + detailsHtml()" in JS
 
 
 def test_grouped_targets_navigate():
@@ -59,6 +59,24 @@ def test_grouped_targets_navigate():
 
 def test_each_group_explains_what_it_does():
     assert "KIND_DESC" in JS and "dcyc-gdesc" in JS
+
+
+def test_status_line_expands_to_show_tracked_items():
+    # clicking the Closed/Open line reveals the tracked (non-blocking) items
+    assert "dcyc-status-h" in JS and "S.statusOpen" in JS
+    assert "function statusLineHtml(tracked)" in JS
+    assert "Tracked — non-blocking" in JS
+    # tracked items no longer render inside Details (moved under the status line)
+    assert "function detailsHtml()" in JS
+
+
+def test_buckets_are_collapsible():
+    assert "data-bucket" in JS and "S.bucketOpen" in JS and "function bucketOpen(" in JS
+
+
+def test_runnable_builds_go_to_the_engine_not_needs_you():
+    # a buildable, non-human item (e.g. "render · runnable" figure) is engine work
+    assert '(it.buildable || it.buildable_gap) && !it.human && !it.decision && !it.resolvable) return "engine"' in JS
 
 
 def test_verbs_say_what_they_do():
