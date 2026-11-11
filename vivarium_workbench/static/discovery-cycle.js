@@ -154,7 +154,13 @@
       ".dcyc-grouprow:hover{background:var(--viv-bg-alt,#f7f8fa)}",
       ".dcyc-gcount{min-width:22px;text-align:center;font-weight:650;font-size:11px;background:var(--viv-bg-alt,#eef1f5);border-radius:6px;padding:1px 5px;color:var(--viv-fg,#334)}",
       ".dcyc-gtargets{list-style:none;margin:0;padding:2px 11px 9px 40px;font-size:11.5px;color:var(--viv-fg-muted,#667)}",
-      ".dcyc-gtargets li{margin:2px 0}",
+      ".dcyc-gtargets li{margin:3px 0}",
+      ".dcyc-glabel{flex:1;min-width:0}",
+      ".dcyc-gtone{color:var(--viv-fg-muted,#778);font-weight:400}",
+      ".dcyc-gdesc{font-size:11px;color:var(--viv-fg-muted,#889);padding:0 11px 8px 40px;line-height:1.35}",
+      ".dcyc-grouprow-nav .dcyc-go{color:#2563eb}",
+      ".dcyc-gtarget-link{appearance:none;-webkit-appearance:none;background:none;border:0;padding:0;margin:0;font:inherit;font-size:11.5px;color:#2563eb;cursor:pointer;text-align:left}",
+      ".dcyc-gtarget-link:hover{text-decoration:underline}",
       ".dcyc-details{border:1px solid var(--viv-border,#e1e3ea);border-radius:10px;margin:2px 0 8px;overflow:hidden}",
       ".dcyc-details-h{display:flex;align-items:center;gap:7px;padding:8px 11px;cursor:pointer;background:var(--viv-bg-alt,#f7f8fa);font-size:12px;font-weight:650}",
       ".dcyc-details-h:hover{background:var(--viv-bg-alt,#eef1f5)}",
@@ -458,6 +464,31 @@
   };
   function kindLabel(k) { return KIND_LABELS[k] || String(k == null ? "" : k).replace(/_/g, " "); }
 
+  // Generation-request kinds whose `target` is a study slug (so it can be opened
+  // directly), and which tab of that study to land on. resolve_decision's target
+  // is free-text decision prose, not a slug — it navigates to the investigation.
+  var KIND_STUDY_TAB = {
+    author_tests: "tests",
+    interpret_finding: "overview",
+    author_viz: "visualizations",
+    propose_viz: "visualizations",
+    seed: "overview",
+    build_model: "overview",
+  };
+  function studyTabFor(kind) { return KIND_STUDY_TAB[kind]; }
+  function isStudyKind(kind) { return Object.prototype.hasOwnProperty.call(KIND_STUDY_TAB, kind); }
+
+  // One line saying what the act does, so a row isn't just a jargon label.
+  var KIND_DESC = {
+    author_tests: "Generate the behaviour tests that check each study's claim against its runs.",
+    interpret_finding: "Write the one-line claim that states what each study found.",
+    resolve_decision: "A choice the cycle is waiting on — open it to decide.",
+    author_viz: "Author the figure each study still needs.",
+    propose_viz: "Propose a figure for each study.",
+    seed: "Seed a follow-up study the cycle proposed.",
+    build_model: "Build the model mechanism each study needs.",
+  };
+
   // Which bucket a frontier item belongs in: a human action, engine-runnable, or
   // just tracked (no action — informational, shown in Details).
   function bucketOf(it) {
@@ -485,18 +516,46 @@
       return { kind: k, label: kindLabel(k), count: by[k].length, targets: by[k] };
     }).sort(function (a, b) { return b.count - a.count; });
   }
-  // A grouped generation-request row: "10 · write the claim line" with the targets
-  // expandable. Governed by autonomy (set in Details), so no per-item buttons here.
+  // A grouped generation-request row: "9 · write the claim line" + a line saying
+  // what it does, with each target a link that jumps to that study (or, for a
+  // decision, to the investigation's Decisions tab). A single-target group is one
+  // clickable row that navigates straight there.
+  function genTargetLink(kind, t) {
+    if (isStudyKind(kind)) {
+      return '<button class="dcyc-gtarget-link" data-genstudy="' + esc(t) +
+        '" data-gentab="' + esc(studyTabFor(kind) || "overview") + '">' + esc(t) + " ▸</button>";
+    }
+    return '<button class="dcyc-gtarget-link" data-gendecide="' + esc(t) + '">' +
+      esc(String(t).slice(0, 90)) + (String(t).length > 90 ? "…" : "") + " ▸</button>";
+  }
   function genGroupHtml(gp, gate) {
     var key = gate + ":" + gp.kind;
+    var desc = KIND_DESC[gp.kind];
+    var descLine = desc ? '<div class="dcyc-gdesc">' + esc(desc) + "</div>" : "";
+    // single target → the whole row navigates straight to it
+    if (gp.count === 1) {
+      var t0 = gp.targets[0];
+      var nav = isStudyKind(gp.kind)
+        ? ('data-genstudy="' + esc(t0) + '" data-gentab="' + esc(studyTabFor(gp.kind) || "overview") + '"')
+        : ('data-gendecide="' + esc(t0) + '"');
+      var tone = isStudyKind(gp.kind) ? esc(t0)
+        : esc(String(t0).slice(0, 64)) + (String(t0).length > 64 ? "…" : "");
+      return '<div class="dcyc-grouprow dcyc-grouprow-nav" ' + nav + '>' +
+        '<span class="dcyc-gcount">1</span>' +
+        '<span class="dcyc-glabel">' + esc(gp.label) + '<span class="dcyc-gtone"> · ' + tone + "</span></span>" +
+        '<span class="dcyc-caret dcyc-go">▸</span></div>' + descLine;
+    }
     var open = !!(S.genOpen && S.genOpen[key]);
-    var caret = gp.count > 1 ? ' <span class="dcyc-caret">' + (open ? "▾" : "▸") + "</span>" : "";
     var head = '<div class="dcyc-grouprow" data-gengroup="' + esc(key) + '">' +
-      '<span class="dcyc-gcount">' + gp.count + "</span> " + esc(gp.label) + caret + "</div>";
-    var list = (open && gp.count > 1)
-      ? '<ul class="dcyc-gtargets">' + gp.targets.map(function (t) { return "<li>" + esc(t) + "</li>"; }).join("") + "</ul>"
+      '<span class="dcyc-gcount">' + gp.count + "</span>" +
+      '<span class="dcyc-glabel">' + esc(gp.label) + "</span>" +
+      '<span class="dcyc-caret">' + (open ? "▾" : "▸") + "</span></div>";
+    var list = open
+      ? '<ul class="dcyc-gtargets">' + gp.targets.map(function (t) {
+          return "<li>" + genTargetLink(gp.kind, t) + "</li>";
+        }).join("") + "</ul>"
       : "";
-    return head + list;
+    return head + descLine + list;
   }
 
   function needsYouHtml(you, reviewReqs) {
@@ -830,6 +889,21 @@
     } catch (e) { setStatus("Couldn't open the study."); }
   }
 
+  // A generation-request decision isn't an inline frontier item here — navigate to
+  // the investigation's Decisions tab (in the main window), where it's resolved.
+  function openDecision() {
+    if (!S.slug) return;
+    try {
+      if (typeof global._openInvestigationDetail === "function") global._openInvestigationDetail(S.slug);
+      if (typeof global._aigOpenDecisionsTab === "function") {
+        setTimeout(function () { try { global._aigOpenDecisionsTab(); } catch (e) { /* ignore */ } }, 120);
+        setStatus("Opened the Decisions tab for “" + currentTitle(S.slug) + "”.");
+      } else {
+        setStatus("Showing “" + currentTitle(S.slug) + "” in the main window — see its Decisions tab.");
+      }
+    } catch (e) { setStatus("Couldn't open the decision."); }
+  }
+
   function submitDecision(target, kind) {
     var ta = el("dcyc-decide-ta");
     var rationale = ta ? ta.value.trim() : "";
@@ -946,6 +1020,15 @@
         var k = b.getAttribute("data-gengroup"); S.genOpen = S.genOpen || {};
         S.genOpen[k] = !S.genOpen[k]; renderGraph();
       });
+    });
+    // grouped generation-request targets: jump to the study, or to the decision
+    Array.prototype.forEach.call(g.querySelectorAll("[data-genstudy]"), function (b) {
+      b.addEventListener("click", function (ev) {
+        ev.stopPropagation(); openStudyLink(b.getAttribute("data-genstudy"), b.getAttribute("data-gentab"));
+      });
+    });
+    Array.prototype.forEach.call(g.querySelectorAll("[data-gendecide]"), function (b) {
+      b.addEventListener("click", function (ev) { ev.stopPropagation(); openDecision(); });
     });
     // generation-request autonomy presets: persist discovery.gates, then re-emit
     Array.prototype.forEach.call(g.querySelectorAll("[data-genpreset]"), function (b) {

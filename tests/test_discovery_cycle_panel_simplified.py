@@ -45,6 +45,22 @@ def test_renderGraph_composes_the_new_structure():
     assert "applyReportHtml() + statusLineHtml() + you + engine + nothing + detailsHtml(" in JS
 
 
+def test_grouped_targets_navigate():
+    # each study target is a link that opens that study; a decision navigates to
+    # the investigation's Decisions tab — not dead text.
+    assert "data-genstudy" in JS and "data-gentab" in JS
+    assert "function genTargetLink(" in JS
+    assert "openStudyLink(b.getAttribute(\"data-genstudy\")" in JS
+    assert "data-gendecide" in JS and "function openDecision(" in JS
+    assert "_aigOpenDecisionsTab" in JS   # decision routes to the Decisions tab
+    # single-target groups are one clickable nav row
+    assert "dcyc-grouprow-nav" in JS
+
+
+def test_each_group_explains_what_it_does():
+    assert "KIND_DESC" in JS and "dcyc-gdesc" in JS
+
+
 def test_verbs_say_what_they_do():
     # Run -> Analyze (read-only re-derive); Advance / Apply kept; stray Switch button removed
     assert ">Analyze<" in JS
