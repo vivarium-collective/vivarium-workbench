@@ -56,6 +56,7 @@ import {
   resolveComposite, fetchInnerComposite, parseUrlOverrides, apiRoot,
 } from './api';
 import type { ExploreInspectMsg, ParameterDecl } from './api';
+import { resolveCompositeSrc } from './staticSource';
 
 // Layout runs go through the mode registry (see hooks/useLayoutMode): a mode's
 // run() returns { nodes, bands? }, so call sites destructure `nodes`.
@@ -882,23 +883,26 @@ export default function App() {
   useEffect(() => {
     if (state) return;
     const params = new URLSearchParams(window.location.search);
-    const stateUrl = params.get('stateUrl');
     // Forward the config overrides to the live state build so the GRAPH is
     // config-applied (e.g. n_generations>1 → the batch `batch_runner` wiring,
     // injected_processes wired) — matching the Configure form, which already
-    // resolves with overrides. A static ?stateUrl= snapshot has no live build,
-    // so it keeps its baked state.
+    // resolves with overrides. A static snapshot has no live build, so it keeps
+    // its baked state.
     const ovParam = (urlOverrides && Object.keys(urlOverrides).length)
       ? '&overrides=' + encodeURIComponent(JSON.stringify(urlOverrides)) : '';
-    const src = stateUrl
-      ? stateUrl
-      : (compositeId
-          ? '/api/composite-state?ref=' + encodeURIComponent(compositeId) + ovParam
-          : null);
-    if (!src) return;
     let cancelled = false;
+    // Where to fetch the composite document from, static-first (see staticSource):
+    // ?stateUrl=/?src= a direct URL; ?id= resolved via a static ?manifest= (or the
+    // conventional ./composites/manifest.json under ?static=1); else the live API.
     setLoadError(null);
-    fetch(src)
+    resolveCompositeSrc({
+      params,
+      compositeId,
+      isStatic: STATIC,
+      apiFallback: (id) => '/api/composite-state?ref=' + encodeURIComponent(id) + ovParam,
+    }).then((src) => {
+      if (cancelled || !src) return;
+      return fetch(src)
       .then((r) => r.json().then((data) => ({ ok: r.ok, status: r.status, data })))
       .then(({ ok, status, data }) => {
         if (cancelled) return;
@@ -949,9 +953,9 @@ export default function App() {
           // Visualizations panel shows its Plotly / movie without a live run.
           // The viz JSON is the state URL's sibling; best-effort (bundles that
           // didn't bake viz simply keep the panel's "run in a live dashboard").
-          if (STATIC && stateUrl) {
-            const vizUrl = stateUrl.replace('composite-state', 'composite-viz');
-            if (vizUrl !== stateUrl) {
+          if (STATIC && src) {
+            const vizUrl = src.replace('composite-state', 'composite-viz');
+            if (vizUrl !== src) {
               fetch(vizUrl)
                 .then((r) => (r.ok ? r.json() : null))
                 .then((vz) => {
@@ -965,6 +969,7 @@ export default function App() {
         }
       })
       .catch(() => { /* fall through to postMessage path */ });
+    });
     return () => { cancelled = true; };
   }, [compositeId, state, urlOverrides, retryTick]);
 
