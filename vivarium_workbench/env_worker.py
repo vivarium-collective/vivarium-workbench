@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import hashlib
 import importlib.util
 import json
 import os
@@ -4153,6 +4154,30 @@ def _run_process(params: dict) -> dict:
 _PROVISION_SITE_DIRNAME = "env-worker-site"
 
 
+def _workspace_site_leaf() -> str:
+    """A per-workspace subdir name for the provision site, or ``""`` when no
+    workspace is set.
+
+    The install site is prepended to ``sys.path``, so it MUST NOT be shared
+    between workspaces: on a host running several workbenches at once (the local
+    multi-workspace laptop), a single shared ``env-worker-site`` accumulates every
+    workspace's packages, and that cross-contaminated dir on ``sys.path`` makes
+    ``importlib.metadata`` discovery hang — the server accepts connections but
+    never responds. Namespacing the site by the absolute workspace path keeps each
+    workspace's provisioned packages isolated. The leaf is
+    ``<basename>-<8 hex of sha1(abspath)>`` (basename for legibility, hash for
+    uniqueness across same-named checkouts). Empty when ``_workspace`` is unset so
+    single-pod/two-pod deployments and tests keep the historical flat path.
+    """
+    ws = _workspace
+    if not ws:
+        return ""
+    ws_abs = os.path.abspath(ws)
+    digest = hashlib.sha1(ws_abs.encode("utf-8")).hexdigest()[:8]
+    base = os.path.basename(ws_abs.rstrip("/")) or "ws"
+    return f"{base}-{digest}"
+
+
 def _default_provision_target() -> str:
     """Pick a writable install dir for the running topology.
 
@@ -4162,11 +4187,20 @@ def _default_provision_target() -> str:
     hardcoded ``/scratch`` default raised ``PermissionError`` there, so fall back
     to a user-writable temp dir. Either topology can still pin an explicit path
     via ``VIVARIUM_ENV_WORKER_SITE``.
+
+    The site is namespaced per-workspace (``<base>/env-worker-site/<ws-leaf>``)
+    when a workspace is known, so concurrent workbenches on one host never share a
+    single install dir (see ``_workspace_site_leaf``). The shared parent still
+    hosts the cross-workspace ``pkg-cache`` wheel cache (``_provision_cache_dir``),
+    which is content-addressed and safe to share.
     """
     scratch = "/scratch"
     if os.path.isdir(scratch) and os.access(scratch, os.W_OK):
-        return os.path.join(scratch, _PROVISION_SITE_DIRNAME)
-    return os.path.join(tempfile.gettempdir(), _PROVISION_SITE_DIRNAME)
+        base = os.path.join(scratch, _PROVISION_SITE_DIRNAME)
+    else:
+        base = os.path.join(tempfile.gettempdir(), _PROVISION_SITE_DIRNAME)
+    leaf = _workspace_site_leaf()
+    return os.path.join(base, leaf) if leaf else base
 
 
 def _provision_target() -> str:
