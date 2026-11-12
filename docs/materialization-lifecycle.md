@@ -248,6 +248,7 @@ never a hang or a 500:
 | repo unreachable / auth | cloning | `FAILED` — "could not reach `<repo>`" |
 | ref not found | cloning | `FAILED` — "ref `<ref>` not found" |
 | `uv sync` resolution/build error | syncing | `FAILED` — "environment build failed" + the `uv` error tail |
+| GitHub asks git for a credential (a private git dependency) | syncing | `FAILED` — "environment build failed: the workbench has no GitHub sign-in or token …" (none was handed to git) or "… GitHub refused the workbench's credential …" (one was handed over and GitHub answered 401) + the `uv` error tail |
 | exceeded the materialize timeout | any | `FAILED` — "environment build timed out after `<N>` min" |
 
 The failing `uv` output tail is the actionable part — it's what a user needs to fix
@@ -265,13 +266,28 @@ before it reaches the browser.
 - **No session** (or the session lookup fails, which never fails a build that needs no
   credential): the sync runs without one and fails as before with
   `fatal: could not read Username for 'https://github.com': terminal prompts disabled`
-  in the tail. Sign in from the GitHub panel, then start the build again from the
-  Environment panel ("Use this environment"). The toast's Retry re-runs only managed
-  `repo@ref` builds; for a switched build it just reloads the page.
-- **The account must be able to read the dependency.** An expired or revoked token is
-  rejected by GitHub (sign in again); an account outside the organisation, or one its
-  SSO / OAuth-app policy has not authorised, gets a 403 or 404 even though the header
-  is correct.
+  in the tail, and the toast's headline says "the workbench has no GitHub sign-in or token
+  to give git for a private dependency" (git's own line sits at the bottom of the scroll
+  box, under the download list). The same headline covers a `VIVARIUM_WORKBENCH_GH_TOKEN`
+  that is set but yields no session: GitHub rejected it (the workbench log records
+  "rejected by GitHub") or could not be reached to check it (for example egress to
+  `api.github.com` is blocked). Sign in from the GitHub panel, or have the operator set a
+  valid token, then start the build again from the Environment panel ("Use this
+  environment"). The toast's Retry re-runs only managed `repo@ref` builds; for a switched
+  build it just reloads the page.
+- **A credential GitHub does not accept.** A signed-in session (or a token that passed
+  the check) was handed to git and GitHub still answered 401: the headline says "GitHub
+  refused the workbench's credential" (expired, revoked or invalid token: sign in again
+  or replace the token). Real GitHub prints the same `could not read Username for
+  'https://github.com'` line with no header and with a bogus-token header (probed
+  2026-11-12), so the headline is chosen from whether `materialize` handed git a
+  credential, not from git's text. Only that line, on the `github.com` host, selects
+  either headline: another host's prompt, or a refusal git reports in other words (a
+  valid token that cannot read the repository, SSO not authorised), keeps the plain
+  "environment build failed" with git's own words in the tail.
+- **The account must be able to read the dependency** for the build to succeed at all: an
+  account outside the organisation, or one its SSO / OAuth-app policy has not authorised,
+  cannot fetch it even with a correct header.
 - **Exposure.** The token is in the environment of `uv`, so also of every build backend
   or `setup.py` it runs, and readable by same-user processes (`/proc/<pid>/environ`).
   That is inherent to handing a credential to a tool that spawns git itself. The session
