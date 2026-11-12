@@ -182,6 +182,28 @@
       (compact ? '' : _esc(meta.label)) + (meta.derived ? '<sup title="derived">*</sup>' : '') + '</span>';
   }
 
+  // Honesty marker for a COMPLETED card whose input dependencies are not done.
+  // The execution badge reflects only THIS study's own run; the server
+  // (investigation_graph_views) sets `upstream_incomplete` to the member studies
+  // it builds on (interface inputs / prerequisites) that are not themselves
+  // completed. So a study reading "Completed" while one of those is still
+  // Planned/Running is only *provisionally* complete — flag it with an amber chip
+  // instead of letting the clean "Completed" badge imply the chain is finished.
+  function _aigUpstreamIncompleteChip(slugs, compact) {
+    slugs = slugs || [];
+    if (!slugs.length) return '';
+    var ttl = 'Provisional — this study reads "Completed", but ' + slugs.length +
+      (slugs.length === 1 ? ' study it builds on has' : ' studies it builds on have') +
+      ' not finished: ' + slugs.join(', ');
+    var c = '#b45309';  // amber-700
+    return '<span class="aig-upstream-incomplete" title="' + _esc(ttl) + '" ' +
+      'style="display:inline-flex;align-items:center;gap:3px;font-size:0.6em;font-weight:700;' +
+      'white-space:nowrap;border-radius:9999px;padding:1px 7px;color:' + c + ';' +
+      'background:' + c + '14;border:1px solid ' + c + '40">' +
+      '<span style="font-size:1.05em;line-height:1">⚠</span>' +
+      (compact ? '' : 'upstream incomplete') + '</span>';
+  }
+
   // ── Clickable axis-marker breakdown (graph cards) ────────────────────────────
   // Mirrors study-detail.js's header markers so the SAME information is one click
   // away on a graph card's Progress / Verdict pill: the underlying lifecycle /
@@ -13375,6 +13397,7 @@
                        : (isParked ? 'Parked — a deliberately-deferred future direction, not pending work'
                                    : 'Verdict: pending — not yet concluded'),
                      'aig-verdict-pill', _pillCompact, 'verdict') +
+            (isCompleted ? _aigUpstreamIncompleteChip(s.upstream_incomplete, _pillCompact) : '') +
           '</span>' +
           '<span style="display:flex;align-items:center;gap:6px;flex:none">' +
             _tierPipsHtml(s) +

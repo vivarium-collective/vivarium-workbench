@@ -20,6 +20,12 @@ from investigation_contracts import validate_chain
 # report-card verdicts (mirrors report_views._PRE_EVAL_STATUSES).
 _PRE_EVAL_STATUSES = frozenset({"build", "planned", "implementation", "design", "pending", ""})
 
+# The only execution_status that satisfies a downstream study's input dependency.
+# Everything else (planned, running, proposed, failed, parked) means the upstream
+# has not finished, so a study that reads "Completed" while an upstream is in one
+# of those states is only provisionally complete (see upstream_incomplete below).
+_COMPLETE_EXECUTION = frozenset({"completed"})
+
 # Two-axis ontology derivation (execution_status × verdict) + edge-relation
 # typing live in the shared study_ontology module so this graph builder and the
 # study-card detail serializer (report_views) can never drift.
@@ -206,6 +212,33 @@ def build_investigation_graph(ws_root: Path, inv_slug: str) -> tuple[dict, int]:
         chain = _build_chain(slug, nodes)
         chain["derived"] = derived
         chains[slug] = chain
+
+    # DAG-aware completion: a study's execution badge ("Completed") reflects only
+    # whether THAT study's own run finished — it ignores the dependency graph. So a
+    # downstream study can read "Completed" while the member studies it takes its
+    # inputs FROM are still Planned/Running (the badge and the "builds on" edges
+    # disagree). Flag each node with the upstream member studies — along its
+    # incoming input/prerequisite edges — that are not themselves completed, so the
+    # UI can mark such a node provisional instead of cleanly done. Honesty signal,
+    # derive-only; the frontend may ignore it.
+    _status_by_id = {n["id"]: str(n.get("execution_status") or "").strip().lower()
+                     for n in studies_out}
+    _incoming: dict[str, list[str]] = {}
+    for _e in study_edges:
+        _incoming.setdefault(_e["target"], []).append(_e["source"])
+    for _n in studies_out:
+        _ups = [src for src in _incoming.get(_n["id"], [])
+                if _status_by_id.get(src, "") not in _COMPLETE_EXECUTION]
+        if _ups:
+            # Deduplicate, preserve first-seen order, strip the "study/" id prefix.
+            _seen: set[str] = set()
+            _slugs = []
+            for src in _ups:
+                s = src.split("/", 1)[-1]
+                if s not in _seen:
+                    _seen.add(s)
+                    _slugs.append(s)
+            _n["upstream_incomplete"] = _slugs
 
     return {"investigation": inv_slug, "studies": studies_out,
             "study_edges": study_edges, "chains": chains}, 200
