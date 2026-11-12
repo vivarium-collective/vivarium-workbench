@@ -87,6 +87,34 @@ def test_build_iset_summary_injects_runs(tmp_path):
     assert has_runs[0]["effective_status"] == "in_progress"
 
 
+def test_build_iset_summary_federated_string_executive(tmp_path, monkeypatch):
+    """A federated investigation whose ``executive`` is a plain string (as
+    spatio-flux 1.5.5 ships) must not blow up build_iset_summary. Regression for
+    the HTTP 500 on /api/investigation-summaries reported from RENCI."""
+    from vivarium_workbench.lib import federation as _fed
+
+    def _fake_federated(ws_root):
+        return [{
+            "name": "paper-figures",
+            "id": "spatio_flux::paper-figures",
+            "origin_repo": "spatio-flux",
+            "member_studies": ["spatio_flux::fig-1"],
+            "spec": {
+                "title": "Paper figures",
+                "status": "planning",
+                # The failure mode: executive is a string, not a mapping.
+                "executive": "One study per figure of the Process Bigraph paper.",
+            },
+        }]
+
+    monkeypatch.setattr(_fed, "federated_investigation_sets", _fake_federated)
+
+    out = inv.build_iset_summary(tmp_path, study_has_runs=lambda s, spec: False)
+    fed = next(e for e in out if e["name"] == "paper-figures")
+    assert fed["read_only"] is True
+    assert fed["verdict_status"] == "planning"  # falls back to spec.status
+
+
 def test_build_iset_summary_parse_error(tmp_path):
     """A malformed investigation.yaml yields the minimal {name, error} entry."""
     (tmp_path / "investigations" / "inv-bad").mkdir(parents=True)
