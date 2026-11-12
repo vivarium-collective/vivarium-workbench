@@ -159,6 +159,63 @@ def test_provision_target_prefers_scratch_when_writable(monkeypatch):
     assert env_worker._provision_target() == "/scratch/env-worker-site"
 
 
+# ---- per-workspace site: concurrent workbenches must not share sys.path ----
+
+def test_provision_site_namespaced_per_workspace(monkeypatch, tmp_path):
+    # On a host running several workbenches at once, a single shared
+    # env-worker-site accumulates every workspace's packages and poisons
+    # importlib.metadata discovery. The default site must be namespaced by the
+    # workspace so each one is isolated.
+    monkeypatch.delenv("VIVARIUM_ENV_WORKER_SITE", raising=False)
+    monkeypatch.setattr(env_worker.os.path, "isdir",
+                        lambda p: False if p == "/scratch" else os.path.isdir(p))
+    import os as _os
+    import tempfile
+    base = os.path.join(tempfile.gettempdir(), "env-worker-site")
+
+    monkeypatch.setattr(env_worker, "_workspace", str(tmp_path / "ws_alpha"))
+    alpha = env_worker._provision_target()
+    monkeypatch.setattr(env_worker, "_workspace", str(tmp_path / "ws_beta"))
+    beta = env_worker._provision_target()
+
+    # both live UNDER the shared base, but in distinct per-workspace leaves
+    assert _os.path.dirname(alpha) == base and _os.path.dirname(beta) == base
+    assert alpha != beta
+    assert _os.path.basename(alpha).startswith("ws_alpha-")
+    assert _os.path.basename(beta).startswith("ws_beta-")
+
+
+def test_provision_site_leaf_stable_for_same_workspace(monkeypatch, tmp_path):
+    monkeypatch.delenv("VIVARIUM_ENV_WORKER_SITE", raising=False)
+    monkeypatch.setattr(env_worker, "_workspace", str(tmp_path / "ws"))
+    # deterministic: same workspace -> same site across calls
+    assert env_worker._provision_target() == env_worker._provision_target()
+
+
+def test_pkg_cache_stays_shared_across_workspaces(monkeypatch, tmp_path):
+    # The wheel download cache is content-addressed and SAFE to share; only the
+    # install site must be per-workspace. pkg-cache is a sibling of the leaf
+    # (dirname(target)/pkg-cache), so it stays common to all workspaces.
+    monkeypatch.delenv("VIVARIUM_ENV_WORKER_SITE", raising=False)
+    for env in ("UV_CACHE_DIR", "PIP_CACHE_DIR"):
+        monkeypatch.delenv(env, raising=False)
+    monkeypatch.setattr(env_worker.os.path, "isdir",
+                        lambda p: False if p == "/scratch" else os.path.isdir(p))
+    monkeypatch.setattr(env_worker, "_workspace", str(tmp_path / "ws_a"))
+    cache_a = env_worker._provision_cache_dir()
+    monkeypatch.setattr(env_worker, "_workspace", str(tmp_path / "ws_b"))
+    cache_b = env_worker._provision_cache_dir()
+    assert cache_a == cache_b and cache_a.endswith("pkg-cache")
+
+
+def test_provision_site_env_override_ignores_workspace(monkeypatch, tmp_path):
+    # An explicit pin is fully user-controlled — the per-workspace leaf must not
+    # be appended to it (the local workaround relies on this exact path).
+    monkeypatch.setenv("VIVARIUM_ENV_WORKER_SITE", "/some/explicit/dir")
+    monkeypatch.setattr(env_worker, "_workspace", str(tmp_path / "ws"))
+    assert env_worker._provision_target() == "/some/explicit/dir"
+
+
 # ---- _DISCOVERED reset: runtime installs become visible in a warm worker --
 
 def test_install_modules_resets_discovery_gate(tmp_path, monkeypatch):
