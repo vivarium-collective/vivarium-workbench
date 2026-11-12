@@ -1701,8 +1701,21 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
     import yaml as _yaml
 
     from vivarium_workbench.lib.simulations_index import discover_default_baseline_db
-    from discovery_engine.viz.freshness import chart_freshness, manifest_diff
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+
+    # Per-chart freshness badges are an OPTIONAL enhancement sourced from
+    # discovery_engine.viz.freshness. When the discovery_engine installed in the
+    # running server's env predates that module (a version skew), charts must
+    # still render — just without the badge — rather than 500-ing the whole
+    # endpoint on an unguarded import. Degrade to "untracked" freshness.
+    try:
+        from discovery_engine.viz.freshness import chart_freshness, manifest_diff
+    except Exception:  # ImportError, or a partial/broken engine install
+        def manifest_diff(_study_dir, _visualizations):
+            return None
+
+        def chart_freshness(_study_dir, _entry, _latest):
+            return "untracked"
 
     # Layout-aware: a study may live nested under
     # investigations/<inv>/studies/<slug>/ rather than the flat studies/<slug>/.

@@ -1051,8 +1051,21 @@ def create_app() -> FastAPI:
         single implementation. Charts are
         polymorphic: ``live`` charts carry inline SVG, ``static`` / ``declared``
         charts carry an image data-URI plus a freshness badge (see ChartPayload).
+
+        Resilient by contract: chart building must never 500 the Visualizations
+        tab. A failure (a broken chart, a bad run.db, a version-skewed optional
+        dependency) degrades to a valid empty payload — the UI shows "No figures
+        yet" instead of a red error banner — and is logged for diagnosis.
         """
-        return StudyChartsPayload.model_validate(build_study_charts_payload(ws, slug))
+        try:
+            return StudyChartsPayload.model_validate(build_study_charts_payload(ws, slug))
+        except Exception:
+            _error_logger.exception(
+                "study-charts build failed for %r; returning empty payload", slug)
+            return StudyChartsPayload(
+                study=slug, charts=[], gate_results=[], db_exists=False,
+                data_store=None, static_count=0, live_count=0, gate_result_count=0,
+            )
 
     @app.get(
         "/api/study-behavior-card/{slug}",
