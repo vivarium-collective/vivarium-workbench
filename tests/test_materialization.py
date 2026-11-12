@@ -7,10 +7,12 @@ exercise the cache/coordinate logic without running ``uv``; one opt-in test runs
 a real ``uv sync`` of a minimal no-dep project (skipped when ``uv`` is absent).
 """
 import base64
+import http.server
 import os
 import shutil
 import subprocess
 import sys
+import threading
 import urllib.error
 from pathlib import Path
 
@@ -285,3 +287,111 @@ def test_materialize_failure_tail_never_carries_the_credential(store, tmp_path, 
     basic = base64.b64encode(f"x-access-token:{_TOKEN}".encode()).decode()
     assert basic not in exc.value.tail
     assert "trace: http.https://github.com/.extraHeader=<redacted>" in exc.value.tail
+
+
+
+# The toast headlines `str(MaterializationError)` and puts the uv tail in a scroll box, where the
+# cause sits under ~40 "Downloading ..." lines. git prints the SAME line whether no credential
+# reached it or GitHub answered 401 to the one it got (real GitHub, probed 2026-11-12: no header, and
+# a bogus-token header), so the message is chosen from what `materialize` knows: did it hand git a
+# credential at all. The two github.com cases use a stand-in `uv` (the periphery) that prints that
+# line verbatim, as captured from real git against github.com and from the field log: real git cannot
+# produce the github.com wording hermetically, because it prints the host it actually connects to. The
+# host control below therefore uses REAL git against a loopback server.
+_GITHUB_LINE = "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+_NOISE = 'echo "Downloading torch (502.2MiB)" >&2; echo "Downloading pandas (11.8MiB)" >&2'
+
+
+class _Always401(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="x"')
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        pass
+
+
+@pytest.fixture
+def private_git_url():
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Always401)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}/org/private.git"
+    server.shutdown()
+    server.server_close()
+
+
+def _failing_materialize(tmp_path, monkeypatch, uv_body: str) -> m.MaterializationError:
+    """``materialize`` with a stand-in ``uv`` that runs ``uv_body`` and fails."""
+    for var in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_PARAMETERS",
+                "GIT_ASKPASS", "SSH_ASKPASS", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")      # what uv sets for the git it runs
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    uv = bindir / "uv"
+    uv.write_text(f"#!/bin/sh\n{uv_body}\nexit 1\n")
+    uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    with pytest.raises(m.MaterializationError) as exc:
+        m.materialize(_make_project(tmp_path / "proj"), timeout=60)
+    return exc.value
+
+
+_GITHUB_FAILURE = f'{_NOISE}; echo "{_GITHUB_LINE}" >&2'
+
+
+@_needs_posix_git
+def test_a_missing_github_credential_is_named_in_the_error(store, tmp_path, monkeypatch):
+    monkeypatch.setattr(github_auth, "current_session", lambda: None)
+    err = _failing_materialize(tmp_path, monkeypatch, _GITHUB_FAILURE)
+    assert _GITHUB_LINE in err.tail                         # git's own words stay for the operator
+    assert str(err).startswith("environment build failed")
+    assert "no GitHub sign-in or token" in str(err)
+    assert "VIVARIUM_WORKBENCH_GH_TOKEN" in str(err)
+
+
+@_needs_posix_git
+def test_a_refused_github_credential_is_named_in_the_error(store, tmp_path, monkeypatch):
+    """A session exists, so git was handed a header; the same line then means GitHub said 401."""
+    _signed_in(monkeypatch)
+    err = _failing_materialize(tmp_path, monkeypatch, _GITHUB_FAILURE)
+    assert _GITHUB_LINE in err.tail
+    assert str(err).startswith("environment build failed")
+    assert "refused the workbench's credential" in str(err)
+    assert "expired, revoked or invalid" in str(err)
+    assert "no GitHub sign-in or token" not in str(err)     # it HAD one: do not tell the operator to add one
+    assert _TOKEN not in str(err) and _TOKEN not in err.tail
+
+
+@_needs_posix_git
+@pytest.mark.parametrize("signed_in", [True, False])
+def test_another_hosts_credential_prompt_is_not_blamed_on_github(store, tmp_path, monkeypatch, private_git_url, signed_in):
+    """Control, with REAL git: a private dependency on a host that is not github.com asks for a
+    username too, but our credential is scoped to github.com, so the headline must stay plain."""
+    if signed_in:
+        _signed_in(monkeypatch)
+    else:
+        monkeypatch.setattr(github_auth, "current_session", lambda: None)
+    monkeypatch.setenv("VWB_TEST_GIT_URL", private_git_url)
+    err = _failing_materialize(tmp_path, monkeypatch, 'git ls-remote "$VWB_TEST_GIT_URL" >&2')
+    assert "could not read Username for 'http://127.0.0.1" in err.tail   # real git asked for a credential
+    assert str(err) == "environment build failed"
+
+
+@_needs_posix_git
+@pytest.mark.parametrize("signed_in", [True, False])
+def test_an_unrelated_build_failure_keeps_the_plain_message(store, tmp_path, monkeypatch, signed_in):
+    """Control: a failure that is not git asking for a credential must not be blamed on one."""
+    if signed_in:
+        _signed_in(monkeypatch)
+    else:
+        monkeypatch.setattr(github_auth, "current_session", lambda: None)
+    err = _failing_materialize(tmp_path, monkeypatch, 'echo "No solution found when resolving dependencies" >&2')
+    assert str(err) == "environment build failed"
+    assert "No solution found" in err.tail

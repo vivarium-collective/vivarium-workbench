@@ -55,6 +55,28 @@ class MaterializationError(Exception):
         self.tail = tail
 
 
+# What git prints, with prompts off (as uv runs it), when GitHub asks for a credential it does not
+# have: either none reached it, or GitHub answered 401 to the one it sent. Real GitHub, probed
+# 2026-11-12: the same line with no header and with a bogus-token header, so the message is chosen
+# from whether `materialize` handed git a credential, not from git's text. Matched on the github.com
+# host only: the credential is scoped to it, so another host's line is not ours to explain. The toast
+# headlines the message and scrolls the tail, where this line sits under the download list.
+_GITHUB_NEEDS_CREDENTIAL = "could not read Username for 'https://github.com'"
+_NO_CREDENTIAL = (
+    "environment build failed: the workbench has no GitHub sign-in or token to give git for a private "
+    "dependency. Sign in with GitHub, or have the operator set VIVARIUM_WORKBENCH_GH_TOKEN (if it is "
+    "set, GitHub rejected it or could not be reached to check it)")
+_CREDENTIAL_REFUSED = (
+    "environment build failed: GitHub refused the workbench's credential for a private git dependency "
+    "(the token is expired, revoked or invalid): sign in again, or replace VIVARIUM_WORKBENCH_GH_TOKEN")
+
+
+def _build_failed_message(output: str, *, credential_given: bool) -> str:
+    if _GITHUB_NEEDS_CREDENTIAL not in output:
+        return "environment build failed"
+    return _CREDENTIAL_REFUSED if credential_given else _NO_CREDENTIAL
+
+
 def store_root() -> Path:
     """The venv store directory (§5) — coordinate-keyed venvs live under here.
     Override with ``VIVARIUM_WORKBENCH_VENV_STORE``; defaults under the user
@@ -155,9 +177,10 @@ def materialize(source: Path, *, timeout: float = _DEFAULT_TIMEOUT_S) -> str:
     # git_https_env: a workspace can pin a PRIVATE git dependency (sms-ecoli pins
     # the private v2ecoli); uv runs git with prompts disabled and the container has
     # no credential helper, so the signed-in GitHub session must reach it here.
+    git_env = github_auth.git_https_env()
     env = dict(
         os.environ,
-        **github_auth.git_https_env(),
+        **git_env,
         UV_PROJECT_ENVIRONMENT=str(venv_dir),
         UV_CACHE_DIR=str(store_root() / ".uv-cache"),
     )
@@ -176,9 +199,11 @@ def materialize(source: Path, *, timeout: float = _DEFAULT_TIMEOUT_S) -> str:
         raise MaterializationError("uv not found on PATH", tail="") from e
 
     if proc.returncode != 0:
+        output = proc.stderr or proc.stdout or ""
         # The tail goes to the browser: scrub the credential handed to git above.
-        tail = github_auth.mask_token((proc.stderr or proc.stdout or "")[-2000:])
-        raise MaterializationError("environment build failed", tail=tail)
+        tail = github_auth.mask_token(output[-2000:])
+        raise MaterializationError(
+            _build_failed_message(output, credential_given=bool(git_env)), tail=tail)
 
     py = _venv_python(venv_dir)
     if py is None:
