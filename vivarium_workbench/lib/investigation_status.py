@@ -457,11 +457,13 @@ def build_iset_summary(
 
     for fi in _fed.federated_investigation_sets(ws_root):
         fspec = fi.get("spec") or {}
+        fex = fspec.get("executive")
+        fex = fex if isinstance(fex, dict) else {}
         out.append({
             "name":             fi["name"],
             "title":            fspec.get("title", fi["name"]),
             "status":           fspec.get("status", "planning"),
-            "verdict_status":   (fspec.get("executive") or {}).get("verdict_status")
+            "verdict_status":   fex.get("verdict_status")
                                 or fspec.get("status") or "planning",
             "effective_status": "federated",
             "description":      _card_description(fspec),
