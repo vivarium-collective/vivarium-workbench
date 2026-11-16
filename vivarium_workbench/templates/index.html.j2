@@ -837,13 +837,16 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     <!-- The Vivarium brand logo was removed; the workspace badge (avatar) is the
          top element of the rail. The rail defaults to the full labelled sidebar
          and can be collapsed to a compact icon bar via the toggle below; the
-         choice is persisted. The sidebar has a fixed width (no drag-to-resize).
-         "About Vivarium" is reached from the About button pinned in the rail
-         footer. ⌘K still opens search. -->
+         choice is persisted. The right-edge handle below drag-resizes the rail
+         narrower (capped so it can't get too wide); dragging it all the way in
+         snaps to the collapsed bar. "About Vivarium" is reached from the About
+         button pinned in the rail footer. ⌘K still opens search. -->
 
     <!-- The sidebar expand/collapse toggle lives in the Settings popover (the gear
-         at the bottom of the rail); it drives the persisted vivarium.rail-collapsed
-         state. -->
+         at the bottom of the rail); the right-edge drag handle below also sizes the
+         rail. Both drive the persisted vivarium.rail-collapsed / rail-width state. -->
+    <div id="viv-rail-resize-handle" class="viv-rail-resize-handle" aria-hidden="true"
+         onpointerdown="_vivRailResizeStart(event)" ondblclick="_vivRailResizeReset()"></div>
 
     {% if repo_url %}
     <!-- GitHub mark, defined once and reused (workspace-name link + collapsed icon). -->
