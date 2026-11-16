@@ -860,8 +860,6 @@ def composites_data(ws_root: Path, *, scope: str = "all") -> dict:
                 rec["preferred_time"] = None
             mod = rec.get("module") or ""
             rec["workspace_local"] = bool(mod == pkg or mod.startswith(ws_prefix_dot))
-            # Composite contract-audit needs a built core (deferred); specs are discovered coreless.
-            rec["contract_audit"] = {"status": "unavailable"}
             out.append(rec)
         out = filter_composites(out, ws_data)
         out = _dedupe_alias_composites(out)

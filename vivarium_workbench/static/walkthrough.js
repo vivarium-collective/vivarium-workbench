@@ -3631,7 +3631,7 @@
         ' title="Double-click to Explore (open the full card)">' +
       '<div class="reg-card-row">' +
         '<div class="reg-card-main">' +
-          '<div class="reg-card-head"><strong class="reg-card-name">' + esc(p.name) + '</strong>' + _procKindBadge(p.kind) + _procBridgeBadge(p) + defaultBadge + _regUseBadge(p) + _contractBadge(p.contract_audit) + '</div>' +
+          '<div class="reg-card-head"><strong class="reg-card-name">' + esc(p.name) + '</strong>' + _procKindBadge(p.kind) + _procBridgeBadge(p) + defaultBadge + _regUseBadge(p) + '</div>' +
           '<code class="reg-card-addr">' + addr + '</code>' +
           (short ? '<p class="reg-card-desc">' + esc(short) + '</p>' : '') +
         '</div>' +
@@ -3672,7 +3672,7 @@
       }).join('');
     }
     var bodyHead =
-      '<div class="loom-body-head"><span class="loom-name">' + _esc(p.name) + '</span>' + _procKindBadge(kind) + _regUseBadge(p) + _contractBadge(p.contract_audit) + '</div>' +
+      '<div class="loom-body-head"><span class="loom-name">' + _esc(p.name) + '</span>' + _procKindBadge(kind) + _regUseBadge(p) + '</div>' +
       '<code class="loom-addr">' + _esc(p.address || kind) + '</code>' +
       (desc ? '<p class="loom-desc">' + _esc(desc) + '</p>' : '');
 
@@ -3736,10 +3736,9 @@
   // (loaded before this file) so the "{ } JSON" button works on every page the
   // card mounts on, including the Study Detail Model tab. Bare references below
   // resolve to those globals.
-  // Contract-audit panel toggle — mirrors _toggleCompositeJson. The REAL
-  // composite audit is expensive (it builds the composite's core), so it's
-  // fetched lazily on first open from /api/composite-contract-audit and the
-  // header badge is back-patched with the real status once it lands.
+  // Wiring-audit panel toggle — mirrors _toggleCompositeJson. The audit is
+  // expensive (it builds the composite's core), so it's fetched lazily on first
+  // open from /api/composite-contract-audit.
   function _toggleCompositeContract(btn) {
     var card = btn.closest('.registry-entry-full'); if (!card) return;
     var panel = card.querySelector('[data-role="composite-contract"]'); if (!panel) return;
@@ -3750,7 +3749,7 @@
     panel._loaded = true;
     var id = card.getAttribute('data-address');
     var body = panel.querySelector('.pcard-contract-body');
-    if (body) body.innerHTML = '<span class="muted" style="font-size:0.85em">Auditing composite contracts… (building the core)</span>';
+    if (body) body.innerHTML = '<span class="muted" style="font-size:0.85em">Auditing composite wiring… (building the core)</span>';
     fetch('/api/composite-contract-audit?id=' + encodeURIComponent(id))
       .then(function (r) { return r.json(); })
       .then(function (a) {
@@ -3760,16 +3759,6 @@
             : '<pre>' + _esc(JSON.stringify(a, null, 2)) + '</pre>';
         }
         panel._audit = a;
-        // Back-patch the header badge so the at-a-glance status is now real,
-        // not the coreless "contract n/a" stub.
-        try {
-          var badge = card.querySelector('.contract-badge');
-          if (badge && a && a.status && typeof _contractBadge === 'function') {
-            var tmp = document.createElement('div');
-            tmp.innerHTML = _contractBadge(a);
-            if (tmp.firstChild) badge.replaceWith(tmp.firstChild);
-          }
-        } catch (e) { /* badge back-patch is best-effort */ }
       })
       .catch(function (e) {
         if (body) body.innerHTML = '<span class="loom-run-err">Audit failed: ' + _esc(String(e)) + '</span>';
@@ -3777,17 +3766,6 @@
       });
   }
   window._toggleCompositeContract = _toggleCompositeContract;
-  // Process-card contract toggle — the per-process audit is already inline on
-  // the card (pre-rendered into the panel), so this just reveals it. No fetch,
-  // no badge back-patch (the header badge is already the real status).
-  function _toggleProcessContract(btn) {
-    var card = btn.closest('.registry-entry-full'); if (!card) return;
-    var panel = card.querySelector('[data-role="process-contract"]'); if (!panel) return;
-    var show = panel.hidden;
-    panel.hidden = !show;
-    btn.classList.toggle('active', show);
-  }
-  window._toggleProcessContract = _toggleProcessContract;
 
   // In a ?popcard= window: strip the shell to just the single requested card.
   function _enterPopcardMode(address, kind) {
@@ -4033,10 +4011,9 @@
       '<div class="loom-card loom-card-stack loom-card-' + kind + '">' +
         '<div class="pcard-top">' +
           '<div class="pcard-header pcard-title" onclick="_pinCardTop(this)" title="Click to pin to top">' +
-            '<span class="loom-name">' + _esc(p.name) + '</span>' + kindBadge + _regUseBadge(p) + _contractBadge(p.contract_audit) +
+            '<span class="loom-name">' + _esc(p.name) + '</span>' + kindBadge + _regUseBadge(p) +
             '<code class="loom-addr">' + _esc(p.address || kind) + '</code>' +
             (/^(process|step)$/.test(kind) ? _processCodeBtn(p.address) : '') +
-            (p.contract_audit ? _processContractBtn() : '') +
             _cardPopoutBtn(p.address || kind, kind) +
           '</div>' +
           '<div class="pcard-summary">' +
@@ -4046,14 +4023,6 @@
               (desc ? '<p class="loom-desc pcard-desc-clamp" onclick="_pcardToggleDesc(this)" title="Click to expand / collapse">' + _esc(desc) + '</p>' : '') +
             '</div>' +
           '</div>' +
-          // Contract-audit panel — hidden until the header "§ Contract" button
-          // toggles it (mirrors the composite card). The per-process audit is
-          // already inline on the card, so it's pre-rendered here, not fetched.
-          (p.contract_audit
-            ? '<div class="pcard-json-view pcard-contract-view" data-role="process-contract" hidden>' +
-                '<div class="pcard-contract-body">' + _contractPanelBody(p.contract_audit) + '</div>' +
-              '</div>'
-            : '') +
         '</div>' +
         '<div class="pcard-acc">' +
           section('configure', 'Configure', '<span class="pcard-sec-count">' + nCfg + '</span><span class="pcard-config-chips" data-role="config-chips" hidden></span>', configBody, { resizable: true }) +

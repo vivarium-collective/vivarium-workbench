@@ -1,5 +1,5 @@
-"""Unit tests for lib.composite_audit.audit_composite — the real composite-level
-contract roll-up (Phase 1 per-process audit + Phase 2 wiring/interface check).
+"""Unit tests for lib.composite_audit.audit_composite — the composite-level
+WIRING audit (shared-store type + unit agreement).
 
 Drives the pure logic with a tiny fake ``Composite`` (just ``.process_paths``)
 and a real core, so no heavy composite build is needed.
@@ -9,7 +9,7 @@ from bigraph_schema.contract import ProcessContract
 from bigraph_schema.edge import Edge
 from vivarium_workbench.lib.composite_audit import audit_composite
 
-_STATUSES = ('pass', 'fail', 'incomplete', 'not-declared', 'unavailable', 'error')
+_STATUSES = ('pass', 'fail', 'warn', 'unavailable')
 
 
 class _P(Edge):
@@ -42,41 +42,9 @@ def test_rollup_and_consistent_wiring():
     res = audit_composite(core, _FakeComp(pp))
     assert res['status'] in _STATUSES
     assert res['n_processes'] == 2
-    assert len(res['processes']) == 2
     # two processes agree on the shared 'store' type → no wiring findings
     assert res['wiring']['status'] == 'pass'
     assert res['wiring']['findings'] == []
-
-
-class _PC(Edge):
-    # A *constrained* face (units on each port) — counts as "typed" the way
-    # tumor-tcell's ports do, so completeness lands at 0.75 (ports, no predicates).
-    contract = ProcessContract(face={
-        'inputs': {'m': {'_type': 'float', '_units': 'kilogram'}},
-        'outputs': {'m': {'_type': 'float', '_units': 'kilogram'}}})
-    def inputs(self): return {'m': 'float'}
-    def outputs(self): return {'m': 'float'}
-
-
-def test_completeness_breakdown_and_improve_rollup():
-    # Constrained ports but no predicate conditions → 0.75; the panel should be
-    # able to say *why*: ports fully typed, predicates missing.
-    core = _core()
-    core.register_link('PC', _PC)
-    f = core.access('float')
-    pp = {
-        ('a',): {'address': 'local:PC', 'inputs': {'m': ['store']}, 'outputs': {'m': ['store']},
-                 '_inputs': {'m': f}, '_outputs': {'m': f}},
-        ('b',): {'address': 'local:PC', 'inputs': {'m': ['store']}, 'outputs': {'m': ['store']},
-                 '_inputs': {'m': f}, '_outputs': {'m': f}},
-    }
-    res = audit_composite(core, _FakeComp(pp))
-    c = res['processes'][0]['completeness']
-    assert c['ports_total'] == c['ports_typed'] and c['ports_total'] > 0
-    assert c['has_predicates'] is False
-    assert any('predicate' in m for m in c['missing'])
-    # composite-level aggregation names the predicate gap and counts both processes
-    assert any('predicate' in it['action'] and it['n_processes'] == 2 for it in res['improve'])
 
 
 def test_wiring_type_mismatch_is_fail():
@@ -108,7 +76,7 @@ def test_single_port_store_is_not_flagged():
 
 def test_empty_composite_is_wellformed():
     res = audit_composite(_core(), _FakeComp({}))
-    assert res['status'] == 'not-declared'
+    assert res['status'] == 'pass'
     assert res['n_processes'] == 0
     assert res['wiring']['status'] == 'pass'
 
