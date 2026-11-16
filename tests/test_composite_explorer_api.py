@@ -259,10 +259,8 @@ def test_composite_contract_audit_endpoint_wellformed(server):
     except (urllib.error.URLError, TimeoutError, socket.timeout) as e:
         pytest.skip(f"cold composite-core build too slow for this runner: {e!r}")
     assert status == 200, body
-    assert body.get("status") in (
-        "pass", "fail", "incomplete", "not-declared", "unavailable", "error"), body
-    if body["status"] not in ("unavailable", "error"):
-        assert isinstance(body.get("processes"), list)
+    assert body.get("status") in ("pass", "fail", "warn", "unavailable"), body
+    if body["status"] != "unavailable":
         assert "wiring" in body and body["wiring"]["status"] in ("pass", "warn", "fail")
 
     # Unknown id degrades, not 500 (no core build — always fast).

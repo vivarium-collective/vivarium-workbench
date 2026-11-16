@@ -66,7 +66,7 @@ except Exception:  # pragma: no cover - framework absent/incompatible
 #: rebuilding live beats risking a stale/wrong catalog keyed on a bad sig.
 DISABLED = "__disabled__"
 
-_CATALOG_SCHEMA = 2
+_CATALOG_SCHEMA = 3
 
 _ENV_CACHE_DIR = "VIVARIUM_WORKBENCH_CATALOG_CACHE_DIR"
 
@@ -207,8 +207,9 @@ def catalog_signature(ws_root: Path | str) -> str:
     try:
         ws_root = Path(ws_root)
         # ``catalog_schema`` is an explicit payload-shape token: bump it when the
-        # cached catalog records gain/lose fields. v2 = process records carry
-        # ``contract_audit`` (Phase 4A); pre-v2 payloads lack it and must recompute.
+        # cached catalog records gain/lose fields. v3 = the per-process
+        # ``contract_audit`` field was removed (contract auditing moved to the
+        # discovery-engine validator layer); pre-v3 payloads carry it and must recompute.
         tokens: list[str] = [
             f"py={sys.version_info.major}.{sys.version_info.minor}",
             f"catalog_schema={_CATALOG_SCHEMA}",
