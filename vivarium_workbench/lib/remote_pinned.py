@@ -72,8 +72,10 @@ def resolve_run_target(ws_root: Path) -> str:
         workspace picker (``run_core.run_target_for``'s existing
         ``.viv-build.json`` check), or
       - the deployment itself is configured for pinned remote runs
-        (``VIVARIUM_WORKBENCH_REMOTE_PINNED`` — :func:`is_pinned_enabled`).
-    Returns ``"local"`` otherwise.
+        (``VIVARIUM_WORKBENCH_REMOTE_PINNED`` — :func:`is_pinned_enabled`), or
+      - the operator named a backend that runs documents (:func:`uses_named_backend_dispatch`).
+    Returns ``"local"`` otherwise, and raises ``APIError`` (502) when the operator
+    named a backend that cannot be reached (``require_named_backend_reachable``).
 
     Real bug this closes (backlog item 18, confirmed from source 2026-08-04):
     ``composite_test_run_views.composite_test_run`` special-cased the second
@@ -100,7 +102,15 @@ def resolve_run_target(ws_root: Path) -> str:
         return "deployment"
     if is_pinned_enabled():
         return "deployment"
-    return "deployment" if uses_named_backend_dispatch(ws_root) else "local"
+    if uses_named_backend_dispatch(ws_root):
+        return "deployment"
+    # Not a backend that runs documents. If the operator NAMED one that cannot be asked, "local" would start on
+    # this machine what they said to run elsewhere: refuse (APIError 502). A named backend that answers and
+    # offers only a legacy surface stays "local" (tests/test_backend_dispatch_viva_v1.py pins that).
+    from vivarium_workbench.lib.server_capabilities import require_named_backend_reachable
+
+    require_named_backend_reachable()
+    return "local"
 
 
 def uses_viva_v1_dispatch(ws_root: Path) -> bool:

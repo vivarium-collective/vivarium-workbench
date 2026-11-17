@@ -1916,7 +1916,13 @@ def main(argv: list[str] | None = None) -> int:
     p_render_loom.set_defaults(func=cmd_render_loom)
 
     args = parser.parse_args(argv)
-    return args.func(args)
+    from vivarium_workbench.lib.errors import APIError
+
+    try:
+        return args.func(args)
+    except APIError as e:  # a refusal the routes answer with its own status (502: the backend named for this run is down)
+        _emit(e.to_body(), getattr(args, "json", False))
+        return 1
 
 
 if __name__ == "__main__":

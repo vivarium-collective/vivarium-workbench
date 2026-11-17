@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from vivarium_workbench.lib.errors import APIError
 from vivarium_workbench.lib.investigation_composite import (
     STUDY_META,
     InvestigationCompositeError,
@@ -109,6 +110,8 @@ def _launch_target(ws_root: Path, document: dict, target: str, report: dict,
     try:
         from vivarium_workbench.lib import composite_test_run_views
         return composite_test_run_views.composite_test_run(ws_root, body)
+    except APIError as exc:  # a refusal with its own status and body (502: the backend named for this workbench is down)
+        return exc.to_body(), exc.status_code
     except Exception as exc:  # noqa: BLE001 — a launch failure must not sink the report
         return {"error": f"launch failed: {exc}"}, 500
 

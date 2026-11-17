@@ -39,6 +39,7 @@ from vivarium_workbench.lib import run_core
 from vivarium_workbench.lib import study_run_post
 from vivarium_workbench.lib import study_run_state
 from vivarium_workbench.lib import study_spec
+from vivarium_workbench.lib.errors import APIError
 from vivarium_workbench.lib.study_crud_mutations import _study_name_from_body
 
 
@@ -569,10 +570,17 @@ def launch_into_study(ws_root, study, spec_id, params, n_steps, *, seed=None,
     effective_seed = seed if seed is not None else full_params.get("seed")
 
     try:
+        target = remote_pinned.resolve_run_target(ws_root)
+    except APIError:
+        # The backend named for this workbench cannot be reached. A dry run starts nothing (a preview "stays
+        # local-only", see run_study_baseline), so it still answers; any other run is refused.
+        if not dry_run:
+            raise
+        target = "local"
+    try:
         plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=full_params,
                                    db_path=db_file, label=label, n_steps=n_steps,
-                                   seed=effective_seed,
-                                   target=remote_pinned.resolve_run_target(ws_root))
+                                   seed=effective_seed, target=target)
     except run_core.RunTargetUnavailable as e:
         return {"error": str(e)}, 409
     # Remote-build guard (item 18: unified with composite_test_run's target

@@ -122,8 +122,8 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
                     print(f"backend dispatch: {_p['dispatch']} (server v{_p['version']}; "
                           f"capabilities: {', '.join(_p['capabilities']) or 'none advertised'})")
             elif _p is not None:
-                print(f"backend dispatch: legacy (capabilities unavailable: {_p['error']})",
-                      file=sys.stderr)
+                print(f"backend dispatch: UNREACHABLE ({_p['error']}); a run is refused, never started locally, "
+                      "until it answers", file=sys.stderr)
         except Exception as e:  # noqa: BLE001
             print(f"warning: backend capability check failed: {e}", file=sys.stderr)
 

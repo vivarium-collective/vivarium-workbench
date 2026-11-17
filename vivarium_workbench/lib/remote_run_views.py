@@ -388,6 +388,13 @@ def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:
     :meth:`SmsApiClient.run_simulation`; unset when absent/blank, matching
     every other optional field here."""
     body = body or {}
+    if not body.get("simulator_id"):
+        # No simulator id: this submit belongs to the named backend (compose-api, or viva-v1 documents), unless a
+        # pinned or session build sends it to SMS. Resolve the target as every run entrypoint does: it answers 502 when
+        # the named backend cannot be reached, instead of falling through to the SMS path's "not authenticated" or
+        # "simulator_id is required", and it never asks that backend for a pinned or session build. A submit that
+        # carries a simulator id is the SMS host's and does not wait on the named backend.
+        remote_pinned.resolve_run_target(ws_root)
     if not body.get("simulator_id") and remote_pinned.uses_compose_dispatch(ws_root):
         # The operator named compose-api: the composite runs in the environment its registry lists for this
         # workspace (remote_run_compose), so there is no simulator id to ask for here either.
