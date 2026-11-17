@@ -146,6 +146,20 @@ describe('ProcessNode tiers', () => {
     expect(container.querySelector('.process-node-math .katex')).not.toBeNull();
   });
 
+  it('leads with the equation block above the prose recital (math prioritized)', () => {
+    const { container } = renderAt('contract');
+    const math = container.querySelector('.process-node-math');
+    const recital = container.querySelector('.contract-recital');
+    expect(math).not.toBeNull();
+    expect(recital).not.toBeNull();
+    // A model's math reads first: the equation block carries the lead-prominence
+    // class and precedes the prose recital in document order.
+    expect(math!.classList.contains('is-lead')).toBe(true);
+    expect(
+      math!.compareDocumentPosition(recital!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('full adds the completeness indicator', () => {
     renderAt('full');
     expect(screen.getByText(/0\/3 ports documented/)).toBeTruthy();

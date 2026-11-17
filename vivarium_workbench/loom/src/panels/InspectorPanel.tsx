@@ -173,6 +173,27 @@ function ProcessDetail(props: { details: ProcessNodeData }) {
         </div>
       )}
 
+      {/* Equations lead the inspector for a model that declares them — the math
+          (and its symbol legend) is prioritized above notes/ports/config, because
+          a model's governing equations are what the reader came for. */}
+      {contract && contract.math.length > 0 && (
+        <InspectorSection title="Equations">
+          <div className="insp-math">
+            {contract.math.map((m, i) => <KatexBlock key={i} tex={toLatex(m)} />)}
+          </div>
+        </InspectorSection>
+      )}
+
+      {contract && Object.keys(contract.symbols).length > 0 && (
+        <InspectorSection title="Symbols">
+          <div className="insp-symbols">
+            {Object.entries(contract.symbols).map(([s, meaning]) => (
+              <div key={s}><em><MathText text={s} symbolKey /></em> — <MathText text={meaning} /></div>
+            ))}
+          </div>
+        </InspectorSection>
+      )}
+
       {hasDescription && (
         <InspectorSection title="Notes">
           <Prose text={rawDescription as string} />
@@ -205,24 +226,6 @@ function ProcessDetail(props: { details: ProcessNodeData }) {
                 <span className="insp-config-val mono" title={c.value}>{c.value}</span>
                 <span className="insp-config-type mono">{c.type || '—'}</span>
               </div>
-            ))}
-          </div>
-        </InspectorSection>
-      )}
-
-      {contract && contract.math.length > 0 && (
-        <InspectorSection title="Equations">
-          <div className="insp-math">
-            {contract.math.map((m, i) => <KatexBlock key={i} tex={toLatex(m)} />)}
-          </div>
-        </InspectorSection>
-      )}
-
-      {contract && Object.keys(contract.symbols).length > 0 && (
-        <InspectorSection title="Symbols">
-          <div className="insp-symbols">
-            {Object.entries(contract.symbols).map(([s, meaning]) => (
-              <div key={s}><em><MathText text={s} symbolKey /></em> — <MathText text={meaning} /></div>
             ))}
           </div>
         </InspectorSection>
