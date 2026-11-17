@@ -401,7 +401,8 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     from vivarium_workbench.lib import remote_pinned
     from vivarium_workbench.lib import remote_run as _remote_run
 
-    if remote_pinned.uses_compose_dispatch(ws_root):
+    on_compose = remote_pinned.uses_compose_dispatch(ws_root)
+    if on_compose:
         # The named backend is compose-api: run_remote sends the composite to the environment its registry
         # lists for this workspace (remote_run_compose.run_composite). No cloud image to resolve, and no git
         # preflight: the environment's image runs, not this checkout.
@@ -510,6 +511,11 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     # inputs. The run lands into this workspace's store, so without this its Origin would read "local".
     if plan.target == "deployment":
         manifest["ran_on"] = remote_pinned.remote_deployment_name()
+        if on_compose:
+            # compose-api runs its environment's image, never this checkout; the image is recorded when the run lands.
+            from vivarium_workbench.lib import remote_run_compose
+
+            remote_run_compose.stamp_manifest(manifest, None)
 
     conn = cr.connect(db_file)
     try:

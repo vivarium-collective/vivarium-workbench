@@ -52,6 +52,8 @@ DISPATCH_TAG_PREFIX = "workbench:dispatch:"
 #: How often, and how far apart in seconds, a submission whose answer was lost is looked up by its dispatch tag.
 LOOKUP_ATTEMPTS = 5
 LOOKUP_INTERVAL = 3.0
+#: What :func:`run_composite` names its results archive after the run (``compose-4706-results.zip``).
+ARCHIVE_SUFFIX = "-results.zip"
 
 _TERMINAL_OK = {"completed"}
 _TERMINAL_BAD = {"failed", "cancelled", "out_of_memory", "timeout"}
@@ -524,7 +526,7 @@ def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: floa
                 raise RuntimeError(f"compose-api run {run_id} ended {state.status}"
                                    + (f": {error}" if isinstance(error, str) and error else ""))
             Path(dest).mkdir(parents=True, exist_ok=True)
-            return session.download(simulation_id, Path(dest) / f"{run_id}-results.zip")
+            return session.download(simulation_id, Path(dest) / f"{run_id}{ARCHIVE_SUFFIX}")
     except ComposeDispatchError as e:
         raise RuntimeError(str(e.body.get("error"))) from e
     except InvalidRequestError as e:
@@ -576,9 +578,7 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
             if not state.ok:
                 return {"error": f"run {run_id!r} is {state.status}; only a completed run has results to land",
                         "phase": _phase(state.status), "run_id": run_id}, 409
-            detail = session.simulation(simulation_id)
-            version = _version_of(detail)
-            image = _image_of(session, version, _text(detail.simulator))
+            provenance, image = _provenance(session, simulation_id, run_id, state)
             with tempfile.TemporaryDirectory() as td:
                 archive = Path(td) / "results.zip"
                 archive.write_bytes(session.results(simulation_id))
@@ -586,13 +586,6 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
                     return {"error": f"simulation {simulation_id} served something other than a results archive",
                             "run_id": run_id}, 422
                 deployment = remote_pinned.remote_deployment_name()
-                provenance = {
-                    "source": deployment, "backend": BACKEND,
-                    "compose": {"run_id": run_id, "simulation_id": simulation_id,
-                                "experiment_id": detail.experiment_id, "image": image,
-                                "environment_version": f"{version[0]}@{version[1]}" if version else None,
-                                "slurm_job_id": state.slurm_job},
-                }
                 landed = cr.generate_run_id(spec_id, params=provenance)
                 try:
                     n_steps = land_composite_results(archive, db_file, landed, emitter=STUDY_EMITTER)
@@ -609,9 +602,7 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
     manifest = cr.build_run_manifest(
         spec_id=spec_id, params=provenance, n_steps=n_steps, emitter="sqlite", emit_paths=[], runtime={},
         origin="remote", study=None, generation_id=None, ws_root=None)
-    # The code that ran is the image's, named by its digest; the checkout is not what ran.
-    manifest["code_version"] = {"git_sha": None, "package": None, "repo": None, "remote_url": None,
-                                "image": image}
+    stamp_manifest(manifest, image)
     conn = cr.connect(db_file)
     try:
         try:
@@ -628,6 +619,52 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
     finally:
         conn.close()
     return {"run_id": landed}, 200
+
+
+def _provenance(session: "ComposeSession", simulation_id: int, run_id: str, state: Any) -> "tuple[dict, str | None]":
+    """compose-api's record of one finished run, ``(provenance, image)``: the simulation, the environment version it
+    ran in, that version's image and the SLURM job, under ``compose`` (the deployment is ``source``)."""
+    detail = session.simulation(simulation_id)
+    version = _version_of(detail)
+    image = _image_of(session, version, _text(detail.simulator))
+    return {
+        "source": remote_pinned.remote_deployment_name(), "backend": BACKEND,
+        "compose": {"run_id": run_id, "simulation_id": simulation_id,
+                    "experiment_id": detail.experiment_id, "image": image,
+                    "environment_version": f"{version[0]}@{version[1]}" if version else None,
+                    "slurm_job_id": state.slurm_job},
+    }, image
+
+
+def stamp_manifest(manifest: dict, image: "str | None") -> None:
+    """The code that ran is the image's, named by its digest; the checkout is not what ran, so ``code_version`` and
+    the primary ``environments`` entry carry none of its identity (``image`` is None until the run is landed). The
+    manifest's ``env`` fingerprint is left as launched: it is the local environment a re-run is compared against
+    (``rerun``'s ``env_id`` drift check), not a claim about what ran."""
+    manifest["code_version"] = {"git_sha": None, "package": None, "repo": None, "remote_url": None, "image": image}
+    manifest["environments"] = [
+        {**e, "repo": None, "commit": None, "remote_url": None, "lockfile_hash": None} if e.get("role") == "primary" else e
+        for e in manifest.get("environments") or []]
+
+
+def record_provenance(conn: Any, run_id: str, archive: Path) -> None:
+    """Complete the manifest of a Composites-tab run with compose-api's record of the run whose results ``archive``
+    is (:func:`run_composite`'s), as :func:`land` does for a study run. A run's params stay the composite's inputs,
+    which a re-run sends back, so the record is ``manifest["compose"]``, not the params. Any other archive: nothing."""
+    name = archive.name.removesuffix(ARCHIVE_SUFFIX)
+    if name == archive.name or not is_run_id(name):
+        return
+    simulation_id = simulation_id_of(name)
+    with _session() as session:
+        provenance, image = _provenance(session, simulation_id, name, session.status(simulation_id))
+    row = conn.execute("SELECT manifest_json FROM runs_meta WHERE run_id = ?", (run_id,)).fetchone()
+    if row is None or not row[0]:
+        return
+    manifest = json.loads(row[0])
+    manifest["compose"] = provenance["compose"]
+    stamp_manifest(manifest, image)
+    conn.execute("UPDATE runs_meta SET manifest_json = ? WHERE run_id = ?", (json.dumps(manifest), run_id))
+    conn.commit()
 
 
 def _version_of(detail: Any) -> "tuple[str, int] | None":
