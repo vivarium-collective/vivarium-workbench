@@ -2226,6 +2226,54 @@
 
   function studyName() { return window._studyName; }
 
+  // --- Variants & findings authoring (issue #1618, blocker B) ---
+  // Inline onsubmit handlers resolve against global scope, so these are exposed
+  // on window. Each posts to an existing (variant) or new (finding) endpoint and
+  // reloads so the server-rendered lists/cards refresh.
+  function _submitStudyVariantAdd(form) {
+    var status = form.parentNode.querySelector('.study-variant-add-status');
+    var name = (form.name && form.name.value || '').trim();
+    var base = (form.base_composite && form.base_composite.value || '').trim();
+    var ovrRaw = (form.overrides && form.overrides.value || '').trim();
+    if (!name) { if (status) status.textContent = 'Name required.'; return false; }
+    var overrides = {};
+    if (ovrRaw) {
+      try { overrides = JSON.parse(ovrRaw); }
+      catch (e) { if (status) status.textContent = 'Overrides must be valid JSON (e.g. {"k": 2}).'; return false; }
+      if (typeof overrides !== 'object' || Array.isArray(overrides)) {
+        if (status) status.textContent = 'Overrides must be a JSON object.'; return false;
+      }
+    }
+    if (status) status.textContent = 'Adding…';
+    api('POST', '/api/study-variant-add',
+        {study: studyName(), name: name, base_composite: base, parameter_overrides: overrides})
+      .then(function (r) {
+        if (r.status === 200) { location.reload(); return; }
+        if (status) status.textContent = 'Error: ' + (r.body && r.body.error || r.status);
+      })
+      .catch(function (err) { if (status) status.textContent = 'Error: ' + (err.body && err.body.error || err.status); });
+    return false;
+  }
+  window._submitStudyVariantAdd = _submitStudyVariantAdd;
+
+  function _submitStudyFindingAdd(form) {
+    var status = form.parentNode.querySelector('.study-finding-add-status');
+    var statement = (form.statement && form.statement.value || '').trim();
+    var st = (form.status && form.status.value || 'novel').trim();
+    var explanation = (form.explanation && form.explanation.value || '').trim();
+    if (!statement) { if (status) status.textContent = 'Statement required.'; return false; }
+    if (status) status.textContent = 'Adding…';
+    api('POST', '/api/study-finding-add',
+        {study: studyName(), statement: statement, status: st, explanation: explanation})
+      .then(function (r) {
+        if (r.status === 200) { location.reload(); return; }
+        if (status) status.textContent = 'Error: ' + (r.body && r.body.error || r.status);
+      })
+      .catch(function (err) { if (status) status.textContent = 'Error: ' + (err.body && err.body.error || err.status); });
+    return false;
+  }
+  window._submitStudyFindingAdd = _submitStudyFindingAdd;
+
   // --- Analyses (Model tab) ---
   // Reuses /api/study-set-analyses (lib.metadata_mutations.set_investigation_analyses,
   // which despite its name resolves any study by name via study_dir() — flat
@@ -3462,6 +3510,42 @@
       })
       .catch(function (addResult) {
         if (status) status.textContent = 'Error: ' + (addResult.body && addResult.body.error || addResult.status);
+      });
+  });
+
+  // --- Variants & findings (issue #1618, blocker B) ---
+  bindAll('.study-variant-del', function(btn) {
+    var variant = btn.dataset.variant;
+    if (!confirm('Delete variant “' + variant + '”?')) return;
+    api('POST', '/api/study-variant-delete', {study: studyName(), variant: variant})
+      .then(function (r) {
+        if (r.status === 200) location.reload();
+        else alert('Error: ' + (r.body && r.body.error || r.status));
+      });
+  });
+  bindAll('.study-variant-run', function(btn) {
+    var variant = btn.dataset.variant;
+    btn.disabled = true;
+    var prev = btn.textContent;
+    btn.textContent = 'Running…';
+    api('POST', '/api/study-run-variant', {study: studyName(), variant: variant})
+      .then(function (r) {
+        if (r.status === 200) { location.reload(); return; }
+        btn.disabled = false; btn.textContent = prev;
+        alert('Error: ' + (r.body && r.body.error || r.status));
+      })
+      .catch(function (err) {
+        btn.disabled = false; btn.textContent = prev;
+        alert('Error: ' + (err.body && err.body.error || err.status));
+      });
+  });
+  bindAll('.study-finding-del', function(btn) {
+    var id = btn.dataset.id;
+    if (!confirm('Delete this finding?')) return;
+    api('POST', '/api/study-finding-delete', {study: studyName(), id: id})
+      .then(function (r) {
+        if (r.status === 200) location.reload();
+        else alert('Error: ' + (r.body && r.body.error || r.status));
       });
   });
 

@@ -16,12 +16,17 @@ Batch 19 of the FastAPI strangler-fig migration (POST phase, Phase C).
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from pathlib import Path
 
 import yaml
 
 from vivarium_workbench.lib import study_spec as _study_spec_lib
 from vivarium_workbench.lib.path_safety import plain_name
+
+# Status vocabulary the study-detail finding cards render (glyph + color):
+# confirms (✓) / partial (◐) / contradicts (✗) / novel (◆). Default: novel.
+_FINDING_STATUSES = frozenset({"confirms", "partial", "contradicts", "novel"})
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +172,85 @@ def study_variant_set_params(ws_root: Path, body: dict) -> tuple[dict, int]:
             sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
             return {"ok": True}, 200
     return {"error": f"variant {variant_name!r} not found"}, 404
+
+
+# ---------------------------------------------------------------------------
+# Finding builders — write to study.yaml `findings[]` (the list the study page
+# renders), NOT the node-store `/api/finding` graph model. Blocker B of #1618:
+# findings/conclusions had no GUI; this backs an authoring form on the Decide
+# tab.
+# ---------------------------------------------------------------------------
+
+def study_finding_add(ws_root: Path, body: dict) -> tuple[dict, int]:
+    """Append a finding to study.yaml ``findings[]``. Returns (response, code).
+
+    Body:
+      study or investigation: <study name>
+      statement:              <the finding text> (required)
+      status:                 confirms | partial | contradicts | novel
+                              (optional; defaults to "novel")
+      kind:                   <free label> (optional; defaults to "observation")
+      explanation:            <why / mechanism> (optional)
+
+    The written entry is the minimal shape the study-detail finding card
+    renders: ``{id, statement, status, kind, explanation?}``. A generated
+    ``id`` (``f<hex>``) lets the card anchor and lets ``study-finding-delete``
+    target it.
+    """
+    study = _study_name_from_body(body)
+    statement = (body.get("statement") or "").strip()
+    status = (body.get("status") or "novel").strip() or "novel"
+    kind = (body.get("kind") or "observation").strip() or "observation"
+    explanation = (body.get("explanation") or "").strip()
+    if not study:
+        return {"error": "missing study"}, 400
+    if not statement:
+        return {"error": "statement is required"}, 400
+    if status not in _FINDING_STATUSES:
+        return {"error": f"status must be one of {sorted(_FINDING_STATUSES)}"}, 400
+
+    study_dir = _study_spec_lib.study_dir(ws_root, study)
+    sf = _study_spec_lib.study_spec_file(study_dir)
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    findings = spec.setdefault("findings", [])
+    if not isinstance(findings, list):
+        return {"error": "study.yaml findings is not a list"}, 422
+    fid = "f" + uuid.uuid4().hex[:8]
+    entry: dict = {"id": fid, "statement": statement, "status": status, "kind": kind}
+    if explanation:
+        entry["explanation"] = explanation
+    findings.append(entry)
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return {"ok": True, "id": fid}, 200
+
+
+def study_finding_delete(ws_root: Path, body: dict) -> tuple[dict, int]:
+    """Remove a finding from study.yaml ``findings[]`` by id. (response, code).
+
+    Body: ``{study|investigation, id}``. 404 when no finding has that id.
+    """
+    study = _study_name_from_body(body)
+    fid = (body.get("id") or "").strip()
+    if not study or not fid:
+        return {"error": "missing study or finding id"}, 400
+
+    study_dir = _study_spec_lib.study_dir(ws_root, study)
+    sf = _study_spec_lib.study_spec_file(study_dir)
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    findings = spec.get("findings") or []
+    remaining = [f for f in findings
+                 if not (isinstance(f, dict) and f.get("id") == fid)]
+    if len(remaining) == len(findings):
+        return {"error": f"finding {fid!r} not found"}, 404
+    spec["findings"] = remaining
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return {"ok": True}, 200
 
 
 # ---------------------------------------------------------------------------

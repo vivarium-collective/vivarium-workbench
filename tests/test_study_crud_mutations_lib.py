@@ -144,6 +144,68 @@ class TestStudyVariantAdd:
         assert code == 404
 
 
+class TestStudyFindingAdd:
+    def test_happy(self, ws):
+        resp, code = scm.study_finding_add(ws, {
+            "study": "s1", "statement": "DnaA titration sets timing",
+            "status": "confirms", "explanation": "because X",
+        })
+        assert code == 200
+        assert resp["ok"] is True and resp["id"].startswith("f")
+        spec = _read_spec(ws)
+        f = spec["findings"][-1]
+        assert f["statement"] == "DnaA titration sets timing"
+        assert f["status"] == "confirms"
+        assert f["explanation"] == "because X"
+        assert f["id"] == resp["id"]
+
+    def test_defaults_status_novel(self, ws):
+        resp, code = scm.study_finding_add(ws, {"study": "s1", "statement": "X"})
+        assert code == 200
+        assert _read_spec(ws)["findings"][-1]["status"] == "novel"
+
+    def test_missing_statement_400(self, ws):
+        resp, code = scm.study_finding_add(ws, {"study": "s1"})
+        assert code == 400
+        assert "statement" in resp["error"]
+
+    def test_bad_status_400(self, ws):
+        resp, code = scm.study_finding_add(ws, {
+            "study": "s1", "statement": "X", "status": "maybe"})
+        assert code == 400
+
+    def test_study_not_found_404(self, ws):
+        resp, code = scm.study_finding_add(ws, {"study": "nope", "statement": "X"})
+        assert code == 404
+
+
+class TestStudyFindingDelete:
+    def test_happy(self, ws):
+        add, _ = scm.study_finding_add(ws, {"study": "s1", "statement": "X"})
+        fid = add["id"]
+        resp, code = scm.study_finding_delete(ws, {"study": "s1", "id": fid})
+        assert code == 200 and resp == {"ok": True}
+        assert all(f.get("id") != fid for f in _read_spec(ws).get("findings", []))
+
+    def test_unknown_id_404(self, ws):
+        resp, code = scm.study_finding_delete(ws, {"study": "s1", "id": "fzzz"})
+        assert code == 404
+
+    def test_finding_add_then_delete_via_routes(self, ws):
+        """Route-level: POST add → finding present; POST delete → gone."""
+        app = create_app()
+        app.dependency_overrides[get_workspace] = lambda: ws
+        client = TestClient(app)
+        r = client.post("/api/study-finding-add",
+                        json={"study": "s1", "statement": "route finding"})
+        assert r.status_code == 200, r.text
+        fid = r.json()["id"]
+        assert any(f["id"] == fid for f in _read_spec(ws)["findings"])
+        r2 = client.post("/api/study-finding-delete", json={"study": "s1", "id": fid})
+        assert r2.status_code == 200, r2.text
+        assert all(f.get("id") != fid for f in _read_spec(ws).get("findings", []))
+
+
 class TestStudyVariantDelete:
     def test_happy(self, ws):
         resp, code = scm.study_variant_delete(ws, {"study": "s1", "variant": "fast"})
