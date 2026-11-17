@@ -29,6 +29,7 @@ import pytest
 import yaml
 
 from vivarium_workbench.lib import server_capabilities as sc
+from vivarium_workbench.lib import sms_api_client as sac
 
 HERE = Path(__file__).parent
 FIXTURE_WS = HERE / "_fixtures" / "ws_increase_demo"
@@ -205,6 +206,48 @@ def test_each_named_backend_gets_its_own_dispatch(ws, backend, monkeypatch, inpr
     profile = inproc_client(ws).get("/api/remote-run-config").json()["backend"]
     assert profile["reachable"] is True
     assert profile["dispatch"] == dispatch
+
+
+# --- the pinned SMS build is asked of the SMS host, not of a named compose-api -------------------------------
+
+class _SmsHost(_Backend):
+    """A second server, answering as the SMS API: its own routes and its own request log, so a test can tell which
+    host a request reached."""
+
+    routes: dict[str, dict] = {}
+    seen: list[tuple[str, str]] = []
+
+
+@pytest.fixture
+def sms_host():
+    _SmsHost.routes, _SmsHost.seen = {}, []
+    srv = HTTPServer(("127.0.0.1", 0), _SmsHost)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+    srv.server_close()
+
+
+def test_the_pinned_sms_build_is_asked_of_the_sms_host_when_compose_api_is_named(
+        ws, backend, sms_host, monkeypatch, inproc_client):
+    """The test above pins the *predicate* (a pinned build is not routed to compose-api). The request is what
+    matters: ``SMS_API_BASE`` names the SMS host, ``--backend-base-url`` names compose-api, and the pinned submit
+    must reach the first, because compose-api has no ``/api/v1/simulations`` (docs/backend-compose-api.md: the
+    pinned and switched builds are not on compose-api)."""
+    _Backend.routes = dict(COMPOSE)
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", backend)
+    monkeypatch.setenv("SMS_API_BASE", sms_host)
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_REPO_URL", SMS_ECOLI)
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_BRANCH", "main")
+    # What `serve` does at start-up, before any request: read the named backend's profile, which is how it
+    # becomes known as compose-api (the SMS flows then leave it alone).
+    assert sc.explicit_backend_profile()["dispatch"] == sc.DISPATCH_COMPOSE
+    res = inproc_client(ws).post("/api/remote-run-submit", json={
+        "study": "demo", "simulator_id": 66, "num_generations": 2, "num_seeds": 3})
+    assert res.status_code == 202, res.text
+    assert ("POST", "/api/v1/simulations") in _SmsHost.seen
+    assert ("POST", "/api/v1/simulations") not in _Backend.seen, "the pinned build was asked of the compose-api host"
 
 
 # --- a named backend that cannot be reached never runs locally -----------------------------------------------
@@ -467,5 +510,67 @@ def test_the_failure_window_counts_from_the_end_of_the_probe(monkeypatch):
     clock[0] += 2.0  # 6 s after it returned: outside
     sc.explicit_backend_profile()
     assert len(probes) == 2
+
+
+# --- the SMS flows keep the SMS host when compose-api is the named backend -----------------------------------
+
+def test_a_named_compose_api_is_skipped_for_the_sms_flows_and_stays_skipped_when_it_drops(
+        dropping_backend, sms_host, monkeypatch):
+    """What decides is what the backend IS, learned from its profile, not whether it answers just now: a blip must not
+    send the SMS flows (polls, landing, health) to a URL whose circuit breaker then stays open for a minute."""
+    _Dropping.routes = dict(COMPOSE)
+    monkeypatch.setenv(NAMED, dropping_backend)
+    monkeypatch.setenv("SMS_API_BASE", sms_host)
+    assert sc.explicit_backend_profile()["dispatch"] == sc.DISPATCH_COMPOSE
+    assert sac.sms_api_base() == sms_host
+
+    _Dropping.up = False
+    _age(dropping_backend, 100.0)
+    assert sc.explicit_backend_profile()["reachable"] is False
+    assert sac.sms_api_base() == sms_host
+
+
+def test_a_backend_that_stops_answering_as_compose_api_is_no_longer_skipped(dropping_backend, sms_host, monkeypatch):
+    _Dropping.routes = dict(COMPOSE)
+    monkeypatch.setenv(NAMED, dropping_backend)
+    monkeypatch.setenv("SMS_API_BASE", sms_host)
+    sc.explicit_backend_profile()
+    assert sac.sms_api_base() == sms_host
+
+    _Dropping.routes = {}  # it answers again, as a legacy backend (every route a 404)
+    _age(dropping_backend, 100.0)
+    assert sc.explicit_backend_profile()["dispatch"] == sc.DISPATCH_LEGACY
+    assert sac.sms_api_base() == dropping_backend
+
+
+def test_the_pinned_submit_does_not_wait_on_a_named_compose_api_that_dropped(
+        ws, dropping_backend, sms_host, monkeypatch, inproc_client):
+    """Stanford plus a named compose-api: the pinned submit carries a simulator id and goes to the SMS host, so a
+    compose-api that has gone away must not stop it. The named backend's refusal is for submits that are its own."""
+    _Dropping.routes = dict(COMPOSE)
+    monkeypatch.setenv(NAMED, dropping_backend)
+    _stanford_env(monkeypatch, sms_host)
+    c = inproc_client(ws)
+    assert c.get("/api/remote-run-config").json()["backend"]["dispatch"] == sc.DISPATCH_COMPOSE  # learned while up
+
+    _Dropping.up = False
+    _age(dropping_backend, 100.0)
+    res = c.post("/api/remote-run-submit", json={
+        "study": "demo", "simulator_id": 66, "num_generations": 2, "num_seeds": 3})
+    assert res.status_code == 202, res.text
+    assert ("POST", "/api/v1/simulations") in _SmsHost.seen
+
+
+def test_the_pinned_build_is_looked_up_on_the_sms_host_even_on_the_first_config_read(
+        ws, dropping_backend, sms_host, monkeypatch, inproc_client):
+    """compose-api was down when ``serve`` started, so nothing has learned that the named URL is compose-api. The
+    first /api/remote-run-config after it is back reads the profile BEFORE it looks the pinned build up, so that
+    lookup already goes to the SMS host."""
+    _Dropping.routes = dict(COMPOSE)
+    monkeypatch.setenv(NAMED, dropping_backend)
+    _stanford_env(monkeypatch, sms_host)
+    inproc_client(ws).get("/api/remote-run-config")
+    assert ("GET", "/core/v1/simulator/versions") in _SmsHost.seen
+    assert ("GET", "/core/v1/simulator/versions") not in _Dropping.seen
 
 

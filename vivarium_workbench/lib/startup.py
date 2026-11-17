@@ -96,22 +96,10 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     from vivarium_workbench.lib.sms_api_client import backend_configured
 
     if backend_configured():
-        try:
-            from vivarium_workbench.lib.workspace_deps_views import remote_health
-            _h = remote_health()
-            if _h["reachable"]:
-                print(f"remote sms-api: {_h['base_url']} — reachable ✓ (v{_h['version']})")
-            else:
-                print(
-                    f"remote sms-api: {_h['base_url']} — UNREACHABLE ✗ "
-                    f'("switch to remote" unavailable until the endpoint/tunnel is up)',
-                    file=sys.stderr,
-                )
-        except Exception as e:  # noqa: BLE001
-            print(f"warning: remote sms-api health check failed: {e}", file=sys.stderr)
-
         # A backend named with --backend-base-url: say which dispatch route its
         # capabilities give this workspace (best-effort; never blocks or raises).
+        # First, because reading the profile is also how a named compose-api becomes known as one, and
+        # sms_api_base() (the health check below, every SMS call after it) leaves it out of the SMS flows.
         try:
             from vivarium_workbench.lib.server_capabilities import explicit_backend_profile
             _p = explicit_backend_profile()
@@ -126,6 +114,20 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
                       "until it answers", file=sys.stderr)
         except Exception as e:  # noqa: BLE001
             print(f"warning: backend capability check failed: {e}", file=sys.stderr)
+
+        try:
+            from vivarium_workbench.lib.workspace_deps_views import remote_health
+            _h = remote_health()
+            if _h["reachable"]:
+                print(f"remote sms-api: {_h['base_url']} — reachable ✓ (v{_h['version']})")
+            else:
+                print(
+                    f"remote sms-api: {_h['base_url']} — UNREACHABLE ✗ "
+                    f'("switch to remote" unavailable until the endpoint/tunnel is up)',
+                    file=sys.stderr,
+                )
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: remote sms-api health check failed: {e}", file=sys.stderr)
 
         # Start the RemoteLink circuit-breaker probe so a wedged tunnel is
         # detected in the background (~3s probe every 30s) and every sms-api call

@@ -2,6 +2,8 @@
 
 Precedence (highest first): the flag / ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL``, then
 the pre-existing ``VIVA_API_BASE``, then its alias ``SMS_API_BASE``, then localhost.
+One exception, tested in test_backend_interop.py: a named URL that has answered as compose-api is skipped when an
+alias is set (compose-api has none of the SMS routes).
 The last case boots a REAL detached server (the flag must survive the re-exec that
 ``--detach`` does) and asks it, over HTTP, which backend it resolved.
 """
@@ -43,6 +45,18 @@ def test_new_env_beats_aliases(clean_env):
     clean_env.setenv("VIVA_API_BASE", "http://viva")
     clean_env.setenv("SMS_API_BASE", "http://alias")
     clean_env.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "http://new")
+    assert sac.sms_api_base() == "http://new"
+
+
+def test_resolving_the_base_url_never_touches_the_network(clean_env):
+    """sms_api_base() is read from some forty places (health polls, every SMS call, the circuit breaker's own key):
+    with a named backend AND an alias set it answers from the environment alone, and cannot fail."""
+    def boom(*a, **k):
+        raise AssertionError("sms_api_base() made a network call")
+
+    clean_env.setattr(sac, "urlopen", boom)
+    clean_env.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "http://new")
+    clean_env.setenv("SMS_API_BASE", "http://alias")
     assert sac.sms_api_base() == "http://new"
 
 

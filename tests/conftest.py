@@ -513,7 +513,7 @@ def _restore_composite_spec_registry():
 @pytest.fixture(autouse=True)
 def _forget_what_the_process_learned_about_backends():
     """The backend tests start stub servers on ephemeral ports, and what the process learns about a URL (its
-    RemoteLink circuit breaker) is keyed by it: a later test that is handed the
+    RemoteLink circuit breaker, whether it answered as compose-api) is keyed by it: a later test that is handed the
     same port must not inherit another test's state. Only modules already imported have anything to forget."""
     import sys
 
@@ -522,6 +522,10 @@ def _forget_what_the_process_learned_about_backends():
         if link is not None:
             with link._links_lock:
                 link._links.clear()
+        client = sys.modules.get("vivarium_workbench.lib.sms_api_client")
+        identities = getattr(client, "COMPOSE_API_BASES", None)  # absent in code that predates compose-api identities
+        if identities is not None:
+            identities.clear()
 
     _clear()
     yield

@@ -315,8 +315,10 @@ def remote_run_config(ws_root: Path) -> tuple[dict, int]:
     Mirrors :func:`remote_run_pinned_build_start`'s priority: this session's own
     switched build (``ws_root``'s ``.viv-build.json``) wins over the deployment's
     static repo@branch pin, so the label always matches what will actually run."""
-    body, status = _remote_run_config(ws_root)
+    # The profile first: reading it is how a named compose-api becomes known as one, and the pinned build below is
+    # looked up on the SMS host (sms_api_base()) only once it is.
     backend = _backend_info()
+    body, status = _remote_run_config(ws_root)
     if backend is not None:
         body["backend"] = backend
     return body, status

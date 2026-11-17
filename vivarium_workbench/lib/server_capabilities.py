@@ -221,7 +221,7 @@ def explicit_backend_profile() -> "dict | None":
     """
     import time
 
-    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
+    from vivarium_workbench.lib.sms_api_client import COMPOSE_API_BASES, explicit_backend_base_url
 
     base = explicit_backend_base_url()
     if base is None:
@@ -236,6 +236,11 @@ def explicit_backend_profile() -> "dict | None":
     # back, and the profile is read again within ``_PROFILE_FAILURE_TTL`` after that.
     profile = backend_profile(SmsApiClient.for_("probe", base))
     _PROFILE_CACHE[base] = (time.monotonic(), profile)
+    if profile["reachable"]:  # an answer says what the backend is; a failure says nothing about that
+        if profile["dispatch"] == DISPATCH_COMPOSE:
+            COMPOSE_API_BASES.add(base)
+        else:
+            COMPOSE_API_BASES.discard(base)
     return profile
 
 
