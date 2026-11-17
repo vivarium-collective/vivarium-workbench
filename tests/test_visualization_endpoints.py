@@ -1091,7 +1091,7 @@ def test_post_create_from_composite_creates_v2_spec(workspace_server):
     suffix = auto_name[len('study-chromosome-partition-'):]
     assert len(suffix) == 6, f"expected 6-char suffix, got {suffix!r}"
 
-    inv_dir = workspace_server.root / 'investigations' / auto_name
+    inv_dir = workspace_server.root / 'studies' / auto_name
     spec_path = inv_dir / 'spec.yaml'
     assert spec_path.is_file(), f"spec.yaml not found at {spec_path}"
 
