@@ -13,7 +13,7 @@ Usage::
 
     data, dump = load_yaml_preserving(path.read_text())
     data["field"] = new_value
-    path.write_text(dump(data))
+    path.write_text(dump(data), encoding="utf-8")
 
 ``data`` is a mutable mapping (a ruamel ``CommentedMap`` when available, else a
 plain ``dict``); assigning plain ``dict`` / ``list`` values into it is fine and

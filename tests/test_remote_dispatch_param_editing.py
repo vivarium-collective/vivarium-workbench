@@ -356,9 +356,11 @@ def test_save_model_params_merges_edited_fields_into_a_copy_of_current_params():
     fn = js[i:j]
     assert "Object.assign({}, overrides || {})" in fn
     assert "if (input.dataset.edited !== '1') return;" in fn
-    assert "/api/study-baseline-add" in fn
-    assert "/api/study-baseline-remove" in fn
-    assert fn.index("/api/study-baseline-add") < fn.index("/api/study-baseline-remove")
+    # Saves the merged params by repointing the baseline in place via the
+    # atomic /api/study-baseline-set (preserves the entry name) — not the old
+    # remove-then-add pair, which failed on single-entry studies.
+    assert "/api/study-baseline-set" in fn
+    assert "/api/study-baseline-remove" not in fn
 
 
 def test_model_config_load_passes_baseline_name_only_when_composite_input_exists():
