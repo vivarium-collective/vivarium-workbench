@@ -228,6 +228,7 @@ from vivarium_workbench.lib.models import (
     StudyVariantDeleteBody,
     StudyVariantSetParamsBody,
     StudyBaselineAddBody,
+    StudyBaselineSetBody,
     StudyBaselineRemoveBody,
     StudyInterventionAddBody,
     StudyInterventionUpdateBody,
@@ -4954,6 +4955,26 @@ def create_app() -> FastAPI:
         Body: ``{study|investigation, name, composite, params?}``
         """
         body, status = _study_crud_mut.study_baseline_add(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-baseline-set",
+        tags=["Studies"],
+        summary="Repoint an existing baseline entry in place (preserves its name)",
+    )
+    def study_baseline_set(
+        req: StudyBaselineSetBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Update a baseline entry's composite/params without renaming it.
+
+        Body: ``{study|investigation, name, composite?, params?}``
+        404 if the named entry doesn't exist. Replaces the frontend's old
+        add-then-remove swap that suffixed the baseline name (issue #1618).
+        """
+        body, status = _study_crud_mut.study_baseline_set(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body

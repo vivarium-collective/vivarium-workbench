@@ -125,6 +125,9 @@ def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
     name = (body.get("name") or "").strip()
     source = (body.get("source") or "").strip()
     investigation = (body.get("investigation") or "").strip()
+    # The "+ Study" dialog sends the free-text research question; persist it on
+    # the scaffold so it is not dropped (issue #1618, bug 1).
+    question = (body.get("question") or "").strip()
     if not name:
         return {"error": "name is required"}, 400
     if not re.match(r"^[a-zA-Z0-9_-]+$", name):
@@ -180,6 +183,7 @@ def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
                 name,
                 composite=source,
                 baseline_name=baseline_name,
+                question=question,
             )
             (inv_dir / "study.yaml").write_text(body_yaml, encoding="utf-8")
         elif source_path and baseline_name:
@@ -190,7 +194,7 @@ def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
             _shutil.copy2(source_path, sidecar)
             spec = {
                 "name": name,
-                "description": "",
+                "description": question,
                 "composites": [
                     {
                         "name": baseline_name,
@@ -219,7 +223,7 @@ def study_create(ws_root: Path, body: dict) -> "tuple[dict, int]":
             # be scaffolded successfully yet stay permanently invisible to
             # /api/investigations and /api/study/{slug}.
             from vivarium_workbench.lib.scaffold_yaml import v4_study_scaffold
-            body_yaml = v4_study_scaffold(name)
+            body_yaml = v4_study_scaffold(name, question=question)
             (inv_dir / "study.yaml").write_text(body_yaml, encoding="utf-8")
 
         if investigation:

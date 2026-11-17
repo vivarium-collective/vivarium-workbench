@@ -22,6 +22,7 @@ import yaml
 
 from vivarium_workbench.lib import study_spec as _study_spec_lib
 from vivarium_workbench.lib.path_safety import plain_name
+from vivarium_workbench.lib.yaml_roundtrip import load_yaml_preserving
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +203,9 @@ def study_baseline_add(ws_root: Path, body: dict) -> tuple[dict, int]:
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    # Comment-preserving round-trip so pointing a study at a composite from the
+    # GUI doesn't strip the scaffold's guide comments (issue #1618, #7).
+    spec, dump = load_yaml_preserving(sf.read_text(encoding="utf-8"))
     if _v4_baseline_not_yet_materialized(spec):
         return {
             "error": "This study's baseline is defined under conditions.baseline "
@@ -215,7 +218,7 @@ def study_baseline_add(ws_root: Path, body: dict) -> tuple[dict, int]:
     if any(b.get("name") == entry_name for b in baseline if isinstance(b, dict)):
         return {"error": f"baseline entry {entry_name!r} already exists"}, 409
     baseline.append({"name": entry_name, "composite": composite, "params": params or {}})
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+    sf.write_text(dump(spec), encoding="utf-8")
     return {"ok": True, "name": entry_name}, 200
 
 
@@ -239,7 +242,8 @@ def study_baseline_remove(ws_root: Path, body: dict) -> tuple[dict, int]:
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    # Comment-preserving round-trip (issue #1618, #7).
+    spec, dump = load_yaml_preserving(sf.read_text(encoding="utf-8"))
     if _v4_baseline_not_yet_materialized(spec):
         return {
             "error": "This study's baseline is defined under conditions.baseline "
@@ -270,8 +274,66 @@ def study_baseline_remove(ws_root: Path, body: dict) -> tuple[dict, int]:
         return {"error": "cannot leave baseline empty"}, 400
 
     spec["baseline"] = remaining
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+    sf.write_text(dump(spec), encoding="utf-8")
     return {"ok": True}, 200
+
+
+def study_baseline_set(ws_root: Path, body: dict) -> tuple[dict, int]:
+    """Repoint an existing baseline entry IN PLACE, preserving its name.
+
+    POST /api/study-baseline-set. Body:
+      study:     <name>
+      name:      <existing baseline entry name>
+      composite: <pkg.composites.x>   (optional; unchanged when absent)
+      params:    <dict>               (optional; replaced when present)
+
+    Unlike the add-then-remove dance the frontend used to perform — which
+    renamed the entry to ``<name>-<timestamp-suffix>`` to dodge the add's 409
+    and the remove's "can't leave baseline empty" 400 — this updates the
+    entry's ``composite`` / ``params`` WITHOUT changing its ``name``, so a
+    study keeps a stable, legible baseline name after a model change (issue
+    #1618, blocker A). Comment-preserving round-trip (#7).
+
+    404 when the named entry doesn't exist; 422 for an unmaterialized v4
+    conditions.baseline (same as add/remove).
+    """
+    study = (body.get("study") or body.get("investigation") or "").strip()
+    entry_name = (body.get("name") or "").strip()
+    composite = (body.get("composite") or "").strip()
+    params = body.get("params")
+    if not study:
+        return {"error": "missing study"}, 400
+    if not entry_name:
+        return {"error": "missing baseline entry name"}, 400
+    if params is not None and not isinstance(params, dict):
+        return {"error": "params must be an object"}, 400
+
+    study_dir = _study_spec_lib.study_dir(ws_root, study)
+    sf = _study_spec_lib.study_spec_file(study_dir)
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec, dump = load_yaml_preserving(sf.read_text(encoding="utf-8"))
+    if _v4_baseline_not_yet_materialized(spec):
+        return {
+            "error": "This study's baseline is defined under conditions.baseline "
+                     "(v4 format) and has never been saved as a standalone "
+                     "baseline[] entry. Edit conditions.baseline.params directly.",
+        }, 422
+    baseline = spec.get("baseline") or []
+    entry = next(
+        (b for b in baseline
+         if isinstance(b, dict) and b.get("name") == entry_name),
+        None,
+    )
+    if entry is None:
+        return {"error": f"baseline entry {entry_name!r} not found"}, 404
+    if composite:
+        entry["composite"] = composite
+    if params is not None:
+        entry["params"] = params
+    sf.write_text(dump(spec), encoding="utf-8")
+    return {"ok": True, "name": entry_name}, 200
 
 
 # ---------------------------------------------------------------------------
