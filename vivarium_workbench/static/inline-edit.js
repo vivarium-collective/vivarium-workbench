@@ -193,8 +193,11 @@
       // is also a feedback region; reveals on hover of the field.
       ".ie-pencil{position:absolute;top:4px;right:30px;z-index:6;width:26px;height:26px;padding:0;border:none;border-radius:7px;",
       "  background:var(--card,#fff);box-shadow:0 1px 4px rgba(0,0,0,.18);color:#2d6cdf;cursor:pointer;font-size:13px;line-height:26px;text-align:center;",
-      "  opacity:0;transform:translateY(-2px);transition:opacity .12s,transform .12s;}",
-      ".ie-editable:hover>.ie-pencil,.ie-pencil:focus{opacity:.92;transform:none;}",
+      // Visible by default (issue #1618 a11y): the ✎ used to be opacity:0 until
+      // hover, so a new user had no way to discover a field was editable. Keep
+      // it subtle at rest and full-strength on hover/focus.
+      "  opacity:.5;transform:none;transition:opacity .12s,transform .12s;}",
+      ".ie-editable:hover>.ie-pencil,.ie-pencil:focus{opacity:.95;transform:none;}",
       ".ie-pencil:hover{opacity:1;box-shadow:0 2px 8px rgba(0,0,0,.28);}",
       ".ie-editing>.ie-pencil{display:none;}",
       ".ie-editor{display:block;margin:2px 0;}",
