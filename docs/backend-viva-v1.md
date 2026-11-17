@@ -126,9 +126,9 @@ analyses (`/api/v1/analyses*`), build/branch pickers, `/composites/{id}/{jobs,da
 ### When the named backend cannot be reached
 
 Naming a backend says "run there", so a run is never started locally in its place. When the profile read cannot
-reach it (a refused or dropped connection, a timeout, or an HTTP error other than a 404 from
-`/viva/v1/capabilities`), every run start that resolves a target answers `502` with `phase: unreachable`:
-`resolve_run_target` (the study baseline and variant,
+reach it (a refused or dropped connection, a timeout, an HTTP error other than a 404 from `/viva/v1/capabilities`,
+or a connection failure or 5xx from `/openapi.json`, which decides between legacy and compose-api), every run start
+that resolves a target answers `502` with `phase: unreachable`: `resolve_run_target` (the study baseline and variant,
 the Composites card, investigation runs) and `remote_run_submit` without a `simulator_id` (unless a pinned or session
 build sends it to SMS). The preflight answers `200` with `ok: false` and the same fields; `vwb run` prints the body
 and exits 1; the investigation trigger answers `200` with `launch_status: 502` and the body in `run`. A dry-run

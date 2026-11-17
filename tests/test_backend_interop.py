@@ -574,3 +574,44 @@ def test_the_pinned_build_is_looked_up_on_the_sms_host_even_on_the_first_config_
     assert ("GET", "/core/v1/simulator/versions") not in _Dropping.seen
 
 
+# --- a backend that cannot say what it is --------------------------------------------------------------------
+
+class _Stumbling(_Backend):
+    """A backend that is up and is not viva-v1 (every route is a 404) but fails when asked for its OpenAPI document."""
+
+    routes: dict[str, dict] = {}
+    seen: list[tuple[str, str]] = []
+
+    def do_GET(self):  # noqa: N802
+        path = self.path.split("?")[0]
+        type(self).seen.append(("GET", path))
+        if path == "/openapi.json":
+            self._reply(503, {"detail": "try again later"})
+        else:
+            self._reply(404, {"detail": "Not Found"})
+
+
+@pytest.fixture
+def stumbling_backend():
+    _Stumbling.routes, _Stumbling.seen = {}, []
+    srv = HTTPServer(("127.0.0.1", 0), _Stumbling)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+    srv.server_close()
+
+
+def test_a_backend_that_fails_when_asked_what_it_is_reads_as_unreachable_not_as_a_healthy_legacy_one(
+        ws, stumbling_backend, monkeypatch, inproc_client, local_runs):
+    """A 404 on the capabilities route alone says "not viva-v1"; compose-api is then recognised by its OpenAPI
+    document. When that document cannot be had (a 5xx, a refused connection, a timeout) the backend is not a legacy
+    one that is up: it cannot be told apart, so a run must not fall to the laptop. (A 404 there still reads as
+    legacy: test_each_named_backend_gets_its_own_dispatch.)"""
+    monkeypatch.setenv(NAMED, stumbling_backend)
+    c = inproc_client(ws)
+    profile = c.get("/api/remote-run-config").json()["backend"]
+    assert profile["reachable"] is False
+    res = c.post("/api/composite-test-run", json={"id": COMPOSITE, "steps": 1})
+    assert res.status_code == 502, res.text
+    _assert_unreachable(res.json(), stumbling_backend)
+    assert local_runs == []

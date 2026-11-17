@@ -168,10 +168,10 @@ def backend_profile(client: SmsApiClient) -> dict:
 
     Never raises: ``reachable: false`` + ``error`` when the backend cannot be
     asked, which reads as ``legacy`` so an older backend keeps the path it always
-    had. A backend that cannot be asked (a refused connection or a timeout, or an HTTP
-    error other than a 404 on the capabilities route) is *unreachable*, not legacy:
-    what a run on it would do is unknown, and
-    :func:`require_named_backend_reachable` refuses a local run for it.
+    had. A backend that cannot be asked (a refused connection or a timeout, an HTTP
+    error other than a 404 on the capabilities route, a connection failure or a 5xx
+    on ``/openapi.json``) is *unreachable*, not legacy: what a run on it would do is
+    unknown, and :func:`require_named_backend_reachable` refuses a local run for it.
     """
     out: dict = {"reachable": True, "version": None, "capabilities": [], "services": {},
                  "dispatch": DISPATCH_LEGACY, "error": None}
@@ -185,7 +185,14 @@ def backend_profile(client: SmsApiClient) -> dict:
     if not caps.supports(CAPABILITY_VIVA_V1_COMPOSITES):
         try:
             version, operations = client.openapi_operations()
-        except (SmsApiError, ValueError):  # ValueError: an /openapi.json that is not JSON is not compose-api
+        except SmsApiError as e:
+            if e.status is None or e.status >= 500:
+                # The capabilities route answered 404, so something is there, but it cannot say what it is
+                # (a refused connection, a timeout, a 5xx): not a legacy backend that is up.
+                out.update(reachable=False, error=str(e))
+                return out
+            version, operations = None, frozenset()  # a 4xx: this backend has no OpenAPI document
+        except ValueError:  # an /openapi.json that is not JSON is not compose-api
             version, operations = None, frozenset()
         if COMPOSE_OPERATIONS <= operations:
             out["dispatch"] = DISPATCH_COMPOSE
