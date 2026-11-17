@@ -409,8 +409,10 @@ def run_remote(
     # (compose.py:121-122), so clamp here at the boundary that owns the contract
     # rather than trusting every caller. Local runs never reach this path, so
     # their step counts stay unbounded.
-    steps = max(0, min(int(n_steps), 1000))
-    print(f"Submitting composite '{composite_id}' to sms-api ({steps} steps)…")
+    requested = int(n_steps)
+    steps = max(0, min(requested, 1000))
+    clamped = f", clamped from {requested} to {steps}" if steps != requested else ""
+    print(f"Submitting composite '{composite_id}' to sms-api ({steps} steps{clamped})…")
     # analysis_options is added to the call only when present, so a client test
     # double built against the pre-Task-8 compose_submit(pbg_bytes,
     # extra_pip_deps=, interval_time=) signature (no **kwargs catch-all) keeps
