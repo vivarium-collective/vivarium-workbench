@@ -4946,6 +4946,9 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
   border: 1px solid transparent;
 }
 .aig-na-chip.aig-na-clear { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
+/* Neutral (grey) — nothing is flagged, but nothing has run either, so it is NOT
+   a green "all clear". Distinguishes "no studies / no runs yet" from validated. */
+.aig-na-chip.aig-na-quiet { background: #f8fafc; color: #475569; border-color: #e2e8f0; }
 .aig-na-chip.aig-na-flag { background: #fffbeb; color: #92400e; border-color: #fcd34d; cursor: pointer; }
 .aig-na-chip.aig-na-flag.aig-na-high { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
 .aig-na-chip.aig-na-flag:hover { filter: brightness(0.97); }
@@ -4979,6 +4982,7 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 /* Keep only a quiet status tint on the chip's glyph/text so the pill still reads
    as a status without breaking the shared shape. */
 .inv-header-bar .aig-na-chip.aig-na-clear { color: #166534; }
+.inv-header-bar .aig-na-chip.aig-na-quiet { color: #475569; }
 .inv-header-bar .aig-na-chip.aig-na-flag { color: #92400e; }
 .inv-header-bar .aig-na-chip.aig-na-flag.aig-na-high { color: #991b1b; }
 #ws-actions { display: inline-flex; align-items: center; gap: 8px; }
