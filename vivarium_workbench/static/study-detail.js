@@ -2256,6 +2256,23 @@
   }
   window._submitStudyVariantAdd = _submitStudyVariantAdd;
 
+  function _submitStudyInterventionAdd(form) {
+    var status = form.parentNode.querySelector('.study-intervention-add-status');
+    var name = (form.name && form.name.value || '').trim();
+    var description = (form.description && form.description.value || '').trim();
+    if (!name) { if (status) status.textContent = 'Name required.'; return false; }
+    if (status) status.textContent = 'Adding…';
+    api('POST', '/api/study-intervention-add',
+        {study: studyName(), name: name, description: description})
+      .then(function (r) {
+        if (r.status === 200) { location.reload(); return; }
+        if (status) status.textContent = 'Error: ' + (r.body && r.body.error || r.status);
+      })
+      .catch(function (err) { if (status) status.textContent = 'Error: ' + (err.body && err.body.error || err.status); });
+    return false;
+  }
+  window._submitStudyInterventionAdd = _submitStudyInterventionAdd;
+
   function _submitStudyFindingAdd(form) {
     var status = form.parentNode.querySelector('.study-finding-add-status');
     var statement = (form.statement && form.statement.value || '').trim();
@@ -3543,6 +3560,15 @@
     var id = btn.dataset.id;
     if (!confirm('Delete this finding?')) return;
     api('POST', '/api/study-finding-delete', {study: studyName(), id: id})
+      .then(function (r) {
+        if (r.status === 200) location.reload();
+        else alert('Error: ' + (r.body && r.body.error || r.status));
+      });
+  });
+  bindAll('.study-intervention-del', function(btn) {
+    var name = btn.dataset.name;
+    if (!confirm('Delete intervention “' + name + '”?')) return;
+    api('POST', '/api/study-intervention-delete', {study: studyName(), name: name})
       .then(function (r) {
         if (r.status === 200) location.reload();
         else alert('Error: ' + (r.body && r.body.error || r.status));

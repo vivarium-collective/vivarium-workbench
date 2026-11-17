@@ -1320,6 +1320,41 @@
     {% endif %}
   </div>
 
+  {# Interventions authoring (issue #1618, blocker B). Interventions are named,
+     described perturbations the study applies; the endpoints existed with no UI
+     and nothing rendered the list. Mirrors the Variants section above. #}
+  <div class="overview-section" id="study-interventions-section">
+    <h3>Interventions <span class="muted" style="font-size:0.85em;font-weight:normal">— named perturbations applied in this study</span></h3>
+    {% if study.interventions %}
+    <table class="cond-table" style="margin-bottom:10px">
+      <thead><tr><th>Intervention</th><th>Description</th><th></th></tr></thead>
+      <tbody>
+        {% for iv in study.interventions %}
+        <tr>
+          <td><code>{{ iv.name or '?' }}</code></td>
+          <td>{{ iv.description or '' }}</td>
+          <td style="white-space:nowrap">
+            <button type="button" class="action-btn study-intervention-del" data-name="{{ iv.name }}" style="font-size:0.78em" title="Delete intervention">✕</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted" style="font-size:0.88em;margin:0 0 10px">No interventions yet.</p>
+    {% endif %}
+    <form class="study-intervention-add-form" onsubmit="return _submitStudyInterventionAdd(this)" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+      <label style="font-size:0.78em;color:#475569">Name<br>
+        <input name="name" required pattern="[a-zA-Z0-9_-]+" placeholder="knockout-dnaA"
+               style="font-family:monospace;font-size:0.82em;padding:3px 6px;min-width:140px"></label>
+      <label style="font-size:0.78em;color:#475569;flex:1;min-width:200px">Description<br>
+        <input name="description" placeholder="what the intervention does"
+               style="width:100%;font-size:0.82em;padding:3px 6px"></label>
+      <button type="submit" class="action-btn" style="font-size:0.82em">+ Add intervention</button>
+    </form>
+    <div class="study-intervention-add-status muted" style="font-size:0.8em;margin-top:4px"></div>
+  </div>
+
 
 
   {# Readouts (Phase 1): the emit CONTRACT, re-homed from its own tab into
