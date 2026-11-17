@@ -6,6 +6,17 @@
 
 **Verdict: this is a SMALL, additive bump — not a migration — but it is BLOCKED on a lockstep co-bump of `viva-superpowers`, whose own `<0.4` pin on discovery-engine gates it.**
 
+> **Outcome (executed 2026-11-17).** Done and merged. viva-superpowers relaxed its
+> pin to `<0.7` (viva-superpowers#407, merged) and the workbench followed
+> (vivarium-workbench#1623, merged) — DE now resolves to 0.6.0. The full workbench
+> suite was run against 0.6.0 **and** the 0.3.0 baseline in one environment: an
+> **identical** failure set (22 pre-existing local-env/golden artifacts), so **zero
+> regressions**; #1623's clean-env CI passed all four suites. One correction to §3:
+> viva-superpowers `main` has since **deleted** the object-identity facade shims
+> (the split is now clean, consumers import `discovery_engine.*` directly) — the
+> shared-`discovery_engine` resolver constraint that gated the bump still held, so
+> the ordering was as scoped.
+
 All facts below verified on 2026-11-17 against the discovery-engine git tags (v0.3.0 … v0.6.0), PyPI, and the two consumers' `pyproject.toml`.
 
 ---
