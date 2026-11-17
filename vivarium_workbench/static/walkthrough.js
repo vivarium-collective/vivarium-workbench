@@ -10854,8 +10854,11 @@
   window._openAuditReport = _openAuditReport;
 
   // mode: 'investigation' | 'study' (explicit from the header cluster); falls
-  // back to the active browse tab when omitted.
-  function _openBrowseCreate(mode) {
+  // back to the active browse tab when omitted. presetInv (study mode only):
+  // slug of the investigation to pre-select in the dropdown, so "+ Add a study"
+  // from an investigation's own empty state lands on that investigation instead
+  // of defaulting to the first in the list (issue #1618, §1).
+  function _openBrowseCreate(mode, presetInv) {
     var isStudy = mode ? (mode === 'study') : (window._isetBrowseTab === 'studies');
     window._browseCreateMode = isStudy ? 'study' : 'investigation';
     document.getElementById('browse-create-title').textContent = isStudy ? 'New study' : 'New investigation';
@@ -10864,14 +10867,17 @@
       ? 'Describe the study — the question you want to answer'
       : 'Describe the investigation — the question you want to answer';
     document.getElementById('browse-create-inv-row').style.display = isStudy ? '' : 'none';
+    var sel = document.getElementById('browse-create-inv');
     if (isStudy) {
-      var sel = document.getElementById('browse-create-inv');
       sel.innerHTML = (window._isetIndex || []).map(function (i) {
         return '<option value="' + _esc(i.name) + '">' + _esc(i.title || i.name) + '</option>';
       }).join('');
     }
     var form = document.getElementById('form-browse-create');
     form.reset();
+    // Apply the preset AFTER form.reset() (reset would otherwise snap the
+    // select back to its first option).
+    if (isStudy && presetInv && sel) sel.value = presetInv;
     var nameInput = form.querySelector('[name=name]');
     if (nameInput) nameInput._touched = false;
     form.querySelector('.form-error').textContent = '';
@@ -10905,6 +10911,10 @@
           closeModal('modal-browse-create');
           window._investigationsLoaded = false;
           if (typeof _loadInvestigations === 'function') _loadInvestigations();
+          // Also refresh the iset index (bug 2): _loadInvestigations only
+          // reloads the flat study list, leaving the Studies panel / rail /
+          // dropdown showing stale data until a full reload.
+          if (typeof _loadInvestigationSets === 'function') _loadInvestigationSets();
           if (typeof _vivOpenInvestigationFromRail === 'function') _vivOpenInvestigationFromRail(name);
         });
     } else {
@@ -10913,14 +10923,18 @@
         .then(function (p) {
           if (!p[0]) { errEl.textContent = p[1].error || 'Create failed.'; return; }
           var created = (p[1] && p[1].name) || name;
-          // Seed the question on the scaffolded study (best-effort).
-          apiFetch('PATCH', '/api/study/' + encodeURIComponent(created), { narrative: { path: 'purpose.question', value: prompt } })
-            .catch(function () {}).then(function () {
-              closeModal('modal-browse-create');
-              window._investigationsLoaded = false;
-              if (typeof _loadInvestigations === 'function') _loadInvestigations();
-              _openStudyEmbeddedNewTab(created);
-            });
+          // The question is now persisted server-side by study-create (issue
+          // #1618, bug 1) — it writes a live top-level `question:` on the
+          // scaffold. The old best-effort PATCH to `purpose.question` wrote the
+          // wrong (non-canonical, non-allowlisted) path and silently failed.
+          closeModal('modal-browse-create');
+          window._investigationsLoaded = false;
+          if (typeof _loadInvestigations === 'function') _loadInvestigations();
+          // Refresh the iset index too so the parent investigation's study
+          // count + Studies panel reflect the new study immediately, instead of
+          // "0 · No studies" until reload (issue #1618, bug 2).
+          if (typeof _loadInvestigationSets === 'function') _loadInvestigationSets();
+          _openStudyEmbeddedNewTab(created);
         });
     }
   }
@@ -13261,7 +13275,19 @@
     edgesSvg.innerHTML  = '';
 
     if (!studies.length) {
-      nodesHost.innerHTML = '<p class="empty-state" style="padding:24px">No studies in this investigation.</p>';
+      // Offer the next step from the empty state instead of making the user
+      // hunt for "+ Study" (issue #1618, §1 — "Offer the next step in every
+      // empty state"). Pre-select THIS investigation in the dialog.
+      var _emptyInv = window._currentInvestigation || '';
+      nodesHost.innerHTML =
+        '<div class="empty-state" style="padding:24px;text-align:center">' +
+          '<p style="margin:0 0 10px">No studies in this investigation yet.</p>' +
+          '<button type="button" class="action-btn" id="iset-empty-add-study">+ Add a study</button>' +
+        '</div>';
+      var _emptyAddBtn = document.getElementById('iset-empty-add-study');
+      if (_emptyAddBtn) _emptyAddBtn.addEventListener('click', function () {
+        _openBrowseCreate('study', _emptyInv);
+      });
       return;
     }
 

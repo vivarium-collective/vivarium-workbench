@@ -112,7 +112,8 @@ def test_generator_shape_writes_study_yaml(tmp_path, monkeypatch):
 
     canned = "schema_version: 4\nname: inv-gen\n"
 
-    def _scaffold(name, *, composite=None, baseline_name=None, created=None):
+    def _scaffold(name, *, composite=None, baseline_name=None, created=None,
+                  question=None):
         assert composite == "pkg.composites.base"
         assert baseline_name == "base"
         return canned
@@ -201,6 +202,17 @@ def test_blank_shape_writes_study_yaml(tmp_path):
     assert "schema_version" in text
 
 
+def test_question_persisted_on_blank_study(tmp_path):
+    """The "+ Study" dialog's question is saved to study.yaml, not dropped
+    (issue #1618, bug 1)."""
+    ws = _make_ws(tmp_path)
+    q = "Does more DnaA shorten the initiation delay?"
+    body, status = views.study_create(ws, {"name": "inv-q", "question": q})
+    assert status == 200
+    spec = yaml.safe_load((ws / "studies" / "inv-q" / "study.yaml").read_text())
+    assert spec.get("question", "").strip() == q
+
+
 def test_blank_shape_is_visible_to_iter_study_dirs(tmp_path):
     """Regression: a blank (no-source) study must be discoverable by the same
     scan /api/investigations and /api/study/{slug} use — a study.yaml the
@@ -226,7 +238,8 @@ def test_action_failure_500(tmp_path, monkeypatch):
     def _gen(ref, root):
         return (None, True, "base")
 
-    def _boom(name, *, composite=None, baseline_name=None, created=None):
+    def _boom(name, *, composite=None, baseline_name=None, created=None,
+              question=None):
         raise RuntimeError("scaffold boom")
 
     monkeypatch.setattr(

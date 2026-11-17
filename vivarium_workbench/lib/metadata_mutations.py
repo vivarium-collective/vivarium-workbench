@@ -21,6 +21,7 @@ import yaml
 from vivarium_workbench.lib import investigation_status as _invstatus
 from vivarium_workbench.lib import study_spec as _study_spec_lib
 from vivarium_workbench.lib.atomic_io import atomic_write_text
+from vivarium_workbench.lib.yaml_roundtrip import load_yaml_preserving
 
 
 # ---------------------------------------------------------------------------
@@ -248,9 +249,11 @@ def set_study_objective(ws_root: Path, body: dict) -> tuple[dict, int]:
     sf = _study_spec_lib.study_spec_path(ws_root, name)
     if not sf.is_file():
         return {"error": "study not found"}, 404
-    spec: dict = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    # Comment-preserving round-trip so editing the objective doesn't wipe the
+    # scaffold's guide comments (issue #1618, #7).
+    spec, dump = load_yaml_preserving(sf.read_text(encoding="utf-8"))
     spec["objective"] = text
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+    sf.write_text(dump(spec), encoding="utf-8")
     return {"ok": True}, 200
 
 
@@ -302,7 +305,9 @@ def set_study_narrative(ws_root: Path, body: dict) -> tuple[dict, int]:
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec: dict = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    # Comment-preserving round-trip so editing a narrative field (e.g. the
+    # claim) doesn't strip the scaffold's guide comments (issue #1618, #7).
+    spec, dump = load_yaml_preserving(sf.read_text(encoding="utf-8"))
     if not isinstance(spec, dict):
         return {"error": "study.yaml is not a mapping"}, 500
 
@@ -333,7 +338,7 @@ def set_study_narrative(ws_root: Path, body: dict) -> tuple[dict, int]:
     else:
         cur[leaf] = value
 
-    atomic_write_text(sf, yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
+    atomic_write_text(sf, dump(spec))
     return {"ok": True}, 200
 
 

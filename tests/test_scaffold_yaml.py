@@ -99,6 +99,27 @@ class TestV4StudyScaffold:
         assert spec["baseline"][0]["name"] == "alt"
         jsonschema.validate(spec, study_schema)
 
+    def test_question_written_live_when_provided(self, study_schema):
+        """The "+ Study" dialog's question persists as a live top-level
+        ``question:`` field (issue #1618, bug 1), not just a comment."""
+        text = v4_study_scaffold(
+            "my-study", composite="pkg.composites.foo",
+            question="Does more DnaA shorten the initiation delay?",
+        )
+        spec = yaml.safe_load(text)
+        assert spec["question"] == "Does more DnaA shorten the initiation delay?\n"
+        jsonschema.validate(spec, study_schema)
+
+    def test_question_multiline_block_scalar(self):
+        text = v4_study_scaffold("s", question="line one\nline two")
+        spec = yaml.safe_load(text)
+        assert spec["question"] == "line one\nline two\n"
+
+    def test_no_live_question_when_absent(self):
+        """Absent question → no live top-level key (only the commented hint)."""
+        spec = yaml.safe_load(v4_study_scaffold("s"))
+        assert "question" not in spec
+
     @pytest.mark.parametrize("marker", [
         "schema_version: 4",
         # report/study_card/conclusion_verdicts demoted from ★author-first

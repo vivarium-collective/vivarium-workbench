@@ -1547,6 +1547,21 @@ class StudyBaselineAddBody(BaseModel):
     params: Optional[dict] = None
 
 
+class StudyBaselineSetBody(BaseModel):
+    """POST /api/study-baseline-set {study|investigation, name, composite?, params?}
+
+    In-place repoint of an existing baseline entry (preserves its name).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+    composite: Optional[str] = None
+    params: Optional[dict] = None
+
+
 class StudyBaselineRemoveBody(BaseModel):
     """POST /api/study-baseline-remove {study|investigation, name}"""
 

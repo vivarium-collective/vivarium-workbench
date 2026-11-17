@@ -369,6 +369,31 @@ class TestSetStudyNarrative:
         })
         assert code == 400
 
+    def test_preserves_scaffold_comments(self, ws):
+        """Editing a narrative field must not strip the file's guide comments
+        (issue #1618, bug 4 / #7). Previously set_study_narrative round-tripped
+        through yaml.safe_dump, which drops every comment."""
+        sf = ws / "studies" / "s1" / "study.yaml"
+        sf.write_text(
+            "# top-of-file guidance comment\n"
+            "schema_version: 4\n"
+            "name: s1\n"
+            "status: draft\n"
+            "# ★ author the claim first\n"
+            "biological_summary: ''\n",
+            encoding="utf-8",
+        )
+        resp, code = mm.set_study_narrative(ws, {
+            "study": "s1",
+            "path": "biological_summary",
+            "value": "DnaA cycles.",
+        })
+        assert code == 200
+        text = sf.read_text(encoding="utf-8")
+        assert "# top-of-file guidance comment" in text
+        assert "# ★ author the claim first" in text
+        assert _read_study(ws)["biological_summary"] == "DnaA cycles."
+
 
 class TestSetStudyExpertInput:
     def test_sets_current(self, ws):
