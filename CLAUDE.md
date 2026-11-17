@@ -116,15 +116,15 @@ test fixture now spawns the live FastAPI app. Do **not** add new dependencies on
 **Plugin split.** `discovery_engine` (the `discovery-engine` package) holds the investigation/study
 framework and the discovery cycle: study audit/evaluation/verdict/status, rigor,
 the report linter, the argument/knowledge/narrative projections, post-sim steps,
-and `viz_freshness`. `viva_superpowers` is the skills-first facade plus the helpers
-that stayed behind (`catalog`, `feedback_import`, `feedback_tracking`,
-`chart_store`, `run_params`, `loop_state`, `test_audit`); for every moved module it
-keeps only a **back-compat shim** that re-exports the engine
-(`sys.modules[__name__] = discovery_engine.<m>`), so `viva_superpowers.<m>` *is* the
-same module object as `discovery_engine.<m>` — a permanent facade with **no forks and
-no divergence** (viva-superpowers' own `test_discovery_engine_facade.py` asserts that
-object identity across the whole set). **New workbench code imports moved modules from
-`discovery_engine.*` directly** (never through the shim); `tests/test_plugin_import_allowlist.py`
+and `viz_freshness`. `viva_superpowers` is the skills-first agent plugin plus the
+non-engine helpers that stayed behind (`catalog`, `feedback_import`,
+`feedback_tracking`, `chart_store`, `run_params`, `loop_state`, `test_audit`, plus the
+benchmarking / model-build-loop / publishing / packaging helpers). **The facade is
+gone — import moved modules from `discovery_engine.<m>` directly.** The back-compat
+shims that used to re-export the engine under the `viva_superpowers.<m>` name have
+been **deleted** (clean split; there is no longer a `test_discovery_engine_facade.py`
+object-identity assertion). So `from discovery_engine.card_grade import ...` — never
+`viva_superpowers.<engine-module>`. `tests/test_plugin_import_allowlist.py`
 (the allowlist) plus the import-linter config govern which modules the workbench may
 import from each package.
 
