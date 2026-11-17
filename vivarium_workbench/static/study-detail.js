@@ -3524,13 +3524,16 @@
   })();
 
   // btn-delete has class "btn-delete danger" — selector ".btn-delete" still matches.
-  // Handler _post_investigation_delete uses body key "name".
+  // Deletes THIS study via /api/study-delete. Previously this reused
+  // /api/investigation-delete and relied on that route resolving studies/
+  // first; investigation-delete is now investigations-only (issue #1618,
+  // bug 11), so the study page uses the dedicated study-delete route.
   bindAll('.btn-delete', function(btn) {
     // Guard: only the header delete button has data-study; variant/run deletes
     // use different class names so this handler won't fire for those.
     if (!btn.dataset.study) return;
     if (!confirm('Delete this study and all its runs?')) return;
-    api('POST', '/api/investigation-delete', {name: studyName()})
+    api('POST', '/api/study-delete', {name: studyName()})
       .then(function() { window.location = (window.__BASE_PATH__ || '') + '/studies'; });
   });
 

@@ -2096,6 +2096,16 @@ class InvestigationDeleteBody(BaseModel):
     investigation: Optional[str] = None
 
 
+class StudyDeleteBody(BaseModel):
+    """POST /api/study-delete {name} (also accepts study / investigation aliases)"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Batch 22: Investigation comparison & group mutation request-body models
 # ---------------------------------------------------------------------------

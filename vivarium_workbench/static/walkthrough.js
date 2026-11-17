@@ -18858,7 +18858,7 @@
   window._runInvestigation = _runInvestigation;
 
   function _deleteInvestigation(name) {
-    if (!confirm('Delete investigation "' + name + '"? This removes its runs.db, visualizations, and spec.yaml.')) return;
+    if (!confirm('Delete investigation "' + name + '"? This removes the investigations/' + name + '/ folder (its investigation.yaml and any member studies stored under it). A same-named top-level study is not affected.')) return;
     apiFetch('POST', '/api/investigation-delete', {name: name}).then(function(r) { return r.json(); }).then(function(j) {
       if (!j.ok) { alert('Delete failed: ' + (j.error || 'unknown')); return; }
       var detail = document.getElementById('investigation-detail');
