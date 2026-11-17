@@ -497,25 +497,80 @@
   // Generic modal helpers
   // -------------------------------------------------------------------------
 
+  // Accessibility (issue #1618): remember what had focus before a dialog opened
+  // so it can be restored on close, and move focus into the dialog on open.
+  var _modalReturnFocus = null;
+
+  function _focusFirstInModal(el) {
+    // Prefer the first real text field (so you can type immediately — the
+    // audit's "focus stays on the page body" finding); fall back to any
+    // focusable control, then the dialog box itself.
+    var field = el.querySelector(
+      "input:not([type=hidden]):not([disabled]),textarea:not([disabled]),select:not([disabled])"
+    );
+    var target = field
+      || el.querySelector("button:not([disabled]),[href],[tabindex]:not([tabindex='-1'])")
+      || el.querySelector(".modal-box")
+      || el;
+    if (target) { try { target.focus(); } catch (e) { /* ignore */ } }
+  }
+
   function openModal(id) {
     var el = document.getElementById(id);
-    if (el) el.style.display = "flex";
+    if (!el) return;
+    _modalReturnFocus = document.activeElement;
+    el.style.display = "flex";
+    // Mark the dialog box for assistive tech and label it from its heading.
+    var box = el.querySelector(".modal-box") || el;
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    var heading = el.querySelector("h1,h2,h3,h4");
+    if (heading) {
+      if (!heading.id) heading.id = id + "-title";
+      box.setAttribute("aria-labelledby", heading.id);
+    }
+    _focusFirstInModal(el);
+  }
+
+  function _dismissModalEl(el) {
+    if (!el) return;
+    el.style.display = "none";
+    // Clear inline errors.
+    var errEl = el.querySelector(".form-error");
+    if (errEl) errEl.textContent = "";
+    // Restore focus to whatever held it before the dialog opened.
+    if (_modalReturnFocus && typeof _modalReturnFocus.focus === "function") {
+      try { _modalReturnFocus.focus(); } catch (e) { /* ignore */ }
+    }
+    _modalReturnFocus = null;
   }
 
   function closeModal(id) {
-    var el = document.getElementById(id);
-    if (el) {
-      el.style.display = "none";
-      // Clear inline errors.
-      var errEl = el.querySelector(".form-error");
-      if (errEl) errEl.textContent = "";
-    }
+    _dismissModalEl(document.getElementById(id));
   }
+
+  // Esc closes the top-most open dialog (audit: "Escape doesn't close them").
+  // No-op when no modal overlay is visible, so it never fights native controls
+  // or the inline-edit editor's own Esc-to-cancel.
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" && e.keyCode !== 27) return;
+    var overlays = document.querySelectorAll(".modal-overlay");
+    for (var i = overlays.length - 1; i >= 0; i--) {
+      var o = overlays[i];
+      try {
+        if (getComputedStyle(o).display !== "none") {
+          _dismissModalEl(o);
+          e.preventDefault();
+          break;
+        }
+      } catch (err) { /* ignore */ }
+    }
+  });
 
   // Close modals when clicking the overlay background.
   document.addEventListener("click", function (e) {
     if (e.target && e.target.classList.contains("modal-overlay")) {
-      e.target.style.display = "none";
+      _dismissModalEl(e.target);
     }
   });
 
