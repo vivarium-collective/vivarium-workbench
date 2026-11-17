@@ -1196,6 +1196,14 @@ body {
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .process-node-math > div { margin: 0; }
+/* Lead variant: when a model declares math, the equation block is the FIRST thing
+   in the contract region (above the prose recital), so drop the top margin and
+   firm up the teal rule so the math reads as the headline it now is. */
+.process-node-math.is-lead {
+  margin-top: 0;
+  border-left-width: 4px;
+  box-shadow: 0 1px 3px rgba(16, 42, 67, 0.06);
+}
 /* KaTeX-typeset equations: tight display margins; KatexBlock scales a too-wide
    equation to fit (see Katex.tsx) — bigger base so it stays legible after fit. */
 .process-node-math .katex-display { margin: 0.15em 0; overflow: visible; }

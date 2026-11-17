@@ -666,9 +666,19 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
           />
         )}
 
-        {/* The contract: a justified recital of what the process does, over its
-            governing equations. Only shown when actually documented. Click to
-            reveal the full description below (when there is one to reveal).
+        {/* Math leads the card. For a process that declares governing equations,
+            the equations ARE the headline — rendered prominently ABOVE the prose
+            recital (`is-lead`), because a model's math is what the reader came for.
+            A process with no declared math keeps its summary as the headline. */}
+        {show.contract && contract && contract.math.length > 0 && (
+          <div className="process-node-math is-lead" title={SECTION_HINT.math}>
+            {contract.math.map((m, i) => <KatexBlock key={i} tex={toLatex(m)} />)}
+          </div>
+        )}
+
+        {/* The contract recital: a justified prose account of what the process
+            does, under its governing equations. Only shown when documented. Click
+            to reveal the full description below (when there is one to reveal).
             Composite Processes show their inner mini-map above instead. */}
         {show.contract && !data.isCompositeProcess && !hideSummary && contract?.summary && (
           <div
@@ -680,12 +690,6 @@ function ProcessNode({ data }: NodeProps & { data: ProcessNodeData }) {
             }}
           >
             <p className="contract-recital"><MathText text={contract.summary} /></p>
-          </div>
-        )}
-
-        {show.contract && contract && contract.math.length > 0 && (
-          <div className="process-node-math" title={SECTION_HINT.math}>
-            {contract.math.map((m, i) => <KatexBlock key={i} tex={toLatex(m)} />)}
           </div>
         )}
 

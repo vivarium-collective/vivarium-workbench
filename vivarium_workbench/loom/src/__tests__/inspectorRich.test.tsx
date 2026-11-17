@@ -26,6 +26,26 @@ const PROCESS_DETAILS = {
   outputPortsTarget: { rna: 'cell.counts' },
 };
 
+// A process with a DECLARED structured contract that carries governing equations.
+const MATH_PROCESS_DETAILS = {
+  label: 'michaelis-menten',
+  nodeType: 'process',
+  processType: 'process',
+  address: 'local:mm',
+  config: { Vmax: 1.2 },
+  path: ['mm'],
+  inputPorts: ['S'],
+  outputPorts: ['v'],
+  description: 'A docstring note about the enzyme kinetics.',
+  contract: {
+    summary: 'Michaelis-Menten enzyme kinetics.',
+    math: ['v = V_max * S / (K_m + S)'],
+    symbols: { v: 'reaction rate', V_max: 'maximum rate' },
+  },
+  inputSchema: { S: 'float' },
+  outputSchema: { v: 'float' },
+};
+
 function renderProcess(locked = false) {
   render(
     <InspectorPanel
@@ -75,5 +95,20 @@ describe('InspectorPanel — rich process detail', () => {
   it('prompts to click when there is no selection', () => {
     render(<InspectorPanel selection={null} />);
     expect(screen.getByText(/Click a node to inspect/i)).toBeTruthy();
+  });
+
+  it('leads with the Equations section for a model that declares math', () => {
+    render(
+      <InspectorPanel
+        selection={{ path: ['mm'], kind: 'process', details: MATH_PROCESS_DETAILS }}
+        locked={false}
+      />,
+    );
+    const eqn = screen.getByText('Equations');
+    const notes = screen.getByText('Notes');
+    const config = screen.getByText(/Config \(/);
+    // Equations are prioritized: the section precedes Notes and Config in the DOM.
+    expect(eqn.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(eqn.compareDocumentPosition(config) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
