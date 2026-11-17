@@ -245,6 +245,7 @@ from vivarium_workbench.lib.models import (
     InvestigationCreateRequest,
     IsetCloneBody,
     InvestigationDeleteBody,
+    StudyDeleteBody,
     # Batch 22: request-body models for investigation comparison & group mutations
     InvestigationComparisonAddBody,
     InvestigationComparisonUpdateBody,
@@ -5309,6 +5310,27 @@ def create_app() -> FastAPI:
         directly (git commit deferred to the flip/state batch).
         """
         body, status = _scaffold_mut.delete_investigation(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-delete",
+        tags=["Studies"],
+        summary="Delete a study directory (no git commit on the FastAPI path)",
+    )
+    def study_delete(
+        req: StudyDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Remove a study directory (pure rmtree, no git commit).
+
+        Body: ``{name}`` (also accepts ``study`` / ``investigation`` aliases).
+        Resolves the target as a study (studies/ first); refuses an
+        investigation (409). 400 when name is missing; 404 when the study
+        directory does not exist; 200 ``{ok: true, name}`` on success.
+        """
+        body, status = _scaffold_mut.delete_study(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
