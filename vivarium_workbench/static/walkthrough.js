@@ -10384,6 +10384,95 @@
       }).catch(function () { /* optional surface */ });
   }
   window._vivLoadEvidence = _vivLoadEvidence;
+
+  // ---- RFC-0007 validation panel (GET /api/validation-panel/{slug}) ----
+  // Census header, type x scope coverage matrix, grouped records, and the
+  // epistemic-separation check. Renders nothing when the response is empty
+  // (snapshot / published bundle / engine predating the validation layer).
+  function _vpRender(d) {
+    var types = d.types || [], scopes = d.scopes || [];
+    var execOnly = {};
+    (d.execution_only_types || []).forEach(function (t) { execOnly[t] = true; });
+    var c = d.census || {};
+    var h = '<div class="vp-head"><strong>Validation</strong>';
+    ['passed', 'failed', 'inconclusive', 'error'].forEach(function (k) {
+      h += '<span class="vp-chip vp-' + k + '">' + (c[k] || 0) + ' ' + k + '</span>';
+    });
+    h += '<span class="vp-chip">pass rate ' + Math.round((d.pass_rate || 0) * 100) + '%</span>';
+    h += '<span class="vp-chip' + (d.stale_count ? ' vp-stale' : '') + '">' + (d.stale_count || 0) + ' stale</span></div>';
+
+    var recs = d.records || [];
+    var counts = {};
+    recs.forEach(function (r) { var k = r.type + '|' + r.scope; counts[k] = (counts[k] || 0) + 1; });
+    h += '<table class="vp-matrix"><thead><tr><th></th>';
+    scopes.forEach(function (sc) { h += '<th>' + _esc(sc) + '</th>'; });
+    h += '</tr></thead><tbody>';
+    types.forEach(function (t) {
+      h += '<tr><th class="' + (execOnly[t] ? 'vp-exec' : '') + '" title="' +
+        (execOnly[t] ? 'Execution-only: cannot carry a scientific judgment' : 'May assert a scientific judgment') + '">' +
+        _esc(t) + (execOnly[t] ? ' *' : '') + '</th>';
+      scopes.forEach(function (sc) {
+        var ids = ((d.coverage || {})[t] || {})[sc] || [];
+        var n = counts[t + '|' + sc] || 0;
+        h += ids.length
+          ? '<td class="vp-cell-on" title="' + _esc(ids.join(', ')) + '">' + ids.length + ' validator' + (ids.length > 1 ? 's' : '') +
+            (n ? ' / ' + n + ' rec' : '') + '</td>'
+          : '<td class="vp-cell-off">—</td>';
+      });
+      h += '</tr>';
+    });
+    h += '</tbody></table><div class="vp-note">* execution-only type (structural / computational / visual)</div>';
+
+    var groups = {};
+    recs.forEach(function (r) {
+      var k = r.type + ' › ' + r.scope;
+      (groups[k] = groups[k] || []).push(r);
+    });
+    Object.keys(groups).sort().forEach(function (k) {
+      h += '<details class="vp-group"><summary>' + _esc(k) + ' (' + groups[k].length + ')</summary>';
+      groups[k].forEach(function (r) {
+        var j = r.scientific_judgment;
+        var jtxt = (j === null || j === undefined)
+          ? (execOnly[r.type] ? 'n/a — execution-only' : 'no judgment') : String(j);
+        h += '<details class="vp-rec"><summary><span class="vp-target">' + _esc(r.target) + '</span> ' +
+          '<span class="vp-chip vp-' + _esc(r.execution_status) + '">' + _esc(r.execution_status) + '</span> ' +
+          '<span class="vp-judg">' + _esc(jtxt) + '</span></summary>' +
+          '<pre class="vp-detail">' + _esc(JSON.stringify({findings: r.findings, evidence: r.evidence, criteria: r.criteria}, null, 2)) +
+          '</pre></details>';
+      });
+      h += '</details>';
+    });
+
+    var v = d.violations || [];
+    if (v.length) {
+      h += '<div class="vp-viol"><strong>Epistemic-separation violations (' + v.length + ')</strong><ul>';
+      v.forEach(function (x) { h += '<li>' + _esc(typeof x === 'string' ? x : JSON.stringify(x)) + '</li>'; });
+      h += '</ul></div>';
+    } else {
+      h += '<div class="vp-ok">Separation holds: no execution-only validator asserts a scientific judgment.</div>';
+    }
+    return h;
+  }
+  function _vivLoadValidationPanel(slug) {
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot' || !slug) return;
+    fetch('/api/validation-panel/' + encodeURIComponent(slug), {headers: {Accept: 'application/json'}})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (window._currentIset !== slug) return;
+        var host = document.getElementById('inv-validation-panel');
+        if (!d || !d.types || !d.records) { if (host) host.remove(); return; }
+        if (!host) {
+          var anchor = document.getElementById('investigation-intro');
+          if (!anchor || !anchor.parentNode) return;
+          host = document.createElement('details');
+          host.id = 'inv-validation-panel';
+          host.className = 'vp-panel';
+          anchor.parentNode.insertBefore(host, anchor.nextSibling);
+        }
+        host.innerHTML = '<summary>Validation (RFC-0007)</summary>' + _vpRender(d);
+      }).catch(function () { /* optional surface */ });
+  }
+  window._vivLoadValidationPanel = _vivLoadValidationPanel;
   window._vivPaintEvidence = _vivPaintEvidence;
 
   // The full Asks / Finds / plan body, from the study DATA (not the band-limited
@@ -11991,6 +12080,7 @@
       .then(function(d) {
         window._currentIsetData = d;
         try { _vivLoadEvidence(name); } catch (_) {}
+        try { _vivLoadValidationPanel(name); } catch (_) {}
         document.getElementById('investigation-detail-title').textContent = d.title || d.name;
         // Also refresh the VISIBLE chrome header (#ws-title) from the authoritative
         // detail payload. _showInvestigationWorkspace set it from _isetIndex, which

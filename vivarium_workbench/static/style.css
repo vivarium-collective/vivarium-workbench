@@ -6865,3 +6865,24 @@ body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]{
 .reg-explore-btn-sm{ height:22px; padding:0 8px; font-size:11px; font-weight:600; background:#2563eb; color:#fff; border:1px solid #2563eb; border-radius:4px; cursor:pointer; margin-right:5px; vertical-align:middle; }
 .reg-explore-btn-sm:hover{ background:#1d4ed8; }
 .reg-td-actions{ white-space:nowrap; }
+
+/* RFC-0007 validation panel */
+.vp-panel { margin: 0 0 16px; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.85em; }
+.vp-panel > summary { cursor: pointer; font-weight: 600; }
+.vp-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
+.vp-chip { display: inline-block; padding: 1px 8px; border-radius: 9999px; border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; font-size: 0.9em; }
+.vp-chip.vp-passed { background: #d1fae5; color: #065f46; border-color: #10b981; }
+.vp-chip.vp-failed, .vp-chip.vp-error { background: #fee2e2; color: #991b1b; border-color: #ef4444; }
+.vp-chip.vp-inconclusive, .vp-chip.vp-stale { background: #fef3c7; color: #92400e; border-color: #f59e0b; }
+.vp-matrix { border-collapse: collapse; width: 100%; margin: 8px 0 2px; }
+.vp-matrix th, .vp-matrix td { border: 1px solid #e2e8f0; padding: 3px 6px; text-align: left; font-size: 0.9em; }
+.vp-matrix th.vp-exec { font-style: italic; color: #64748b; }
+.vp-cell-on { background: #eff6ff; }
+.vp-cell-off { color: #94a3b8; text-align: center; }
+.vp-note { color: #64748b; font-size: 0.85em; margin-bottom: 8px; }
+.vp-group { margin: 4px 0; }
+.vp-rec { margin: 2px 0 2px 14px; }
+.vp-judg { color: #475569; }
+.vp-detail { background: #f8fafc; padding: 6px; overflow-x: auto; font-size: 0.85em; }
+.vp-viol { border: 1px solid #ef4444; background: #fef2f2; padding: 6px 10px; border-radius: 6px; margin-top: 8px; }
+.vp-ok { color: #065f46; margin-top: 8px; }
