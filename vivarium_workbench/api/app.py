@@ -226,6 +226,8 @@ from vivarium_workbench.lib.models import (
     # Batch 19: request-body models for study CRUD
     StudyVariantAddBody,
     StudyVariantDeleteBody,
+    StudyFindingAddBody,
+    StudyFindingDeleteBody,
     StudyVariantSetParamsBody,
     StudyBaselineAddBody,
     StudyBaselineSetBody,
@@ -4937,6 +4939,42 @@ def create_app() -> FastAPI:
         Body: ``{name|study|investigation, variant, parameter_overrides: dict}``
         """
         body, status = _study_crud_mut.study_variant_set_params(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-finding-add",
+        tags=["Studies"],
+        summary="Append a finding to study.yaml findings[]",
+    )
+    def study_finding_add(
+        req: StudyFindingAddBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Record a finding on the study (the list the study page renders).
+
+        Body: ``{study|investigation, statement, status?, kind?, explanation?}``
+        """
+        body, status = _study_crud_mut.study_finding_add(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-finding-delete",
+        tags=["Studies"],
+        summary="Remove a finding from study.yaml findings[] by id",
+    )
+    def study_finding_delete(
+        req: StudyFindingDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Delete a finding by id.
+
+        Body: ``{study|investigation, id}``
+        """
+        body, status = _study_crud_mut.study_finding_delete(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
