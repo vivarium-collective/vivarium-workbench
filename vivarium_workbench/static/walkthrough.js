@@ -7422,7 +7422,7 @@
   window._installFromMarketplace = _installFromMarketplace;
 
   function _proceedWithCatalogInstall(name, opts) {
-    if (!confirm("Install '" + name + "' on the active investigation branch?\n\nThis adds a submodule, pip installs the package, and appends it to pyproject.toml. Requires an active investigation branch.")) return;
+    if (!confirm("Install '" + name + "'?\n\nThis adds a submodule, pip installs the package, and appends it to pyproject.toml. If a workstream is active the change is committed to its branch.")) return;
     var body = {name: name};
     if (opts && opts.skip_system_deps_check) body.skip_system_deps_check = true;
     if (opts && opts.full_repo) body.full_repo = true;
@@ -20766,6 +20766,12 @@
       // the existing Open-PR button. Otherwise fall back to inline append
       // for layouts that still embed everything inside #viv-git-status.
       var actions = [];
+      // Start workstream — the primary CTA when no investigation branch is
+      // active yet (blocker C / #1618: _startWork existed but nothing called it,
+      // so a new user could not begin an investigation branch from the GUI).
+      if (!s.has_active_workstream) {
+        actions.push('<button class="ws-btn ws-primary" onclick="_startWork()" title="Create an investigation branch off ' + _esc(s.base) + ' to group your authoring work">Start workstream</button>');
+      }
       if (!s.upstream_repo) {
         actions.push(s.gh_available
           ? '<button class="ws-btn ws-primary" onclick="_linkBranch()">Link branch to upstream</button>'
