@@ -1126,6 +1126,19 @@ def create_app() -> FastAPI:
         return build_evidence_integrity(ws, slug)
 
     @app.get(
+        "/api/validation-panel/{slug}",
+        tags=["Investigations"],
+        summary="RFC-0007 validation records, coverage matrix and epistemic-separation view",
+    )
+    def validation_panel_route(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        """Validation records from the discovery cycle bundle plus the type x scope
+        coverage matrix and epistemic-separation violations. ``{}`` on an engine
+        predating the validation layer. Backed by
+        ``lib.validation_panel.build_validation_panel``."""
+        from vivarium_workbench.lib.validation_panel import build_validation_panel
+        return build_validation_panel(ws, slug) or {}
+
+    @app.get(
         "/api/generation-requests/{slug}",
         tags=["Investigations"],
         summary="Typed GenerationRequests the frontier emits (AI-drivable cycle, Phase 1)",
