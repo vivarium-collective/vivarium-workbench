@@ -557,6 +557,72 @@ class TestInstallFailure:
         assert "diagnosis" not in body
         assert body["install_mode"] == "pypi"
 
+    def test_git_pip_failure_rolls_back_added_submodule(self, tmp_path, monkeypatch):
+        # #1618 bug 7: a git-submodule install that fails at `pip install -e`
+        # (after `git submodule add` already landed on disk) must not leave the
+        # submodule staged — its studies/investigations would otherwise show up
+        # in the dashboard as if the install succeeded.
+        entry = {"name": "foo", "source": "https://example.com/foo.git", "ref": "main"}
+        _write_ws(tmp_path, {"name": "ws", "imports": {}})
+        _make_venv_pip(tmp_path)
+        monkeypatch.setattr(workspace_deps_views, "module_registry", lambda ws: [entry])
+        monkeypatch.setattr(views.shutil, "which", lambda x: None)
+
+        target = tmp_path / "external" / "foo"
+        cmds: list[list[str]] = []
+
+        def _fake_run(cmd, **kw):
+            cmds.append(cmd)
+            if cmd[:3] == ["git", "submodule", "add"]:
+                target.mkdir(parents=True, exist_ok=True)  # the add lands on disk
+                return subprocess.CompletedProcess(cmd, 0, stdout="cloned", stderr="")
+            if cmd[1:3] == ["install", "-e"]:
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom pip")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")  # rollback git cmds
+
+        monkeypatch.setattr(views.subprocess, "run", _fake_run)
+        _patch_yaml_io(monkeypatch)
+        _patch_pyproject_noops(monkeypatch)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
+
+        body, status = views.catalog_install(tmp_path, {"name": "foo"})
+        assert status == 500
+        assert body["rolled_back"] is True
+        assert not target.exists()  # the half-installed submodule was removed
+        assert ["git", "submodule", "deinit", "-f", "--", "external/foo"] in cmds
+        assert ["git", "rm", "-f", "--", "external/foo"] in cmds
+
+    def test_git_pip_failure_no_rollback_when_submodule_preexisted(self, tmp_path, monkeypatch):
+        # The rollback only undoes a submodule *this* call added. A failed
+        # re-install over a pre-existing checkout must leave it untouched.
+        entry = {"name": "foo", "source": "https://example.com/foo.git", "ref": "main"}
+        _write_ws(tmp_path, {"name": "ws", "imports": {}})
+        _make_venv_pip(tmp_path)
+        target = tmp_path / "external" / "foo"
+        target.mkdir(parents=True)
+        (target / "pyproject.toml").write_text("")  # non-empty → submodule add skipped
+        monkeypatch.setattr(workspace_deps_views, "module_registry", lambda ws: [entry])
+        monkeypatch.setattr(views.shutil, "which", lambda x: None)
+
+        cmds: list[list[str]] = []
+
+        def _fake_run(cmd, **kw):
+            cmds.append(cmd)
+            if cmd[1:3] == ["install", "-e"]:
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(views.subprocess, "run", _fake_run)
+        _patch_yaml_io(monkeypatch)
+        _patch_pyproject_noops(monkeypatch)
+        monkeypatch.setattr(registry, "clear_registry_cache", lambda *a, **k: None)
+
+        body, status = views.catalog_install(tmp_path, {"name": "foo"})
+        assert status == 500
+        assert "rolled_back" not in body  # nothing we added, nothing to undo
+        assert target.exists()  # pre-existing checkout preserved
+        assert not any(c[:3] == ["git", "submodule", "deinit"] for c in cmds)
+
     def test_pip_timeout_500_no_log(self, tmp_path, monkeypatch):
         # subprocess raises before log_holder is populated → live leaves the 500
         # un-enriched (no log/install_mode/diagnosis added).

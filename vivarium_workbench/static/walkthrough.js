@@ -7426,10 +7426,23 @@
     var body = {name: name};
     if (opts && opts.skip_system_deps_check) body.skip_system_deps_check = true;
     if (opts && opts.full_repo) body.full_repo = true;
+    // In-page progress: the install (submodule clone + pip install) routinely
+    // takes a minute. Without this the page sits silent after the confirm, with
+    // no sign anything is happening (issue #1618, bug 7). A persistent toast
+    // (durationMs:0 → until we clear it) is non-blocking, so it also doesn't
+    // freeze browser automation the way the old alert() did (#1051).
+    var _progress = (typeof _showToast === 'function')
+      ? _showToast('Installing ' + name + '… (cloning + pip install — this can take a minute)', { durationMs: 0 })
+      : null;
+    function _clearProgress() {
+      if (_progress && _progress.parentNode) _progress.parentNode.removeChild(_progress);
+      _progress = null;
+    }
     apiFetch('POST', '/api/catalog-install', body)
       .then(function(r) { return r.json().then(function(j) { return [r.ok, r.status, j]; }); })
       .then(function(parts) {
         var ok = parts[0], status = parts[1], json = parts[2];
+        _clearProgress();
         if (!ok) {
           // 409 = system-deps gate (defence-in-depth — UI should have
           // already shown the modal; re-show if it happens anyway).
@@ -7448,18 +7461,25 @@
             }, opts);
             return;
           }
-          alert(_renderInstallError(json));
+          var em = _renderInstallError(json);
+          // A rolled-back install leaves nothing staged — say so, so the user
+          // knows the Studies panel isn't about to fill with a half-installed
+          // module (issue #1618, bug 7).
+          if (json && json.rolled_back) em += "\n\n(Partial install rolled back — nothing was left staged.)";
+          if (typeof _showToast === 'function') _showToast(em, { danger: true }); else alert(em);
           return;
         }
-        var msg = "Installed " + name + ".\nCommit: " + (json.commit || 'n/a');
-        alert(msg);
+        var msg = "Installed " + name + "." + (json.commit ? "\nCommit: " + json.commit : '');
+        if (typeof _showToast === 'function') _showToast(msg); else alert(msg);
         window._registryLoaded = false;  // force registry reload on next switch
         apiFetch('POST', '/api/render').finally(function() {
           location.reload();
         });
       })
       .catch(function(err) {
-        alert("Network error: " + String(err));
+        _clearProgress();
+        var nm = "Network error: " + String(err);
+        if (typeof _showToast === 'function') _showToast(nm, { danger: true }); else alert(nm);
       });
   }
   window._proceedWithCatalogInstall = _proceedWithCatalogInstall;
