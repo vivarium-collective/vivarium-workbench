@@ -856,6 +856,18 @@ def create_app() -> FastAPI:
     # Registered last so it wraps the CSRF middleware and sees the final status.
     install_request_logging(app)
 
+    @app.middleware("http")
+    async def _idle_activity_mw(request: Request, call_next):
+        """Stamp "last activity" on every request so the idle self-shutdown
+        watchdog (``lib.idle_shutdown``) keeps an actively-polled dashboard alive
+        and only reaps a server nobody is talking to."""
+        try:
+            from vivarium_workbench.lib import idle_shutdown
+            idle_shutdown.touch()
+        except Exception:  # noqa: BLE001 — never let bookkeeping break a request
+            pass
+        return await call_next(request)
+
     @app.get("/health", tags=["System"], summary="Service liveness check")
     def health() -> dict[str, str]:
         return {"status": "ok"}
