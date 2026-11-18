@@ -127,10 +127,10 @@ Run a workspace's studies on [compose-api](https://github.com/biosimulations/com
 uv run vivarium-workbench serve --backend-base-url https://compose.cam.uchc.edu/
 ```
 
-Startup prints `backend dispatch: compose-api`. A study's runs then execute in the environment compose-api has
-registered for the workspace's repository (an owner-published image), are checked against that environment's
-interface manifest before submission, and land back as study runs; the Composites tab's remote run takes the same
-route. Cancelling needs `COMPOSE_API_TOKEN`. The
+Startup prints `backend dispatch: compose-api`. A study's runs then execute in the prebuilt image compose-api has
+registered for the workspace's repository, checked against that image's interface manifest before submission, or,
+with no such image, in an environment compose-api infers from the classes the composite names. They land back as
+study runs, and the Composites tab's remote run takes the same route. Cancelling needs `COMPOSE_API_TOKEN`. The
 contract, onboarding a new workspace, and what is not on compose-api yet are in
 [docs/backend-compose-api.md](docs/backend-compose-api.md).
 
