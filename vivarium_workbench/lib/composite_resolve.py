@@ -12,8 +12,6 @@ from pathlib import Path
 import yaml
 from process_bigraph.composite_spec import CompositeSpec, get as _get_spec  # module-level for monkeypatch
 
-from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
-from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 
 from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _ws_add_to_sys_path
@@ -492,8 +490,8 @@ def resolve_composite_for_request(
     materialized build (.viv-build.json — real files on disk, same dir the env
     worker provisions a venv for, item 63) resolves LOCALLY, through the same
     general resolution any local workspace uses; a bare deployment-wide pin
-    with no materialized clone resolves on the deployment via sms-api; a local
-    workspace resolves locally. Returns the resolve payload dict (or None on
+    with no materialized clone has nothing to resolve against and degrades to
+    ``wiring_status: "unavailable"``; a local workspace resolves locally. Returns the resolve payload dict (or None on
     a local miss)."""
     from vivarium_workbench.lib.run_core import run_target_for
     from vivarium_workbench.lib.remote_simulations import _read_build_meta
@@ -520,9 +518,9 @@ def resolve_composite_for_request(
         #      the same safe, out-of-process env-worker discovery
         #      discover_all_composites already uses elsewhere (and which the
         #      managed materialization path now provisions a real venv for).
-        # Only when NEITHER general path can see it does this fall back to
-        # sms-api — the one case with nothing local to introspect at all is a
-        # bare deployment-wide pin (VIVARIUM_WORKBENCH_REMOTE_PINNED, no
+        # Only when NEITHER general path can see it does this degrade -- the
+        # one case with nothing local to introspect at all is a bare
+        # deployment-wide pin (VIVARIUM_WORKBENCH_REMOTE_PINNED, no
         # materialized clone), which the same waterfall degrades through
         # cleanly (both local attempts miss, unconditionally, for any id).
         local = resolve_composite(ws_root, spec_id, overrides)
@@ -531,17 +529,17 @@ def resolve_composite_for_request(
         local = _local_generator_payload(ws_root, spec_id)
         if local is not None:
             return local
-        try:
-            return SmsApiClient(_sms_api_base()).composite_resolve(int(sim_id), spec_id, overrides or {})
-        except SmsApiError as e:
-            # sms-api has no POST /core/v1/simulator/{id}/composite-resolve route —
-            # this client method was added speculatively and the server side was
-            # never built. Composite preview is a non-blocking convenience (actual
-            # dispatch reads the composite ref directly and never calls this), so
-            # degrade to the same honest-unavailable shape every other resolve
-            # failure already uses, instead of a 500.
-            return _degraded_result(
-                spec_id, e,
-                notice="composite preview is not available for remote-pinned deployments yet",
-            )
+        # No remote resolution exists. viva-api has never served a composite-resolve
+        # route (checked 2026-11-18 against code, not docs: the app built from main has
+        # only latest/status/versions/upload under /core/v1/simulator; no version of its
+        # generated OpenAPI spec on any branch has one; no .py on any branch defines it).
+        # The client method was added on the workbench side in 536fa2eb (SP-D1) with the
+        # server endpoint left as a follow-on that was never built. A hosted resolution
+        # would need a live worker, which is viva-core-only (docs/backend-adapters.md §3.1). A
+        # preview is a convenience -- dispatch reads the composite ref directly -- so
+        # degrade to the honest-unavailable shape every other resolve failure uses.
+        return _degraded_result(
+            spec_id, LookupError(f"{spec_id!r} has no local definition in this build"),
+            notice="composite preview is not available for remote-pinned deployments yet",
+        )
     return resolve_composite(ws_root, spec_id, overrides)

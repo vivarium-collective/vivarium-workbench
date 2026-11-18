@@ -10,8 +10,9 @@ call-site-shaped. This module is that line, written down.
 single choke point all 25 call sites pass through, and it already receives the
 method name. Classifying here is robust to an incomplete audit: a call site nobody
 has traced still cannot route a simulation into a worker pod sized for
-interaction. (Of the eight job-class call sites, four have been traced;
-`investigation_steps` dispatches `run_study` with no run-target gate at all.)
+interaction. (`investigation_steps._run_study_hook` now honors
+`resolve_run_target` and refuses the worker on `deployment`, step 2a; the
+post-run analysis methods still run in whichever worker the pool launched.)
 
 **Viz is deliberately NOT classified.** §2A.7: *"Viz straddles — light preview may
 stay an env-worker query, heavy post-run rendering moves into the job; split it
