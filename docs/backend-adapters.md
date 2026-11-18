@@ -288,18 +288,26 @@ be done on its own:
 
 ## 5. Open questions
 
-- **Q1 (Eran):** how to map a legacy simulation id to its run id: `run_id` on `SimulationRun`, or a
-  `legacy_simulation_id` filter. Blocks step 5 only.
+- **Q1, settled 2026-11-18 (Jim): option A1.** viva-api adds the correlation id as `run_id` to `SimulationRun` and
+  `GET /api/v1/simulations/{id}`, and the workbench rewrites stored integer ids on first read (step 5). A
+  `legacy_simulation_id` filter on core's run list was rejected because it would put an SMS id into core, which
+  outlives viva-api. The field itself is asked of viva-api in the issue; step 5 waits on it.
 - **Q2 (Eran):** re-running analyses on a finished run: a core job kind, or steps inside the composite. Blocks
   step 6 only.
-- **Q3 (Eran):** does viva-core outlive viva-api? This decides whether the `workers` and `analyses` facets get
-  built on viva-core or pushed into compose-api.
+- **Q3, settled 2026-11-18 (Jim): viva-core outlives viva-api.** The viva-core adapter is long-term, not frozen,
+  and the `analyses` facet and ask C are built on viva-core. Only viva-api's SMS-specific surfaces retire.
 - **Q4, settled 2026-11-18 (Jim and Alex):** compose-api will not host env workers, and viva-api's are not ported.
   Hosted workers are an optional `workers` facet that only viva-core provides. Work that depends on them moves to the
   manifest, the Run facet or plain file access (§3.1), and the facet is removed if SMS turns out not to need it. A
   fully remote workbench with live probes is a later, separate design.
   - ~~My earlier recommendation, a workbench-side Kubernetes launcher running the registry image, is withdrawn.~~
-- **Q5:** should viva-core's `POST /composites` accept data files with a document, as compose-api now does
-  (wb#1642)? Until it does, the viva-core adapter refuses a run that carries files.
+  - Jim, 2026-11-18: SMS needs no hosted env workers beyond the workbench. The CLI exposes them for convenience,
+    but production doesn't use them. So the `workers` facet, and viva-api's `/viva/v1/workers`, exist only for
+    the hosted workbench, and they can be retired once §3.1's remaining uses (probes, generator discovery, viz
+    previews) have another home or are judged not worth hosting.
+- **Q5, Jim's position 2026-11-18: yes, if it is backwards compatible.** viva-core's `POST /composites` should
+  accept data files with a document, as compose-api does (wb#1642). It must be strictly additive: no files means
+  today's behaviour, and support is advertised as a capability. It's ask C in the viva-api issue. Until a backend
+  advertises it, the viva-core adapter refuses a run that carries files.
 - **To verify before step 2:** what the Stanford test and prod deployments advertise on `/viva/v1/capabilities`:
   `viva-v1-composites`, `viva-v1-composites-documents`, `viva-v1-environments`, `viva-v1-environments-build`.
