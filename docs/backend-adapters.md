@@ -172,6 +172,13 @@ Verified against viva-api **code** on `main` (1c8b27ae), 2026-11-18, not against
   `/{job}/call`). viva-core's `/composites/{id}/results` and `/datasets` are present, so the viva-core adapter can
   drop the interim compose results download. Deployed sites may run older images: confirm against each site's
   `/openapi.json` before relying on a route there.
+  - **Correction, same day:** being registered is not being implemented. viva-core's `GET /environments/{id}/manifest`
+    and `GET /environments/{id}/source` are stubs that answer **501**
+    (`viva_core/api/routers/environment_lifecycle.py`: "need a package hook … which does not exist yet"). Every
+    replacement below that relies on them is blocked until they're implemented (ask D in viva-api#1055).
+    A grep for `status_code=501` over `viva_api` and `viva_core` finds no other unconditional stub. The rest are
+    conditional: `DELETE /composites/{id}` when a run's mechanism can't be stopped, and SLURM-only legacy routes.
+    The literal check, redone with both quote styles, covers all 39 route literals in `sms_api_client.py`.
 - **composite-resolve never existed.**
   - The app built from `main` has only `latest`, `status`, `versions` and `upload` under `/core/v1/simulator`.
   - No version of the generated OpenAPI spec, on any of the 432 refs (146 spec revisions), lists composite-resolve
@@ -197,8 +204,8 @@ Verified against viva-api **code** on `main` (1c8b27ae), 2026-11-18, not against
 | `list_build_simulations` | `remote_simulations` (Remote tab) | `GET /composites?environment_id=` | nothing |
 | `compose_submit`, `compose_status[_batch]`, `download_compose_results` (`/viva/v1/compose`, interim) | `remote_run.run_remote`, `run_jobs`, `remote_trace`, **and `remote_run_viva_v1.land`** (the viva-core adapter itself lands results through the interim route) | the viva-core document route (`create_composite_run`) | Stanford must advertise `viva-v1-composites-documents` (to verify) |
 | `simulator_status`, `list_branch_builds`, `list_simulators`, `simulator_commit`, `upload_simulator`, `register_branch_head` (`/core/v1/simulator*`) | `remote_pinned`, `comparison_pinning`, `remote_build_source`, `source_build_views`, `remote_run_views` | `/viva/v1/environments` (W2 already goes there first; these are fallbacks) | both Stanford sites advertising `viva-v1-environments[-build]` (to verify) |
-| `download_workspace` | `remote_build_source` | `/environments/{id}/source` | nothing |
-| `/api/v1/simulations/discovery` (raw `client._get`, the config list of a build) | `composite_test_run_views` | `ecoli-simulation`'s params model, or an environment's manifest | to decide in step 2 |
+| `download_workspace` | `remote_build_source` | `/environments/{id}/source` | ~~nothing~~ the route is a 501 stub: ask D |
+| `/api/v1/simulations/discovery` (raw `client._get`) | `composite_test_run_views` | a vEcoli-specific listing of `configs/*.json` and `ecoli/analysis/<category>/*.py`, done over SSH on the HPC checkout or through the GitHub Contents API. Replacement: the environment's read-back manifest, extended by the SMS package (Q-config, settled) | ask D |
 | `run_analysis`, `analysis_status`, `list_analyses` | `remote_run_views`, `remote_analysis_figures` | analyses requested **at submit** already travel as `analysis_options` in the params. Re-running analyses on a finished run has no core route | Eran (Q2) |
 | **Direct S3 reads, outside any API**: `remote_analysis_figures` reads analysis figures with boto3 (GovCloud credentials) from the `s3://` `result_uri` that `list_analyses` returns | `api/app.py` (3 routes) | `/composites/{id}/datasets` (or an artifact route) so the backend owns storage access | Q2. The workbench must not hold object-store credentials for a backend |
 | `composite_resolve` (`/core/v1/simulator/{id}/composite-resolve`) | `composite_resolve` | none; the route has never existed (verified above) | nothing: deleted in step 0 |
@@ -214,7 +221,7 @@ Everywhere else it picks `LocalWorkerLauncher`. All 30 worker methods go through
 
 | Group | Methods | Alternative without a hosted worker | Direction |
 |---|---|---|---|
-| **Catalog**: what classes, ports and config schemas exist | `registry_catalog`, `reexport_map`, `attach_process_docs`, `viz_classes`, `viz_class_inputs`, `analysis_viewers`, `data_sources_provider` | read from the environment's **interface manifest** (compose-api `/registry/environments/{name}/manifest`, `/registry/entries`; viva-core `/environments/{id}/manifest`). Alex's first step for a hosted workbench | move behind `EnvFacet.manifest()`; the worker becomes the fallback |
+| **Catalog**: what classes, ports and config schemas exist | `registry_catalog`, `reexport_map`, `attach_process_docs`, `viz_classes`, `viz_class_inputs`, `analysis_viewers`, `data_sources_provider` | read from the environment's **interface manifest** (compose-api `/registry/environments/{name}/manifest`, `/registry/entries`; viva-core `/environments/{id}/manifest`, **a 501 stub today**: ask D). Alex's first step for a hosted workbench | move behind `EnvFacet.manifest()`; the worker becomes the fallback |
 | **Composite discovery**: generators, `composites_full` | `discover_composites`, `composites_full` | documents are workspace files and need no code; **generators** execute workspace code | documents need nothing; generators stay on the worker (or get pre-rendered at build time: open) |
 | **Jobs** (`JOB_CLASS_METHODS`) | `run_study` (already refused on a deployment target), `run_study_analyses`, `run_investigation_analysis`, plus `report_core_snapshot` | the **Run facet**: a batch run on the backend. Analyses at submit go in the run's params; post-run analyses over landed output need an analysis job | move to `runs.submit` once the Run facet has analysis jobs (Q2). A hosted worker should never run science |
 | **Probes**: single update, state resolution | `run_process`, `resolve_composite_state`, `resolve_inner_composite_state`, `config_to_composite`, `composite_contract_audit` | none yet: they execute live code | stay local. Hosted: viva-core workers only. **The open problem** for a fully remote workbench, deferred until a real user needs it (Alex) |
@@ -292,8 +299,16 @@ be done on its own:
   `GET /api/v1/simulations/{id}`, and the workbench rewrites stored integer ids on first read (step 5). A
   `legacy_simulation_id` filter on core's run list was rejected because it would put an SMS id into core, which
   outlives viva-api. The field itself is asked of viva-api in the issue; step 5 waits on it.
-- **Q2 (Eran):** re-running analyses on a finished run: a core job kind, or steps inside the composite. Blocks
-  step 6 only.
+- **Q2, settled 2026-11-18 (Jim): yes.** Re-running analyses on a finished run becomes a core job kind attached to
+  the run, with the SMS package registering the v2ecoli analysis DAG through core's extension points. This unblocks
+  step 6 once viva-api builds it.
+- **Q-config, settled 2026-11-18 (Jim): follow compose-api's manifests.** viva-core implements
+  `/environments/{id}/manifest` the way compose-api does: the image is read back when it's built or registered
+  (`pbg-interfaces/1` classes plus installed packages), and a prebuilt or older image gets its own inspection job.
+  Existing environments are **backfilled** by instantiating their containers and introspecting them; compose-api
+  does this lazily, on the first read of a ready version that lacks a read-back. The SMS package extends the
+  read-back with vEcoli's config files and analysis modules, which replaces `/api/v1/simulations/discovery`.
+  `/source` needs the same package hook. This is ask D in viva-api#1055.
 - **Q3, settled 2026-11-18 (Jim): viva-core outlives viva-api.** The viva-core adapter is long-term, not frozen,
   and the `analyses` facet and ask C are built on viva-core. Only viva-api's SMS-specific surfaces retire.
 - **Q4, settled 2026-11-18 (Jim and Alex):** compose-api will not host env workers, and viva-api's are not ported.
