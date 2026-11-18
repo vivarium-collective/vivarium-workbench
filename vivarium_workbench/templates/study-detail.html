@@ -738,11 +738,15 @@
               {% if f.evidence.smoking_gun %}<details style="display:inline-block;margin-left:4px"><summary>smoking gun</summary><pre style="white-space:pre-wrap;margin:4px 0 0 0;padding:6px 8px;background:#fff;border-radius:3px;font-size:0.85em;font-family:inherit">{{ f.evidence.smoking_gun }}</pre></details>{% endif %}
             </div>
             {% set _runids = (f.provenance or {}).run_ids %}
-            {% if f.evidence.divergence_factor is defined or _runids %}
+            {# provenance.model_version is engine-authored (finding_observations._fill_finding)
+               but was never surfaced; render it only when present (never defaulted). #}
+            {% set _mv = (f.provenance or {}).model_version %}
+            {% if f.evidence.divergence_factor is defined or _runids or _mv %}
             <div class="finding-traceability" style="font-size:0.84em;color:#475569;padding:4px 10px;margin:4px 0">
               {% if f.evidence.divergence_factor is defined %}<span class="finding-divergence" style="font-weight:600">×{{ f.evidence.divergence_factor }} vs expected</span>{% endif %}
               {% if f.evidence.divergence_factor is defined and _runids %} · {% endif %}
               {% if _runids %}runs: {% for rid in _runids %}<a href="#run-{{ rid }}"><code>{{ rid }}</code></a>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+              {% if _mv %}{% if f.evidence.divergence_factor is defined or _runids %} · {% endif %}model <code>{{ _mv }}</code>{% endif %}
             </div>
             {% endif %}
             {% set _citedtest = (study.behavior_tests or study.expected_behavior or [])|selectattr('name','equalto', _ftok)|first %}
