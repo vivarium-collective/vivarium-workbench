@@ -104,6 +104,46 @@ def _install_timeout(default: int = _INSTALL_TIMEOUT_DEFAULT) -> int:
 from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _ws_add_to_sys_path
 
 
+def _rollback_submodule(ws_root: Path, target_path: str) -> bool:
+    """Best-effort removal of a submodule *this* install added before it failed.
+
+    The git-submodule install path adds ``external/<name>`` (step 1) and only
+    then runs ``pip install -e`` (step 2). If step 2 fails, the exception used to
+    propagate straight to the 500 while the freshly-added submodule stayed on
+    disk — its top-level ``studies/`` and ``investigations/`` then showed up in
+    the dashboard exactly as if the module had installed cleanly (issue #1618,
+    bug 7: a failed install left its submodule staged, and that module's 8
+    investigations and 60 studies appeared in the Studies panel).
+
+    Undo the add: ``deinit`` the submodule, drop it from the index + working tree
+    with ``git rm`` (which also rewrites ``.gitmodules``), and clear the stashed
+    ``.git/modules/<path>`` git dir. Every step is independent and swallowed —
+    rollback must never mask the original install error. Only call this when the
+    add happened in *this* request (so a retried install over a pre-existing
+    checkout is never nuked). Returns True when the working-tree dir is gone.
+    """
+    abs_target = (ws_root / target_path).resolve()
+    timeout = _install_timeout()
+    for cmd in (
+        ["git", "submodule", "deinit", "-f", "--", target_path],
+        ["git", "rm", "-f", "--", target_path],
+    ):
+        try:
+            subprocess.run(
+                cmd, cwd=ws_root, capture_output=True,
+                encoding="utf-8", errors="replace", timeout=timeout,
+            )
+        except Exception:  # noqa: BLE001 — best-effort cleanup
+            pass
+    try:
+        shutil.rmtree(ws_root / ".git" / "modules" / target_path, ignore_errors=True)
+    except Exception:  # noqa: BLE001
+        pass
+    if abs_target.exists():
+        shutil.rmtree(abs_target, ignore_errors=True)
+    return not abs_target.exists()
+
+
 def _install_locked_deps_with_uv(
     uv_path: str,
     venv_py: Path,
@@ -259,6 +299,10 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
     catalog_entry = entry  # captured for closure
     log_holder: list[str] = []
     install_mode_holder: list[str] = []
+    #: set True once *this* call's ``git submodule add`` succeeds, so a later
+    #: failure (e.g. the editable pip install) can roll the submodule back out
+    #: instead of leaving it staged (issue #1618, bug 7).
+    submodule_added_holder: list[bool] = []
 
     def action():
         if use_pypi:
@@ -360,6 +404,9 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
                     raise RuntimeError(
                         f"submodule add failed: {(r.stderr or r.stdout)[:300]}"
                     )
+                # The add landed — remember it so a later step's failure rolls
+                # the submodule back out instead of leaving it on disk.
+                submodule_added_holder.append(True)
 
             # Step 1b: if the module ships a uv.lock it declares a pinned
             # dependency closure that may include git/path-only deps a plain
@@ -451,8 +498,16 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
     except Exception as inner:
         log_excerpt = log_holder[0] if log_holder else ""
         install_mode = install_mode_holder[0] if install_mode_holder else install_mode
+        # If this call added the submodule before failing, roll it back so a
+        # half-installed module's studies/investigations don't show up in the
+        # dashboard as if the install succeeded (issue #1618, bug 7).
+        rolled_back = False
+        if submodule_added_holder:
+            rolled_back = _rollback_submodule(ws_root, target_path)
         _invalidate_catalog_caches(ws_root)
         resp: dict = {"error": f"action failed: {inner}"}
+        if rolled_back:
+            resp["rolled_back"] = True
         # Live enriches the 500 only when log_excerpt is truthy.
         if log_excerpt:
             _ws_add_to_sys_path(ws_root)
