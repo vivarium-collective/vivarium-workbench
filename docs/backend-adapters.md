@@ -307,7 +307,7 @@ be done on its own:
     previews) have another home or are judged not worth hosting.
 - **Q5, Jim's position 2026-11-18: yes, if it is backwards compatible.** viva-core's `POST /composites` should
   accept data files with a document, as compose-api does (wb#1642). It must be strictly additive: no files means
-  today's behaviour, and support is advertised as a capability. It's ask C in the viva-api issue. Until a backend
+  today's behaviour, and support is advertised as a capability. It's ask C in viva-api#1055. Until a backend
   advertises it, the viva-core adapter refuses a run that carries files.
 - **To verify before step 2:** what the Stanford test and prod deployments advertise on `/viva/v1/capabilities`:
   `viva-v1-composites`, `viva-v1-composites-documents`, `viva-v1-environments`, `viva-v1-environments-build`.
