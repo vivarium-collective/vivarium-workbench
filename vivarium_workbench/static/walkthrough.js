@@ -7421,8 +7421,18 @@
   }
   window._installFromMarketplace = _installFromMarketplace;
 
+  // Non-blocking confirm gate: uses the shared _confirmModal when present
+  // (doesn't freeze the event loop / browser automation — #1051), and falls
+  // back to native confirm() otherwise. Always returns a Promise<bool>.
+  function _confirmGate(message) {
+    if (typeof window._confirmModal === 'function') return window._confirmModal(message);
+    return Promise.resolve(window.confirm(message));
+  }
+  window._confirmGate = _confirmGate;
+
   function _proceedWithCatalogInstall(name, opts) {
-    if (!confirm("Install '" + name + "'?\n\nThis adds a submodule, pip installs the package, and appends it to pyproject.toml. If a workstream is active the change is committed to its branch.")) return;
+    _confirmGate("Install '" + name + "'?\n\nThis adds a submodule, pip installs the package, and appends it to pyproject.toml. If a workstream is active the change is committed to its branch.").then(function (_ok) {
+    if (!_ok) return;
     var body = {name: name};
     if (opts && opts.skip_system_deps_check) body.skip_system_deps_check = true;
     if (opts && opts.full_repo) body.full_repo = true;
@@ -7481,6 +7491,7 @@
         var nm = "Network error: " + String(err);
         if (typeof _showToast === 'function') _showToast(nm, { danger: true }); else alert(nm);
       });
+    });
   }
   window._proceedWithCatalogInstall = _proceedWithCatalogInstall;
 
@@ -15222,12 +15233,14 @@
   window._vivRunStudyFromRow = function (ev, slug) {
     if (ev) ev.stopPropagation();
     if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') return;
-    if (!confirm("Run this study's current baseline spec as a new run?")) return;
-    apiFetch('POST', '/api/study-run-baseline', {study: slug}).then(function (r) { return r.json(); }).then(function (j) {
-      var id = j && (j.run_id || j.simulation_id);
-      var msg = id ? ('Run launched — ' + id) : ('Run: ' + ((j && j.error) || 'done'));
-      if (typeof _showToast === 'function') _showToast(msg); else alert(msg);
-    }).catch(function (e) { alert('Run failed: ' + e); });
+    _confirmGate("Run this study's current baseline spec as a new run?").then(function (_ok) {
+      if (!_ok) return;
+      apiFetch('POST', '/api/study-run-baseline', {study: slug}).then(function (r) { return r.json(); }).then(function (j) {
+        var id = j && (j.run_id || j.simulation_id);
+        var msg = id ? ('Run launched — ' + id) : ('Run: ' + ((j && j.error) || 'done'));
+        if (typeof _showToast === 'function') _showToast(msg); else alert(msg);
+      }).catch(function (e) { alert('Run failed: ' + e); });
+    });
   };
   // ↻ reproduce — replay a study's most recent run's recorded manifest (live
   // only). Resolves the latest run id from /api/simulations first.
