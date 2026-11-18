@@ -130,12 +130,14 @@
       return '<span style="color:#9ca3af;">—</span>';
     }
     var inferred = !!s.inferred;
+    var dirty = s.dirty === true;
     var color = inferred ? "#9ca3af" : "#374151";
     var short = s.commit_short || (s.commit ? String(s.commit).slice(0, 7) : "");
     var tip = (s.remote_url ? s.remote_url + "\n" : "") +
       (s.commit ? "commit " + s.commit : "") +
       (s.package ? "\npackage " + s.package : "") +
-      (inferred ? "\n(inferred from workspace HEAD — approximate, not the run's exact commit)" : "");
+      (inferred ? "\n(inferred from workspace HEAD — approximate, not the run's exact commit)" : "") +
+      (dirty ? "\n(uncommitted changes present at run time — this commit does not fully capture what ran)" : "");
     var commitHtml = "";
     if (short) {
       if (s.commit_url) {
@@ -151,8 +153,13 @@
     var repoHtml = s.repo
       ? '<span style="font-size:11px;color:' + color + ';">' + esc(s.repo) + "</span>" : "";
     var sep = (repoHtml && commitHtml) ? '<span style="color:#d1d5db;">@</span>' : "";
+    // A dirty-at-run-time marker: the recorded commit doesn't fully capture what
+    // ran (e.g. the study was never committed — #1618 bug 10).
+    var dirtyHtml = dirty
+      ? ' <span style="font-size:10px;color:#b45309;font-weight:600;" ' +
+        'title="uncommitted changes present at run time">+uncommitted</span>' : "";
     return '<span title="' + esc(tip) + '" style="white-space:nowrap;overflow:hidden;' +
-      'text-overflow:ellipsis;display:block;">' + prefix + repoHtml + sep + commitHtml + "</span>";
+      'text-overflow:ellipsis;display:block;">' + prefix + repoHtml + sep + commitHtml + dirtyHtml + "</span>";
   }
 
   // Config cell — the exact generator params that reproduce this run. Shows the

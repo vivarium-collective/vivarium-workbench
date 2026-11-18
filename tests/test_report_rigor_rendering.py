@@ -252,6 +252,34 @@ def test_provenance_renders_versions_when_importable():
     assert str(Path.home()) not in html
 
 
+def test_provenance_flags_uncommitted_tree(tmp_path):
+    # A git repo with an uncommitted (never-committed) file: the report's
+    # Workspace-commit row must say the commit doesn't capture the state
+    # (issue #1618, bug 10) rather than imply a clean, reproducible checkout.
+    import subprocess
+
+    def _git(*args):
+        subprocess.run(["git", *args], cwd=str(tmp_path), check=True,
+                       capture_output=True, text=True)
+    _git("init")
+    _git("config", "user.email", "t@t")
+    _git("config", "user.name", "t")
+    (tmp_path / "README.md").write_text("x")
+    _git("add", "-A")
+    _git("commit", "-m", "init")
+
+    info = _provenance_info(tmp_path)
+    assert info.get("workspace_dirty") is False
+    assert "uncommitted" not in _render_provenance(info)
+
+    # Now leave an uncommitted study on disk.
+    (tmp_path / "studies").mkdir()
+    (tmp_path / "studies" / "s1.yaml").write_text("name: s1\n")
+    info = _provenance_info(tmp_path)
+    assert info.get("workspace_dirty") is True
+    assert "uncommitted changes" in _render_provenance(info)
+
+
 # ---------------------------------------------------------------------------
 # End-to-end: the rendered report carries the new sections
 # ---------------------------------------------------------------------------
