@@ -102,19 +102,44 @@ def test_study_group_update_not_found_404(tmp_path):
 
 
 def test_study_delete_happy(tmp_path):
-    # study-delete was a pure alias of investigation-delete (both →
-    # delete_investigation); the alias was removed, so a study is deleted via the
-    # canonical route with its slug.
+    # A study is deleted via the dedicated /api/study-delete route. (It used to
+    # go through /api/investigation-delete, which relied on that route resolving
+    # studies/ first — the data-loss bug fixed in #1618, bug 11.)
     ws, slug = _study_ws(tmp_path)
-    r = _client(ws).post("/api/investigation-delete", json={"name": slug})
+    r = _client(ws).post("/api/study-delete", json={"name": slug})
     assert r.status_code == 200
     assert not (ws / "studies" / slug).exists()
 
 
 def test_study_delete_unknown_404(tmp_path):
     ws, _ = _study_ws(tmp_path)
-    r = _client(ws).post("/api/investigation-delete", json={"name": "ghost"})
+    r = _client(ws).post("/api/study-delete", json={"name": "ghost"})
     assert r.status_code == 404
+
+
+def test_investigation_delete_does_not_touch_same_named_study(tmp_path):
+    """Regression for #1618 bug 11: deleting investigation ``foo`` must not
+    remove a study also named ``foo`` (investigation-delete used to resolve
+    studies/ first)."""
+    ws, slug = _study_ws(tmp_path)           # studies/<slug>/
+    inv = ws / "investigations" / slug
+    inv.mkdir(parents=True)
+    (inv / "investigation.yaml").write_text("name: " + slug + "\n")
+    r = _client(ws).post("/api/investigation-delete", json={"name": slug})
+    assert r.status_code == 200
+    assert not inv.exists()                   # investigation gone
+    assert (ws / "studies" / slug).exists()   # study untouched
+
+
+def test_study_delete_refuses_investigation_409(tmp_path):
+    """/api/study-delete must not delete an investigation that shares no study."""
+    ws, _ = _study_ws(tmp_path)
+    inv = ws / "investigations" / "inv-only"
+    inv.mkdir(parents=True)
+    (inv / "investigation.yaml").write_text("name: inv-only\n")
+    r = _client(ws).post("/api/study-delete", json={"name": "inv-only"})
+    assert r.status_code == 409
+    assert inv.exists()
 
 
 def test_study_patch_empty_400(tmp_path):

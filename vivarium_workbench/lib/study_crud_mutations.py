@@ -16,12 +16,18 @@ Batch 19 of the FastAPI strangler-fig migration (POST phase, Phase C).
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from pathlib import Path
 
 import yaml
 
 from vivarium_workbench.lib import study_spec as _study_spec_lib
 from vivarium_workbench.lib.path_safety import plain_name
+from vivarium_workbench.lib.yaml_roundtrip import load_yaml_preserving
+
+# Status vocabulary the study-detail finding cards render (glyph + color):
+# confirms (✓) / partial (◐) / contradicts (✗) / novel (◆). Default: novel.
+_FINDING_STATUSES = frozenset({"confirms", "partial", "contradicts", "novel"})
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +176,85 @@ def study_variant_set_params(ws_root: Path, body: dict) -> tuple[dict, int]:
 
 
 # ---------------------------------------------------------------------------
+# Finding builders — write to study.yaml `findings[]` (the list the study page
+# renders), NOT the node-store `/api/finding` graph model. Blocker B of #1618:
+# findings/conclusions had no GUI; this backs an authoring form on the Decide
+# tab.
+# ---------------------------------------------------------------------------
+
+def study_finding_add(ws_root: Path, body: dict) -> tuple[dict, int]:
+    """Append a finding to study.yaml ``findings[]``. Returns (response, code).
+
+    Body:
+      study or investigation: <study name>
+      statement:              <the finding text> (required)
+      status:                 confirms | partial | contradicts | novel
+                              (optional; defaults to "novel")
+      kind:                   <free label> (optional; defaults to "observation")
+      explanation:            <why / mechanism> (optional)
+
+    The written entry is the minimal shape the study-detail finding card
+    renders: ``{id, statement, status, kind, explanation?}``. A generated
+    ``id`` (``f<hex>``) lets the card anchor and lets ``study-finding-delete``
+    target it.
+    """
+    study = _study_name_from_body(body)
+    statement = (body.get("statement") or "").strip()
+    status = (body.get("status") or "novel").strip() or "novel"
+    kind = (body.get("kind") or "observation").strip() or "observation"
+    explanation = (body.get("explanation") or "").strip()
+    if not study:
+        return {"error": "missing study"}, 400
+    if not statement:
+        return {"error": "statement is required"}, 400
+    if status not in _FINDING_STATUSES:
+        return {"error": f"status must be one of {sorted(_FINDING_STATUSES)}"}, 400
+
+    study_dir = _study_spec_lib.study_dir(ws_root, study)
+    sf = _study_spec_lib.study_spec_file(study_dir)
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    findings = spec.setdefault("findings", [])
+    if not isinstance(findings, list):
+        return {"error": "study.yaml findings is not a list"}, 422
+    fid = "f" + uuid.uuid4().hex[:8]
+    entry: dict = {"id": fid, "statement": statement, "status": status, "kind": kind}
+    if explanation:
+        entry["explanation"] = explanation
+    findings.append(entry)
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return {"ok": True, "id": fid}, 200
+
+
+def study_finding_delete(ws_root: Path, body: dict) -> tuple[dict, int]:
+    """Remove a finding from study.yaml ``findings[]`` by id. (response, code).
+
+    Body: ``{study|investigation, id}``. 404 when no finding has that id.
+    """
+    study = _study_name_from_body(body)
+    fid = (body.get("id") or "").strip()
+    if not study or not fid:
+        return {"error": "missing study or finding id"}, 400
+
+    study_dir = _study_spec_lib.study_dir(ws_root, study)
+    sf = _study_spec_lib.study_spec_file(study_dir)
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    findings = spec.get("findings") or []
+    remaining = [f for f in findings
+                 if not (isinstance(f, dict) and f.get("id") == fid)]
+    if len(remaining) == len(findings):
+        return {"error": f"finding {fid!r} not found"}, 404
+    spec["findings"] = remaining
+    sf.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return {"ok": True}, 200
+
+
+# ---------------------------------------------------------------------------
 # Baseline builders
 # ---------------------------------------------------------------------------
 
@@ -202,7 +287,9 @@ def study_baseline_add(ws_root: Path, body: dict) -> tuple[dict, int]:
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    # Comment-preserving round-trip so pointing a study at a composite from the
+    # GUI doesn't strip the scaffold's guide comments (issue #1618, #7).
+    spec, dump = load_yaml_preserving(sf.read_text(encoding="utf-8"))
     if _v4_baseline_not_yet_materialized(spec):
         return {
             "error": "This study's baseline is defined under conditions.baseline "
@@ -215,7 +302,7 @@ def study_baseline_add(ws_root: Path, body: dict) -> tuple[dict, int]:
     if any(b.get("name") == entry_name for b in baseline if isinstance(b, dict)):
         return {"error": f"baseline entry {entry_name!r} already exists"}, 409
     baseline.append({"name": entry_name, "composite": composite, "params": params or {}})
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+    sf.write_text(dump(spec), encoding="utf-8")
     return {"ok": True, "name": entry_name}, 200
 
 
@@ -239,7 +326,8 @@ def study_baseline_remove(ws_root: Path, body: dict) -> tuple[dict, int]:
     if not sf.is_file():
         return {"error": "study not found"}, 404
 
-    spec = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    # Comment-preserving round-trip (issue #1618, #7).
+    spec, dump = load_yaml_preserving(sf.read_text(encoding="utf-8"))
     if _v4_baseline_not_yet_materialized(spec):
         return {
             "error": "This study's baseline is defined under conditions.baseline "
@@ -270,8 +358,66 @@ def study_baseline_remove(ws_root: Path, body: dict) -> tuple[dict, int]:
         return {"error": "cannot leave baseline empty"}, 400
 
     spec["baseline"] = remaining
-    sf.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+    sf.write_text(dump(spec), encoding="utf-8")
     return {"ok": True}, 200
+
+
+def study_baseline_set(ws_root: Path, body: dict) -> tuple[dict, int]:
+    """Repoint an existing baseline entry IN PLACE, preserving its name.
+
+    POST /api/study-baseline-set. Body:
+      study:     <name>
+      name:      <existing baseline entry name>
+      composite: <pkg.composites.x>   (optional; unchanged when absent)
+      params:    <dict>               (optional; replaced when present)
+
+    Unlike the add-then-remove dance the frontend used to perform — which
+    renamed the entry to ``<name>-<timestamp-suffix>`` to dodge the add's 409
+    and the remove's "can't leave baseline empty" 400 — this updates the
+    entry's ``composite`` / ``params`` WITHOUT changing its ``name``, so a
+    study keeps a stable, legible baseline name after a model change (issue
+    #1618, blocker A). Comment-preserving round-trip (#7).
+
+    404 when the named entry doesn't exist; 422 for an unmaterialized v4
+    conditions.baseline (same as add/remove).
+    """
+    study = (body.get("study") or body.get("investigation") or "").strip()
+    entry_name = (body.get("name") or "").strip()
+    composite = (body.get("composite") or "").strip()
+    params = body.get("params")
+    if not study:
+        return {"error": "missing study"}, 400
+    if not entry_name:
+        return {"error": "missing baseline entry name"}, 400
+    if params is not None and not isinstance(params, dict):
+        return {"error": "params must be an object"}, 400
+
+    study_dir = _study_spec_lib.study_dir(ws_root, study)
+    sf = _study_spec_lib.study_spec_file(study_dir)
+    if not sf.is_file():
+        return {"error": "study not found"}, 404
+
+    spec, dump = load_yaml_preserving(sf.read_text(encoding="utf-8"))
+    if _v4_baseline_not_yet_materialized(spec):
+        return {
+            "error": "This study's baseline is defined under conditions.baseline "
+                     "(v4 format) and has never been saved as a standalone "
+                     "baseline[] entry. Edit conditions.baseline.params directly.",
+        }, 422
+    baseline = spec.get("baseline") or []
+    entry = next(
+        (b for b in baseline
+         if isinstance(b, dict) and b.get("name") == entry_name),
+        None,
+    )
+    if entry is None:
+        return {"error": f"baseline entry {entry_name!r} not found"}, 404
+    if composite:
+        entry["composite"] = composite
+    if params is not None:
+        entry["params"] = params
+    sf.write_text(dump(spec), encoding="utf-8")
+    return {"ok": True, "name": entry_name}, 200
 
 
 # ---------------------------------------------------------------------------

@@ -351,9 +351,12 @@ def test_needs_attention_is_a_compact_toolbar_chip():
     assert 'id="aig-needs-attention-chip"' in TPL
     i = JS.index("function _renderInvNeedsAttention")
     body = JS[i: JS.index("window._renderInvNeedsAttention", i)]
-    # All-clear renders a small "✓ All clear" chip — not the old full-width green
-    # "✓ Nothing needs attention" banner.
-    assert "aig-na-clear" in body and "All clear" in body
+    # All-clear renders a small chip — not the old full-width green
+    # "✓ Nothing needs attention" banner. The clear/quiet label + class now come
+    # from the honest _naQuietState helper (which yields "✓ All clear"/aig-na-clear
+    # only when a study actually ran — issue #1618, bug 3).
+    assert "_naQuietState(d.summary)" in body
+    assert "aig-na-clear" in JS and "All clear" in JS
     assert "Nothing needs attention" not in body     # old big all-clear banner gone
     # Needs state is a clickable chip that opens the detail list (in a popover —
     # the single surface; the old in-body banner is gone).

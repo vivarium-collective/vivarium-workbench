@@ -307,13 +307,17 @@ class TestBuildGitStatus:
         }
         assert expected_keys.issubset(result.keys())
 
-    def test_dirty_count_zero_no_origin(self, repo: Path) -> None:
-        """Without an origin remote, build_git_status returns early before
-        computing dirty_count (matches original _get_git_status behaviour)."""
+    def test_dirty_count_counts_files_without_origin(self, repo: Path) -> None:
+        """A local-only workspace (no origin remote) still reports its
+        uncommitted files. Regression for issue #1618 bug 6: build_git_status
+        used to return early on the missing-origin check, before dirty_count
+        was computed, so the "Commit all" panel never appeared for an un-pushed
+        workspace (dirty_count: 0 with files uncommitted)."""
         (repo / "dirty.txt").write_text("change\n")
         result = gs.build_git_status(repo)
-        # Returns early after origin check fails → dirty_count stays at default 0
-        assert result["dirty_count"] == 0
+        assert result["upstream_repo"] is None       # still no origin
+        assert result["push_state"] == "no_origin"
+        assert result["dirty_count"] >= 1             # but files are counted now
 
 
 # ---------------------------------------------------------------------------

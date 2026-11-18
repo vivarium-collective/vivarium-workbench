@@ -308,7 +308,14 @@
       + ".disc-cons.simulation,.disc-cons.simulationstudy{background:#dbeafe;color:#1e40af}"
       + ".disc-cons.review{background:#fef3c7;color:#92400e}"
       + ".disc-cons.humanonly{background:#f3e8ff;color:#6b21a8}"
-      + ".disc-cmd{font-family:ui-monospace,Menlo,monospace;font-size:0.8em;color:#475569;background:#f8fafc;padding:1px 6px;border-radius:5px;word-break:break-all}";
+      + ".disc-cmd{font-family:ui-monospace,Menlo,monospace;font-size:0.8em;color:#475569;background:#f8fafc;padding:1px 6px;border-radius:5px;word-break:break-all}"
+      + ".disc-note{font-size:0.85em;color:#475569;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:7px 10px;margin:8px 0 4px;line-height:1.45}"
+      + ".disc-note code{font-family:ui-monospace,Menlo,monospace;font-size:0.92em;background:#eef2f7;padding:0 4px;border-radius:4px}"
+      + ".disc-det{margin:2px 0 6px}"
+      + ".disc-det>summary{cursor:pointer;color:#2563eb;font-size:0.84em;padding:3px 0;list-style:none;user-select:none}"
+      + ".disc-det>summary::-webkit-details-marker{display:none}"
+      + ".disc-det>summary::before{content:'\\25b8 ';color:#94a3b8}"
+      + ".disc-det[open]>summary::before{content:'\\25be '}";
     var el = document.createElement("style"); el.id = "disc-style"; el.textContent = css;
     document.head.appendChild(el);
   }
@@ -333,34 +340,73 @@
     if (diag.validator_pass_rate != null) chips.push('<span class="disc-chip">validator pass ' + Math.round(diag.validator_pass_rate * 100) + "%</span>");
     H.push('<div class="disc-chips">' + chips.join("") + "</div>");
     var opps = d.opportunities || [];
-    if (opps.length) {
-      H.push('<div class="disc-sub">Most valuable to investigate</div>');
-      H.push('<table class="disc-tbl"><thead><tr><th>score</th><th>action</th><th>target</th></tr></thead><tbody>');
-      opps.slice(0, 8).forEach(function (o) {
-        H.push('<tr><td class="sc">' + _esc(_num(o.score)) + "</td><td>" + _esc(o.action)
-          + "</td><td>" + _esc(_strip(o.source)) + "</td></tr>");
-      });
-      H.push("</tbody></table>");
-    }
     var plan = d.execution_plan || [];
-    if (plan && plan.length) {
-      H.push('<div class="disc-sub">Decide — the next action &amp; how it runs (gated)</div>');
-      H.push('<table class="disc-tbl"><thead><tr><th>action</th><th>target</th><th>consequence</th><th>command</th></tr></thead><tbody>');
-      plan.slice(0, 8).forEach(function (p) {
-        var cons = String(p.consequence || "").replace(/[^a-z]/g, "");
-        H.push("<tr><td>" + _esc(p.action) + "</td><td>" + _esc(_strip(p.source))
-          + '</td><td><span class="disc-cons ' + cons + '">' + _esc(p.consequence) + "</span></td><td>"
-          + (p.command ? '<span class="disc-cmd">' + _esc(p.command) + "</span>" : "—") + "</td></tr>");
-      });
-      H.push("</tbody></table>");
-    }
     var sugg = (d.suggestions || []).filter(function (s) { return s.status === "awaiting_expert"; });
-    if (sugg.length) {
-      H.push('<div class="disc-sub">Suggested studies (awaiting expert input)</div><ul class="ag-list">');
-      sugg.slice(0, 6).forEach(function (s) {
-        H.push("<li>on <b>" + _esc(s.parent) + "</b>: " + _esc(String(s.needs || "").slice(0, 130)) + "</li>");
+
+    // The suggestions list carries the real signal when the value-ranking is
+    // flat — each suggestion has a distinct rationale. Shared by both branches.
+    function _pushSuggestions(heading, limit, needsLen) {
+      if (!sugg.length) return;
+      H.push('<div class="disc-sub">' + heading + '</div><ul class="ag-list">');
+      sugg.slice(0, limit).forEach(function (s) {
+        H.push("<li>on <b>" + _esc(s.parent) + "</b>: " + _esc(String(s.needs || "").slice(0, needsLen)) + "</li>");
       });
       H.push("</ul>");
+    }
+
+    // Degeneracy guard: when every opportunity scores the same, the
+    // "value-ranked" table ranks nothing (no argument-graph edges → downstream
+    // impact is 0 for all; the engine itself flags `argument_disconnected`).
+    // Presenting identical scores as a ranking — and repeating the same study
+    // list across "Most valuable" and "Decide" — is noise, so summarize instead.
+    var _sc = opps.map(function (o) { return Number(o.score); })
+                  .filter(function (x) { return isFinite(x); });
+    var _hasVariance = _sc.length > 1 && (Math.max.apply(null, _sc) - Math.min.apply(null, _sc) > 1e-9);
+    var degenerate = opps.length > 1 && !_hasVariance;
+
+    if (degenerate) {
+      _pushSuggestions("Suggested next studies", 8, 180);   // lead with the real signal
+      var n = opps.length;
+      H.push('<div class="disc-note">ⓘ No priority ranking yet — '
+        + n + " " + (n === 1 ? "study is" : "studies are")
+        + " ready to re-test, but none outranks another: the argument graph has no "
+        + "epistemic edges, so downstream impact is 0 for all. Add relations "
+        + "(<code>discover relate</code> or the investigation graph) to get a real ranking.</div>");
+      // Ready studies + run commands behind a disclosure — merges the old
+      // redundant "Most valuable" + "Decide" tables into one actionable list.
+      var rows = (plan && plan.length) ? plan : opps;
+      if (rows.length) {
+        H.push('<details class="disc-det"><summary>show ' + rows.length + " ready "
+          + (rows.length === 1 ? "study" : "studies") + "</summary>");
+        H.push('<table class="disc-tbl"><thead><tr><th>study</th><th>run</th></tr></thead><tbody>');
+        rows.slice(0, 20).forEach(function (p) {
+          var cmd = p.command ? '<span class="disc-cmd">' + _esc(p.command) + "</span>" : "—";
+          H.push("<tr><td>" + _esc(_strip(p.source || p.target || p.action)) + "</td><td>" + cmd + "</td></tr>");
+        });
+        H.push("</tbody></table></details>");
+      }
+    } else {
+      if (opps.length) {
+        H.push('<div class="disc-sub">Most valuable to investigate</div>');
+        H.push('<table class="disc-tbl"><thead><tr><th>score</th><th>action</th><th>target</th></tr></thead><tbody>');
+        opps.slice(0, 8).forEach(function (o) {
+          H.push('<tr><td class="sc">' + _esc(_num(o.score)) + "</td><td>" + _esc(o.action)
+            + "</td><td>" + _esc(_strip(o.source)) + "</td></tr>");
+        });
+        H.push("</tbody></table>");
+      }
+      if (plan && plan.length) {
+        H.push('<div class="disc-sub">Decide — the next action &amp; how it runs (gated)</div>');
+        H.push('<table class="disc-tbl"><thead><tr><th>action</th><th>target</th><th>consequence</th><th>command</th></tr></thead><tbody>');
+        plan.slice(0, 8).forEach(function (p) {
+          var cons = String(p.consequence || "").replace(/[^a-z]/g, "");
+          H.push("<tr><td>" + _esc(p.action) + "</td><td>" + _esc(_strip(p.source))
+            + '</td><td><span class="disc-cons ' + cons + '">' + _esc(p.consequence) + "</span></td><td>"
+            + (p.command ? '<span class="disc-cmd">' + _esc(p.command) + "</span>" : "—") + "</td></tr>");
+        });
+        H.push("</tbody></table>");
+      }
+      _pushSuggestions("Suggested studies (awaiting expert input)", 6, 130);
     }
     H.push("</div>");
     host.innerHTML = H.join("");

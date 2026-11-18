@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vivarium-workbench"
-version = "0.5.3"
+version = "0.5.4"
 description = "Web-based workbench for Vivarium / process-bigraph workspaces"
 authors = [{name = "Vivarium Collective", email = "team@vivarium-collective.org"}]
 requires-python = ">=3.11"
@@ -124,7 +124,7 @@ dependencies = [
     # `discovery_engine` (see root_packages + import-linter below). Pinned to a
     # PyPI semver range, not git branch=main, so installs are coherent and bumps
     # are visible Renovate PRs rather than silent commit drift.
-    "viva-discovery-engine>=0.3,<0.4",
+    "viva-discovery-engine>=0.3,<0.7",
     # viva-superpowers requires viva-basic-processes, which is not yet on
     # PyPI. Declare it BARE here and supply the git URL via [tool.uv.sources]
     # below — NOT as an inline `pkg @ git+...` direct reference. A baked-in
@@ -192,9 +192,12 @@ vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 # the URL OUT of the published metadata so it never conflicts with the bare
 # requirement from pbg-superpowers.
 [tool.uv.sources]
-# viva-discovery-engine: resolves from PyPI (>=0.2,<0.3 -> 0.2.1). The AI-drivable
-# generation contract (emit/apply/runner) and the consistent_with_zero evidence
-# grading (DE #43) are published there.
+# viva-discovery-engine: resolves from PyPI (>=0.3,<0.7 -> 0.6.0). The AI-drivable
+# generation contract (emit/apply/runner), the consistent_with_zero evidence
+# grading (DE #43), and the 0.4-0.6 additions (generative cycle, engine-native
+# CLI verbs, linkage_index relocation, versioned EvidenceSnapshot) are published
+# there. 0.3->0.6 is additive: no discovery_engine modules deleted or renamed
+# (the subpackage reorg already landed in 0.3.0), full suite shows no regression.
 # viva-superpowers: sourced from git (NOT PyPI 0.22.0) because only main has
 # migrated off pbg-emitters onto viva-emitters>=0.2.3 — the whole point of this
 # change. Pinned to a REV, not `branch = "main"`, matching the deliberate choice

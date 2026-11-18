@@ -335,6 +335,10 @@ def _source_from_manifest(manifest_json: str | None) -> dict | None:
         # flag it so the UI shows it as approximate, same as the read-time
         # inferred fallback.
         "inferred": bool(cv.get("backfilled")),
+        # True when the workspace tree was dirty at launch: the recorded commit
+        # does not fully capture what ran (issue #1618, bug 10). None = unknown
+        # (legacy manifest written before dirty was tracked).
+        "dirty": cv.get("git_dirty"),
     }
 
 
@@ -358,6 +362,8 @@ def _inferred_workspace_source(workspace) -> dict | None:
         "commit_url": _commit_url(ident.get("remote_url"), commit),
         "package": None,
         "inferred": True,
+        # The workspace's CURRENT tree state (this is the current-HEAD fallback).
+        "dirty": ident.get("dirty"),
     }
 
 

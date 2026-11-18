@@ -1588,11 +1588,50 @@
     // .cond-block elements' data-model-composite attributes below, and
     // _loadModelConfig still populates them off-screen (harmless), so nothing
     // downstream breaks. NOTE: the "Set composite" (repoint study.baseline)
-    // authoring action lives only here; it can be re-surfaced behind an explicit
-    // edit affordance if a study needs to change its model from this tab.
+    // authoring action lives only here, so it is re-surfaced behind an explicit
+    // "Change model" toggle below (issue #1618, blocker A) — without it a study
+    // created in the GUI could never be pointed at a model from the GUI.
     var modelSection = document.getElementById('model-section');
     if (modelSection) modelSection.style.display = 'none';
     mount.innerHTML = '';
+    // Issue #1618, blocker A — re-surface the model-set control. The registry-
+    // fed composite <select> + "Set composite" button live inside #model-section
+    // (hidden just above as redundant with the loom cards); a toggle reveals it
+    // so the user can point the study at a real composite from this tab. The
+    // affordance is always offered, since a fresh "+ Study" scaffold starts on
+    // the placeholder composite and MUST be repointed before it can run.
+    if (modelSection) {
+      // A fresh "+ Study" scaffold starts on the placeholder composite; detect
+      // it so the control reads "Choose a model" (and opens on its own) rather
+      // than "Change model" — the "next step" prompt the issue asks for.
+      var _isPlaceholder = order.indexOf('replace_me.composites.placeholder') !== -1;
+      var _editToggle = document.createElement('button');
+      _editToggle.type = 'button';
+      _editToggle.className = 'action-btn';
+      _editToggle.style.cssText = 'font-size:0.82em;margin:0 0 10px' +
+        (_isPlaceholder ? ';font-weight:600' : '');
+      var _editToggleLabel = function (open) {
+        _editToggle.textContent = open
+          ? '✕ Done'
+          : (_isPlaceholder ? '➕ Choose a model' : '✎ Change model');
+      };
+      var _openPicker = function () {
+        modelSection.style.display = '';
+        _editToggleLabel(true);
+        if (typeof _populateBaselineCompositeSelects === 'function') {
+          try { _populateBaselineCompositeSelects(); } catch (e) {}
+        }
+      };
+      _editToggleLabel(false);
+      _editToggle.addEventListener('click', function () {
+        if (modelSection.style.display === 'none') { _openPicker(); }
+        else { modelSection.style.display = 'none'; _editToggleLabel(false); }
+      });
+      mount.appendChild(_editToggle);
+      // Surface the picker immediately when there is no real model yet, so a
+      // newly-created study lands on "Choose a model" without hunting (#1618).
+      if (_isPlaceholder) _openPicker();
+    }
     // The study's ONE canonical config (source of truth) — the vEcoli config both
     // model arms derive from (study.config, else three_arm.native_config, surfaced
     // by the template as data-study-config). Render it ONCE for the whole study so
@@ -1784,22 +1823,21 @@
     if (!editedKeys.length) { status.textContent = 'No changes to save.'; return; }
     var composite = btn.dataset.composite;
     var oldName = btn.dataset.baselineName;
-    var newName = oldName + '-' + Date.now().toString(36);
     btn.disabled = true;
     status.textContent = 'Saving…';
-    api('POST', '/api/study-baseline-add', {study: studyName(), name: newName, composite: composite, params: merged})
-      .then(function (addResult) {
-        if (addResult.status !== 200) throw addResult;
-        return api('POST', '/api/study-baseline-remove', {study: studyName(), name: oldName});
-      })
+    // In-place repoint preserves the baseline entry's name (issue #1618): the
+    // old add(<name>-<suffix>)+remove(<name>) swap renamed the baseline on
+    // every edit. study-baseline-set updates composite/params under the same
+    // name in one call.
+    api('POST', '/api/study-baseline-set', {study: studyName(), name: oldName, composite: composite, params: merged})
       .then(function (r) {
         if (r.status === 200) { location.reload(); return; }
         btn.disabled = false;
         status.textContent = 'Error: ' + (r.body && r.body.error || r.status);
       })
-      .catch(function (addResult) {
+      .catch(function (err) {
         btn.disabled = false;
-        status.textContent = 'Error: ' + (addResult.body && addResult.body.error || addResult.status);
+        status.textContent = 'Error: ' + (err.body && err.body.error || err.status);
       });
   }
 
@@ -2225,6 +2263,71 @@
   }
 
   function studyName() { return window._studyName; }
+
+  // --- Variants & findings authoring (issue #1618, blocker B) ---
+  // Inline onsubmit handlers resolve against global scope, so these are exposed
+  // on window. Each posts to an existing (variant) or new (finding) endpoint and
+  // reloads so the server-rendered lists/cards refresh.
+  function _submitStudyVariantAdd(form) {
+    var status = form.parentNode.querySelector('.study-variant-add-status');
+    var name = (form.name && form.name.value || '').trim();
+    var base = (form.base_composite && form.base_composite.value || '').trim();
+    var ovrRaw = (form.overrides && form.overrides.value || '').trim();
+    if (!name) { if (status) status.textContent = 'Name required.'; return false; }
+    var overrides = {};
+    if (ovrRaw) {
+      try { overrides = JSON.parse(ovrRaw); }
+      catch (e) { if (status) status.textContent = 'Overrides must be valid JSON (e.g. {"k": 2}).'; return false; }
+      if (typeof overrides !== 'object' || Array.isArray(overrides)) {
+        if (status) status.textContent = 'Overrides must be a JSON object.'; return false;
+      }
+    }
+    if (status) status.textContent = 'Adding…';
+    api('POST', '/api/study-variant-add',
+        {study: studyName(), name: name, base_composite: base, parameter_overrides: overrides})
+      .then(function (r) {
+        if (r.status === 200) { location.reload(); return; }
+        if (status) status.textContent = 'Error: ' + (r.body && r.body.error || r.status);
+      })
+      .catch(function (err) { if (status) status.textContent = 'Error: ' + (err.body && err.body.error || err.status); });
+    return false;
+  }
+  window._submitStudyVariantAdd = _submitStudyVariantAdd;
+
+  function _submitStudyInterventionAdd(form) {
+    var status = form.parentNode.querySelector('.study-intervention-add-status');
+    var name = (form.name && form.name.value || '').trim();
+    var description = (form.description && form.description.value || '').trim();
+    if (!name) { if (status) status.textContent = 'Name required.'; return false; }
+    if (status) status.textContent = 'Adding…';
+    api('POST', '/api/study-intervention-add',
+        {study: studyName(), name: name, description: description})
+      .then(function (r) {
+        if (r.status === 200) { location.reload(); return; }
+        if (status) status.textContent = 'Error: ' + (r.body && r.body.error || r.status);
+      })
+      .catch(function (err) { if (status) status.textContent = 'Error: ' + (err.body && err.body.error || err.status); });
+    return false;
+  }
+  window._submitStudyInterventionAdd = _submitStudyInterventionAdd;
+
+  function _submitStudyFindingAdd(form) {
+    var status = form.parentNode.querySelector('.study-finding-add-status');
+    var statement = (form.statement && form.statement.value || '').trim();
+    var st = (form.status && form.status.value || 'novel').trim();
+    var explanation = (form.explanation && form.explanation.value || '').trim();
+    if (!statement) { if (status) status.textContent = 'Statement required.'; return false; }
+    if (status) status.textContent = 'Adding…';
+    api('POST', '/api/study-finding-add',
+        {study: studyName(), statement: statement, status: st, explanation: explanation})
+      .then(function (r) {
+        if (r.status === 200) { location.reload(); return; }
+        if (status) status.textContent = 'Error: ' + (r.body && r.body.error || r.status);
+      })
+      .catch(function (err) { if (status) status.textContent = 'Error: ' + (err.body && err.body.error || err.status); });
+    return false;
+  }
+  window._submitStudyFindingAdd = _submitStudyFindingAdd;
 
   // --- Analyses (Model tab) ---
   // Reuses /api/study-set-analyses (lib.metadata_mutations.set_investigation_analyses,
@@ -3421,28 +3524,27 @@
   })();
 
   // btn-delete has class "btn-delete danger" — selector ".btn-delete" still matches.
-  // Handler _post_investigation_delete uses body key "name".
+  // Deletes THIS study via /api/study-delete. Previously this reused
+  // /api/investigation-delete and relied on that route resolving studies/
+  // first; investigation-delete is now investigations-only (issue #1618,
+  // bug 11), so the study page uses the dedicated study-delete route.
   bindAll('.btn-delete', function(btn) {
     // Guard: only the header delete button has data-study; variant/run deletes
     // use different class names so this handler won't fire for those.
     if (!btn.dataset.study) return;
     if (!confirm('Delete this study and all its runs?')) return;
-    api('POST', '/api/investigation-delete', {name: studyName()})
+    api('POST', '/api/study-delete', {name: studyName()})
       .then(function() { window.location = (window.__BASE_PATH__ || '') + '/studies'; });
   });
 
   // --- Baseline ---
-  // Replace a baseline entry's composite ref: add-then-remove against the
-  // existing (previously orphaned) endpoints, since there's no single
-  // "replace" route. Order matters — study_baseline_remove refuses to leave
-  // baseline[] empty (400), which a single-entry study (e.g. a fresh "+
-  // Study" blank scaffold) always is; adding the replacement under a new
-  // name FIRST means baseline[] never goes empty, then the old entry is
-  // removed. The replacement keeps the original name only when it wasn't
-  // already used (i.e. removal isn't blocked); otherwise it's suffixed to
-  // avoid the add's own "already exists" 409. Params are dropped on
-  // replace — a fresh composite ref starts from its own defaults, matching
-  // what "+ Study" itself does.
+  // Repoint a baseline entry's composite ref IN PLACE, preserving its name
+  // (issue #1618, blocker A). The old flow added a <name>-<timestamp> entry
+  // then removed the original — a dance forced only by the lack of a single
+  // "replace" route, which left every repointed study with a suffixed baseline
+  // name in the UI. study-baseline-set updates the entry under the same name.
+  // Params reset to {} — a fresh composite ref starts from its own defaults,
+  // matching what "+ Study" itself does.
   bindAll('.baseline-composite-set', function(btn) {
     var name = btn.dataset.baselineName;
     var input = document.querySelector('.baseline-composite-input[data-baseline-name="' + name + '"]');
@@ -3450,18 +3552,58 @@
     var composite = input ? input.value.trim() : '';
     if (!composite) { if (status) status.textContent = 'Enter a composite ref first.'; return; }
     if (status) status.textContent = 'Setting…';
-    var newName = name + '-' + Date.now().toString(36);
-    api('POST', '/api/study-baseline-add', {study: studyName(), name: newName, composite: composite, params: {}})
-      .then(function (addResult) {
-        if (addResult.status !== 200) throw addResult;
-        return api('POST', '/api/study-baseline-remove', {study: studyName(), name: name});
-      })
+    api('POST', '/api/study-baseline-set', {study: studyName(), name: name, composite: composite, params: {}})
       .then(function (r) {
         if (r.status === 200) location.reload();
         else if (status) status.textContent = 'Error: ' + (r.body && r.body.error || r.status);
       })
-      .catch(function (addResult) {
-        if (status) status.textContent = 'Error: ' + (addResult.body && addResult.body.error || addResult.status);
+      .catch(function (err) {
+        if (status) status.textContent = 'Error: ' + (err.body && err.body.error || err.status);
+      });
+  });
+
+  // --- Variants & findings (issue #1618, blocker B) ---
+  bindAll('.study-variant-del', function(btn) {
+    var variant = btn.dataset.variant;
+    if (!confirm('Delete variant “' + variant + '”?')) return;
+    api('POST', '/api/study-variant-delete', {study: studyName(), variant: variant})
+      .then(function (r) {
+        if (r.status === 200) location.reload();
+        else alert('Error: ' + (r.body && r.body.error || r.status));
+      });
+  });
+  bindAll('.study-variant-run', function(btn) {
+    var variant = btn.dataset.variant;
+    btn.disabled = true;
+    var prev = btn.textContent;
+    btn.textContent = 'Running…';
+    api('POST', '/api/study-run-variant', {study: studyName(), variant: variant})
+      .then(function (r) {
+        if (r.status === 200) { location.reload(); return; }
+        btn.disabled = false; btn.textContent = prev;
+        alert('Error: ' + (r.body && r.body.error || r.status));
+      })
+      .catch(function (err) {
+        btn.disabled = false; btn.textContent = prev;
+        alert('Error: ' + (err.body && err.body.error || err.status));
+      });
+  });
+  bindAll('.study-finding-del', function(btn) {
+    var id = btn.dataset.id;
+    if (!confirm('Delete this finding?')) return;
+    api('POST', '/api/study-finding-delete', {study: studyName(), id: id})
+      .then(function (r) {
+        if (r.status === 200) location.reload();
+        else alert('Error: ' + (r.body && r.body.error || r.status));
+      });
+  });
+  bindAll('.study-intervention-del', function(btn) {
+    var name = btn.dataset.name;
+    if (!confirm('Delete intervention “' + name + '”?')) return;
+    api('POST', '/api/study-intervention-delete', {study: studyName(), name: name})
+      .then(function (r) {
+        if (r.status === 200) location.reload();
+        else alert('Error: ' + (r.body && r.body.error || r.status));
       });
   });
 

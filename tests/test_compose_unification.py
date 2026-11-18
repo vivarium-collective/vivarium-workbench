@@ -115,11 +115,13 @@ def test_save_study_analyses_posts_to_the_working_endpoint():
 
 def test_baseline_composite_replace_control_present_and_wired():
     # Regression: the pre-unification "+ Add baseline" form (_submitBaselineAdd)
-    # was removed from this template, leaving its JS handler and the
-    # /api/study-baseline-add /-remove endpoints orphaned — no UI path could
-    # ever set/replace a study's composite ref once created (e.g. to fix the
-    # "+ Study" blank scaffold's placeholder ref). This control reuses those
-    # existing, working endpoints instead of adding a new one.
+    # was removed from this template, leaving no UI path to set/replace a study's
+    # composite ref once created (e.g. to fix the "+ Study" blank scaffold's
+    # placeholder ref). This control repoints the baseline in place via the
+    # dedicated /api/study-baseline-set endpoint — an atomic update that
+    # preserves the entry's name. (It replaced an earlier remove-then-add pass,
+    # which could not work on a single-entry study: study_baseline_remove
+    # refuses to leave baseline[] empty, so the remove failed on the first call.)
     p = _panel_compose()
     assert 'class="baseline-composite-input"' in p
     assert 'class="action-btn baseline-composite-set"' in p
@@ -127,10 +129,6 @@ def test_baseline_composite_replace_control_present_and_wired():
     js = (ROOT / "vivarium_workbench/static/study-detail.js").read_text()
     i = js.index("baseline-composite-set", js.index("bindAll"))
     block = js[i:i + 1200]
-    assert "/api/study-baseline-remove" in block
-    assert "/api/study-baseline-add" in block
-    # Regression: add MUST come before remove. study_baseline_remove refuses
-    # to leave baseline[] empty (400) — a single-entry study (the common
-    # case, e.g. a fresh "+ Study" blank scaffold) always has exactly one
-    # entry, so remove-then-add always fails on the very first call.
-    assert block.index("/api/study-baseline-add") < block.index("/api/study-baseline-remove")
+    assert "/api/study-baseline-set" in block
+    # The fragile remove-then-add pair must be gone.
+    assert "/api/study-baseline-remove" not in block

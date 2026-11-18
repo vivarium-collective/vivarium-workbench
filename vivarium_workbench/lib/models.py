@@ -1523,6 +1523,32 @@ class StudyVariantDeleteBody(BaseModel):
     variant: Optional[str] = None
 
 
+class StudyFindingAddBody(BaseModel):
+    """POST /api/study-finding-add
+
+    {study|investigation, statement, status?, kind?, explanation?}
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    statement: Optional[str] = None
+    status: Optional[str] = None
+    kind: Optional[str] = None
+    explanation: Optional[str] = None
+
+
+class StudyFindingDeleteBody(BaseModel):
+    """POST /api/study-finding-delete {study|investigation, id}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    id: Optional[str] = None
+
+
 class StudyVariantSetParamsBody(BaseModel):
     """POST /api/study-variant-set-params {name|study|investigation, variant, parameter_overrides}"""
 
@@ -1537,6 +1563,21 @@ class StudyVariantSetParamsBody(BaseModel):
 
 class StudyBaselineAddBody(BaseModel):
     """POST /api/study-baseline-add {study|investigation, name, composite, params?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+    composite: Optional[str] = None
+    params: Optional[dict] = None
+
+
+class StudyBaselineSetBody(BaseModel):
+    """POST /api/study-baseline-set {study|investigation, name, composite?, params?}
+
+    In-place repoint of an existing baseline entry (preserves its name).
+    """
 
     model_config = ConfigDict(extra="allow")
 
@@ -2047,6 +2088,16 @@ class IsetCloneBody(BaseModel):
 
 class InvestigationDeleteBody(BaseModel):
     """POST /api/investigation-delete {name} (also accepts study / investigation aliases)"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+
+
+class StudyDeleteBody(BaseModel):
+    """POST /api/study-delete {name} (also accepts study / investigation aliases)"""
 
     model_config = ConfigDict(extra="allow")
 

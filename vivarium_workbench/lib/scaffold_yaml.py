@@ -27,6 +27,7 @@ def v4_study_scaffold(
     composite: str | None = None,
     baseline_name: str | None = None,
     created: str | None = None,
+    question: str | None = None,
 ) -> str:
     """Return the text body for a new studies/<name>/study.yaml file.
 
@@ -45,6 +46,10 @@ def v4_study_scaffold(
         baseline_name: short name for the baseline entry (defaults to
             "baseline").
         created: optional ISO-8601 date string (defaults to today).
+        question: optional free-text research question (from the "+ Study"
+            dialog). When given, it is written as a live top-level ``question:``
+            block scalar so it persists and renders; when absent the section
+            stays a commented placeholder.
     """
     created = created or datetime.date.today().isoformat()
     bname = baseline_name or "baseline"
@@ -80,6 +85,18 @@ def v4_study_scaffold(
             f"    params: {{}}\n"
         )
 
+    # The question typed into the "+ Study" dialog is the one framing field a
+    # new user supplies up front, so persist it as LIVE top-level YAML (not a
+    # commented placeholder) — it renders at the top of the study page and the
+    # card's `question` reads it. Previously the dialog's value was dropped
+    # (issue #1618, bug 1): study_create ignored it and the scaffold only ever
+    # emitted `# ★ question:` as a comment. Multi-line text stays a block scalar.
+    if question and question.strip():
+        q_indent = "\n".join("  " + ln for ln in question.strip().splitlines())
+        question_block = f"question: |\n{q_indent}\n\n"
+    else:
+        question_block = ""
+
     return f"""\
 # {name}/study.yaml — schema v4
 #
@@ -102,7 +119,7 @@ execution_status: planned      # two-axis ontology: proposed | planned | running
 # verdict:                     # supported | qualified | inconclusive | refuted — set once completed
 phase: Design
 
-# study_type: standard             # critique #10 — exploratory | confirmatory |
+{question_block}# study_type: standard             # critique #10 — exploratory | confirmatory |
 #                                   # diagnostic | adversarial | standard. Default
 #                                   # (unset) = standard; `kind: adversarial` still
 #                                   # works as an alias. Shapes how rigor credits the

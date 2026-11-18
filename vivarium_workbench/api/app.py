@@ -226,8 +226,11 @@ from vivarium_workbench.lib.models import (
     # Batch 19: request-body models for study CRUD
     StudyVariantAddBody,
     StudyVariantDeleteBody,
+    StudyFindingAddBody,
+    StudyFindingDeleteBody,
     StudyVariantSetParamsBody,
     StudyBaselineAddBody,
+    StudyBaselineSetBody,
     StudyBaselineRemoveBody,
     StudyInterventionAddBody,
     StudyInterventionUpdateBody,
@@ -245,6 +248,7 @@ from vivarium_workbench.lib.models import (
     InvestigationCreateRequest,
     IsetCloneBody,
     InvestigationDeleteBody,
+    StudyDeleteBody,
     # Batch 22: request-body models for investigation comparison & group mutations
     InvestigationComparisonAddBody,
     InvestigationComparisonUpdateBody,
@@ -4941,6 +4945,42 @@ def create_app() -> FastAPI:
         return body
 
     @app.post(
+        "/api/study-finding-add",
+        tags=["Studies"],
+        summary="Append a finding to study.yaml findings[]",
+    )
+    def study_finding_add(
+        req: StudyFindingAddBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Record a finding on the study (the list the study page renders).
+
+        Body: ``{study|investigation, statement, status?, kind?, explanation?}``
+        """
+        body, status = _study_crud_mut.study_finding_add(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-finding-delete",
+        tags=["Studies"],
+        summary="Remove a finding from study.yaml findings[] by id",
+    )
+    def study_finding_delete(
+        req: StudyFindingDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Delete a finding by id.
+
+        Body: ``{study|investigation, id}``
+        """
+        body, status = _study_crud_mut.study_finding_delete(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
         "/api/study-baseline-add",
         tags=["Studies"],
         summary="Append a composite to study.yaml baseline[]",
@@ -4954,6 +4994,26 @@ def create_app() -> FastAPI:
         Body: ``{study|investigation, name, composite, params?}``
         """
         body, status = _study_crud_mut.study_baseline_add(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-baseline-set",
+        tags=["Studies"],
+        summary="Repoint an existing baseline entry in place (preserves its name)",
+    )
+    def study_baseline_set(
+        req: StudyBaselineSetBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Update a baseline entry's composite/params without renaming it.
+
+        Body: ``{study|investigation, name, composite?, params?}``
+        404 if the named entry doesn't exist. Replaces the frontend's old
+        add-then-remove swap that suffixed the baseline name (issue #1618).
+        """
+        body, status = _study_crud_mut.study_baseline_set(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
@@ -5309,6 +5369,27 @@ def create_app() -> FastAPI:
         directly (git commit deferred to the flip/state batch).
         """
         body, status = _scaffold_mut.delete_investigation(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/study-delete",
+        tags=["Studies"],
+        summary="Delete a study directory (no git commit on the FastAPI path)",
+    )
+    def study_delete(
+        req: StudyDeleteBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Remove a study directory (pure rmtree, no git commit).
+
+        Body: ``{name}`` (also accepts ``study`` / ``investigation`` aliases).
+        Resolves the target as a study (studies/ first); refuses an
+        investigation (409). 400 when name is missing; 404 when the study
+        directory does not exist; 200 ``{ok: true, name}`` on success.
+        """
+        body, status = _scaffold_mut.delete_study(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
