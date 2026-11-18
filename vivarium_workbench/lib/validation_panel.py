@@ -5,6 +5,8 @@ recomputed via ``run_validators`` and nothing is persisted.
 """
 from __future__ import annotations
 
+from vivarium_workbench.lib.cycle_cache import cached_run_cycle
+
 _STATUSES = ("passed", "failed", "inconclusive", "error")
 
 
@@ -24,7 +26,7 @@ def build_validation_panel(ws_root, inv_slug: str) -> "dict | None":
         )
 
         _, inv_spec, studies = discover.load_cycle_inputs(ws_root, inv_slug)
-        cyc = discover.run_cycle(inv_spec, studies)
+        cyc = cached_run_cycle(discover, inv_spec, studies)
         records = cyc.get("validations") or []
 
         census = {s: 0 for s in _STATUSES}
