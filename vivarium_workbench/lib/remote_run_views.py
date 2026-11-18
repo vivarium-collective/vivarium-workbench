@@ -615,7 +615,9 @@ def remote_run_land_artifacts(ws_root: Path, body: dict) -> tuple[dict, int]:
     (a GovCloud run that isn't investigation-organized, so it has no study spec
     to land into). Downloads the sim's result tar and folds ``analyses.json`` +
     copies ``ptools/*.tsv`` into ``.pbg/runs/<run_id>/``, so the Analyses button
-    resolves and the run shows in the PTools Omics Viewer's run menu.
+    resolves. The TSVs stay in the run folder, which the Pathway Tools viewer does
+    not read (it globs study directories; the workbench never serves ``.pbg``): to
+    view a run there, land it into a study (``remote_run_land``).
 
     This is the "land on demand" endpoint the Runs-table remote-row actions call.
     Body: ``{simulation_id, run_id}``. Idempotent.

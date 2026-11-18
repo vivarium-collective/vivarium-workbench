@@ -592,3 +592,87 @@ def test_land_ptools_tsvs_noop_when_none_present(tmp_path: Path):
 
     assert land_ptools_tsvs(extract_root, ws_root, "r2") == 0
     assert not (ws_root / ".pbg" / "runs" / "r2" / "ptools").exists()
+
+
+# ---------------------------------------------------------------------------
+# PTools exports of a run landed INTO A STUDY must be viewable: the Pathway Tools
+# plugin (pbg-ptools) discovers ``<study>/**/ptools/*.tsv`` only, and the
+# workbench never serves a dot-segment (``.pbg``), so the Pathway Tools server
+# could not fetch a TSV from ``.pbg/runs/<run_id>/ptools/`` over HTTP either.
+# Found by the 2026-11-18 test-stack proof (simulation 2087 landed from the hosted
+# workbench: 12 TSVs in .pbg/runs/<id>/ptools, none offered by the viewer).
+# ---------------------------------------------------------------------------
+
+
+def _make_remote_zarr_tar_with_ptools(tmp_path: Path, names: tuple[str, ...]) -> Path:
+    """A landed tar whose analysis output carries ``ptools/*.tsv`` exports."""
+    staging = tmp_path / "staging_ptools"
+    part = staging / "seed_00" / "store.zarr" / "experiment_id=exp-seed00"
+    part.mkdir(parents=True)
+    (part / ".zgroup").write_text('{"zarr_format":2}')
+    pt = staging / "analyses" / "analysis-exp-ab12" / "ptools"
+    pt.mkdir(parents=True)
+    for name in names:
+        (pt / name).write_text("id\tt0\nb0001\t1.0\n")
+    tar_path = tmp_path / "sim_with_ptools.tar.gz"
+    with tarfile.open(tar_path, "w:gz") as tar:
+        tar.add(staging, arcname=".")
+    return tar_path
+
+
+def test_land_into_a_study_puts_ptools_tsvs_where_the_viewer_finds_and_serves_them(tmp_path: Path):
+    """The Pathway Tools viewer globs ``<study>/**/ptools/*.tsv`` and its server
+    fetches the file over HTTP from the workbench, which refuses any ``.pbg`` path:
+    so a study landing must ALSO leave the TSVs inside the study directory."""
+    from vivarium_workbench.lib.static_serving import is_servable
+
+    ws_root = tmp_path / "workspace"
+    study = ws_root / "studies" / "s"
+    study.mkdir(parents=True)
+    names = ("ptools_rna__variant=0_seed=0.tsv", "ptools_proteins__variant=0_seed=0.tsv")
+    tar = _make_remote_zarr_tar_with_ptools(tmp_path, names)
+
+    run_id = land_remote_run(
+        study, spec_id="s", simulation_id=2087, experiment_id="sim-2087-s", commit="c",
+        tar_path=tar, ws_root=ws_root,
+    )
+
+    # What pbg-ptools globs (its on-disk contract): found under the study dir.
+    found = sorted(study.glob("**/ptools/*.tsv"))
+    assert [p.name for p in found] == sorted(names)
+    # ... under the landed run's own folder, so two landed runs never collide.
+    assert all(p.parent == study / "sim-2087-s" / "ptools" for p in found)
+    # ... at a path the workbench will actually serve to the Pathway Tools server.
+    assert all(is_servable(p.relative_to(ws_root).as_posix()) for p in found)
+    # The run-folder copy stays (the Analyses/Runs artifacts still read it) but it is NOT servable:
+    # this is why the study copy is needed, not a convenience.
+    kept = ws_root / ".pbg" / "runs" / run_id / "ptools" / names[0]
+    assert kept.is_file()
+    assert not is_servable(kept.relative_to(ws_root).as_posix())
+
+
+def test_land_into_a_study_without_ptools_exports_creates_no_ptools_dir(tmp_path: Path):
+    ws_root = tmp_path / "workspace"
+    study = ws_root / "studies" / "s"
+    study.mkdir(parents=True)
+    tar = _make_remote_zarr_tar(tmp_path)
+
+    land_remote_run(
+        study, spec_id="s", simulation_id=2088, experiment_id="sim-2088-s", commit="c",
+        tar_path=tar, ws_root=ws_root,
+    )
+
+    assert not list(study.glob("**/ptools"))
+
+
+def test_land_without_ws_root_does_not_land_ptools_anywhere(tmp_path: Path):
+    """ws_root stays the switch for artifact landing: callers that omit it are unaffected."""
+    study = tmp_path / "study"
+    study.mkdir()
+    tar = _make_remote_zarr_tar_with_ptools(tmp_path, ("ptools_rna__variant=0_seed=0.tsv",))
+
+    land_remote_run(
+        study, spec_id="s", simulation_id=2089, experiment_id="sim-2089-s", commit="c", tar_path=tar,
+    )
+
+    assert not list(study.glob("**/ptools"))
