@@ -84,6 +84,40 @@ def test_git_repo_identity_non_repo(tmp_path):
     ident = cr.git_repo_identity(d)
     assert ident["git_sha"] is None
     assert ident["repo"] == "plain"           # still names the dir
+    assert ident["dirty"] is None             # unknown — not a git repo
+
+
+def test_git_repo_identity_reports_dirty(tmp_path):
+    ws = tmp_path / "ws"
+    _make_repo(ws)
+    # Clean right after commit.
+    assert cr.git_repo_identity(ws)["dirty"] is False
+    # An uncommitted (untracked) file — the #1618 bug 10 case: a study dir that
+    # was never committed means HEAD doesn't capture what would run.
+    (ws / "studies").mkdir()
+    (ws / "studies" / "s1.yaml").write_text("name: s1\n")
+    assert cr.git_repo_identity(ws)["dirty"] is True
+
+
+def test_manifest_code_version_records_dirty(tmp_path):
+    ws = tmp_path / "ws"
+    _make_repo(ws)
+    (ws / "uncommitted.txt").write_text("x")  # dirty the tree
+    m = cr.build_run_manifest(
+        spec_id="pkg.demo", params={}, n_steps=1, emitter=None,
+        emit_paths=[], runtime={}, origin="local", ws_root=ws,
+    )
+    assert m["code_version"]["git_dirty"] is True
+
+
+def test_source_from_manifest_surfaces_dirty():
+    src = si._source_from_manifest(json.dumps({"code_version": {
+        "git_sha": "a" * 40, "repo": "demo", "git_dirty": True}}))
+    assert src["dirty"] is True
+    # Legacy manifest without the key → unknown (None), never a false "clean".
+    legacy = si._source_from_manifest(json.dumps({"code_version": {
+        "git_sha": "a" * 40, "repo": "demo"}}))
+    assert legacy["dirty"] is None
 
 
 # --- manifest records repo + commit ----------------------------------------

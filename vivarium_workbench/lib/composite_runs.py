@@ -212,7 +212,7 @@ def git_repo_identity(ws_root) -> dict:
     remote it falls back to the checkout directory name so the column still
     shows *something* identifying for a local-only workspace.
     """
-    out: dict = {"git_sha": None, "repo": None, "remote_url": None}
+    out: dict = {"git_sha": None, "repo": None, "remote_url": None, "dirty": None}
     if ws_root is None:
         return out
     import subprocess
@@ -227,6 +227,18 @@ def git_repo_identity(ws_root) -> dict:
             capture_output=True, text=True, check=True, timeout=5,
         ).stdout.strip()
         out["git_sha"] = sha or None
+    except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
+        pass
+    # Whether the working tree is dirty at launch. `--porcelain` lists both
+    # modified-tracked AND untracked paths, so a study that was never committed
+    # (the exact #1618 bug 10 case) makes this True: the recorded git_sha does
+    # NOT fully capture what ran. None when git is absent / not a repo.
+    try:
+        status = subprocess.run(
+            ["git", "-C", str(ws_root), "status", "--porcelain"],
+            capture_output=True, text=True, check=True, timeout=5,
+        ).stdout
+        out["dirty"] = bool(status.strip())
     except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
         pass
     try:
@@ -370,6 +382,10 @@ def build_run_manifest(*, spec_id, params, n_steps, emitter, emit_paths,
         "generation_id": generation_id,
         "code_version": {
             "git_sha": git_sha,
+            # Whether the workspace tree was dirty at launch. True means the
+            # recorded git_sha does NOT fully capture what ran — e.g. the study
+            # was never committed (issue #1618, bug 10). None when not a git repo.
+            "git_dirty": repo.get("dirty"),
             "package": pkg_version,
             # Repo identity of the workspace checkout the run launched from
             # (source-provenance). ``repo`` is a short human name (remote
