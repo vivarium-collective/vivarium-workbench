@@ -51,13 +51,15 @@ The code is not shipped. `GET /registry/entries` and `GET /registry/environments
 4. No registry entry has the repository: the same as 3, with no entry. compose-api admits a document by its classes,
    each under its own registry entry, not by the repository it came from. So a workspace that composes other entries'
    classes, as viva-multiscale-nfkb composes viva-tellurium's, viva-maboss's, viva-pde-particle's and
-   viva-basic-processes', needs no entry of its own. A class no entry provides is refused by compose-api, in its own
-   words. The preflight answers `reason: inferred` with `registry_entry: null`. A workspace whose own classes should
-   run on compose-api still needs an entry, added by a compose-api pull request (below). A workspace with no git
-   `origin` is a **409** (`no-remote`): name its environment with step 1.
+   viva-basic-processes', needs no entry of its own. Each class runs its own entry's pinned code, not the checkout.
+   compose-api refuses a class no entry provides, in its own words, except when it sends the run to a prebuilt image
+   that covers the document's other classes: it does not look up a prebuilt image's own classes, so such a class
+   fails there at import instead. The preflight answers `reason: inferred` with `registry_entry: null`. A workspace
+   whose own classes should run on compose-api still needs an entry, added by a compose-api pull request (below). A
+   workspace with no git `origin` is run the same way.
 
-The run uses the environment, not the checkout: the prebuilt image, or the environment built from the entry's pinned
-commit. When the entry pins a `commit` and HEAD is another commit, the submit answers with a `warning`. A landed run records the environment version it ran in (`compose.environment_version`, such
+The run uses the environment, not the checkout: the prebuilt image, or the environment built from the pinned commits
+of the registry entries its classes belong to. When the entry pins a `commit` and HEAD is another commit, the submit answers with a `warning`. A landed run records the environment version it ran in (`compose.environment_version`, such
 as `viva-pde-particle@2`, read from the run's own record) and that version's image digest as `code_version.image`.
 A run from before versions has no version, and its image is resolved from the simulator name.
 A study run keeps that record in its params. A Composites-tab run's params are the composite's inputs, which a re-run
@@ -142,9 +144,10 @@ As compose-api's maintainer described it on 2026-10-29 (biosimulations/compose-a
 3. **Or no image at all.** When no ready environment covers the classes a document names, compose-api composes a
    `mash-up` from the registry entries (cached by its entry set) for a signed-in caller, and writes its own runner
    into the image. This workbench uses it: a workspace whose entry has no prebuilt environment is submitted with no
-   `environment=` (see "Which environment runs the workspace"). So a workspace needs one reviewed `manifest.yaml`
-   entry and nothing else, and compose-api runs its classes only when that entry is at level `tested` or higher
-   (the header of compose-api's `registry/manifest.yaml`).
+   `environment=` (see "Which environment runs the workspace"). So a workspace whose own classes should run needs
+   one reviewed `manifest.yaml` entry for them and nothing else, and compose-api runs them only when that entry is at
+   level `tested` or higher (the header of compose-api's `registry/manifest.yaml`). A workspace that only composes
+   registered classes needs no entry.
 
 ## Tests
 

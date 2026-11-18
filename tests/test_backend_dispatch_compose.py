@@ -905,14 +905,30 @@ def test_a_repository_no_entry_has_resolves_to_an_inferred_environment(ws, stub,
     assert env == {"name": None, "simulator": None, "image": None, "entry": None, "module_roots": [], "stale": False}
 
 
-def test_a_workspace_with_no_git_origin_is_still_refused(ws, stub, backend_env):
-    """Inference needs no entry, but the workbench still matches a prebuilt one by origin first, so a workspace with
-    no origin is asked to name its environment."""
+def test_a_workspace_with_no_git_origin_is_inferred_too(ws, stub, backend_env):
+    """Inference needs no entry, so it needs no origin to match one: a local-only workspace runs the same way."""
     _live_registry(stub)
     _name(backend_env, stub.url, environment=None)
-    with rc._session() as session, pytest.raises(rc.ComposeDispatchError) as refused:
-        rc.resolve_environment(session, ws)
-    assert refused.value.status == 409 and refused.value.body["reason"] == "no-remote"
+    with rc._session() as session:
+        env = rc.resolve_environment(session, ws)
+    assert (env["name"], env["entry"]) == (None, None)
+
+
+def test_a_class_compose_api_refuses_is_shown_for_a_workspace_no_entry_has(ws, stub, backend_env, dashboard_client):
+    """The claim this path rests on: with no entry, compose-api is the one that decides each class, and its refusal
+    reaches the user in its own words."""
+    _live_registry(stub)
+    _with_origin(ws, "git@github.com:someone/unregistered.git")
+    _name(backend_env, stub.url, environment=None)
+    detail = {"message": "the composite names processes this service will not run",
+              "violations": [{"document": "demo.pbg", "address": "local:pbg_ws_increase_demo.Increase",
+                              "reason": "module `pbg_ws_increase_demo` is not provided by any registered simulator",
+                              "always_rejected": False}]}
+    stub.respond("POST", "/simulation/run", 400, {"detail": detail})
+    res = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
+    assert res.status_code == 409 and res.json()["reason"] == "refused", res.text
+    assert "module `pbg_ws_increase_demo` is not provided by any registered simulator" in res.json()["error"]
+    assert len(stub.calls_to("run-simulation")) == 1
 
 
 def test_the_preflight_for_a_workspace_no_entry_has_says_it_needs_none(ws, stub, backend_env, dashboard_client):

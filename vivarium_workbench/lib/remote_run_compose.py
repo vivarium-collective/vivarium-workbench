@@ -146,11 +146,12 @@ def resolve_environment(session: "ComposeSession", ws_root: Path) -> dict:
     An entry with no prebuilt environment has ``name`` None: the run names none and compose-api chooses one that covers
     the document's classes, or builds one from the registry for a signed-in caller. ``GET /registry/entries`` does not
     say whether an entry can be composed, so the service decides, and its refusal is shown as it gives it.
-    A repository no registry entry has is run the same way, with ``entry`` None as well. compose-api admits a document
-    by its classes, each under a registered entry, not by where it came from, so a workspace that composes other
-    entries' classes needs no entry of its own. A class no entry provides is refused by the service, in its own words.
-    Raises :class:`ComposeDispatchError` (409) for a named environment compose-api lacks, or a workspace with no git
-    origin.
+    A repository no registry entry has, or a workspace with no git origin, is run the same way, with ``entry`` None.
+    compose-api admits a document by its classes, each under a registered entry, not by where it came from, so a
+    workspace that composes other entries' classes needs no entry of its own. compose-api decides each class: it
+    refuses one no entry provides, except when it sends the run to a prebuilt image that covers the document's other
+    classes, whose own classes it does not look up.
+    Raises :class:`ComposeDispatchError` (409) for a named environment compose-api lacks.
     """
     from vivarium_workbench.lib.env_compat import get_env
 
@@ -170,13 +171,8 @@ def resolve_environment(session: "ComposeSession", ws_root: Path) -> dict:
                 "module_roots": _module_roots(entries, name), "stale": bool(env.stale)}
 
     origin = _origin(ws_root)
-    if not origin:
-        raise ComposeDispatchError({
-            "error": "this workspace has no git origin, so compose-api's registry cannot be matched to it; set "
-                     "VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT=name:<environment>",
-            "reason": "no-remote"}, 409)
-    repo = _canonical_repo(origin)
-    entry = next((x for x in entries if x.source and _canonical_repo(x.source) == repo), None)
+    repo = _canonical_repo(origin) if origin else None
+    entry = next((x for x in entries if repo and x.source and _canonical_repo(x.source) == repo), None)
     prebuilt = [environments[b] for b in (entry.bundles or [])
                 if b in environments and environments[b].kind == "prebuilt" and environments[b].simulator] if entry else []
     if not prebuilt:
@@ -470,7 +466,8 @@ def _dispatch(session: "ComposeSession", ws_root: Path, composite_id: str, param
 def dispatch_preflight(ws_root: Path) -> dict:
     """``/api/remote-dispatch-preflight`` on compose-api: ``{target, dispatch, ok, reason, message, environment?}``,
     ready when a prebuilt environment runs this workspace, or (``reason`` ``inferred``) when compose-api will choose or
-    build one (:func:`resolve_environment`); its reason when no registry entry has the workspace's repository."""
+    build one (:func:`resolve_environment`), whether or not a registry entry has the workspace's repository; its
+    reason when a named environment does not exist."""
     from compose_api_client.ext import CliError
 
     out: dict = {"target": "deployment", "dispatch": BACKEND}
@@ -488,7 +485,8 @@ def dispatch_preflight(ws_root: Path) -> dict:
         which = (f"compose-api has no prebuilt environment for this workspace (registry entry {entry.id!r}, "
                  f"level {level})" if entry else
                  "No registry entry has this workspace's repository, and none is needed when its composite uses "
-                 "registered classes: compose-api admits each class under its own registry entry")
+                 "registered classes: compose-api admits each class under its own registry entry and runs that "
+                 "entry's pinned code, not this checkout")
         return {**out, "ok": True, "reason": "inferred", "environment": None,
                 "registry_entry": entry.id if entry else None, "registry_level": level, "signed_in": signed_in,
                 "message": f"{which}. It runs the composite in an environment that covers its classes, or builds "
@@ -502,8 +500,8 @@ def dispatch_preflight(ws_root: Path) -> dict:
 
 def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
     """``POST /simulation/run`` for a study's composite. ``({run_id, phase: "running", backend}, 202)``; 400 for a
-    step count compose-api does not run, 401 for a first run that needs a signed-in caller, 409 when no registry entry
-    has the workspace's repository, a class is not in its environment, or compose-api refuses the run (its words are
+    step count compose-api does not run, 401 for a first run that needs a signed-in caller, 409 when a named
+    environment does not exist, a class is not in its environment, or compose-api refuses the run (its words are
     shown), 422 for a composite that cannot be exported, 502 when compose-api cannot be reached or failed (never
     retried: a retry could submit twice, or start a second environment build; a submission whose answer was lost is
     looked up by its dispatch tag)."""
