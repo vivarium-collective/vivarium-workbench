@@ -452,7 +452,13 @@ def catalog_install(ws_root: Path, body: dict) -> tuple[dict, int]:
                 "path": f"external/{name}",
                 "description": catalog_entry.get("description", ""),
                 "installed": True,
-                "install_path": str(abs_target),
+                # Workspace-RELATIVE, not the absolute on-disk path: workspace.yaml
+                # is committed, so a machine-specific "/Users/…/external/<name>"
+                # would leak the author's home dir and break on every other
+                # checkout (issue #1618, bug 5). install_path is only ever
+                # displayed/carried, never resolved as a filesystem path, and the
+                # workspace self-module already uses a relative install_path.
+                "install_path": target_path,
                 "package": package_name,
             }
             _workspace_yaml.save_workspace(ws_file, ws)

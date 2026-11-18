@@ -228,6 +228,10 @@ class TestGitSubmoduleInstall:
         assert saved["imports"]["foo"]["path"] == "external/foo"
         assert saved["imports"]["foo"]["package"] == "pbg_foo"
         assert saved["imports"]["foo"]["installed"] is True
+        # install_path is workspace-RELATIVE — committing an absolute on-disk path
+        # would leak the author's home dir and break other checkouts (#1618 bug 5).
+        assert saved["imports"]["foo"]["install_path"] == "external/foo"
+        assert not Path(saved["imports"]["foo"]["install_path"]).is_absolute()
 
     def test_full_repo_forces_git_path_over_pypi(self, tmp_path, monkeypatch):
         # Catalog entry has BOTH pypi_name and a git source. Without

@@ -169,6 +169,12 @@ def import_install(ws_root: Path, body: dict) -> tuple[dict, int]:
     if not target:
         return {"error": "no install target — set 'path' in import or pass 'target' in body"}, 400
 
+    # Keep the original workspace-RELATIVE target (or URL) for workspace.yaml:
+    # that file is committed, so persisting the absolute on-disk path below would
+    # leak the author's home dir and break on every other checkout (issue #1618,
+    # bug 5). The absolute path is only needed for the pip subprocess.
+    rel_target = target
+
     # Resolve path relative to workspace (unless it's a URL/VCS spec).
     if not target.startswith(("http://", "https://", "git+")):
         abs_target = (ws_root / target).resolve()
@@ -221,7 +227,7 @@ def import_install(ws_root: Path, body: dict) -> tuple[dict, int]:
     # Mark installed in workspace.yaml. The live handler wraps this in
     # ``_active_branch_action``; here the commit is DEFERRED — run the mutation
     # inline, then invalidate the registry cache and return success directly.
-    install_target = target
+    install_target = rel_target  # relative/URL, not the absolute on-disk path (#1618 bug 5)
     _ws_add_to_sys_path(ws_root)
     ws_file = ws_root / "workspace.yaml"
     ws = _workspace_yaml.load_workspace(ws_file)

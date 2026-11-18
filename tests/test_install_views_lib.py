@@ -312,10 +312,11 @@ class TestImportInstall:
         assert cleared["n"] == 1
 
         # The workspace.yaml mutation ran inline (deferred commit): the import is
-        # now marked installed=True with the resolved absolute install_path.
+        # now marked installed=True with the workspace-RELATIVE install_path
+        # (not the absolute on-disk path — workspace.yaml is committed, #1618 bug 5).
         saved = yaml.safe_load((tmp_path / "workspace.yaml").read_text())
         assert saved["imports"]["foo"]["installed"] is True
-        assert saved["imports"]["foo"]["install_path"] == str(pkg)
+        assert saved["imports"]["foo"]["install_path"] == "pkg"
 
     def test_target_override_beats_entry_path(self, tmp_path, monkeypatch):
         pkg = tmp_path / "override"
@@ -337,9 +338,11 @@ class TestImportInstall:
 
         body, status = views.import_install(tmp_path, {"name": "foo", "target": "override"})
         assert status == 200
+        # pip still gets the absolute path…
         assert str(pkg) in captured["cmd"]
+        # …but workspace.yaml records the relative target (#1618 bug 5).
         saved = yaml.safe_load((tmp_path / "workspace.yaml").read_text())
-        assert saved["imports"]["foo"]["install_path"] == str(pkg)
+        assert saved["imports"]["foo"]["install_path"] == "override"
 
     def test_url_target_skips_path_resolution(self, tmp_path, monkeypatch):
         (tmp_path / ".venv" / "bin").mkdir(parents=True)
