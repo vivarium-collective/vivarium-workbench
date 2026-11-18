@@ -486,7 +486,8 @@
 
   // Land-on-demand for a remote run: POST /api/remote-run-land-artifacts (fold
   // analyses.json + copy ptools/*.tsv into .pbg/runs/<run_id>/), then refresh so
-  // ⬇ Analyses resolves and the run appears in the PTools viewer. Same delegated,
+  // ⬇ Analyses resolves (the PTools viewer reads study folders only: landing into a
+  // study, remote-run-land, is what makes a run viewable there). Same delegated,
   // capture-phase, read-id-from-<tr> idiom as ↻ Rerun above.
   function _landRemote(runId, simId, btn) {
     if (!runId || simId == null || simId === "") return;

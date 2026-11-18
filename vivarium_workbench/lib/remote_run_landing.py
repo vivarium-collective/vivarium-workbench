@@ -42,6 +42,7 @@ import zipfile
 from pathlib import Path
 
 from vivarium_workbench.lib import composite_runs as cr
+from vivarium_workbench.lib.path_safety import is_plain_name
 
 
 def _is_root_pber(name: str) -> bool:
@@ -199,32 +200,46 @@ def fold_analyses(extract_root: Path, ws_root: Path, run_id: str) -> None:
     (run_dir / "analyses.json").write_text(json.dumps(entries, indent=2), encoding="utf-8")
 
 
-def land_ptools_tsvs(extract_root: Path, ws_root: Path, run_id: str) -> int:
+def land_ptools_tsvs(
+    extract_root: Path, ws_root: Path, run_id: str, study_dest: "Path | None" = None
+) -> int:
     """Copy any PTools TSV exports (``**/ptools/*.tsv``) out of a landed remote-run
-    tar into ``<ws>/.pbg/runs/<run_id>/ptools/``, so the PTools Omics Viewer
-    discovers this run the same way it discovers a local study's exports
-    (v2ecoli.workbench_viewers._ptools_targets globs ``**/ptools/*.tsv``). Without
-    this, a GovCloud run's ptools TSVs — present in the tar our backend-aware
-    ``/results`` route streams — would be extracted to a temp dir and discarded
-    with everything but ``analyses.json``.
+    tar into ``<ws>/.pbg/runs/<run_id>/ptools/`` (the run's own artifacts), and, when
+    ``study_dest`` is given, ALSO into ``<study_dest>/ptools/``. Without this, a
+    GovCloud run's ptools TSVs — present in the tar our backend-aware ``/results``
+    route streams — would be extracted to a temp dir and discarded with everything
+    but ``analyses.json``.
 
-    Returns the number of TSVs landed. Best-effort / idempotent (overwrites); the
-    caller wraps it so a copy failure never fails an otherwise-completed run.
+    Why the study copy: the Pathway Tools plugin (pbg-ptools) discovers
+    ``<study>/**/ptools/*.tsv`` only, and its server fetches each TSV over HTTP from
+    this workbench, which never serves a dot-segment such as ``.pbg``
+    (``static_serving.is_servable``). The run-folder copy is therefore invisible to
+    the viewer and unreachable for it; a landing INTO A STUDY leaves the exports
+    under the study directory, in the run's own subfolder so two landed runs never
+    collide.
+
+    Returns the number of TSVs landed in the run folder. Best-effort / idempotent
+    (overwrites); a copy failure is skipped, never raised, so an otherwise-completed
+    run still lands.
     """
     tsvs = sorted(extract_root.glob("**/ptools/*.tsv"))
     if not tsvs:
         return 0
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
-    dest = WorkspacePaths.load(ws_root).pbg / "runs" / run_id / "ptools"
-    dest.mkdir(parents=True, exist_ok=True)
+    dests = [WorkspacePaths.load(ws_root).pbg / "runs" / run_id / "ptools"]
+    if study_dest is not None:
+        dests.append(Path(study_dest) / "ptools")
     n = 0
-    for src in tsvs:
-        try:
-            shutil.copy2(src, dest / src.name)
-            n += 1
-        except OSError:
-            continue
+    for i, dest in enumerate(dests):
+        dest.mkdir(parents=True, exist_ok=True)
+        for src in tsvs:
+            try:
+                shutil.copy2(src, dest / src.name)
+                if i == 0:
+                    n += 1
+            except OSError:
+                continue
     return n
 
 
@@ -237,8 +252,10 @@ def land_remote_simulation_artifacts(ws_root: Path, simulation_id: int, run_id: 
     the same helpers the study-shaped and composite paths use.
 
     This is the "land on demand" backend: after it runs, the Analyses artifact
-    (``.pbg/runs/<run_id>/analyses.json``) resolves and the run appears in the
-    PTools Omics Viewer's run menu (``_ptools_targets`` globs ``.pbg/runs/*``).
+    (``.pbg/runs/<run_id>/analyses.json``) resolves. The TSVs stay in
+    ``.pbg/runs/<run_id>/ptools/``, which the Pathway Tools viewer does NOT read
+    (pbg-ptools globs study directories only, and the workbench never serves
+    ``.pbg``): to view a run there, land it into a study (``land_remote_run``).
     Idempotent (overwrites). Returns ``{run_id, analyses: bool, ptools: int}``;
     raises SmsApiError / OSError on a failed download/extract so the caller can
     shape the HTTP status.
@@ -449,7 +466,13 @@ def land_remote_run(
 
         if ws_root is not None:
             fold_analyses(extract_root, ws_root, run_id)
-            land_ptools_tsvs(extract_root, ws_root, run_id)
+            # The landed run's own folder inside the study (the same name the parquet store uses):
+            # where the Pathway Tools viewer looks and the workbench will serve from. A name that is
+            # not one plain path component skips the study copy rather than failing the landing.
+            land_ptools_tsvs(
+                extract_root, ws_root, run_id,
+                study_dest=study_dir / experiment_id if is_plain_name(experiment_id) else None,
+            )
 
     provenance["store_path"] = str(dest)
     resolved_n_steps = n_steps if n_steps is not None else 0
