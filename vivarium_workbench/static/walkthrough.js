@@ -12258,6 +12258,20 @@
   // "All clear" explainer popover: says what the deterministic needs-attention
   // scan means and lists the checks behind it (all passing when all-clear), so
   // the user can see there's nothing to act on — or what would be flagged.
+  // The honest headline for an investigation the scan flagged NOTHING in. "All
+  // clear" (green) is reserved for an investigation that has member studies AND
+  // at least one has run — otherwise there is simply nothing evaluated yet, which
+  // is a neutral state, not a validated one (issue #1618, bug 3: "✓ All clear" on
+  // an empty / never-run investigation read as if the work had passed).
+  function _naQuietState(summary) {
+    summary = summary || {};
+    var members = (summary.member_count != null) ? summary.member_count : null;
+    var evaluated = (summary.evaluated_count != null) ? summary.evaluated_count : null;
+    if (members === 0) return { label: 'No studies yet', cls: 'aig-na-quiet', color: '#475569' };
+    if (evaluated === 0) return { label: 'No runs yet', cls: 'aig-na-quiet', color: '#475569' };
+    return { label: '✓ All clear', cls: 'aig-na-clear', color: '#166534' };
+  }
+
   function _aigCloseAllClearInfo() { var p = document.getElementById('aig-allclear-pop'); if (p) p.remove(); }
   function _aigShowAllClearInfo(anchor) {
     if (document.getElementById('aig-allclear-pop')) { _aigCloseAllClearInfo(); return; }   // toggle
@@ -12331,6 +12345,13 @@
         + '</li>';
     }).join('');
     var clear = total === 0;
+    // Honest headline: "✓ All clear" only when something was actually evaluated;
+    // otherwise "No studies yet" / "No runs yet" (neutral), never a green pass.
+    var _quiet = _naQuietState(summary);
+    var _headColor = clear ? _quiet.color : '#b45309';
+    var _headline = clear
+      ? _quiet.label
+      : '⚠ ' + total + ' need' + (total === 1 ? 's' : '') + ' attention';
     var pop = document.createElement('div');
     pop.id = 'aig-allclear-pop';
     pop.setAttribute('role', 'dialog');
@@ -12340,8 +12361,8 @@
       + 'max-height:78vh;overflow:auto;font-size:0.85em;color:#334155;line-height:1.32';
     pop.innerHTML =
       '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:2px">'
-        + '<span style="font-weight:700;color:' + (clear ? '#166534' : '#b45309') + '">'
-          + (clear ? '✓ All clear' : '⚠ ' + total + ' need' + (total === 1 ? 's' : '') + ' attention') + '</span>'
+        + '<span style="font-weight:700;color:' + _headColor + '">'
+          + _headline + '</span>'
         + (memberCount != null ? '<span class="muted" style="font-size:0.9em;white-space:nowrap">' + memberCount + ' member stud' + (memberCount === 1 ? 'y' : 'ies') + ' scanned</span>' : '')
       + '</div>'
       + '<ul style="margin:4px 0 0;padding:0;list-style:none">' + rows + '</ul>'
@@ -12394,11 +12415,13 @@
       var lbl = '<span class="muted" style="font-size:0.85em">code-computed by the needs-attention scan (deterministic)</span>';
       var total = (d.summary.total) || 0;
       if (!total) {
-        // All-clear: a compact chip — now CLICKABLE to explain what it means and
-        // show the (passing) checks behind it.
+        // Nothing flagged — but only call it a green "✓ All clear" when a study
+        // has actually run; an empty / never-run investigation gets a neutral
+        // "No studies yet" / "No runs yet" chip instead (issue #1618, bug 3).
+        var _q = _naQuietState(d.summary);
         if (chip) chip.innerHTML =
-          '<button type="button" class="aig-na-chip aig-na-clear" onclick="window._aigShowAllClearInfo(this)" '
-          + 'title="Click to see what the needs-attention scan checked">✓ All clear</button>';
+          '<button type="button" class="aig-na-chip ' + _q.cls + '" onclick="window._aigShowAllClearInfo(this)" '
+          + 'title="Click to see what the needs-attention scan checked">' + _q.label + '</button>';
         return;
       }
       var bySev = d.summary.by_severity || {};
