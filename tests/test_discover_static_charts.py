@@ -267,3 +267,31 @@ def test_declared_image_via_path_field_resolves_to_img(tmp_path):
     [rec] = discover_declared_figure_charts(tmp_path, [{"name": "p", "path": "viz/p.png"}])
     assert rec["media"] == "png"
     assert rec["img"].startswith("data:image/png;base64,")
+
+
+# -- committed viz/*.html surfaces name-agnostically (issue #1632) -------------
+
+def test_undeclared_viz_html_surfaces_as_iframe(tmp_path):
+    (tmp_path / "viz").mkdir()
+    (tmp_path / "viz" / "foo.html").write_text("<html></html>")
+    [rec] = discover_declared_figure_charts(
+        tmp_path, [{"name": "other", "address": "local:Something"}])
+    assert rec["media"] == "html"
+    assert rec["key"] == "foo"
+    assert rec["iframe_url"] == "/viz/foo.html"
+
+
+def test_declared_viz_not_duplicated_by_fallthrough(tmp_path):
+    (tmp_path / "viz").mkdir()
+    (tmp_path / "viz" / "foo.html").write_text("<html></html>")
+    recs = discover_declared_figure_charts(
+        tmp_path, [{"name": "foo", "address": "local:Foo"}])
+    assert len(recs) == 1
+    recs = discover_declared_figure_charts(tmp_path, [{"address": "html:foo.html"}])
+    assert len(recs) == 1
+
+
+def test_missing_or_empty_viz_dir_no_crash(tmp_path):
+    assert discover_declared_figure_charts(tmp_path, []) == []
+    (tmp_path / "viz").mkdir()
+    assert discover_declared_figure_charts(tmp_path, []) == []

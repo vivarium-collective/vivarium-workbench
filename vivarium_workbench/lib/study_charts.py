@@ -543,6 +543,7 @@ def discover_declared_figure_charts(study_dir: Path,
     """
     out: list[dict] = []
     seen_keys: set[str] = set()
+    seen_paths: set[Path] = set()
     url_base = Path(ws_root) if ws_root is not None else Path(study_dir)
     for entry in (visualizations or []):
         if not isinstance(entry, dict):
@@ -612,6 +613,42 @@ def discover_declared_figure_charts(study_dir: Path,
         rec["run_id"] = None
         out.append(rec)
         seen_keys.add(key)
+        try:
+            seen_paths.add(fig.resolve())
+        except OSError:
+            pass
+    # Name-agnostic fall-through (parity with the downloadable report's
+    # investigation_report._embed_html_figures): any committed viz/**/*.html not
+    # already surfaced above becomes an iframe figure, even when no
+    # ``visualizations[]`` entry's name equals its stem (or none exists).
+    viz_dir = Path(study_dir) / "viz"
+    try:
+        html_files = (sorted(viz_dir.rglob("*.html"), key=lambda p: p.as_posix())
+                      if viz_dir.is_dir() else [])
+    except OSError:
+        html_files = []
+    for fig in html_files:
+        try:
+            if fig.name == "model-loom.html" or not fig.is_file():
+                continue  # model-loom is reserved for the Model section
+            resolved = fig.resolve()
+            if resolved in seen_paths or fig.stem in seen_keys:
+                continue
+            try:
+                rel = fig.relative_to(url_base).as_posix()
+            except ValueError:
+                try:
+                    rel = resolved.relative_to(Path(url_base).resolve()).as_posix()
+                except ValueError:
+                    rel = fig.name
+            rec = {**_static_chart_meta(fig), "key": fig.stem,
+                   "iframe_url": f"/{rel}", "media": "html",
+                   "source": "declared", "freshness": "declared", "run_id": None}
+        except Exception:
+            continue
+        out.append(rec)
+        seen_paths.add(resolved)
+        seen_keys.add(fig.stem)
     return out
 
 
