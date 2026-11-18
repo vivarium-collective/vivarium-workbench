@@ -324,5 +324,16 @@ be done on its own:
   accept data files with a document, as compose-api does (wb#1642). It must be strictly additive: no files means
   today's behaviour, and support is advertised as a capability. It's ask C in viva-api#1055. Until a backend
   advertises it, the viva-core adapter refuses a run that carries files.
-- **To verify before step 2:** what the Stanford test and prod deployments advertise on `/viva/v1/capabilities`:
-  `viva-v1-composites`, `viva-v1-composites-documents`, `viva-v1-environments`, `viva-v1-environments-build`.
+- **Verified 2026-11-18, the Stanford sites' `/viva/v1/capabilities`,** read through the EKS API proxy:
+
+  | Site | sms-api image | viva-core | workbench image | Workbench route |
+  |---|---|---|---|---|
+  | stanford-test (`sms-api-stanford-test`) | 0.9.194 | 0.1.10 | 0.5.5 | `SMS_API_BASE=http://api:8000`, `REMOTE_PINNED=1`, hosted workers proxied through the api, no `--backend-base-url` |
+  | prod (`sms-api-stanford`) | 0.9.182 | 0.1.10 | 0.4.1 | the same |
+
+  - **Both sites advertise all four capabilities the plan needs:** `viva-v1-composites`,
+    `viva-v1-composites-documents`, `viva-v1-environments` and `viva-v1-environments-build`. They also advertise
+    `-results`, `-datasets`, `-trace`, `-jobs` and `-workers`, and `/viva/v1/health` reports every service wired.
+  - **Prod's v0.9.182 already defines `ecoli-simulation`** with the same `SimulationParams`.
+  - So steps 2–4 aren't blocked by either site. The exceptions are `/source` and `/manifest`, confirmed live on
+    stanford-test to answer "not implemented … (plan P5)", which is ask D.
