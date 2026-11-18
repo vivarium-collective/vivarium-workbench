@@ -128,17 +128,13 @@ def _composite_declared_emit_paths(study_dir, spec) -> list:
 def _resolve_study_dir(ws_root, name):
     """Resolve a study's directory honoring the workspace ``layout:`` map.
 
-    Uses :class:`WorkspacePaths` (nested investigations/<inv>/studies/<s> and
-    relocated layouts), falling back to the classic flat ``studies/<name>`` /
-    ``investigations/<name>`` paths for legacy studies whose dir lacks a
-    ``study.yaml`` (so WorkspacePaths' study.yaml gate skips them).
+    Delegates to :func:`study_spec.study_dir` — :class:`WorkspacePaths` (nested
+    investigations/<inv>/studies/<s> and relocated layouts), falling back to the
+    layout-mapped ``studies`` / ``investigations`` roots for legacy studies whose
+    dir lacks a ``study.yaml`` (so WorkspacePaths' study.yaml gate skips them),
+    e.g. the ``spec.yaml`` study ``POST /api/study-create-from-composite`` writes.
     """
-    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
-    try:
-        return WorkspacePaths.load(ws_root).study_dir(name, must_exist=True)
-    except FileNotFoundError:
-        flat = ws_root / "studies" / name
-        return flat if flat.is_dir() else ws_root / "investigations" / name
+    return study_spec.study_dir(ws_root, name)
 
 
 def _materialize_federated_study(ws_root, name):
