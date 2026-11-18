@@ -11,7 +11,8 @@ image, the run names that environment and the composite is checked against its i
 sent: for a prebuilt image, compose-api itself does not look classes up. When it has none, the run names no
 environment: compose-api infers one that covers the document's classes, or builds one from the registry for a
 signed-in caller, and checks the classes itself. The composite is exported with ``local:<module>.<Class>`` addresses
-(the only form compose-api accepts), with one emitter recording what a local run of the study records.
+(the only form compose-api accepts), with one emitter recording what a local run of the study records. A file inside
+the workspace that the composite names, such as a mesh, is sent with it (:func:`workspace_files`).
 
 Run ids are ``compose-<simulation id>``: compose-api's ids are integers, which the other routes read as legacy
 simulation ids. The Composites-tab remote run (``remote_run.run_remote``) takes the same dispatch through
@@ -318,6 +319,58 @@ def export_document(ws_root: Path, composite_id: str, params: dict, emit_paths: 
     return document
 
 
+#: Names an archive member may not take: compose-api's runner runs the archive's first ``.pbg``, and reads a nested
+#: ``.omex`` as part of a batch.
+_RESERVED_SUFFIXES = (".pbg", ".omex")
+
+
+def workspace_files(document: dict, ws_root: Path) -> "tuple[dict, dict[str, Path]]":
+    """The files inside the workspace that the document names, by the name each travels under, and the document with
+    each such path replaced by that name.
+
+    compose-api's runner unpacks an archive beside its document and makes every bare file name in the document point
+    at the unpacked file (``compose_api/environments/runner.py``, ``load_document``), so a mesh or model file the
+    composite reads from the workspace goes in the upload. A string counts when it names an existing file inside the
+    workspace, relative to it as a local run reads it, or absolute. Any other string, and any path outside the
+    workspace, is left as it is. Raises :class:`ComposeDispatchError` (422) for two different files with one name,
+    which the archive cannot hold side by side, and for a file named like a document or an archive.
+    """
+    root = ws_root.resolve()
+    files: dict[str, Path] = {}
+
+    def named_file(text: str) -> "Path | None":
+        if "/" not in text and not Path(text).suffix:
+            return None
+        candidate = Path(text) if Path(text).is_absolute() else root / text
+        try:
+            path = candidate.resolve()
+        except (OSError, RuntimeError):
+            return None
+        return path if path.is_file() and path.is_relative_to(root) else None
+
+    def visit(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {key: visit(value) for key, value in node.items()}
+        if isinstance(node, list):
+            return [visit(value) for value in node]
+        if not isinstance(node, str) or (path := named_file(node)) is None:
+            return node
+        if path.suffix.lower() in _RESERVED_SUFFIXES:
+            raise ComposeDispatchError({
+                "error": f"the composite names {node!r}, a {path.suffix} file, which compose-api would read as a "
+                         "document or an archive rather than as data; rename it to send it",
+                "reason": "file-name-reserved"}, 422)
+        if files.setdefault(path.name, path) != path:
+            raise ComposeDispatchError({
+                "error": f"the composite names two different files called {path.name!r} "
+                         f"({files[path.name].relative_to(root)} and {path.relative_to(root)}); compose-api receives "
+                         "them side by side under their names, so one must be renamed",
+                "reason": "file-name-collision"}, 422)
+        return path.name
+
+    return visit(document), files
+
+
 # -- the routes ----------------------------------------------------------------------------------------------------
 
 
@@ -425,6 +478,7 @@ def _dispatch(session: "ComposeSession", ws_root: Path, composite_id: str, param
     except Exception as e:  # noqa: BLE001 - the export's own reason (an unregistered process) IS the answer
         raise ComposeDispatchError({"error": f"could not export composite {composite_id!r} as a document: {e}",
                                     "reason": "export-failed"}, 422) from e
+    document, files = workspace_files(document, ws_root)
     if env["name"] is None:
         problems = manifest_violations(document, None, [])
     else:
@@ -443,10 +497,18 @@ def _dispatch(session: "ComposeSession", ws_root: Path, composite_id: str, param
             "reason": "not-in-environment", "violations": problems, "environment": env["name"]}, 409)
     dispatch_tag = f"{DISPATCH_TAG_PREFIX}{uuid.uuid4().hex}"
     with tempfile.TemporaryDirectory() as td:
-        pbg = Path(td) / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', composite_id)}.pbg"
-        pbg.write_text(json.dumps(document), encoding="utf-8")
+        stem = re.sub(r"[^A-Za-z0-9_.-]", "_", composite_id)
+        if files:  # the document and the workspace files it names, in one archive
+            upload = Path(td) / f"{stem}.omex"
+            with zipfile.ZipFile(upload, "w", zipfile.ZIP_DEFLATED) as omex:
+                omex.writestr(f"{stem}.pbg", json.dumps(document))
+                for name, path in sorted(files.items()):
+                    omex.write(path, name)
+        else:
+            upload = Path(td) / f"{stem}.pbg"
+            upload.write_text(json.dumps(document), encoding="utf-8")
         try:
-            experiment = session.submit(pbg, environment=env["name"], interval=steps,
+            experiment = session.submit(upload, environment=env["name"], interval=steps,
                                         tags=[*tags, dispatch_tag], description=description)
         except UncertainOutcomeError as e:
             # The answer was lost after the request may have arrived: never resubmit, find the run by its tag.

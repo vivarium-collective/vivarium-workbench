@@ -1165,3 +1165,92 @@ def test_a_head_that_is_not_the_pin_is_warned_about_for_an_inferred_environment_
     pin = next(e for e in _json("entries_0.7.76.json") if e["id"] == BASIC)["commit"]
     assert res.json()["warning"] == (f"this checkout's HEAD is not commit {pin} that compose-api's registry pins for {BASIC}: "
                                      "the run uses the environment compose-api has for that commit, not this checkout")
+
+
+# --- files the composite names travel with it --------------------------------------------------------------------
+
+
+def _mesh_workspace(tmp_path: Path) -> tuple[Path, Path]:
+    ws = tmp_path / "files-ws"
+    (ws / "workspace" / "datasets").mkdir(parents=True)
+    mesh = ws / "workspace" / "datasets" / "test_square.hf5"
+    mesh.write_bytes(b"\x89HDF\r\n\x1a\n mesh")
+    return ws, mesh
+
+
+def test_a_workspace_file_the_composite_names_travels_under_its_own_name(tmp_path):
+    """vivarium-tyssue's EulerSolver reads `eptm: workspace/datasets/test_square.hf5`: compose-api's runner finds the
+    file only if it is in the upload and the document names it by its bare name, which it then makes absolute."""
+    ws, mesh = _mesh_workspace(tmp_path)
+    solver = {"_type": "process", "address": "local:vivarium_tyssue.processes.eulersolver.EulerSolver",
+              "config": {"eptm": "workspace/datasets/test_square.hf5", "tissue_type": "Sheet", "geom": "SheetGeometry",
+                         "absolute": str(mesh)}}
+    document = {"state": {"Tyssue": solver, "label": "a/b", "name": "notes.txt"}}
+
+    sent, files = rc.workspace_files(document, ws)
+
+    assert files == {"test_square.hf5": mesh.resolve()}
+    assert sent["state"]["Tyssue"]["config"]["eptm"] == "test_square.hf5"
+    assert sent["state"]["Tyssue"]["config"]["absolute"] == "test_square.hf5", "an absolute path inside is the same file"
+    assert sent["state"]["Tyssue"]["address"] == solver["address"], "an address is not a file"
+    assert (sent["state"]["label"], sent["state"]["name"]) == ("a/b", "notes.txt"), "no such file: left as written"
+    assert document["state"]["Tyssue"]["config"]["eptm"] == "workspace/datasets/test_square.hf5", "the input is kept"
+
+
+def test_a_file_outside_the_workspace_is_never_sent(tmp_path):
+    ws, _ = _mesh_workspace(tmp_path)
+    secret = tmp_path / "secret.h5"
+    secret.write_bytes(b"not the workspace's")
+    document = {"state": {"a": str(secret), "b": "../secret.h5", "c": "workspace/../../secret.h5"}}
+    assert rc.workspace_files(document, ws) == (document, {})
+
+
+def test_two_files_with_one_name_or_a_file_named_like_a_document_are_refused(tmp_path):
+    ws, _ = _mesh_workspace(tmp_path)
+    (ws / "other").mkdir()
+    (ws / "other" / "test_square.hf5").write_bytes(b"another mesh")
+    with pytest.raises(rc.ComposeDispatchError) as raised:
+        rc.workspace_files({"a": "workspace/datasets/test_square.hf5", "b": "other/test_square.hf5"}, ws)
+    assert raised.value.status == 422 and raised.value.body["reason"] == "file-name-collision"
+    (ws / "nested.pbg").write_text("{}")
+    with pytest.raises(rc.ComposeDispatchError) as raised:
+        rc.workspace_files({"a": "nested.pbg"}, ws)
+    assert raised.value.body["reason"] == "file-name-reserved"
+
+
+def test_a_run_whose_composite_names_a_workspace_file_is_sent_as_an_archive_holding_it(ws, stub, backend_env,
+                                                                                     dashboard_client):
+    composite = ws / "pbg_ws_increase_demo" / "composites" / "increase-demo.composite.yaml"
+    spec = yaml.safe_load(composite.read_text())
+    spec["state"]["stores"]["mesh"] = "data/mesh.h5"
+    composite.write_text(yaml.safe_dump(spec))
+    (ws / "data").mkdir()
+    (ws / "data" / "mesh.h5").write_bytes(b"mesh bytes")
+    _live_registry(stub)
+    _with_origin(ws, "git@github.com:someone/unregistered.git")
+    _name(backend_env, stub.url, environment=None)
+
+    res = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
+    assert res.status_code == 202, res.text
+    (call,) = stub.calls_to("run-simulation")
+    assert call.status == 200  # the stub checked the upload against compose-api's contract
+    import io
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(call.body["uploaded_file"])) as omex:
+        names = sorted(omex.namelist())
+        documents = [n for n in names if n.endswith(".pbg")]
+        assert len(documents) == 1 and "mesh.h5" in names and len(names) == 2
+        assert omex.read("mesh.h5") == b"mesh bytes"
+        sent = json.loads(omex.read(documents[0]))
+    assert rc._state(sent)["stores"]["mesh"] == "mesh.h5"
+
+
+def test_a_run_that_names_no_workspace_file_is_still_sent_as_the_document_alone(ws, stub, backend_env,
+                                                                                dashboard_client):
+    _live_registry(stub)
+    _with_origin(ws, "git@github.com:someone/unregistered.git")
+    _name(backend_env, stub.url, environment=None)
+    assert dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}}).status_code == 202
+    (call,) = stub.calls_to("run-simulation")
+    assert isinstance(json.loads(call.body["uploaded_file"]), dict), "a .pbg, as before"
