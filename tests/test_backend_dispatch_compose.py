@@ -346,15 +346,18 @@ def test_a_class_the_environment_lacks_is_refused_before_anything_is_sent(ws, st
     assert stub.calls_to("run-simulation") == []
 
 
-def test_a_workspace_no_environment_runs_is_told_how_to_register(ws, stub, backend_env, dashboard_client):
-    subprocess.run(["git", "init", "-q", str(ws)], check=True)
-    subprocess.run(["git", "-C", str(ws), "remote", "add", "origin", "git@github.com:someone/unregistered.git"],
-                   check=True)
+def test_a_workspace_no_entry_has_is_run_in_an_environment_compose_api_infers(ws, stub, backend_env, dashboard_client):
+    """A workspace that composes other entries' classes (viva-multiscale-nfkb) needs no entry of its own: the run
+    names no environment, reads no manifest, and compose-api admits or refuses it by its classes."""
+    _live_registry(stub)
+    _with_origin(ws, "git@github.com:someone/unregistered.git")
     _name(backend_env, stub.url, environment=None)
-    res = dashboard_client(ws).post("/api/remote-run-submit", json={"study": "demo"})
-    assert res.status_code == 409 and res.json()["reason"] == "not-registered"
-    assert "manifest.yaml" in res.json()["error"] and "PREBUILT_SIMULATORS" not in res.json()["error"]
-    assert stub.calls_to("run-simulation") == []
+    res = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
+    assert res.status_code == 202, res.text
+    assert res.json()["environment"] is None and "warning" not in res.json(), "no entry, so no pin to compare HEAD to"
+    (call,) = stub.calls_to("run-simulation")
+    assert "environment" not in call.query and "simulator" not in call.query
+    assert stub.calls_to("get-environment-manifest") == []
 
 
 def test_the_registry_entry_is_found_from_the_workspaces_git_origin(ws, stub, backend_env):
@@ -893,14 +896,33 @@ def test_the_prebuilt_environment_still_wins_when_the_entry_has_one(ws, stub, ba
     assert sorted(env["module_roots"]) == ["process_bigraph.emitter", "viva_pde_particle"]
 
 
-def test_a_repository_no_entry_has_is_still_told_to_add_one(ws, stub, backend_env):
+def test_a_repository_no_entry_has_resolves_to_an_inferred_environment(ws, stub, backend_env):
     _live_registry(stub)
     _with_origin(ws, "git@github.com:someone/unregistered.git")
     _name(backend_env, stub.url, environment=None)
+    with rc._session() as session:
+        env = rc.resolve_environment(session, ws)
+    assert env == {"name": None, "simulator": None, "image": None, "entry": None, "module_roots": [], "stale": False}
+
+
+def test_a_workspace_with_no_git_origin_is_still_refused(ws, stub, backend_env):
+    """Inference needs no entry, but the workbench still matches a prebuilt one by origin first, so a workspace with
+    no origin is asked to name its environment."""
+    _live_registry(stub)
+    _name(backend_env, stub.url, environment=None)
     with rc._session() as session, pytest.raises(rc.ComposeDispatchError) as refused:
         rc.resolve_environment(session, ws)
-    assert refused.value.status == 409 and refused.value.body["reason"] == "not-registered"
-    assert "manifest.yaml" in refused.value.body["error"] and "environments.yaml" not in refused.value.body["error"]
+    assert refused.value.status == 409 and refused.value.body["reason"] == "no-remote"
+
+
+def test_the_preflight_for_a_workspace_no_entry_has_says_it_needs_none(ws, stub, backend_env, dashboard_client):
+    _live_registry(stub)
+    _with_origin(ws, "git@github.com:someone/unregistered.git")
+    _name(backend_env, stub.url, environment=None)
+    pre = dashboard_client(ws).get("/api/remote-dispatch-preflight").json()
+    assert (pre["ok"], pre["reason"], pre["environment"], pre["registry_entry"], pre["registry_level"]) == (
+        True, "inferred", None, None, None)
+    assert "none is needed" in pre["message"] and rc.TOKEN_ENV_VAR in pre["message"]
 
 
 def test_a_study_run_with_no_prebuilt_environment_names_none_and_reads_no_manifest(ws, stub, backend_env,

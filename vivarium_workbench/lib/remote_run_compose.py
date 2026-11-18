@@ -146,7 +146,11 @@ def resolve_environment(session: "ComposeSession", ws_root: Path) -> dict:
     An entry with no prebuilt environment has ``name`` None: the run names none and compose-api chooses one that covers
     the document's classes, or builds one from the registry for a signed-in caller. ``GET /registry/entries`` does not
     say whether an entry can be composed, so the service decides, and its refusal is shown as it gives it.
-    Raises :class:`ComposeDispatchError` (409) when no registry entry has the workspace's repository as its source.
+    A repository no registry entry has is run the same way, with ``entry`` None as well. compose-api admits a document
+    by its classes, each under a registered entry, not by where it came from, so a workspace that composes other
+    entries' classes needs no entry of its own. A class no entry provides is refused by the service, in its own words.
+    Raises :class:`ComposeDispatchError` (409) for a named environment compose-api lacks, or a workspace with no git
+    origin.
     """
     from vivarium_workbench.lib.env_compat import get_env
 
@@ -175,17 +179,9 @@ def resolve_environment(session: "ComposeSession", ws_root: Path) -> dict:
     entry = next((x for x in entries if x.source and _canonical_repo(x.source) == repo), None)
     prebuilt = [environments[b] for b in (entry.bundles or [])
                 if b in environments and environments[b].kind == "prebuilt" and environments[b].simulator] if entry else []
-    if entry is None:
-        raise ComposeDispatchError({
-            "error": f"compose-api cannot run this workspace: no registry entry has source {origin}. compose-api runs "
-                     "only the repositories its registry (compose_api/registry/manifest.yaml) lists, and a new one is "
-                     "added by a compose-api pull request; with an entry at level tested, compose-api builds an "
-                     "environment for the workspace on a first signed-in run and reuses it (docs/backend-compose-api.md, "
-                     "onboarding).",
-            "reason": "not-registered", "origin": origin}, 409)
     if not prebuilt:
         return {"name": None, "simulator": None, "image": None, "entry": entry,
-                "module_roots": list(entry.module_roots or []), "stale": False}
+                "module_roots": list(entry.module_roots or []) if entry else [], "stale": False}
     env = prebuilt[0]
     return {"name": env.name, "simulator": env.simulator, "image": env.image, "entry": entry,
             "module_roots": _module_roots(entries, env.name), "stale": bool(env.stale)}
@@ -488,12 +484,15 @@ def dispatch_preflight(ws_root: Path) -> dict:
         return {**out, **body, "ok": False, "message": body["error"]}
     if env["name"] is None:
         entry, signed_in = env["entry"], bool(os.environ.get(TOKEN_ENV_VAR, "").strip())
-        level = getattr(entry.level, "value", entry.level)
-        return {**out, "ok": True, "reason": "inferred", "environment": None, "registry_entry": entry.id,
-                "registry_level": level, "signed_in": signed_in,
-                "message": f"compose-api has no prebuilt environment for this workspace (registry entry {entry.id!r}, "
-                           f"level {level}). It runs the composite in an environment that covers its classes, or builds "
-                           "one from the registry entry's pinned commit: a build needs a signed-in caller"
+        level = getattr(entry.level, "value", entry.level) if entry else None
+        which = (f"compose-api has no prebuilt environment for this workspace (registry entry {entry.id!r}, "
+                 f"level {level})" if entry else
+                 "No registry entry has this workspace's repository, and none is needed when its composite uses "
+                 "registered classes: compose-api admits each class under its own registry entry")
+        return {**out, "ok": True, "reason": "inferred", "environment": None,
+                "registry_entry": entry.id if entry else None, "registry_level": level, "signed_in": signed_in,
+                "message": f"{which}. It runs the composite in an environment that covers its classes, or builds "
+                           "one from their registry entries' pinned commits: a build needs a signed-in caller"
                            + ("" if signed_in else f" (set {TOKEN_ENV_VAR})")
                            + ", and later runs reuse it. The checkout is not shipped, so nothing needs pushing."}
     return {**out, "ok": True, "reason": "environment", "environment": env["name"],

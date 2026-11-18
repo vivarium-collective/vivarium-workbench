@@ -48,8 +48,13 @@ The code is not shipped. `GET /registry/entries` and `GET /registry/environments
    entries). A **429** (it builds at most two new environments at a time) reads as `rate limited`. The first run of a new combination needs
    `COMPOSE_API_TOKEN` (an anonymous one is a **401** that says so) and waits for the build; later runs reuse it. The
    preflight answers `reason: inferred`, with the entry, its level, and whether a token is set.
-4. No registry entry has the repository: a **409** (`not-registered`), because a compose-api pull request adds the
-   entry (below).
+4. No registry entry has the repository: the same as 3, with no entry. compose-api admits a document by its classes,
+   each under its own registry entry, not by the repository it came from. So a workspace that composes other entries'
+   classes, as viva-multiscale-nfkb composes viva-tellurium's, viva-maboss's, viva-pde-particle's and
+   viva-basic-processes', needs no entry of its own. A class no entry provides is refused by compose-api, in its own
+   words. The preflight answers `reason: inferred` with `registry_entry: null`. A workspace whose own classes should
+   run on compose-api still needs an entry, added by a compose-api pull request (below). A workspace with no git
+   `origin` is a **409** (`no-remote`): name its environment with step 1.
 
 The run uses the environment, not the checkout: the prebuilt image, or the environment built from the entry's pinned
 commit. When the entry pins a `commit` and HEAD is another commit, the submit answers with a `warning`. A landed run records the environment version it ran in (`compose.environment_version`, such
