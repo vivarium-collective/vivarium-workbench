@@ -92,3 +92,14 @@ def test_verbs_say_what_they_do():
     assert ">Analyze<" in JS
     assert "id=\"dcyc-switch\"" not in JS, "standalone Switch button removed (now a link on the name)"
     assert "dcyc-switch-link" in JS
+
+
+def test_generation_request_rows_show_the_filler_skill():
+    # the /viva-* skill the engine stamps on each GenerationRequest (#93) is rendered
+    assert "r.skill" in JS and "skill a filler triggers" in JS
+
+
+def test_kind_labels_cover_the_engine_generation_and_frontier_vocabulary():
+    # KIND_LABELS must not drift from the engine's kinds — incl. coverage_gap (#94/#96)
+    for k in ("propose_study", "acquire_model", "visualize", "hypothesize", "critique", "coverage_gap"):
+        assert k + ":" in JS, f"KIND_LABELS missing {k}"
