@@ -49,6 +49,11 @@ _STUDY_KEEP = (
     # state transfer (handoff.emits/receives), and the planned-scaffold analogs
     # (honest_caveat / proposed_controls) used where a realized study has none.
     "primary_limitation", "handoff", "honest_caveat", "proposed_controls",
+    # the two-axis conclusion verdicts (biological_validation / explanatory_gain)
+    # the study page + single_study_report render from the spec directly; carried
+    # here too so the investigation synthesis/template layer can read them instead
+    # of silently dropping an engine-authored field (architecture-review #6).
+    "conclusion_verdicts",
 )
 
 # 5-state study verdict (mirrors viva_superpowers roll-up): each maps to a glyph
