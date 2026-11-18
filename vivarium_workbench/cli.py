@@ -184,7 +184,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     # Boot the FastAPI app under uvicorn (the migration's typed seam is now the
     # served entrypoint; the legacy stdlib server.serve path is retired).
     from vivarium_workbench.lib.startup import serve_fastapi
-    return serve_fastapi(workspace=workspace, port=port, host=host, base_path=base_path)
+    return serve_fastapi(workspace=workspace, port=port, host=host, base_path=base_path,
+                         idle_timeout_minutes=getattr(args, "idle_timeout", None))
 
 
 def migrate_investigations_to_studies(ws_root: Path, dry_run: bool = False) -> dict:
@@ -1181,6 +1182,8 @@ def _serve_detached(workspace: Path, args: argparse.Namespace) -> int:
         cmd += ["--backend-base-url", args.backend_base_url]
     if getattr(args, "no_chat", False):
         cmd += ["--no-chat"]
+    if getattr(args, "idle_timeout", None) is not None:
+        cmd += ["--idle-timeout", str(args.idle_timeout)]
 
     with open(log_file, "wb") as log:
         proc = subprocess.Popen(  # noqa: S603
@@ -1507,6 +1510,14 @@ def main(argv: list[str] | None = None) -> int:
         "--detach", action="store_true",
         help="Launch the dashboard in the background (writes .pbg/server/server-info, "
              "prints the URL, and returns) instead of running in the foreground.",
+    )
+    p_serve.add_argument(
+        "--idle-timeout", type=float, default=None, metavar="MINUTES",
+        help="Self-shutdown after this many minutes with no HTTP requests, so a detached "
+             "server does not linger after everyone stops using it (sets/overrides "
+             "VIVARIUM_WORKBENCH_IDLE_TIMEOUT). 0 disables. Default: a loopback local server "
+             "reaps itself after ~90 min idle; a 0.0.0.0 / --base-path deployment stays up "
+             "unless you set this explicitly.",
     )
     p_serve.add_argument("--open", action="store_true",
                          help="Open the dashboard in a browser after it is ready (with --detach).")

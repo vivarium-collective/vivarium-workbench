@@ -23,6 +23,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 class _BasePathStripMiddleware:
@@ -56,7 +57,8 @@ class _BasePathStripMiddleware:
 GRACEFUL_SHUTDOWN_S = 10
 
 
-def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path: str = "") -> int:
+def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path: str = "",
+                  idle_timeout_minutes: Optional[float] = None) -> int:
     """Boot the FastAPI dashboard app under uvicorn against ``workspace``.
 
     ``host`` defaults to loopback; pass ``0.0.0.0`` to bind every interface
@@ -298,6 +300,20 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     # (Not the CSRF fix — an AWS ALB omits X-Forwarded-Host, so the allowlist is
     # what actually admits the browser origin; this just keeps request metadata
     # honest for logging and any forwarded-aware code.)
+    # Idle self-shutdown: an ephemeral loopback server reaps itself once nobody
+    # is talking to it, so detached servers stop piling up across sessions. A
+    # non-loopback / base-path (container/ALB) bind stays up unless asked for
+    # explicitly. The request middleware (_idle_activity_mw) keeps it reset.
+    from vivarium_workbench.lib import idle_shutdown
+    idle_s = idle_shutdown.resolve_idle_seconds(idle_timeout_minutes, host=host, base_path=base_path)
+    if idle_s > 0:
+        logging.getLogger("vivarium_workbench").info(
+            "idle self-shutdown armed: graceful exit after %.0f min with no requests "
+            "(--idle-timeout 0 or VIVARIUM_WORKBENCH_IDLE_TIMEOUT=0 to disable)",
+            idle_s / 60.0,
+        )
+        idle_shutdown.start_idle_watchdog(idle_s)
+
     uvicorn.run(
         served, host=host, port=port, log_level="info",
         proxy_headers=True, forwarded_allow_ips="*",
