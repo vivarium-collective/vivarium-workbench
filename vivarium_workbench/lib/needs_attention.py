@@ -36,6 +36,7 @@ from vivarium_workbench.lib import linkage_index
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
 from discovery_engine.reporting import rigor
 from discovery_engine.viz import freshness as viz_freshness
+from vivarium_workbench.lib.cycle_cache import cached_run_cycle
 # ---------------------------------------------------------------------------
 # Item shape + ranking
 # ---------------------------------------------------------------------------
@@ -939,7 +940,7 @@ def viz_figure_records(ws_root, inv_slug: str, only_study: str | None = None) ->
         # Source the figure records from the cycle the frontier itself runs (the public
         # `discover.run_cycle` path) rather than reaching into `validation._figure_freshness`,
         # so this stays within the engine import allowlist and the two cannot disagree.
-        cyc = discover.run_cycle(_inv, studies, viz_state=vstate)
+        cyc = cached_run_cycle(discover, _inv, studies, viz_state=vstate)
         vals = (cyc.get("validations") if isinstance(cyc, dict) else []) or []
         return [r for r in vals
                 if isinstance(r, dict) and r.get("type") == "visual" and r.get("scope") == "figure"]

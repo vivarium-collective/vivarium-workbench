@@ -27,6 +27,7 @@ from vivarium_workbench.lib.investigation_members import (
     investigation_member_slugs,
     member_slug,
 )
+from vivarium_workbench.lib.cycle_cache import cached_run_cycle
 from vivarium_workbench.lib.single_study_report import _load_study_spec
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
@@ -987,7 +988,7 @@ def _build_discovery(ws_root, inv_slug: str) -> "dict | None":
         from discovery_engine import discover
         from discovery_engine.projection import engine as de
         _, inv_spec, studies = discover.load_cycle_inputs(ws_root, inv_slug)
-        cyc = discover.run_cycle(inv_spec, studies)
+        cyc = cached_run_cycle(discover, inv_spec, studies)
         clo = de.closure(cyc, inv_spec)
         na = de.next_action(cyc, inv_spec)
         opps = de.opportunities(cyc, inv_spec)
@@ -1055,7 +1056,7 @@ def build_generation_requests(ws_root, inv_slug: str) -> "dict | None":
         return None
     try:
         _, inv_spec, studies = discover.load_cycle_inputs(ws_root, inv_slug)
-        cyc = discover.run_cycle(inv_spec, studies)
+        cyc = cached_run_cycle(discover, inv_spec, studies)
         opps = de.opportunities(cyc, inv_spec)
         gates = (inv_spec.get("discovery") or {}).get("gates") if isinstance(inv_spec, dict) else None
         gc = (GateConfig(default=gates.get("default"), by_kind=gates.get("by_kind") or {})
