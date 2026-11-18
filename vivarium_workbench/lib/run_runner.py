@@ -1098,6 +1098,16 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
                         emitter=STUDY_EMITTER if remote_emit_paths else None)
                 except (ValueError, zipfile.BadZipFile) as land_exc:
                     _write_log(req, f"\nREMOTE RESULTS NOT LANDED: {land_exc}\n")
+                # compose-api's record of the run (environment version, image, SLURM job) goes in the manifest
+                # the launch wrote. A record that cannot be had does not fail a run that completed. Printed, not
+                # _write_log'd: the detached run's stdout IS its log (opened "w"), and the closing line below
+                # would overwrite text appended behind its back.
+                try:
+                    from vivarium_workbench.lib import remote_run_compose
+
+                    remote_run_compose.record_provenance(conn, req.run_id, Path(results_path))
+                except Exception as prov_exc:  # noqa: BLE001 -- best-effort, like the landing above
+                    print(f"\nPROVENANCE NOT RECORDED: {prov_exc}", flush=True)
             elif results_path is not None:
                 try:
                     with tempfile.TemporaryDirectory() as td:

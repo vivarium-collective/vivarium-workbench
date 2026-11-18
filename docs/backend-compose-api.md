@@ -48,6 +48,8 @@ The run uses the image, not the checkout. When the entry pins a `commit` and HEA
 answers with a `warning`. A landed run records the environment version it ran in (`compose.environment_version`, such
 as `viva-pde-particle@2`, read from the run's own record) and that version's image digest as `code_version.image`.
 A run from before versions has no version, and its image is resolved from the simulator name.
+A study run keeps that record in its params. A Composites-tab run's params are the composite's inputs, which a re-run
+sends back, so it keeps the same record in its manifest (`compose.*`, and `code_version.image`).
 
 ## The document
 
