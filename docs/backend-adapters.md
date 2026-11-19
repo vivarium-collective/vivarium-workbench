@@ -1,6 +1,39 @@
 # Backend adapters: the workbench on viva-core and compose-api only
 
-Status: **proposed**, 2026-11-18. Nothing here is implemented yet.
+Status: **in progress**, design settled 2026-11-18. Where each step stands is in [Progress](#progress), the
+single record of it.
+
+## Progress
+
+Every PR that advances this plan updates this table in the same PR (wb#1650 predates the table, so it is
+recorded here). Steps are defined in §4; asks are on viva-api#1055. "Q2" means §5's Q2 (analyses), which is
+Question 1 in viva-api#1055.
+
+| Step | What | PR | State (date) |
+|---|---|---|---|
+| 0 | SMS-call ratchet; drop the dead `composite_resolve` fallback | wb#1646 | in review (2026-11-18) |
+| 1 | `lib/backends/` interface; existing paths as adapters | — | not started; unblocked by wb#1630 (merged 2026-11-19) |
+| 2 | `EnvironmentRef`; new pinned runs on `ecoli-simulation` | — | blocked only on landing: ask E, or the job-owner interim (§4 step 2). Both sites advertise the capabilities and define `ecoli-simulation` (checked 2026-11-18) |
+| 3 | Composites tab off `/viva/v1/compose` | — | not started; composites that carry data files wait on ask C |
+| 4 | Reads off `/api/v1` | wb#1650 (analysis figures and PTools files, taken early) | wb#1650 in review (2026-11-19); its S3 fallback stays until prod's registry covers its analyses (prod question below). Remaining: the Remote-tab run listing, `/source`, trace, other data downloads |
+| 5 | Old runs carry the run id | — | waits on ask A |
+| 6 | Analyses as a core job kind; delete `sms_legacy.py` | — | waits on viva-api building the analysis job kind (Q2, decided; no ask filed yet) |
+| W-a | Post-run analyses off the hosted worker | — | waits on step 1 and Q2 |
+| W-b | Catalog from the manifest | — | waits on ask D |
+| W-c | Authoring and source as plain file access | — | not started |
+
+| Ask (viva-api#1055) | What | State (date) |
+|---|---|---|
+| A | `run_id` on `/api/v1/simulations/{id}` and its status | asked 2026-11-18, no reply |
+| B | one file inside a prefix dataset; needed only for files not registered on their own | low priority (2026-11-19): figures and PTools files are registered singly |
+| C | data files with a document on `POST /composites` | asked 2026-11-18, no reply |
+| D | `/environments/{id}/manifest` and `/source` (501 stubs today) | asked 2026-11-18, no reply |
+| E | `/composites/{id}/results` for SMS runs | asked 2026-11-19, no reply |
+| — | why prod's dataset registry is under 1% of stanford-test's | asked 2026-11-19, no reply |
+
+Related, already on `main`: wb#1642 (runs on compose-api send their data files, 2026-11-18; viva-core waits on
+ask C); wb#1644 (landing leaves
+PTools TSVs in the study, where pbg-ptools finds them, 2026-11-18).
 
 **Goal.** The workbench reaches a remote backend only through one interface. That interface has two
 implementations:
@@ -278,13 +311,13 @@ break:
 0. **Ratchet and dead code.** Add `tests/test_sms_route_ratchet.py`, which pins today's callers of SMS-route client
    methods and SMS route literals. It fails on a new call, and on a removed call that is still listed, so the list
    shrinks in the PR that removes the call. Delete the `composite_resolve` remote fallback. No behaviour change.
-   (Done on branch `refactor/backend-step0`.)
+   (wb#1646.)
 1. **Extract the interface.** Create `lib/backends/` with the Protocols, `active()` and `for_run()`.
    - Wrap `remote_run_viva_v1` and `remote_run_compose` as adapters; their logic doesn't change.
    - Move the inline SMS code from `remote_run_views` into `sms_legacy.py`.
    - Views and `run_remote` dispatch through `for_run()` and `active()`.
-   - It's a pure refactor: the existing tests, `test_backend_interop.py` included, pass unchanged. **Lands after
-     wb#1630**, which edits the same modules.
+   - It's a pure refactor: the existing tests, `test_backend_interop.py` included, pass unchanged. **Was waiting on
+     wb#1630**, which edits the same modules (merged 2026-11-19).
 2. **Separate the environment from the API.** Introduce `EnvironmentRef`. The session or pinned build produces a
    `BuildRef`, and **new** pinned runs go to viva-core `ecoli-simulation` when the backend advertises
    `viva-v1-composites`; otherwise they stay legacy. This is the first visible change, so it needs a stanford-test
@@ -304,7 +337,8 @@ break:
      back with step 6. Until step 6, either keep the integer id beside the run id (from the job owner, above), or
      accept that a new run cannot re-run analyses. Decide before step 2 ships.
 3. **Composites tab off `/viva/v1/compose`.** Composites-tab runs use the viva-core document route.
-4. **Reads off `/api/v1`.** Remote-tab listing, datasets, `/source` and trace for new runs. Drop the `/core/v1`
+4. **Reads off `/api/v1`.** Remote-tab listing, datasets, `/source` and trace for new runs. The analysis figures and PTools
+   files are in wb#1650, in review: it lists by `source=simulation:<id>`, so it needs no run id. Drop the `/core/v1`
    build fallbacks once both sites advertise the environments capabilities.
 5. **Old runs.** Once viva-api exposes the run id of a legacy simulation, add it to stored records on first read,
    **keeping the integer id beside it**: run reads go by the run id, and `sms_legacy` still needs the integer for
