@@ -34,7 +34,6 @@ import yaml
 
 from vivarium_workbench.lib import composite_subprocess
 from vivarium_workbench.lib import lifecycle_mutations
-from vivarium_workbench_sms import remote_pinned
 from vivarium_workbench.lib import run_core
 from vivarium_workbench.lib import study_run_post
 from vivarium_workbench.lib import study_run_state
@@ -45,7 +44,7 @@ from vivarium_workbench.lib.study_crud_mutations import _study_name_from_body
 
 def _named_backend_runs_documents(ws_root) -> bool:
     """A study run goes to the backend the operator named, as a document: compose-api or viva-core (step 1b:
-    ``backends.select``; what ``remote_pinned.uses_named_backend_dispatch`` answers)."""
+    ``backends.select``)."""
     from vivarium_workbench.lib import backends
 
     chosen = backends.select(ws_root)
@@ -574,8 +573,10 @@ def launch_into_study(ws_root, study, spec_id, params, n_steps, *, seed=None,
     label = label or "baseline"
     effective_seed = seed if seed is not None else full_params.get("seed")
 
+    from vivarium_workbench.lib import backends
+
     try:
-        target = remote_pinned.resolve_run_target(ws_root)
+        target = backends.resolve_run_target(ws_root)
     except APIError:
         # The backend named for this workbench cannot be reached. A dry run starts nothing (a preview "stays
         # local-only", see run_study_baseline), so it still answers; any other run is refused.
@@ -589,7 +590,7 @@ def launch_into_study(ws_root, study, spec_id, params, n_steps, *, seed=None,
     except run_core.RunTargetUnavailable as e:
         return {"error": str(e)}, 409
     # Remote-build guard (item 18: unified with composite_test_run's target
-    # resolution via remote_pinned.resolve_run_target — a materialized session
+    # resolution via backends.resolve_run_target — a materialized session
     # build (.viv-build.json) OR a deployment-wide pin (VIVARIUM_WORKBENCH_
     # REMOTE_PINNED) now BOTH resolve to "deployment" here, matching the
     # Composites tab; previously only the .viv-build.json case was caught, so
@@ -788,7 +789,9 @@ def run_study_baseline(ws_root, body):
     # running the wrong composite. dry_run also falls through unchanged
     # (preview stays local-only; no real dispatch to preview against).
     if not dry_run and entry is baseline[0] and not requested:
-        target = remote_pinned.resolve_run_target(ws_root)
+        from vivarium_workbench.lib import backends
+
+        target = backends.resolve_run_target(ws_root)
         if target == "deployment":
             num_generations = generator_overrides.get("n_generations")
             num_seeds = generator_overrides.get("n_seeds")
@@ -801,6 +804,8 @@ def run_study_baseline(ws_root, body):
                 k: v for k, v in generator_overrides.items()
                 if k not in ("n_generations", "n_seeds")
             }
+            # Lazy: the hosted env-worker pod ships the core without the plugin, and this module must import there.
+            from vivarium_workbench_sms import remote_pinned
             from vivarium_workbench_sms.sms_api_client import SmsApiClient
             from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
             simulator_id = remote_pinned.resolve_pinned_simulator_id(
@@ -971,11 +976,13 @@ def run_study_variant(ws_root, body):
         full_params = dict(generator_overrides)
         if params_n_steps is not None:
             full_params["n_steps"] = params_n_steps
+        from vivarium_workbench.lib import backends
+
         try:
             plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=full_params,
                                        db_path=study_dir / "runs.db", label=variant_name,
                                        n_steps=params_n_steps,
-                                       target=remote_pinned.resolve_run_target(ws_root))
+                                       target=backends.resolve_run_target(ws_root))
         except run_core.RunTargetUnavailable as e:
             return {"error": str(e)}, 409
         # Remote-build guard — same as the baseline path above (SP-D2/G1, item
@@ -1045,10 +1052,12 @@ def run_study_variant(ws_root, body):
             full_params["n_steps"] = params_n_steps
 
         db_file = str(study_dir / "runs.db")
+        from vivarium_workbench.lib import backends
+
         try:
             plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=full_params,
                                        db_path=db_file, label=variant_name, n_steps=params_n_steps,
-                                       target=remote_pinned.resolve_run_target(ws_root))
+                                       target=backends.resolve_run_target(ws_root))
         except run_core.RunTargetUnavailable as e:
             return {"error": str(e)}, 409
         # Remote-build guard — same as the baseline path above (SP-D2/G1, item 18).

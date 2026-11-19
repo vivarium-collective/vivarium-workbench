@@ -160,34 +160,34 @@ def test_the_stanford_workbench_env_submits_to_sms_and_asks_nothing_else(ws, bac
 
 
 def test_the_stanford_env_resolves_run_targets_without_probing(ws, monkeypatch):
-    from vivarium_workbench_sms import remote_pinned
+    from vivarium_workbench.lib import backends
 
     def boom(*a, **k):
         raise AssertionError("probed a backend nobody named")
 
     monkeypatch.setattr(sc, "backend_profile", boom)
     _stanford_env(monkeypatch, "http://127.0.0.1:9")
-    assert remote_pinned.uses_compose_dispatch(ws) is False
-    assert remote_pinned.uses_viva_v1_dispatch(ws) is False
-    assert remote_pinned.resolve_run_target(ws) == "deployment"  # the pinned SMS build, as before #1447
+    assert (backends.select(ws) is backends.COMPOSE) is False
+    assert (backends.select(ws) is backends.VIVA_CORE) is False
+    assert backends.resolve_run_target(ws) == "deployment"  # the pinned SMS build, as before #1447
 
 
 # --- the pinned SMS build beats a named compose-api ----------------------------------------------------------
 
 def test_the_pinned_sms_build_keeps_the_simulator_path_when_compose_api_is_named(ws, backend, monkeypatch):
-    from vivarium_workbench_sms import remote_pinned
+    from vivarium_workbench.lib import backends
 
     _Backend.routes = dict(COMPOSE)
     monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", backend)
-    assert remote_pinned.uses_compose_dispatch(ws) is True
+    assert (backends.select(ws) is backends.COMPOSE) is True
 
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_REPO_URL", SMS_ECOLI)
-    assert remote_pinned.uses_compose_dispatch(ws) is False
+    assert (backends.select(ws) is backends.COMPOSE) is False
     monkeypatch.delenv("VIVARIUM_WORKBENCH_REMOTE_PINNED")
 
     (ws / ".viv-build.json").write_text(json.dumps({"repo_url": SMS_ECOLI, "simulator_id": 1}))
-    assert remote_pinned.uses_compose_dispatch(ws) is False
+    assert (backends.select(ws) is backends.COMPOSE) is False
 
 
 # --- one process, one named backend, its own dispatch --------------------------------------------------------
@@ -264,12 +264,12 @@ def local_runs(monkeypatch):
 
 
 def test_a_named_backend_that_cannot_be_reached_never_resolves_to_a_local_run(ws, monkeypatch):
-    from vivarium_workbench_sms import remote_pinned
+    from vivarium_workbench.lib import backends
     from vivarium_workbench.lib.errors import APIError
 
     monkeypatch.setenv(NAMED, DEAD)
     with pytest.raises(APIError) as e:
-        remote_pinned.resolve_run_target(ws)
+        backends.resolve_run_target(ws)
     assert e.value.status_code == 502
     _assert_unreachable(e.value.to_body(), DEAD)
 

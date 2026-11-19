@@ -27,8 +27,8 @@ import pytest
 
 from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib import composite_lookup
+from vivarium_workbench.lib import backends
 from vivarium_workbench.lib import investigations
-from vivarium_workbench_sms import remote_pinned
 from vivarium_workbench.lib import study_run_state
 from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib import investigation_run_one_views as views
@@ -599,7 +599,7 @@ def test_deployment_target_refuses_409_without_running(tmp_path, monkeypatch):
     """target == 'deployment' → 409, and NOTHING local runs: neither the spec
     loader nor the subprocess is reached."""
     ws = _make_ws(tmp_path)
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda p: "deployment")
+    monkeypatch.setattr(backends, "resolve_run_target", lambda p: "deployment")
 
     def _no_spec(*a, **k):
         raise AssertionError("load_spec must not be reached under a deployment target")
@@ -632,7 +632,7 @@ def test_unreachable_named_backend_propagates_502(tmp_path, monkeypatch):
     def _no_run(*a, **k):
         raise AssertionError("subprocess.run must not be reached when the backend is unreachable")
 
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", _unreachable)
+    monkeypatch.setattr(backends, "resolve_run_target", _unreachable)
     monkeypatch.setattr(views.subprocess, "run", _no_run)
 
     with pytest.raises(APIError) as ei:
@@ -644,7 +644,7 @@ def test_missing_inv_still_400_under_a_deployment_target(tmp_path, monkeypatch):
     """Ordering: request validation comes first, so a missing investigation is
     still a 400 rather than being masked by the run-target gate."""
     ws = _make_ws(tmp_path)
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda p: "deployment")
+    monkeypatch.setattr(backends, "resolve_run_target", lambda p: "deployment")
     body, status = views.investigation_run_one(ws, {})
     assert status == 400
     assert body == {"error": "investigation required"}
@@ -658,7 +658,7 @@ def test_local_target_runs_as_before(tmp_path, monkeypatch, fixed_run_id):
     inv_dir = study_spec.study_dir(ws, "inv-x")
     (inv_dir / "composites").mkdir(parents=True, exist_ok=True)
     (inv_dir / "composites" / "baseline.yaml").write_text("foo: 1\n", encoding="utf-8")
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda p: "local")
+    monkeypatch.setattr(backends, "resolve_run_target", lambda p: "local")
     monkeypatch.setattr(
         investigations, "load_spec",
         lambda p: {"variants": [{"name": "baseline",

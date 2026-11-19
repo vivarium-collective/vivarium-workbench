@@ -110,7 +110,7 @@ cached 30 s). A session build (`.viv-build.json`) or the pinned-build config kee
 |---|---|
 | `serve` start-up | probe `/version`, `GET /viva/v1/capabilities` + `/health`; prints `backend dispatch: <mode>` |
 | `GET /api/remote-run-config` | unchanged payload + `backend: {dispatch, version, capabilities, services, reachable, error}` (key absent when no backend is named) |
-| Run target (`remote_pinned.resolve_run_target`) | `deployment` when the above holds |
+| Run target (`backends.resolve_run_target`) | `deployment` when the above holds |
 | Study baseline / variant run, `POST /api/remote-run-submit` (no `simulator_id`) | `POST /viva/v1/composites` (document); answer `{run_id, phase, backend}` |
 | Composites-tab / detached run (`run_remote`) | `POST /viva/v1/composites`, poll `/composites/{id}/status`, results `GET /viva/v1/compose/simulation/{n}/results` (see below for `n`), emitter history landed into the run's own `runs.db` |
 | `POST /api/remote-run-land {study, simulation_id: <run id>}` (Runs table: **⬇ Land results**) | `GET /composites/{id}` (409 unless `completed`), `n` lookup, results archive, emitter history into the study's `runs.db` as a completed run; provenance under `viva_v1` (run id, simulation id, job id, installed commit) |

@@ -344,11 +344,12 @@ def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:
         # the named backend cannot be reached, instead of falling through to the SMS path's "not authenticated" or
         # "simulator_id is required", and it never asks that backend for a pinned or session build. A submit that
         # carries a simulator id is the SMS host's and does not wait on the named backend.
-        remote_pinned.resolve_run_target(ws_root)
         # The operator named a backend that runs documents: compose-api (the composite runs in the environment its
         # registry lists for this workspace) or viva-core (serve --backend-base-url; the declaration authorizes the
         # dispatch). Either way there is no simulator id to ask for. A session build or pin selects SMS instead.
-        chosen = backends.select(ws_root)
+        # One decision (backends.active, which backends.resolve_run_target also reads): patching
+        # backends.resolve_run_target does not steer this submit; patch backends.active / backends.select.
+        chosen = backends.active(ws_root)
         if chosen is backends.COMPOSE or chosen is backends.VIVA_CORE:
             return chosen.runs.submit(ws_root, body)
     return sms_legacy.submit_tail(ws_root, body)

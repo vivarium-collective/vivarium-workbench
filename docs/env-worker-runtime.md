@@ -179,7 +179,7 @@ nothing there has a `.venv`, so every job-class call raised
 `workspace has no .venv`. #954 corrected the axis.
 
 **Step 2a** (#957, 0.3.64) makes run entrypoints honor
-`remote_pinned.resolve_run_target`. **Step 2b**, the declared-scale precheck, is
+`backends.resolve_run_target`. **Step 2b**, the declared-scale precheck, is
 **not started and is now load-bearing**: with transport no longer standing in for
 a cost policy, nothing separates a small in-context run from one that must
 dispatch.

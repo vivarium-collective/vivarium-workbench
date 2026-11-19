@@ -119,15 +119,15 @@ def test_without_a_named_backend_the_config_and_target_are_exactly_as_before(
 
 
 def test_resolve_run_target_makes_no_network_call_without_a_named_backend(tmp_path, clean_backend_env, monkeypatch):
-    from vivarium_workbench_sms import remote_pinned
+    from vivarium_workbench.lib import backends
 
     def boom(*a, **k):
         raise AssertionError("probed a backend nobody named")
 
     monkeypatch.setattr(sc, "backend_profile", boom)
     (tmp_path / "workspace.yaml").write_text("name: w\n")
-    assert remote_pinned.resolve_run_target(tmp_path) == "local"
-    assert remote_pinned.uses_viva_v1_dispatch(tmp_path) is False
+    assert backends.resolve_run_target(tmp_path) == "local"
+    assert (backends.select(tmp_path) is backends.VIVA_CORE) is False
 
 
 # --- (b) a backend WITHOUT the run surface keeps the legacy path -------------------------------
@@ -201,16 +201,16 @@ def test_named_backend_without_documents_capability_stays_legacy(ws, stub, clean
 
 def test_pinned_and_session_build_keep_the_simulator_path_even_with_a_named_backend(
         ws, stub, clean_backend_env, monkeypatch):
-    from vivarium_workbench_sms import remote_pinned
+    from vivarium_workbench.lib import backends
 
     _name_backend(monkeypatch, stub.url)
-    assert remote_pinned.uses_viva_v1_dispatch(ws) is True
+    assert (backends.select(ws) is backends.VIVA_CORE) is True
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_REPO_URL", "https://github.com/o/r")
-    assert remote_pinned.uses_viva_v1_dispatch(ws) is False
+    assert (backends.select(ws) is backends.VIVA_CORE) is False
     monkeypatch.delenv("VIVARIUM_WORKBENCH_REMOTE_PINNED")
     (ws / ".viv-build.json").write_text(json.dumps({"repo_url": "https://github.com/o/r", "simulator_id": 1}))
-    assert remote_pinned.uses_viva_v1_dispatch(ws) is False
+    assert (backends.select(ws) is backends.VIVA_CORE) is False
 
 
 # --- a backend that runs documents -------------------------------------------------------------

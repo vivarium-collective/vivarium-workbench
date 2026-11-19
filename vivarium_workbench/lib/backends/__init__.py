@@ -7,8 +7,9 @@ Step 1a names the adapters that already exist informally and routes the remote-r
 * :data:`SMS_LEGACY` -- the frozen SMS ``/api/v1`` path (:mod:`.sms_legacy`), integer simulation ids.
 
 Step 1b puts the choice of backend for a workspace's NEW run in one place: :func:`named`, :func:`select` and
-:func:`active` (§1; from P1c they consult the provider, §2.2). The six older predicates (``remote_pinned.resolve_run_target`` / ``uses_*_dispatch``,
-``server_capabilities.*_dispatch_active``) remain, as wrappers or primitives, because tests patch them.
+:func:`active` (§1; from P1c they consult the provider, §2.2), and :func:`resolve_run_target` (backlog item 18)
+answers "local" or "deployment" from :func:`active`. The two ``server_capabilities.*_dispatch_active`` primitives
+remain, because tests patch them.
 
 An existing run is routed by its stored record (:func:`for_existing`, step 1c-2); :func:`for_run`'s id-form rule
 is only the fallback for a run with no record (one listed live from the configured server, or stored before step
@@ -20,7 +21,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional, Protocol, Union
+from typing import TYPE_CHECKING, Callable, Literal, Optional, Protocol, Union
 
 from vivarium_workbench.lib.backends.compose_api import ComposeApiRuns, compose_health_identity
 
@@ -197,6 +198,27 @@ def active(ws_root: "Path | str") -> "Backend | None":
     if chosen is None:
         sc.require_named_backend_reachable()
     return chosen
+
+
+def resolve_run_target(ws_root: "Path | str") -> "Literal['local', 'deployment']":
+    """Item 18: THE local-vs-deployment target of a NEW run, the same for every run entrypoint (Composites tab,
+    Study tab, CLI, batch worker, rerun, ...), never by which button was clicked.
+
+    ``"deployment"`` when a backend is :func:`active` for ``ws_root`` (a provider's claim -- the session's own build
+    or the deployment's pin -- or a named backend that runs documents); ``"local"`` otherwise. Raises ``APIError``
+    502 (wb#1630) when the operator named a backend that cannot be reached.
+
+    Backlog item 18 (2026-08-04): the Composites tab honoured a deployment-wide pin while the study-run path saw
+    only the session build, so a pin with no session build fell through to a local subprocess. Every run entrypoint
+    now resolves through this one function and threads the result into ``invoke_run(..., target=...)``.
+
+    Deliberately NOT ``run_core.run_target_for``, which stays ``.viv-build.json``-only: a composite PREVIEW
+    (``composite_resolve.resolve_composite_for_request``) needs a concrete ``simulator_id`` stamp, which a bare
+    deployment-wide pin does not provide.
+
+    Callers read it through the module at call time (``backends.resolve_run_target(...)``) so tests can patch it.
+    """
+    return "deployment" if active(ws_root) is not None else "local"
 
 
 # --- an EXISTING run: the backend its record names (step 1c-2) ---------------------------------------------------

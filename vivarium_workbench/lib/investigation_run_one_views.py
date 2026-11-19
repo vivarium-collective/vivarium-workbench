@@ -117,8 +117,8 @@ def investigation_run_one(ws_root: Path, body: dict) -> tuple[dict, int]:
     # its place. With no pin, build stamp, or named backend this resolves to
     # "local" with no network call and nothing changes. The gate sits after
     # request validation so a malformed request keeps its own 4xx.
-    from vivarium_workbench_sms import remote_pinned
-    if remote_pinned.resolve_run_target(Path(ws_root)) == "deployment":
+    from vivarium_workbench.lib import backends
+    if backends.resolve_run_target(Path(ws_root)) == "deployment":
         return {
             "error": "investigation run-one resolves to the 'deployment' run target",
             "name": inv,

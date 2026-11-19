@@ -2,7 +2,7 @@
 
 Used only when the operator named a backend (``serve --backend-base-url``) that advertises the
 document run surface and neither a session build nor the pinned config chose the simulator-keyed
-path (:func:`remote_pinned.uses_viva_v1_dispatch`). Every function mirrors the shape the legacy
+path (``backends.select(ws) is backends.VIVA_CORE``). Every function mirrors the shape the legacy
 ``remote_run_views`` route answers, so the existing panel/poll code is unchanged; ids are the
 backend's opaque run ids (strings), carried as ``run_id``.
 """
