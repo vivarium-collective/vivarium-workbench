@@ -134,8 +134,17 @@ function lastModal(dom) {
 
   // ── 1b. a BROKEN plugin (mount throws) must not take the page down ──
   {
-    const { win } = load({ withPlugin: false, preload: 'window.SmsLaunch = { mount: function () { throw new Error("boom"); } };' });
+    const { win, calls } = load({
+      withPlugin: false,
+      preload: 'window.SmsLaunch = { mount: function () { throw new Error("boom"); } };',
+      routes: { 'POST /api/study-run-baseline': { status: 202, body: { run_id: 'r1' } } },
+    });
     assert.strictEqual(typeof win._dispatchCurrentSpecBaseline, 'function', 'page still finished loading');
+    // ...but "Run current spec" fails visibly; it never falls back to a local run.
+    let err = null;
+    await win._dispatchCurrentSpecBaseline().catch(e => { err = e; });
+    assert.ok(err && /launch plugin/.test(err.message), 'dispatch rejects when the plugin failed to mount');
+    assert.ok(!calls.some(c => c.url === '/api/study-run-baseline'), 'no local run after a broken plugin');
   }
 
   // ── 2. plugin PRESENT, remote configured, pinned: today's remote dispatch ──

@@ -2480,15 +2480,22 @@
         actionsHost: document.getElementById('sim-run-actions'),
       }) || null;
     } catch (err) {
-      _smsLaunch = null;
+      // The plugin is present but broken: fail the dispatch visibly. Never fall back to a local run,
+      // which on a pinned deployment would run the study somewhere the operator did not choose.
       if (window.console) console.error('sms-launch mount failed', err);
+      _smsLaunch = {
+        dispatchBaseline: function () { return Promise.reject(new Error('the launch plugin (sms-launch.js) failed to load: ' + (err && err.message || err))); },
+        setRemoteConfigured: function () {},
+      };
     }
   }
 
   function _dispatchCurrentSpecBaseline() {
     // The launch plugin answers first (it may dispatch remotely); null means
     // "not mine" and the study runs on the local engine as before.
-    var remote = _smsLaunch ? _smsLaunch.dispatchBaseline() : Promise.resolve(null);
+    var remote = _smsLaunch
+      ? Promise.resolve().then(function () { return _smsLaunch.dispatchBaseline(); })
+      : Promise.resolve(null);
     return remote.then(function(res) {
       if (res) return res;
       // In-page confirm (not window.confirm): embedded/automated browsers that

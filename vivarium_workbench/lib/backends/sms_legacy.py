@@ -353,7 +353,7 @@ def submit_tail(ws_root: Path, body: dict) -> tuple[dict, int]:
     # num_generations/num_seeds directly size a real AWS Batch job -- unlike
     # ordinary composite params, an unset value must never be silently
     # defaulted to 1 (matching the client-side guard in
-    # study-detail.js:_dispatchRemotePinned, which blocks the dispatch before
+    # sms-launch.js:_dispatchRemotePinned, which blocks the dispatch before
     # this route is ever called; this is the defense-in-depth twin for any
     # OTHER caller of this route). No default applies to these two fields.
     num_generations = body.get("num_generations")

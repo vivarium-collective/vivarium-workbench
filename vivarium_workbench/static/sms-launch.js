@@ -74,8 +74,8 @@
       if (!numGenerations) missing.push('n_generations');
       if (!numSeeds) missing.push('n_seeds');
       if (missing.length) {
-        // item 81: styled modal, not window.alert() -- see _confirmModal's
-        // own comment above for why (blocks the event loop, including
+        // item 81: styled modal, not window.alert() -- see _confirmModal's comment
+        // in study-detail.js for why (blocks the event loop, including
         // browser-automation UI verification).
         return _alertModal(
           'Cannot dispatch: ' + missing.join(' and ') +
