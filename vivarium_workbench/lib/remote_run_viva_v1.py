@@ -95,7 +95,11 @@ def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
             return refused
         return {"error": str(e), "reachable": False}, 502
     _record_pending(ws_root, study, composite_id, run["id"])
-    return {"run_id": run["id"], "phase": "running", "backend": "viva-v1"}, 202
+    out = {"run_id": run["id"], "phase": "running", "backend": "viva-v1"}
+    if steps != n_steps:
+        out["warning"] = (f"n_steps clamped from {n_steps} to {steps}: this workbench sends at most 1000 "
+                          "simulated time units per run")
+    return out, 202
 
 
 def land(ws_root: Path, body: dict) -> tuple[dict, int]:

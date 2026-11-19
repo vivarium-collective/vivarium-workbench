@@ -315,8 +315,10 @@ def remote_run_config(ws_root: Path) -> tuple[dict, int]:
     Mirrors :func:`remote_run_pinned_build_start`'s priority: this session's own
     switched build (``ws_root``'s ``.viv-build.json``) wins over the deployment's
     static repo@branch pin, so the label always matches what will actually run."""
-    body, status = _remote_run_config(ws_root)
+    # The profile first: reading it is how a named compose-api becomes known as one, and the pinned build below is
+    # looked up on the SMS host (sms_api_base()) only once it is.
     backend = _backend_info()
+    body, status = _remote_run_config(ws_root)
     if backend is not None:
         body["backend"] = backend
     return body, status
@@ -388,6 +390,13 @@ def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:
     :meth:`SmsApiClient.run_simulation`; unset when absent/blank, matching
     every other optional field here."""
     body = body or {}
+    if not body.get("simulator_id"):
+        # No simulator id: this submit belongs to the named backend (compose-api, or viva-v1 documents), unless a
+        # pinned or session build sends it to SMS. Resolve the target as every run entrypoint does: it answers 502 when
+        # the named backend cannot be reached, instead of falling through to the SMS path's "not authenticated" or
+        # "simulator_id is required", and it never asks that backend for a pinned or session build. A submit that
+        # carries a simulator id is the SMS host's and does not wait on the named backend.
+        remote_pinned.resolve_run_target(ws_root)
     if not body.get("simulator_id") and remote_pinned.uses_compose_dispatch(ws_root):
         # The operator named compose-api: the composite runs in the environment its registry lists for this
         # workspace (remote_run_compose), so there is no simulator id to ask for here either.

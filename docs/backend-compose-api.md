@@ -120,7 +120,10 @@ simulation ids, so the compose check runs before them.
 - A run id compose-api does not have is a **404** (`not_found`), which stops the progress poll. The status route's
   404 alone cannot say this, because it also means "SLURM has no job yet".
 
-**Not on compose-api:** the SMS-only flows (pinned and switched builds, `/api/v1/analyses`, chain campaigns).
+**Not on compose-api:** the SMS-only flows (pinned and switched builds, `/api/v1/analyses`, chain campaigns). A
+compose-api named beside an `SMS_API_BASE` / `VIVA_API_BASE` alias is left out of them: once the profile has read the
+named URL as compose-api, `sms_api_base()` returns the alias (a subprocess, which starts without that, still gets the
+named URL).
 
 ## Onboarding a workspace
 

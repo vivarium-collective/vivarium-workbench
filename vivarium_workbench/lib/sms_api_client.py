@@ -24,6 +24,11 @@ from urllib.request import Request, urlopen
 BACKEND_BASE_ENV_VARS = ("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "VIVA_API_BASE", "SMS_API_BASE")
 DEFAULT_BACKEND_BASE = "http://localhost:8080"
 
+#: Named backend URLs that have answered as compose-api. What a URL IS, not whether it answers right now, so it is
+#: never cleared by a failed probe: ``server_capabilities.explicit_backend_profile`` adds a base when a probe reads
+#: compose-api and drops it when a probe reads anything else. :func:`sms_api_base` consults it without any network call.
+COMPOSE_API_BASES: "set[str]" = set()
+
 
 def normalize_backend_base_url(url: str) -> str:
     """Validate a backend base URL: http(s), a host, no credentials, no trailing slash.
@@ -68,12 +73,21 @@ def sms_api_base() -> str:
     ``http://localhost:8080`` (the SSM tunnel). The single source of truth for
     this lookup — ``workspace_deps_views`` and ``remote_simulations`` re-export
     it under their old ``_sms_api_base`` name.
+
+    One exception to the order: a NAMED backend already known to be compose-api
+    (:data:`COMPOSE_API_BASES`) is skipped when an alias is set. compose-api has
+    none of the SMS routes (the pinned and switched builds are not on it,
+    ``docs/backend-compose-api.md``), and every SMS call is built from this URL,
+    so a compose-api named beside a pinned SMS deployment would be asked for
+    builds it cannot have. The alias keeps serving the SMS flows; compose-api is
+    reached through its own dispatch (``remote_run_compose``). This reads the
+    environment and that set only, so it makes no network call and cannot fail.
     """
-    for name in BACKEND_BASE_ENV_VARS:
-        value = os.environ.get(name)
-        if value:
-            return value
-    return DEFAULT_BACKEND_BASE
+    named = os.environ.get(BACKEND_BASE_ENV_VARS[0])
+    alias = next((v for v in (os.environ.get(n) for n in BACKEND_BASE_ENV_VARS[1:]) if v), None)
+    if named and alias and named in COMPOSE_API_BASES:
+        return alias
+    return named or alias or DEFAULT_BACKEND_BASE
 
 
 class SmsApiError(Exception):

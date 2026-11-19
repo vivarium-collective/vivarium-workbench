@@ -98,6 +98,25 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     from vivarium_workbench.lib.sms_api_client import backend_configured
 
     if backend_configured():
+        # A backend named with --backend-base-url: say which dispatch route its
+        # capabilities give this workspace (best-effort; never blocks or raises).
+        # First, because reading the profile is also how a named compose-api becomes known as one, and
+        # sms_api_base() (the health check below, every SMS call after it) leaves it out of the SMS flows.
+        try:
+            from vivarium_workbench.lib.server_capabilities import explicit_backend_profile
+            _p = explicit_backend_profile()
+            if _p is not None and _p["reachable"]:
+                if _p["dispatch"] == "compose-api":
+                    print(f"backend dispatch: compose-api (server v{_p['version']})")
+                else:
+                    print(f"backend dispatch: {_p['dispatch']} (server v{_p['version']}; "
+                          f"capabilities: {', '.join(_p['capabilities']) or 'none advertised'})")
+            elif _p is not None:
+                print(f"backend dispatch: UNREACHABLE ({_p['error']}); a run is refused, never started locally, "
+                      "until it answers", file=sys.stderr)
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: backend capability check failed: {e}", file=sys.stderr)
+
         try:
             from vivarium_workbench.lib.workspace_deps_views import remote_health
             _h = remote_health()
@@ -111,23 +130,6 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
                 )
         except Exception as e:  # noqa: BLE001
             print(f"warning: remote sms-api health check failed: {e}", file=sys.stderr)
-
-        # A backend named with --backend-base-url: say which dispatch route its
-        # capabilities give this workspace (best-effort; never blocks or raises).
-        try:
-            from vivarium_workbench.lib.server_capabilities import explicit_backend_profile
-            _p = explicit_backend_profile()
-            if _p is not None and _p["reachable"]:
-                if _p["dispatch"] == "compose-api":
-                    print(f"backend dispatch: compose-api (server v{_p['version']})")
-                else:
-                    print(f"backend dispatch: {_p['dispatch']} (server v{_p['version']}; "
-                          f"capabilities: {', '.join(_p['capabilities']) or 'none advertised'})")
-            elif _p is not None:
-                print(f"backend dispatch: legacy (capabilities unavailable: {_p['error']})",
-                      file=sys.stderr)
-        except Exception as e:  # noqa: BLE001
-            print(f"warning: backend capability check failed: {e}", file=sys.stderr)
 
         # Start the RemoteLink circuit-breaker probe so a wedged tunnel is
         # detected in the background (~3s probe every 30s) and every sms-api call

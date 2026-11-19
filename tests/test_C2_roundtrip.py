@@ -192,6 +192,19 @@ def test_run_remote_clamps_steps(tmp_path, monkeypatch, n_steps, expected):
     assert client.interval_time == expected
 
 
+@pytest.mark.parametrize(("n_steps", "clamped"), [(5000, True), (1001, True), (1000, False), (20, False)])
+def test_run_remote_says_when_it_clamps_steps(tmp_path, monkeypatch, capsys, n_steps, clamped):
+    """The clamp itself is unchanged (above); what changes is that the run log says it happened, so a run that
+    asked for 2700 simulated time units and got 1000 is not mistaken for the run that was asked for."""
+    from vivarium_workbench.lib import remote_run
+    _stub_remote_boundaries(monkeypatch)
+    remote_run.run_remote(
+        tmp_path, "some.composite", client=_CaptureClient(),
+        poll_interval=0, dest=tmp_path, skip_preflight=True, n_steps=n_steps)
+    out = capsys.readouterr().out
+    assert (f"clamped from {n_steps} to 1000" in out) is clamped
+
+
 # ---------------------------------------------------------------------------
 # Composite-auto-results Task 8: run_remote's analysis_options param must
 # reach client.compose_submit(analysis_options=...) — exercised at the REAL

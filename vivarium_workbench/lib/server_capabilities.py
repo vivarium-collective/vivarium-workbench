@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from vivarium_workbench.lib.errors import APIError
 from vivarium_workbench.lib.sms_api_client import (
     CAPABILITY_VIVA_V1_COMPOSITES as CAPABILITY_VIVA_V1_COMPOSITES,
     CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS as CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS,
@@ -166,8 +167,11 @@ def backend_profile(client: SmsApiClient) -> dict:
       surface without documents) -- the existing path, unchanged.
 
     Never raises: ``reachable: false`` + ``error`` when the backend cannot be
-    asked, which reads as ``legacy`` so an older/unreachable backend keeps the
-    path it always had (and the real call then reports the real error).
+    asked, which reads as ``legacy`` so an older backend keeps the path it always
+    had. A backend that cannot be asked (a refused connection or a timeout, an HTTP
+    error other than a 404 on the capabilities route, a connection failure or a 5xx
+    on ``/openapi.json``) is *unreachable*, not legacy: what a run on it would do is
+    unknown, and :func:`require_named_backend_reachable` refuses a local run for it.
     """
     out: dict = {"reachable": True, "version": None, "capabilities": [], "services": {},
                  "dispatch": DISPATCH_LEGACY, "error": None}
@@ -181,7 +185,14 @@ def backend_profile(client: SmsApiClient) -> dict:
     if not caps.supports(CAPABILITY_VIVA_V1_COMPOSITES):
         try:
             version, operations = client.openapi_operations()
-        except (SmsApiError, ValueError):  # ValueError: an /openapi.json that is not JSON is not compose-api
+        except SmsApiError as e:
+            if e.status is None or e.status >= 500:
+                # The capabilities route answered 404, so something is there, but it cannot say what it is
+                # (a refused connection, a timeout, a 5xx): not a legacy backend that is up.
+                out.update(reachable=False, error=str(e))
+                return out
+            version, operations = None, frozenset()  # a 4xx: this backend has no OpenAPI document
+        except ValueError:  # an /openapi.json that is not JSON is not compose-api
             version, operations = None, frozenset()
         if COMPOSE_OPERATIONS <= operations:
             out["dispatch"] = DISPATCH_COMPOSE
@@ -199,6 +210,10 @@ def backend_profile(client: SmsApiClient) -> dict:
 #: How long a dispatch decision is trusted. Run entrypoints resolve the target
 #: several times per request; one probe per half-minute keeps that off the wire.
 _PROFILE_TTL = 30.0
+#: How long a FAILED probe is trusted, counted from the end of the probe. The callers of one request share one
+#: answer (a hung backend costs a probe its whole 3 s timeout: ``sms_api_client._CALL_CLASS_POLICY``), but a backend
+#: that is back is read again within seconds once its circuit has closed, not half a minute later.
+_PROFILE_FAILURE_TTL = 5.0
 _PROFILE_CACHE: "dict[str, tuple[float, dict]]" = {}
 
 
@@ -213,18 +228,48 @@ def explicit_backend_profile() -> "dict | None":
     """
     import time
 
-    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
+    from vivarium_workbench.lib.sms_api_client import COMPOSE_API_BASES, explicit_backend_base_url
 
     base = explicit_backend_base_url()
     if base is None:
         return None
     hit = _PROFILE_CACHE.get(base)
-    now = time.monotonic()
-    if hit and now - hit[0] < _PROFILE_TTL:
+    if hit and time.monotonic() - hit[0] < (_PROFILE_TTL if hit[1]["reachable"] else _PROFILE_FAILURE_TTL):
         return hit[1]
+    # Through the circuit breaker (RemoteLink), as every other call is: a connection failure opens it, and while it is
+    # open this answers "unreachable" without a network call, so a dead or hung backend is not asked every few
+    # seconds by every request thread. The breaker's own probe (every 30 s while ``serve`` runs, on the one URL
+    # ``sms_api_base()`` names at start-up) or the first call after its minute is up closes it when the backend is
+    # back, and the profile is read again within ``_PROFILE_FAILURE_TTL`` after that.
     profile = backend_profile(SmsApiClient.for_("probe", base))
-    _PROFILE_CACHE[base] = (now, profile)
+    _PROFILE_CACHE[base] = (time.monotonic(), profile)
+    if profile["reachable"]:  # an answer says what the backend is; a failure says nothing about that
+        if profile["dispatch"] == DISPATCH_COMPOSE:
+            COMPOSE_API_BASES.add(base)
+        else:
+            COMPOSE_API_BASES.discard(base)
     return profile
+
+
+def require_named_backend_reachable() -> None:
+    """Refuse (502, the canonical envelope) when the operator NAMED a backend and it cannot be asked.
+
+    A named backend is the operator saying "run there". One that cannot be reached reads as ``legacy`` in
+    :func:`backend_profile`, and legacy runs locally, so without this a run meant for the backend would start on
+    the machine serving the workbench. The body is the shape ``remote_run_compose._backend_error`` answers for an
+    unreachable compose-api. A named backend that IS reachable and offers only a legacy surface passes (and stays
+    local); with no backend named nothing is probed.
+    """
+    profile = explicit_backend_profile()
+    if profile is None or profile["reachable"]:
+        return
+    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
+
+    base = explicit_backend_base_url()
+    raise APIError(
+        502, f"the backend named for this workbench ({base}) cannot be reached ({profile['error']}); "
+             "a run is not started locally in its place",
+        phase="unreachable", reachable=False, reason="backend unreachable", backend=base)
 
 
 def compose_dispatch_active() -> bool:

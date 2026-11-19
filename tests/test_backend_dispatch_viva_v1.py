@@ -268,6 +268,17 @@ def test_study_run_baseline_dispatches_through_the_run_surface(ws, stub, clean_b
     assert len(stub.calls_to("viva-create-composite-run")) == 1
 
 
+def test_a_study_run_says_when_its_steps_are_clamped(ws, stub, clean_backend_env, inproc_client, monkeypatch):
+    """Visibility only: the clamp (1000 simulated time units) is the workbench's own and is unchanged; the response
+    now says when a run got less than it asked for. A run in range answers exactly as before (the test above)."""
+    _name_backend(monkeypatch, stub.url)
+    res = inproc_client(ws).post("/api/remote-run-submit", json={"study": "demo", "n_steps": 5000})
+    assert res.status_code == 202, res.text
+    assert "clamped from 5000 to 1000" in res.json()["warning"]
+    (call,) = stub.calls_to("viva-create-composite-run")
+    assert call.body["execution"]["options"]["interval_time"] == 1000.0
+
+
 def test_upstream_refusal_is_a_502_with_the_real_reason(ws, stub, clean_backend_env, inproc_client, monkeypatch):
     orig = stub.handle  # 409 carries no JSON schema in the contract, so serve it raw
 

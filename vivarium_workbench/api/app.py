@@ -7513,7 +7513,11 @@ def create_app() -> FastAPI:
         from vivarium_workbench.lib.remote_pinned import resolve_run_target
         from vivarium_workbench.lib import remote_run as _remote_run
         from vivarium_workbench.lib import composite_test_run_views as _ctr
-        target = resolve_run_target(ws)
+        try:
+            target = resolve_run_target(ws)
+        except APIError as e:
+            # A backend the operator named that cannot be asked: the preflight's own dead end, never "runs locally".
+            return JSONResponse(content={**e.to_body(), "target": "deployment", "ok": False, "message": e.message})
         if target != "deployment":
             return JSONResponse(content={"target": target, "ok": True, "reason": "local",
                                          "message": "This workspace runs locally — no push needed."})
