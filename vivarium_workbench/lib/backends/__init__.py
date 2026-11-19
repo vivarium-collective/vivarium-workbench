@@ -19,11 +19,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Union
+from typing import Callable, Optional, Protocol, Union
 
 from vivarium_workbench.lib.backends.compose_api import ComposeApiRuns
 from vivarium_workbench.lib.backends.sms_legacy import SmsLegacyRuns
-from vivarium_workbench.lib.backends.viva_core import VivaCoreRuns
+from vivarium_workbench.lib.backends.viva_core import VivaCoreRuns, viva_health_identity
 
 
 
@@ -43,15 +43,19 @@ class RunFacet(Protocol):
 
 @dataclass(frozen=True)
 class Backend:
-    """One backend. Only the run facet exists so far (§2.1's other facets come with later steps)."""
+    """One backend. Only the run facet exists so far (§2.1's other facets come with later steps).
+
+    ``identity`` maps a base URL to the identity that server reports (``None`` when the backend reports none);
+    run records store it as ``server_id`` (§2.3). compose-api has none yet: adding one is a function here."""
 
     name: str
     runs: RunFacet
+    identity: Optional[Callable[[str], Optional[str]]] = None
 
 
 COMPOSE = Backend("compose-api", ComposeApiRuns())
-VIVA_CORE = Backend("viva-core", VivaCoreRuns())
-SMS_LEGACY = Backend("sms-legacy", SmsLegacyRuns())
+VIVA_CORE = Backend("viva-core", VivaCoreRuns(), identity=viva_health_identity)
+SMS_LEGACY = Backend("sms-legacy", SmsLegacyRuns(), identity=viva_health_identity)  # the same viva-api server
 
 _ALL = (COMPOSE, VIVA_CORE, SMS_LEGACY)
 

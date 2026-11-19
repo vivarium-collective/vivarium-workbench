@@ -37,3 +37,15 @@ class VivaCoreRuns:
     def trace(self, run_id: str) -> "tuple[Union[bytes, dict], int, str]":
         # remote_trace.fetch_trace still serves viva-core traces itself; it moves here in step 4.
         raise NotImplementedError("viva-core traces are served by remote_trace.fetch_trace until step 4")
+
+
+def viva_health_identity(base_url: str) -> "str | None":
+    """The server identity a viva-core (viva-api) at ``base_url`` reports: ``deployment_id`` on ``GET /viva/v1/health``
+    (viva-api#1055 ask F), or ``None`` when it reports none. Raises when the server cannot be asked; the caller
+    (``records._ask``) caches the answer and remembers a failure. Through the circuit breaker, with the probe policy."""
+    from vivarium_workbench.lib.backends.records import IDENTITY_FIELD
+    from vivarium_workbench.lib.sms_api_client import SmsApiClient
+
+    health = SmsApiClient.for_("probe", base_url).health_v1() or {}
+    value = health.get(IDENTITY_FIELD)
+    return str(value).strip() if value not in (None, "") else None

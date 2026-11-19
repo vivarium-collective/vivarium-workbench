@@ -53,12 +53,12 @@ def remote_health() -> dict:
     it answers. Best-effort — never raises; returns
     ``{configured, base_url, reachable, version, error}``.
     """
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient, backend_configured
+    from vivarium_workbench.lib import backend_config
 
     base = _sms_api_base()
-    configured = backend_configured()
+    configured = backend_config.backend_configured()
     try:
-        version = SmsApiClient(base).ping()
+        version = backend_config.ping(base)
         return {"configured": configured, "base_url": base, "reachable": True,
                 "version": version, "error": None}
     except Exception as exc:  # noqa: BLE001 — a health probe must never raise

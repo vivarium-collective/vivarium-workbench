@@ -35,7 +35,9 @@ def _patch_ok(monkeypatch, payload):
     def fake_urlopen(req, timeout=None):
         return _Resp(payload)
 
+    # step P1a (patch target moved): the probe pings through backend_config; SmsApiClient._get still uses its own.
     monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench.lib.backend_config.urlopen", fake_urlopen)
 
 
 def _patch_unreachable(monkeypatch, sentinel=None):
@@ -44,7 +46,9 @@ def _patch_unreachable(monkeypatch, sentinel=None):
             sentinel.append(1)
         raise URLError("connection refused")
 
+    # step P1a (patch target moved): the probe pings through backend_config; SmsApiClient._get still uses its own.
     monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench.lib.backend_config.urlopen", fake_urlopen)
 
 
 def _fresh(name):
@@ -176,7 +180,8 @@ def test_probe_http_error_is_reachable(monkeypatch):
 
         raise HTTPError(req.full_url, 501, "Error response", {}, io.BytesIO(b"nope"))
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    # step P1a (patch target moved): the probe pings through backend_config.
+    monkeypatch.setattr("vivarium_workbench.lib.backend_config.urlopen", fake_urlopen)
     assert lk.probe() is True
     assert lk.state == STATE_UP
 
@@ -185,7 +190,7 @@ def test_probe_http_error_is_reachable(monkeypatch):
 
 def test_snapshot_shape():
     lk = _fresh("snap")
-    snap = lk.snapshot()
+    snap = remote_link.snapshot(lk)  # step P1a (deliberate change): the SMS snapshot is remote_link's, not the core breaker's
     assert set(snap) == {"state", "last_ok", "error", "base_url", "sso_expires_at"}
     assert snap["state"] == "unknown"
     assert snap["base_url"] == lk.base_url
@@ -194,7 +199,7 @@ def test_snapshot_shape():
 def test_snapshot_reflects_down():
     lk = _fresh("snap-down")
     lk.mark_down("boom")
-    snap = lk.snapshot()
+    snap = remote_link.snapshot(lk)  # step P1a (deliberate change)
     assert snap["state"] == STATE_DOWN
     assert snap["error"] == "boom"
 

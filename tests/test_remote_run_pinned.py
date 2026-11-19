@@ -374,10 +374,15 @@ def test_resolve_pinned_simulator_id_none_when_sms_api_unreachable(tmp_path, mon
     assert rp.resolve_pinned_simulator_id(_BoomClient(), tmp_path) is None
 
 
+# step P1a (patch target moved): remote_deployment_name delegates to backend_config.deployment_name, which reads
+# backend_config.get_env.
+from vivarium_workbench.lib import backend_config as _backend_config  # noqa: E402
+
+
 def test_remote_deployment_name_default(monkeypatch):
     import vivarium_workbench.lib.remote_pinned as rp_mod
 
-    monkeypatch.setattr(rp_mod, "get_env", lambda k, d="": d)
+    monkeypatch.setattr(_backend_config, "get_env", lambda k, d="": d)
     assert rp_mod.remote_deployment_name() == "smsvpctest"
 
 
@@ -385,7 +390,7 @@ def test_remote_deployment_name_from_env(monkeypatch):
     import vivarium_workbench.lib.remote_pinned as rp_mod
 
     monkeypatch.setattr(
-        rp_mod, "get_env", lambda k, d="": "smscdk" if k == "REMOTE_DEPLOYMENT" else d
+        _backend_config, "get_env", lambda k, d="": "smscdk" if k == "REMOTE_DEPLOYMENT" else d
     )
     assert rp_mod.remote_deployment_name() == "smscdk"
 
@@ -459,5 +464,5 @@ def test_an_explicit_deployment_name_still_wins_over_a_named_backend(monkeypatch
     from vivarium_workbench.lib import remote_pinned as rp_mod
 
     monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "https://sms.cam.uchc.edu")
-    monkeypatch.setattr(rp_mod, "get_env", lambda k, d="": "smscdk" if k == "REMOTE_DEPLOYMENT" else d)
+    monkeypatch.setattr(_backend_config, "get_env", lambda k, d="": "smscdk" if k == "REMOTE_DEPLOYMENT" else d)
     assert rp_mod.remote_deployment_name() == "smscdk"

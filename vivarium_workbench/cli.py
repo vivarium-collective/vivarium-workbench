@@ -60,14 +60,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     backend_url = getattr(args, "backend_base_url", None)
     if backend_url:
-        from vivarium_workbench.lib.sms_api_client import normalize_backend_base_url
+        from vivarium_workbench.lib.backend_config import normalize_backend_base_url
         try:
             args.backend_base_url = normalize_backend_base_url(backend_url)
         except ValueError as e:
             print(f"ERROR: --backend-base-url: {e}", file=sys.stderr)
             return 2
 
-    from vivarium_workbench.lib.sms_api_client import BackendConfigError, check_single_backend
+    from vivarium_workbench.lib.backend_config import BackendConfigError, check_single_backend
     try:
         check_single_backend(getattr(args, "backend_base_url", None))
     except BackendConfigError as e:  # before detaching, so the operator sees why
@@ -1952,7 +1952,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     from vivarium_workbench.lib.errors import APIError
-    from vivarium_workbench.lib.sms_api_client import BackendConfigError, check_single_backend
+    from vivarium_workbench.lib.backend_config import BackendConfigError, check_single_backend
 
     if args.cmd in BACKEND_COMMANDS:
         try:

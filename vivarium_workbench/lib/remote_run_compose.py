@@ -32,7 +32,7 @@ import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from vivarium_workbench.lib import remote_pinned, study_spec
+from vivarium_workbench.lib import backend_config, study_spec
 from vivarium_workbench.lib.investigations import load_spec
 
 if TYPE_CHECKING:
@@ -97,7 +97,7 @@ def _session() -> "ComposeSession":
     """A session on the named backend, signed in when ``COMPOSE_API_TOKEN`` is set (anonymous otherwise)."""
     from compose_api_client.ext import ComposeSession, EnvironmentToken
 
-    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
+    from vivarium_workbench.lib.backend_config import explicit_backend_base_url
 
     base = explicit_backend_base_url()
     if base is None:
@@ -701,7 +701,7 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
                 if not zipfile.is_zipfile(archive):
                     return {"error": f"simulation {simulation_id} served something other than a results archive",
                             "run_id": run_id}, 422
-                deployment = remote_pinned.remote_deployment_name()
+                deployment = backend_config.deployment_name()
                 landed = cr.generate_run_id(spec_id, params=provenance)
                 # step 1c: where the run went, kept out of the id's hash (added after it is derived)
                 provenance["remote"] = _remote_record("compose-api", run_id, _named_base())
@@ -746,7 +746,7 @@ def _provenance(session: "ComposeSession", simulation_id: int, run_id: str, stat
     version = _version_of(detail)
     image = _image_of(session, version, _text(detail.simulator))
     return {
-        "source": remote_pinned.remote_deployment_name(), "backend": BACKEND,
+        "source": backend_config.deployment_name(), "backend": BACKEND,
         "compose": {"run_id": run_id, "simulation_id": simulation_id,
                     "experiment_id": detail.experiment_id, "image": image,
                     "environment_version": f"{version[0]}@{version[1]}" if version else None,
@@ -812,7 +812,7 @@ def _image_of(session: "ComposeSession", version: "tuple[str, int] | None", simu
 
 
 def _named_base() -> str:
-    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
+    from vivarium_workbench.lib.backend_config import explicit_backend_base_url
 
     return explicit_backend_base_url() or ""
 
@@ -830,7 +830,7 @@ def _record_pending(ws_root: Path, study: str, spec_id: str, run_id: str, base_u
     try:
         from vivarium_workbench.lib import composite_runs as cr
 
-        deployment = remote_pinned.remote_deployment_name()
+        deployment = backend_config.deployment_name()
         conn = cr.connect(study_spec.study_dir(ws_root, study) / "runs.db")
         try:
             cr.save_metadata(
