@@ -15,10 +15,10 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | 1c-1 | One remote backend per process (startup refusal); every remote run records where it went (`params.remote`); `backends.records.resolve_existing` | wb#1654 | **done**, merged 2026-11-19 |
 | 1c-2 | Views, routes, reconciler and figures route existing runs by their record (`resolve_existing`); the Runs tab sends its row's deployment | wb#1655 | **done**, merged 2026-11-19 |
 | — | Plan rewritten for the narrower scope (SMS as a plugin) | wb#1657 | **done**, merged 2026-11-19 |
-| P1a | Core seams that need no provider (`lib/backend_config.py`, `Backend.identity`); no behaviour change | (this PR) | in review (2026-11-19) |
+| P1a | Core seams that need no provider (`lib/backend_config.py`, `Backend.identity`); no behaviour change | wb#1658 | in review (2026-11-19) |
 | P3-ids | Opaque run ids end to end, pulled forward from P3 (runs in parallel with P1, Jim 2026-11-19) | — | in progress |
 | P3-launch | The vEcoli launch panel quarantined in `static/sms-launch.js`, pulled forward from P3 (parallel) | — | in progress |
-| — | compose-api server identity (`COMPOSE.identity`), if compose-api reports one (parallel, short) | — | in progress |
+| — | compose-api server identity (`COMPOSE.identity`) | compose-api#543 | waits on compose-api: it reports no deployment identity today (asked 2026-11-19) |
 | P1b | Pure move: whole SMS modules into `vivarium_workbench_sms` (same distribution), every import and patch target re-pointed, lazy registry imports; import-linter contract whose ignore list is the ratchet | — | not started |
 | P1c | `Provider` and `SmsProvider`; registry, session build/pin and capability probe through the provider; no behaviour change | — | not started |
 | P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, facet routes stay core, SMS-only routes into the plugin's router | — | not started |
