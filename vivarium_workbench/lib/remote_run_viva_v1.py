@@ -29,7 +29,8 @@ _TERMINAL_BAD = {"failed", "cancelled"}
 
 def is_run_id(value: object) -> bool:
     """A /viva/v1 run id (``simulation-D55FF7B``) as opposed to a legacy integer id."""
-    return bool(str(value or "").strip()) and not str(value).strip().isdigit()
+    text = str(value or "").strip()
+    return bool(text) and not (text.isascii() and text.isdigit())  # the complement of an SMS integer id (ASCII)
 
 
 def _client() -> SmsApiClient:

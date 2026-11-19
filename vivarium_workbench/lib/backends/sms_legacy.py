@@ -466,7 +466,8 @@ class SmsLegacyRuns:
     name = "sms-legacy"
 
     def owns(self, run_id: object) -> bool:
-        return str(run_id or "").strip().isdigit()  # falsy ids (0, "") are refused by every tail
+        text = str(run_id or "").strip()
+        return text.isascii() and text.isdigit()  # ASCII only: int() accepts "١٢", and "²".isdigit() is True; falsy ids are refused by every tail
 
     def submit(self, ws_root: Path, body: dict) -> tuple[dict, int]:
         return submit_tail(ws_root, body)

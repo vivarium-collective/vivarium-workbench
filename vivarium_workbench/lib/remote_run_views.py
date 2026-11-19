@@ -361,7 +361,7 @@ def _first_id(params: dict, keys: "tuple[str, ...]") -> str:
         if not value:  # None, "", 0: no id (a falsy id must never reach a backend)
             continue
         text = str(value).strip()
-        if text and not (text.isdigit() and not text.strip("0")):  # "0", "00": no simulation, like the integer 0
+        if text and not (text.isascii() and text.isdigit() and not text.strip("0")):  # "0", "00": no simulation, like the integer 0
             return text
     return ""
 
@@ -417,13 +417,11 @@ def opaque_run_id(value: object) -> str:
     (``" 12 "``, ``"+12"`` -> ``"12"``), so an SMS simulation id behaves exactly as before; ``0`` / blank -> ``""``
     (no id). Anything else (``"simulation-E9Ec819"``, ``"compose-7"``) is returned stripped, unchanged."""
     text = str(value if value is not None else "").strip()
-    try:
-        number = int(text)
-    except ValueError:
+    digits = text[1:] if text.startswith("+") else text
+    if not (digits.isascii() and digits.isdigit()):  # not "1_2", "١٢" or "²", which int() would read or choke on
         return text
-    if number == 0:
-        return ""
-    return str(number) if number > 0 else text
+    number = int(digits)
+    return str(number) if number else ""
 
 
 def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:

@@ -128,3 +128,32 @@ def test_the_study_page_never_picks_the_id_key_by_the_ids_form():
     assert "/^\\d+$/.test(String(runId))" not in detail
     walk = (static / "walkthrough.js").read_text(encoding="utf-8")
     assert "function _simIdNum(r)" in walk  # active-run sort: a string id never makes the comparator NaN
+
+
+# --- non-ASCII digits never pass for an SMS integer (review of #1660) -------------------------------------------------
+
+@pytest.mark.parametrize("rid", ["²", "١٢", "1_2"])
+def test_non_ascii_or_underscored_digits_are_not_an_sms_id(rid):
+    from vivarium_workbench.lib import remote_run_views as rrv
+    from vivarium_workbench.lib.backends import SMS_LEGACY
+
+    assert SMS_LEGACY.runs.owns(rid) is False
+    assert rrv.opaque_run_id(rid) == rid  # passed on as an opaque string, never int()-normalised
+
+
+@pytest.mark.parametrize("given, expected", [("12", "12"), (" 12 ", "12"), ("+12", "12"), ("0012", "12"),
+                                             ("0", ""), ("00", ""), ("", ""), ("compose-7", "compose-7")])
+def test_opaque_run_id_keeps_the_integer_spellings(given, expected):
+    from vivarium_workbench.lib import remote_run_views as rrv
+
+    assert rrv.opaque_run_id(given) == expected
+
+
+def test_composite_status_for_a_non_ascii_digit_id_is_not_a_500(tmp_path):
+    from vivarium_workbench.lib import composite_run_views as crv
+
+    try:
+        body, status = crv.build_composite_run_status(tmp_path, "remote-sim-²")
+    except Exception as e:  # noqa: BLE001
+        pytest.fail(f"raised {type(e).__name__}: {e}")
+    assert status != 500

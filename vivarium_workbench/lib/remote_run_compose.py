@@ -75,7 +75,8 @@ class ComposeDispatchError(Exception):
 def is_run_id(value: object) -> bool:
     """A compose-api run id (``compose-4706``)."""
     text = str(value or "").strip()
-    return text.startswith(RUN_ID_PREFIX) and text[len(RUN_ID_PREFIX):].isdigit()
+    n = text[len(RUN_ID_PREFIX):]
+    return text.startswith(RUN_ID_PREFIX) and n.isascii() and n.isdigit()
 
 
 def run_id_of(simulation_id: int) -> str:
