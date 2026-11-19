@@ -21,6 +21,17 @@ from vivarium_workbench.lib.sms_api_client import BACKEND_BASE_ENV_VARS
 NAMED, VIVA, SMS = BACKEND_BASE_ENV_VARS
 
 
+def _sibling(name: str):
+    """Another test module's helpers, loaded by path: ``tests`` is not a package here, and on CI the name
+    ``tests`` can resolve to an installed third-party package instead."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(f"_sibling_{name}", Path(__file__).parent / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 @pytest.fixture(autouse=True)
 def _env(monkeypatch):
     for v in BACKEND_BASE_ENV_VARS + ("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT",):
@@ -104,7 +115,7 @@ def test_the_document_backends_placeholders_record_where_the_run_went(ws, monkey
 
 def test_land_remote_run_records_the_run_and_keeps_its_id(tmp_path, monkeypatch):
     """The record is kept out of the run id's hash: the same landing with a different record gets the same id."""
-    from tests.test_remote_run_landing import _make_remote_zarr_tar_with_analysis
+    _make_remote_zarr_tar_with_analysis = _sibling("test_remote_run_landing")._make_remote_zarr_tar_with_analysis
     from vivarium_workbench.lib.remote_run_landing import land_remote_run
 
     monkeypatch.setattr(cr.time, "time", lambda: 1_700_000_000.0)  # the id embeds the second it was made
@@ -365,7 +376,8 @@ def test_sms_submit_and_land_record_the_clients_url(monkeypatch, tmp_path):
 
 
 def test_the_pipeline_lands_with_its_clients_url(tmp_path):
-    from tests.test_remote_run_jobs import _ctx, _FakeClient
+    jobs = _sibling("test_remote_run_jobs")
+    _ctx, _FakeClient = jobs._ctx, jobs._FakeClient
     from vivarium_workbench.lib.remote_run_jobs import RemoteRunJob, run_remote_pipeline
 
     client = _FakeClient()
