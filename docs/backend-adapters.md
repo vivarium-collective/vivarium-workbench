@@ -19,7 +19,7 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | P1b | Pure move: whole SMS modules into `vivarium_workbench_sms` (same distribution), every import and patch target re-pointed, lazy registry imports; import-linter contract whose ignore list is the ratchet | — | not started |
 | P1c | `Provider` and `SmsProvider`; registry, session build/pin and capability probe through the provider; no behaviour change | — | not started |
 | P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, facet routes stay core, SMS-only routes into the plugin's router | — | not started |
-| P3 | Opaque string run ids end to end; the UI shows the nine SMS-today features (§2.5) by declared feature; launch-panel decision; core tests run without the plugin | — | not started |
+| P3 | Opaque string run ids end to end; the UI shows the nine SMS-today features (§2.5) by declared feature; launch panel quarantined (`sms-launch.js`); core tests run without the plugin | — | not started |
 | P4 | `vivarium_workbench_sms` moves into the viva-api repository as its own distribution, found by entry point; the Stanford image installs it | — | not started |
 | — | Already done, now counted as plugin work: analysis figures and PTools files read through `/viva/v1/datasets` | wb#1650 | **done**, merged 2026-11-19 |
 
@@ -311,7 +311,7 @@ The UI shows these only when the run's backend has the matching feature. Checked
 | 1 | Cloud builds: build a branch on the deployment, list or switch builds | Source / branch picker: "Build on cloud", the Cloud toggle (`branch-source.js`, `workspace-picker.js`, `session.js`) | `/api/source/builds`, `build-remote`, `switch-build` | `isRemote` | `builds` | yes: its registry environments and versions are the analogue |
 | 2 | Pinned deployment runs, and the relabelled run card | run card, configure-run dialog (`study-detail.js`, `walkthrough.js`, `configure-run.js`) | `/api/remote-run-config`; `remote-run-pinned-build` and `remote-run-build` (HTTP clients only, no browser caller) | `pinned: true` | `builds` (pin) | maybe: pin a registry version |
 | 3 | Remote preflight with "Build on cloud" / "Switch build" actions | composite card's Run button (`composite-card.js`) | `/api/remote-dispatch-preflight` | remote run target | `builds` | with 1 |
-| 4 | vEcoli launch parameters (generations, seeds, ParCa) and the campaign view | study page's remote-run panel (`study-detail.js`, `templates/study-detail.html`) | `/api/remote-run-submit` with the SMS body | deployment run target | not a facet: UI in core files (Q-launch-ui) | no: model science. Better driven by the composite's own parameter schema |
+| 4 | vEcoli launch parameters (generations, seeds, ParCa) and the campaign view | study page's remote-run panel (`study-detail.js`, `templates/study-detail.html`) | `/api/remote-run-submit` with the SMS body | deployment run target | not a facet: quarantined in `sms-launch.js`, feature `sms-launch` (Q-launch-ui) | no: model science. Better driven by the composite's own parameter schema |
 | 5 | Runs on the server listed next to local runs | Runs table (`sim-table.js`, `remote-sim-<id>` rows) | merged into `/api/simulations` | rows present | `listing` | yes: it lists runs |
 | 6 | Land a run's analysis files (`analyses.json`, PTools exports) | row action on a completed remote run (`sim-table.js`) | `/api/remote-run-land-artifacts` | any remote row with an id (also compose-api's); the server refuses non-SMS runs with 409 `not-sms` | `artifacts` | yes: run results and datasets |
 | 7 | Re-run analyses on a finished run | row action (`sim-table.js`) | `/api/remote-run-analysis` | as 6 | `analyses` | needs an analysis job kind there |
@@ -327,7 +327,7 @@ The UI shows these only when the run's backend has the matching feature. Checked
   - The composite-run status and stop routes match `remote-sim-<int>`.
 
   P3 makes run ids opaque strings end to end; the record's `kind` decides, never the id's form. This has to land before any facet can serve compose-api runs.
-- **The vEcoli launch panel** (feature 4) is SMS UI in core files (Q-launch-ui).
+- **The vEcoli launch panel** (feature 4) is SMS UI in core files. Decided: quarantine it in `static/sms-launch.js` behind a feature, as accepted debt (Q-launch-ui).
 - **Gating is a server refusal, not a hidden button.** The UI shows features 6–8 on any remote row with an id; P3 hides them by declared feature.
 - **SMS wording and plumbing:**
   - "sms-api" strings in `branch-source.js`, `study-detail.js`, `workspace-picker.js`, `loom-embed.js`, `session.js`, `progress-track.js`, `sim-table.js` and `index.html.j2`;
@@ -400,7 +400,7 @@ Rounds repeat until they find nothing new. The PR description says what each rev
 6. **P3: features, and a core without the plugin.**
    - Run ids become opaque strings end to end (routes and browser); the record's `kind` decides, never the id's form (§2.5).
    - The browser reads the active provider's `features` and hides SMS-only UI when they're absent.
-   - Decide Q-launch-ui; move the SMS branches of mixed routes behind their facets (§2.2).
+   - Quarantine the launch panel in `static/sms-launch.js` behind the `sms-launch` feature (Q-launch-ui, decided); move the SMS branches of mixed routes behind their facets (§2.2).
    - The models and the bundle key are settled.
    - A CI job turns the provider off and runs the core suite.
    - The plugin's routes then leave the OpenAPI schema. The tests over the whole route table (`tests/test_traversal_sweep.py` and the generated TypeScript types) run with the plugin, and the core-only job skips them.
@@ -418,10 +418,24 @@ Rounds repeat until they find nothing new. The PR description says what each rev
   - **Versioning.** The plugin pins a compatible range of `vivarium-workbench`, and the workbench states which provider-interface version it offers. A contract test in viva-api runs the plugin against the workbench version it pins.
   - **Needs agreement from viva-api's maintainers:** who owns the package, who reviews it, its CI, and how the Stanford workbench image gets it. Ask before P4; it doesn't block P1–P3.
 - **Q-name: the plugin's package name.** The working name is `vivarium_workbench_sms` (distribution `vivarium-workbench-sms`). Jim's phrase was "sms-client provider".
-- **Q-launch-ui: the vEcoli launch panel.**
-  - (a) Drive it from the composite's own parameter schema: the core renders a generic form, and SMS supplies the schema. Recommended, because it also works for compose-api composites.
-  - (b) Let the plugin add a UI fragment.
-  - Decide in P3's plan.
+- **Q-launch-ui, decided (Jim, 2026-11-19): (c) quarantine the panel in the core for now, and revisit at P4.**
+  - **What the panel is.** It's in `study-detail.js`, around lines 2496–2640.
+    - A dispatch-mechanism selector (`multi_node_dispatch`, `mbp_dispatch`, `nextflow_dispatch`), with different fields for each mechanism.
+    - `n_seeds` and `n_generations` come from the study's baseline and block the dispatch when unset, because they size an AWS Batch job.
+    - A confirmation step that names the AWS Batch job, and the campaign view (generations × seeds, "Stop campaign").
+  - **(c), in P3.** Move the panel code unchanged into `static/sms-launch.js`, which the core loads only when the backend declares the `sms-launch` feature.
+    - The UX doesn't change, and there's nothing new to deploy.
+    - Without the plugin, the panel is hidden.
+    - A browser-side check allows SMS terms in that one file only.
+  - **The debt this accepts.**
+    - The core repo still holds vEcoli UI text.
+    - Every change to SMS launching is a workbench PR, and the dispatch mechanisms change often.
+  - **Rejected for now.**
+    - (a) a schema-driven form: the right long-term shape, but awkward for per-mechanism fields, block-don't-default rules, the confirmation and the campaign view without building a small UI language.
+    - (b) a plugin-shipped UI file: the core would have to serve files from the plugin package, and the plugin's JS would be coupled to the core's page and its version.
+  - **When to revisit: at P4, or earlier if compose-api composites need launch parameters.** Once the plugin moves to viva-api, every launch change becomes a two-repo change. At that point:
+    - move `sms-launch.js` into the plugin (b), which by then is mostly a file move plus serving it;
+    - or switch to (a), if a generic parameter form is wanted by then.
 - **Q-features: how features reach the browser.** Either extend an existing core view or add a route. Decide in P3's plan.
 
 ---
