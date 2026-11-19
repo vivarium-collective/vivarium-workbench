@@ -179,7 +179,8 @@ backends.for_run(run_id) -> Backend   # the adapter whose runs.owns(run_id) is t
 
 - Step 1b added `named()` (the named backend's profile alone), `select(ws)` (session build, then pin, then `named()`; never
   raises) and `active(ws)` (`select` plus wb#1630's refusal). The six predicates stay as wrappers and primitives because
-  tests patch `resolve_run_target` at its call sites; callers of the `uses_*` predicates now ask `backends` directly.
+  tests patch `resolve_run_target` at its call sites; callers of the `uses_*` predicates now ask `backends` directly,
+  except `remote_run_land`, which keeps `uses_viva_v1_dispatch` until step 1c rewrites its routing.
   Like today, `active()` reads only the named URL; the aliases do not count.
 - `active()` replaces `resolve_run_target`, `uses_viva_v1_dispatch`, `uses_compose_dispatch`,
   `uses_named_backend_dispatch`, `compose_dispatch_active` and `viva_v1_dispatch_active`. Every call site asks one

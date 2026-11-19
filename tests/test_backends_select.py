@@ -161,7 +161,8 @@ def test_run_remote_with_a_caller_client_never_asks_which_backend(monkeypatch, t
 @pytest.mark.parametrize("named, to_compose", [("compose", True), ("viva", False), ("legacy", False)])
 def test_run_remote_without_a_client_follows_the_named_backend(world, monkeypatch, named, to_compose):
     """Named compose-api: run_composite. Anything else continues to the document / ``/compose/v1`` path, which
-    reads the pinned config next (stopped there)."""
+    reads the pinned config next (stopped there). Which of those two it takes (viva-core vs legacy) is pinned end
+    to end by ``test_backend_dispatch_viva_v1::test_run_remote_runs_a_document_and_lands_the_compose_results``."""
     from vivarium_workbench.lib import remote_run, remote_run_compose
 
     configure, counts = world
@@ -175,3 +176,46 @@ def test_run_remote_without_a_client_follows_the_named_backend(world, monkeypatc
         seen.append("continued")
     assert seen == (["compose"] if to_compose else ["continued"])
     assert counts["reads"] <= 2
+
+
+# --- backends.named / select / active, directly ------------------------------------------------------------------
+
+# named backend -> (named(), select(), active()) by backend name; "raise" = APIError 502.
+DIRECT = {
+    "none":        (None,          None,          None),
+    "compose":     ("compose-api", "compose-api", "compose-api"),
+    "viva":        ("viva-core",   "viva-core",   "viva-core"),
+    "legacy":      (None,          None,          None),
+    "unreachable": (None,          None,          "raise"),
+}
+
+
+def _name(fn):
+    got = _eval(fn)
+    return got if got in (None, "raise") else got.name
+
+
+@pytest.mark.parametrize("named", list(DIRECT))
+def test_backend_functions_without_build_or_pin(world, named):
+    from vivarium_workbench.lib import backends
+
+    configure, counts = world
+    ws = configure(named)
+    assert (_name(backends.named), _name(lambda: backends.select(ws)), _name(lambda: backends.active(ws))) \
+        == DIRECT[named]
+    assert counts["probes"] <= 1
+    if named == "none":
+        assert counts["probes"] == 0
+
+
+@pytest.mark.parametrize("named", list(DIRECT))
+@pytest.mark.parametrize("build", ["session", "pinned"])
+def test_backend_functions_with_build_or_pin_select_sms(world, named, build):
+    from vivarium_workbench.lib import backends
+
+    configure, counts = world
+    ws = configure(named, session=build == "session", pinned=build == "pinned")
+    assert _name(lambda: backends.select(ws)) == "sms-legacy"
+    assert _name(lambda: backends.active(ws)) == "sms-legacy"
+    assert counts["reads"] == 0 and counts["probes"] == 0
+    assert _name(backends.named) == DIRECT[named][0]  # the profile alone ignores the workspace

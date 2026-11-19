@@ -277,13 +277,15 @@ def require_named_backend_reachable() -> None:
 
 def compose_dispatch_active() -> bool:
     """True only when a backend was named explicitly AND it is compose-api. False (no network
-    call at all) otherwise."""
+    call at all) otherwise. Production code asks ``backends.named()`` (step 1b); this stays as a primitive
+    because it is the low-level form and must not import ``backends``."""
     profile = explicit_backend_profile()
     return bool(profile and profile["dispatch"] == DISPATCH_COMPOSE)
 
 
 def viva_v1_dispatch_active() -> bool:
     """True only when a backend was named explicitly AND it runs documents through
-    ``POST /viva/v1/composites``. False (no network call at all) otherwise."""
+    ``POST /viva/v1/composites``. False (no network call at all) otherwise. Production code asks
+    ``backends.named()`` (step 1b); this stays as a primitive and must not import ``backends``."""
     profile = explicit_backend_profile()
     return bool(profile and profile["dispatch"] == DISPATCH_DOCUMENT)
