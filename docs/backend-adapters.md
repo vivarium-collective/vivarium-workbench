@@ -19,7 +19,7 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | P3-ids | Opaque run ids end to end, pulled forward from P3 (runs in parallel with P1, Jim 2026-11-19) | — | in progress |
 | P3-launch | The vEcoli launch panel quarantined in `static/sms-launch.js`, pulled forward from P3 (parallel) | — | in progress |
 | — | compose-api server identity (`COMPOSE.identity`) | compose-api#543 | waits on compose-api: it reports no deployment identity today (asked 2026-11-19) |
-| P1b | Pure move: whole SMS modules into `vivarium_workbench_sms` (same distribution), every import and patch target re-pointed, lazy registry imports; import-linter contract whose ignore list is the ratchet | (this PR) | in review (2026-11-19) |
+| P1b | Pure move: whole SMS modules into `vivarium_workbench_sms` (same distribution), every import and patch target re-pointed, lazy registry imports; import-linter contract whose ignore list is the ratchet | wb#1662 | in review (2026-11-19) |
 | P1c | `Provider` and `SmsProvider`; registry, session build/pin and capability probe through the provider; no behaviour change | — | not started |
 | P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, facet routes stay core, SMS-only routes into the plugin's router | — | not started |
 | P3 | Opaque string run ids end to end; the UI shows the nine SMS-today features (§2.5) by declared feature; launch panel quarantined (`sms-launch.js`); core tests run without the plugin | — | not started |
