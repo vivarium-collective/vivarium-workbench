@@ -28,9 +28,11 @@ import pytest
 from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib import composite_lookup
 from vivarium_workbench.lib import investigations
+from vivarium_workbench.lib import remote_pinned
 from vivarium_workbench.lib import study_run_state
 from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib import investigation_run_one_views as views
+from vivarium_workbench.lib.errors import APIError
 
 RID = "demo__1700000000__abcdef"
 
@@ -579,3 +581,93 @@ def test_v4_local_shorthand_ships_resolved_id_to_child(tmp_path, monkeypatch,
     assert body["ok"] is True
     assert f'_REGISTRY[{json.dumps(resolved_id)}]' in captured["script"]
     assert "local:" not in captured["script"]
+
+
+# ---------------------------------------------------------------------------
+# run-target gate (#1630 follow-up): this ad-hoc "Duplicate run" runs a
+# composite in a LOCAL detached subprocess (the `subprocess.run` below). If the
+# workspace resolves to a deployment run target, running here would put on THIS
+# host the work the operator said to run on the named backend — the same
+# silent-wrong-target hole #1630 closed on the other run entrypoints, left open
+# here. It must refuse (409) rather than run local, and a NAMED backend that
+# cannot be reached must surface the unreachable 502 from `resolve_run_target`,
+# not be swallowed into a local run. The gate sits AFTER request validation, so
+# a malformed request is still its own 4xx.
+# ---------------------------------------------------------------------------
+
+def test_deployment_target_refuses_409_without_running(tmp_path, monkeypatch):
+    """target == 'deployment' → 409, and NOTHING local runs: neither the spec
+    loader nor the subprocess is reached."""
+    ws = _make_ws(tmp_path)
+    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda p: "deployment")
+
+    def _no_spec(*a, **k):
+        raise AssertionError("load_spec must not be reached under a deployment target")
+
+    def _no_run(*a, **k):
+        raise AssertionError("subprocess.run must not be reached under a deployment target")
+
+    monkeypatch.setattr(investigations, "load_spec", _no_spec)
+    monkeypatch.setattr(views.subprocess, "run", _no_run)
+
+    body, status = views.investigation_run_one(ws, {"investigation": "inv-x", "steps": 3})
+
+    assert status == 409
+    assert body["run_target"] == "deployment"
+    assert body["name"] == "inv-x"
+    # the hint must name a run path that actually honors the target, not just say "no"
+    assert "/api/composite-test-run" in body["hint"]
+
+
+def test_unreachable_named_backend_propagates_502(tmp_path, monkeypatch):
+    """A NAMED backend that cannot be reached raises APIError(502) from
+    resolve_run_target; the view must let it propagate (the app's APIError
+    handler renders the 502) rather than fall through to a local subprocess."""
+    ws = _make_ws(tmp_path)
+
+    def _unreachable(p):
+        raise APIError(502, "the backend named for this workbench cannot be reached",
+                       phase="unreachable", reachable=False)
+
+    def _no_run(*a, **k):
+        raise AssertionError("subprocess.run must not be reached when the backend is unreachable")
+
+    monkeypatch.setattr(remote_pinned, "resolve_run_target", _unreachable)
+    monkeypatch.setattr(views.subprocess, "run", _no_run)
+
+    with pytest.raises(APIError) as ei:
+        views.investigation_run_one(ws, {"investigation": "inv-x", "steps": 3})
+    assert ei.value.status_code == 502
+
+
+def test_missing_inv_still_400_under_a_deployment_target(tmp_path, monkeypatch):
+    """Ordering: request validation comes first, so a missing investigation is
+    still a 400 rather than being masked by the run-target gate."""
+    ws = _make_ws(tmp_path)
+    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda p: "deployment")
+    body, status = views.investigation_run_one(ws, {})
+    assert status == 400
+    assert body == {"error": "investigation required"}
+
+
+def test_local_target_runs_as_before(tmp_path, monkeypatch, fixed_run_id):
+    """A laptop (no pin, no named backend) resolves to 'local' and the ad-hoc
+    run behaves exactly as before the gate: the happy 200 path is unchanged."""
+    ws = _make_ws(tmp_path)
+    _write_spec(ws, "inv-x")
+    inv_dir = study_spec.study_dir(ws, "inv-x")
+    (inv_dir / "composites").mkdir(parents=True, exist_ok=True)
+    (inv_dir / "composites" / "baseline.yaml").write_text("foo: 1\n", encoding="utf-8")
+    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda p: "local")
+    monkeypatch.setattr(
+        investigations, "load_spec",
+        lambda p: {"variants": [{"name": "baseline",
+                                 "document": "./composites/baseline.yaml"}],
+                   "baseline": "baseline"})
+    monkeypatch.setattr(views.subprocess, "run", _fake_subprocess(_results_stdout({})))
+
+    body, status = views.investigation_run_one(ws, {"investigation": "inv-x", "steps": 2})
+
+    assert status == 200
+    assert body["ok"] is True
+    assert body["run_id"] == RID
