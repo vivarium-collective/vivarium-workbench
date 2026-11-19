@@ -14,6 +14,14 @@ from vivarium_workbench.lib.simulations_index import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _this_deployment(monkeypatch):
+    """Step 1c-2: the reconciler touches only this deployment's placeholders. These tests write them as
+    ``smstest``'s, so that is the deployment this workbench is configured for (the other-deployment case is its
+    own test below)."""
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT", "smstest")
+
+
 def _make_workspace(tmp_path, slug="baseline"):
     """A minimal workspace with one study holding a runs.db."""
     (tmp_path / "workspace.yaml").write_text(
@@ -210,3 +218,12 @@ def test_reconcile_belt_and_braces_synthesizes_remote_origin(tmp_path):
     row = next(r for r in data["simulations"]
                if r.get("run_id") == "remote-pending-300")
     assert (row.get("remote_origin") or {}).get("simulation_id") == 300
+
+
+def test_another_deployments_placeholder_is_never_reconciled(tmp_path, monkeypatch):
+    """Step 1c-2: a placeholder written for another deployment is not asked about here, so this server's 404 (or a
+    colliding id's status) never marks it orphaned or finished."""
+    ws_root, study_dir = _make_workspace(tmp_path)
+    _write_placeholder(study_dir, ws_root, 101, deployment="prod-elsewhere")
+    assert remote_reconcile.placeholder_sim_ids(ws_root) == set()
+    assert remote_reconcile.reconcile_pending_placeholders(ws_root, {101: remote_reconcile.NOT_FOUND}) == 0

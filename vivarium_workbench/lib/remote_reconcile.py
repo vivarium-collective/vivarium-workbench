@@ -48,14 +48,24 @@ def _pending_sim_id(run_id: str) -> "int | None":
 def _pending_run_dbs(ws_root: Path) -> list[Path]:
     """Every runs DB in the workspace that could hold a placeholder row.
 
-    Resolves via WorkspacePaths (``simulations_index._discover_dbs``) so a
-    workspace that relocates ``studies/`` via its ``layout:`` map is honoured.
+    The same walk the run-record lookup uses (``backends.records.run_dbs``: both study layouts and the legacy
+    ``investigations/<name>/runs.db``), so a placeholder the lookup can find is one the reconciler can see.
     """
-    from vivarium_workbench.lib import simulations_index
+    from vivarium_workbench.lib.backends import records
     try:
-        return [db for db, _rel in simulations_index._discover_dbs(Path(ws_root))]
+        return list(records.run_dbs(Path(ws_root)))
     except Exception:  # noqa: BLE001 — a broken layout must not crash the refresh
         return []
+
+
+def _ours(ws_root: Path, db: Path, sid: int) -> bool:
+    """Step 1c-2: whether the placeholder for ``sid`` in ``db`` is this backend's SMS simulation. Its record (or,
+    for an older row, its stored deployment) must say so; another deployment's placeholder is never asked about
+    here, and so never marked orphaned or finished by a server that is not the one it ran on."""
+    from vivarium_workbench.lib.backends import records
+
+    res = records.resolve_existing(ws_root, str(sid), study_db=db)
+    return res.refusal is None and res.kind == "sms-legacy"
 
 
 def placeholder_sim_ids(ws_root: Path) -> set[int]:
@@ -78,7 +88,7 @@ def placeholder_sim_ids(ws_root: Path) -> set[int]:
             conn.close()
         for r in rows:
             sid = _pending_sim_id(r["run_id"])
-            if sid is not None:
+            if sid is not None and _ours(Path(ws_root), db, sid):
                 ids.add(sid)
     return ids
 
@@ -109,7 +119,8 @@ def reconcile_pending_placeholders(ws_root: "str | Path",
     """Terminalize ``remote-pending-<id>`` rows whose sim is done/failed/unknown.
 
     ``live_status`` maps ``sim_id -> sms-api status string`` (or :data:`NOT_FOUND`
-    for a 404). Returns the number of rows terminalized. Pure — does no network
+    for a 404). Returns the number of rows terminalized. Asks no backend about the runs themselves (deciding which
+    placeholders are this backend's may read the configured server's identity, cached) — does no other network
     I/O; the enrichment (:func:`enrich_placeholder_status`) is a separate step so
     this stays trivially testable with a plain dict.
     """
@@ -134,7 +145,7 @@ def reconcile_pending_placeholders(ws_root: "str | Path",
             for r in rows:
                 run_id = r["run_id"]
                 sid = _pending_sim_id(run_id)
-                if sid is None or sid not in live_status:
+                if sid is None or sid not in live_status or not _ours(ws_root, db, sid):
                     continue
                 raw = live_status.get(sid)
                 if raw == NOT_FOUND:

@@ -36,9 +36,11 @@ def _sibling(name: str):
 def _env(monkeypatch):
     for v in BACKEND_BASE_ENV_VARS + ("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT",):
         monkeypatch.delenv(v, raising=False)
-    records._IDENTITY.clear()
+    for cache in (records._IDENTITY, records._REFRESHED, records._FAILED):
+        cache.clear()
     yield
-    records._IDENTITY.clear()
+    for cache in (records._IDENTITY, records._REFRESHED, records._FAILED):
+        cache.clear()
 
 
 @pytest.fixture
@@ -72,7 +74,7 @@ def test_remote_record_carries_kind_id_url_deployment_and_the_servers_identity(m
     assert records.remote_record("sms-legacy", 12, "http://api:8000")["server_id"] == "st"
 
 
-def test_the_identity_is_read_from_health_and_a_failure_records_null_without_caching(monkeypatch):
+def test_the_identity_is_read_from_health_and_a_failure_is_remembered_only_briefly(monkeypatch):
     from vivarium_workbench.lib import sms_api_client as sac
 
     answers = [RuntimeError("down"), {"deployment_id": "prod"}]
@@ -85,8 +87,10 @@ def test_the_identity_is_read_from_health_and_a_failure_records_null_without_cac
             return a
 
     monkeypatch.setattr(sac.SmsApiClient, "for_", classmethod(lambda cls, kind, base=None, **k: Client()))
-    assert records.fetch_server_id("http://api:8000") is None   # never raises; not cached
-    assert records.fetch_server_id("http://api:8000") == "prod"  # asked again
+    assert records.fetch_server_id("http://api:8000") is None   # never raises
+    assert records.fetch_server_id("http://api:8000") is None   # a failure is remembered briefly, not re-asked
+    records._FAILED["http://api:8000"] -= records._IDENTITY_FAIL_TTL + 1  # ...only briefly
+    assert records.fetch_server_id("http://api:8000") == "prod"
     assert records.cached_server_id("http://api:8000") == "prod"
 
 
@@ -274,14 +278,14 @@ def test_matching_identity_accepts_even_if_the_name_changed(ws, stanford, monkey
 
 
 def test_a_deployment_hint_that_matches_no_record_uses_no_record(ws, stanford, no_identity):
-    _row(ws, "a", {"source": "stanford-test", "simulation_id": 12})
+    _row(ws, "a", {"source": "stanford-test", "simulation_id": 12, "backend": "ray"})
     _row(ws, "b", {"remote": _rec()}, study="t")
     res = records.resolve_existing(ws, "12", deployment="stanford-test")
     assert res.refusal and res.refusal[0]["dispatched_to"] == "stanford-test"
 
 
 def test_a_deployment_hint_this_workbench_could_not_have_written_is_refused(ws, stanford, no_identity):
-    _row(ws, "a", {"source": "smsvpctest", "simulation_id": 12})
+    _row(ws, "a", {"source": "smsvpctest", "simulation_id": 12, "backend": "ray"})
     assert records.resolve_existing(ws, "12", deployment="aws").refusal
 
 
@@ -428,3 +432,67 @@ def test_a_malformed_remote_block_is_not_a_record(ws, stanford):
     found = records.find_records(ws, "12")
     assert found and found[0].record is None
     assert records.resolve_existing(ws, "12").refusal is None
+
+
+# --- step 1c-2 --------------------------------------------------------------------------------------------------
+
+def test_every_refusal_is_terminal_and_names_the_run(ws, stanford, no_identity):
+    _row(ws, "a", {"remote": _rec(base="http://x:1", dep="x")})
+    body, status = records.resolve_existing(ws, "12").refusal
+    assert status == 409 and body["terminal"] is True and body["simulation_id"] == "12" and body["error"]
+
+
+def test_a_local_runs_source_is_not_a_legacy_deployment(ws, stanford):
+    _row(ws, "local", {"source": "somewhere", "simulation_id": 12})  # no remote backend label
+    assert records.resolve_existing(ws, "12") == records.Resolution(kind="sms-legacy", via="id-form")
+
+
+def test_a_mismatch_refreshes_at_most_once_per_ttl(ws, stanford, monkeypatch):
+    from vivarium_workbench.lib import sms_api_client as sac
+
+    asked = []
+
+    class Client:
+        def health_v1(self):
+            asked.append(1)
+            return {"deployment_id": "prod"}
+
+    monkeypatch.setattr(sac.SmsApiClient, "for_", classmethod(lambda cls, kind, base=None, **k: Client()))
+    _row(ws, "a", {"remote": _rec(server_id="stanford-test")})
+    for _ in range(5):
+        assert records.resolve_existing(ws, "12").refusal
+    assert len(asked) == 2  # the first fetch, then one forced re-ask; the next four lookups ask nothing
+
+
+def test_a_tunnel_repointed_after_the_cache_filled_does_not_refuse_its_runs(ws, stanford, monkeypatch):
+    """Unpatched end to end: the cache says prod; the tunnel now reaches stanford-test; a stanford-test run must
+    resolve (the forced re-ask sees the new identity) -- review finding on step 1c-2."""
+    from vivarium_workbench.lib import sms_api_client as sac
+
+    answers = ["prod", "stanford-test"]
+
+    class Client:
+        def health_v1(self):
+            return {"deployment_id": answers.pop(0) if len(answers) > 1 else answers[0]}
+
+    monkeypatch.setattr(sac.SmsApiClient, "for_", classmethod(lambda cls, kind, base=None, **k: Client()))
+    assert records.fetch_server_id("http://api:8000") == "prod"
+    _row(ws, "a", {"remote": _rec(server_id="stanford-test")})
+    assert records.resolve_existing(ws, "12").kind == "sms-legacy"
+
+
+def test_a_down_server_is_not_asked_by_every_lookup(ws, stanford, monkeypatch):
+    from vivarium_workbench.lib import sms_api_client as sac
+
+    asked = []
+
+    class Client:
+        def health_v1(self):
+            asked.append(1)
+            raise RuntimeError("down")
+
+    monkeypatch.setattr(sac.SmsApiClient, "for_", classmethod(lambda cls, kind, base=None, **k: Client()))
+    _row(ws, "a", {"remote": _rec(server_id="st")})
+    for _ in range(5):
+        records.resolve_existing(ws, "12")
+    assert len(asked) == 1

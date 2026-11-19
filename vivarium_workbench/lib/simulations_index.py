@@ -2220,6 +2220,13 @@ def resolve_or_fetch_store(workspace: Path, row: dict) -> "tuple[Path | None, te
     sim_id = remote_origin.get("simulation_id")
     if sim_id is None:
         return None, None
+    # Step 1c-2: only this backend's SMS simulations are downloaded (a viva-core or compose-api row's id is not an
+    # SMS simulation, and another deployment's run must not be fetched from this one).
+    from vivarium_workbench.lib import backends
+
+    if backends.for_existing(workspace, sim_id, deployment=remote_origin.get("deployment"),
+                             study=row.get("study_slug")) is not backends.SMS_LEGACY:
+        return None, None
 
     from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
     from vivarium_workbench.lib.workspace_deps_views import _sms_api_base

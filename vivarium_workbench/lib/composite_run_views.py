@@ -178,7 +178,12 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
         except ValueError:
             return {"error": "run not found"}, 404
         from vivarium_workbench.lib import remote_run_views as _rrv
-        st, code = _rrv.remote_run_status({"simulation_id": sim_id})
+        from vivarium_workbench.lib.remote_pinned import remote_deployment_name
+
+        # This process dispatched it, to its own deployment (step 1c-2: an older row of another deployment with
+        # the same integer id must not be taken for it).
+        st, code = _rrv.remote_run_status({"simulation_id": sim_id, "deployment": remote_deployment_name()},
+                                          ws_root=ws_root)
         if code != 200:
             return st, code
         phase = str(st.get("phase") or "")

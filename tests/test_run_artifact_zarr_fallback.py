@@ -11,6 +11,7 @@ import pytest
 
 from vivarium_workbench.lib.composite_runs import connect, save_metadata
 from vivarium_workbench.lib.composite_run_views import build_run_artifact
+from vivarium_workbench.lib.remote_pinned import remote_deployment_name
 
 
 def make_fake_zarr(store_path, n_steps=4):
@@ -98,7 +99,9 @@ def test_falls_back_through_sms_api_for_s3_only_run(tmp_path, monkeypatch):
         "db_path": None, "store_path": "s3://bucket/vecoli-output/exp-113",
         "emitter": "xarray", "studies": [], "study_slug": None,
         "investigation_slug": None,
-        "remote_origin": {"deployment": "build #50", "simulation_id": 113,
+        # the CURRENT deployment's name, as remote_simulations._normalize stamps it (step 1c-2 checks it before
+        # fetching from this backend)
+        "remote_origin": {"deployment": remote_deployment_name(), "simulation_id": 113,
                            "experiment_id": "r4", "backend": "aws",
                            "s3_uri": "s3://bucket/vecoli-output/exp-113"},
     }

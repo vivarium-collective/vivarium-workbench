@@ -246,7 +246,11 @@
       : (ref.composite_run_id != null ? 'composite_run_id' : 'compose_id');
     var id = ref[key];
     var label = (key === 'simulation_id' ? 'simulation ' : 'run ') + id;
-    var traceUrl = _bp() + '/api/remote-run-trace?' + key + '=' + encodeURIComponent(id);
+    // The run's deployment and study (when the row knows them) let the server find the run's record and refuse a
+    // run of another backend (docs/backend-adapters.md step 1c).
+    var traceUrl = _bp() + '/api/remote-run-trace?' + key + '=' + encodeURIComponent(id) +
+      (ref.deployment ? '&deployment=' + encodeURIComponent(ref.deployment) : '') +
+      (ref.study ? '&study=' + encodeURIComponent(ref.study) : '');
 
     // The button is only visible once support resolved, so the value is normally
     // here already and the window opens synchronously inside the click (popup
@@ -346,6 +350,9 @@
     var sim = btn.getAttribute('data-remote-sim-id') || (host && host.getAttribute('data-remote-sim-id'));
     var comp = btn.getAttribute('data-composite-run-id') || (host && host.getAttribute('data-composite-run-id'));
     if (sim) ref.simulation_id = sim; else if (comp) ref.composite_run_id = comp; else return;
+    var row = btn.closest('tr');
+    if (row && row.getAttribute('data-remote-deployment')) ref.deployment = row.getAttribute('data-remote-deployment');
+    if (row && row.getAttribute('data-study')) ref.study = row.getAttribute('data-study');
     openTrace(ref, { button: btn });
   }
 

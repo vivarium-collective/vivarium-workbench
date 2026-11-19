@@ -22,6 +22,12 @@ from vivarium_workbench.lib import remote_run_views as rrv
 # Fakes / helpers
 # ---------------------------------------------------------------------------
 
+
+# Step 1c-2: the run views and fetch_trace look the run up in the workspace's records; an empty workspace has none,
+# so these tests keep exercising the id's form.
+import tempfile as _tempfile  # noqa: E402
+_WS = Path(_tempfile.mkdtemp(prefix="no-records-ws-"))
+
 class _FakeJob:
     def __init__(self, job_id: str = "J1") -> None:
         self.job_id = job_id
@@ -874,7 +880,7 @@ def test_status_accepts_an_analysis_id(monkeypatch):
         rrv, "SmsApiClient",
         lambda base=None: _AnalysisStatusClient(base, status={"status": "completed"}),
     )
-    body, status = rrv.remote_run_status({"analysis_id": 7})
+    body, status = rrv.remote_run_status({"analysis_id": 7}, ws_root=_WS)
     assert status == 200
     assert body["kind"] == "analysis" and body["phase"] == "done" and body["analysis_id"] == 7
 
@@ -885,7 +891,7 @@ def test_status_analysis_failed_maps_to_failed(monkeypatch):
         rrv, "SmsApiClient",
         lambda base=None: _AnalysisStatusClient(base, status={"status": "failed", "error_log": "boom"}),
     )
-    body, _status = rrv.remote_run_status({"analysis_id": 7})
+    body, _status = rrv.remote_run_status({"analysis_id": 7}, ws_root=_WS)
     assert body["phase"] == "failed" and body["error"] == "boom"
 
 
@@ -914,13 +920,13 @@ def _bind_status_client(monkeypatch, **kw):
 
 def test_status_run_completed_maps_to_done(monkeypatch):
     _bind_status_client(monkeypatch, sim_status={"status": "completed"})
-    body, status = rrv.remote_run_status({"simulation_id": 199})
+    body, status = rrv.remote_run_status({"simulation_id": 199}, ws_root=_WS)
     assert status == 200 and body["kind"] == "run" and body["phase"] == "done"
 
 
 def test_status_run_running_maps_to_running(monkeypatch):
     _bind_status_client(monkeypatch, sim_status={"status": "running"})
-    assert rrv.remote_run_status({"simulation_id": 199})[0]["phase"] == "running"
+    assert rrv.remote_run_status({"simulation_id": 199}, ws_root=_WS)[0]["phase"] == "running"
 
 
 def test_the_terminal_sets_match_sms_apis_real_status_vocabulary():
@@ -945,29 +951,29 @@ def test_the_terminal_sets_match_sms_apis_real_status_vocabulary():
 
 def test_status_build_ready_environment_maps_to_built(monkeypatch):
     _bind_status_client(monkeypatch, build_status={"status": "ready"})
-    body, status = rrv.remote_run_status({"simulator_id": 66})
+    body, status = rrv.remote_run_status({"simulator_id": 66}, ws_root=_WS)
     assert status == 200 and body["phase"] == "built"
 
 
 def test_status_run_queued_maps_to_queued(monkeypatch):
     _bind_status_client(monkeypatch, sim_status={"status": "queued"})
-    assert rrv.remote_run_status({"simulation_id": 199})[0]["phase"] == "queued"
+    assert rrv.remote_run_status({"simulation_id": 199}, ws_root=_WS)[0]["phase"] == "queued"
 
 
 def test_status_build_completed_maps_to_built(monkeypatch):
     _bind_status_client(monkeypatch, build_status={"status": "completed"})
-    body, status = rrv.remote_run_status({"simulator_id": 66})
+    body, status = rrv.remote_run_status({"simulator_id": 66}, ws_root=_WS)
     assert status == 200 and body["kind"] == "build" and body["phase"] == "built"
 
 
 def test_status_requires_an_id(monkeypatch):
     _bind_status_client(monkeypatch)
-    assert rrv.remote_run_status({})[1] == 400
+    assert rrv.remote_run_status({}, ws_root=_WS)[1] == 400
 
 
 def test_status_sms_api_unreachable_is_502_not_crash(monkeypatch):
     _bind_status_client(monkeypatch, raise_err=rrv.SmsApiError("tunnel down"))
-    body, status = rrv.remote_run_status({"simulation_id": 199})
+    body, status = rrv.remote_run_status({"simulation_id": 199}, ws_root=_WS)
     assert status == 502 and body["reachable"] is False and "unreachable" in body["reason"]
 
 
@@ -998,7 +1004,7 @@ def test_chain_progress_in_progress_split(monkeypatch):
         "status": "running", "terminal": False,
         "seeds_total": 10, "seeds_succeeded": 5, "seeds_failed": 1, "seeds_in_progress": 4,
     })
-    body, status = rrv.remote_run_chain_progress({"simulation_id": 163})
+    body, status = rrv.remote_run_chain_progress({"simulation_id": 163}, ws_root=_WS)
     assert status == 200
     assert body["kind"] == "chain_progress" and body["phase"] == "running"
     assert body["seeds_total"] == 10 and body["seeds_succeeded"] == 5
@@ -1011,18 +1017,18 @@ def test_chain_progress_terminal_maps_to_done(monkeypatch):
         "status": "completed", "terminal": True,
         "seeds_total": 2, "seeds_succeeded": 2, "seeds_failed": 0, "seeds_in_progress": 0,
     })
-    body, status = rrv.remote_run_chain_progress({"simulation_id": 163})
+    body, status = rrv.remote_run_chain_progress({"simulation_id": 163}, ws_root=_WS)
     assert status == 200 and body["phase"] == "done" and body["terminal"] is True
 
 
 def test_chain_progress_requires_simulation_id(monkeypatch):
     _bind_chain_progress_client(monkeypatch)
-    assert rrv.remote_run_chain_progress({})[1] == 400
+    assert rrv.remote_run_chain_progress({}, ws_root=_WS)[1] == 400
 
 
 def test_chain_progress_unknown_simulation_is_404(monkeypatch):
     _bind_chain_progress_client(monkeypatch, raise_err=rrv.SmsApiError("GET http://x -> 404"))
-    body, status = rrv.remote_run_chain_progress({"simulation_id": 9999})
+    body, status = rrv.remote_run_chain_progress({"simulation_id": 9999}, ws_root=_WS)
     assert status == 404 and body["phase"] == "not_found"
 
 
@@ -1030,11 +1036,11 @@ def test_chain_progress_non_chain_run_is_200_not_a_campaign(monkeypatch):
     """A plain (non-chain-dispatch) run has nothing to aggregate -- this is a
     real, expected case, not an error the panel should alarm on."""
     _bind_chain_progress_client(monkeypatch, raise_err=rrv.SmsApiError("GET http://x -> 409"))
-    body, status = rrv.remote_run_chain_progress({"simulation_id": 42})
+    body, status = rrv.remote_run_chain_progress({"simulation_id": 42}, ws_root=_WS)
     assert status == 200 and body["phase"] == "not_a_campaign"
 
 
 def test_chain_progress_sms_api_unreachable_is_502_not_crash(monkeypatch):
     _bind_chain_progress_client(monkeypatch, raise_err=rrv.SmsApiError("tunnel down"))
-    body, status = rrv.remote_run_chain_progress({"simulation_id": 163})
+    body, status = rrv.remote_run_chain_progress({"simulation_id": 163}, ws_root=_WS)
     assert status == 502 and body["reachable"] is False

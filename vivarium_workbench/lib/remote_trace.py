@@ -19,6 +19,8 @@ the action instead of offering one that cannot work.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import json
 from typing import Optional, Union
 
@@ -110,9 +112,9 @@ def _positive_int(value: object) -> Optional[int]:
     return n if n > 0 else -1
 
 
-def fetch_trace(client: SmsApiClient, *, simulation_id: object = None,
-                composite_run_id: object = None,
-                compose_id: object = None) -> "tuple[TraceBody, int, str]":
+def fetch_trace(client: SmsApiClient, *, ws_root: "Path | str", simulation_id: object = None,
+                composite_run_id: object = None, compose_id: object = None,
+                deployment: "str | None" = None, study: "str | None" = None) -> "tuple[TraceBody, int, str]":
     """The trace for exactly one of: a viva-api simulation, a composite run, or a
     ``/compose/v1`` submission (resolved to its composite run by ``correlation_id``).
 
@@ -121,11 +123,24 @@ def fetch_trace(client: SmsApiClient, *, simulation_id: object = None,
     capability absent, 404 no such run / no trace yet (passed through from
     viva-api), 502 viva-api unreachable or failed.
     """
-    from vivarium_workbench.lib import backends, remote_run_compose
+    from vivarium_workbench.lib import backends
 
-    for given in (simulation_id, composite_run_id):  # a compose-api run (the UI sends its id as either)
-        if remote_run_compose.is_run_id(given):
+    # Step 1c-2: a run id is looked up in its record, which names the backend that ran it. compose-api answers
+    # itself; a viva-core run's trace is its composite run's (the Runs tab sends a viva row's id as simulation_id);
+    # a run of another backend is refused. ``compose_id`` is a /compose/v1 submission number, not a run's id.
+    for key, given in (("simulation_id", simulation_id), ("composite_run_id", composite_run_id)):
+        if given in (None, ""):
+            continue
+        res = backends.resolve(ws_root, given, deployment=deployment, study=study)
+        if res.refusal is not None:
+            return res.refusal[0], res.refusal[1], ""
+        if res.kind == "compose-api":
             return backends.COMPOSE.runs.trace(str(given).strip())
+        if (res.kind == "viva-core" and res.via == "record" and key == "simulation_id"
+                and composite_run_id in (None, "")):
+            # A viva-core run the workspace recorded (the Runs tab sends its id as simulation_id). Only a recorded
+            # one: any other non-integer simulation_id stays the 400 it always was.
+            simulation_id, composite_run_id = None, str(given).strip()
     sim = _positive_int(simulation_id)
     compose = _positive_int(compose_id)
     run = str(composite_run_id).strip() if composite_run_id not in (None, "") else None
