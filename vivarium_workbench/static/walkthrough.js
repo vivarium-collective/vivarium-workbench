@@ -19624,9 +19624,15 @@
   function _sortActiveRuns(list) {
     // Newest dispatch first among the active runs — the remote simulation_id is
     // monotonic and trustworthy (unlike the frozen timestamp), else fall to time.
+    // Opaque run ids: only an integer id is ordered by value; any other id (a /viva/v1 or
+    // compose-api string) counts as 0 here and falls through to the time order.
+    function _simIdNum(r) {
+      var v = (r.remote_origin || {}).simulation_id;
+      return /^\d+$/.test(String(v == null ? '' : v).trim()) ? Number(v) : 0;
+    }
     return list.slice().sort(function (a, b) {
-      var ai = ((a.remote_origin || {}).simulation_id) || 0;
-      var bi = ((b.remote_origin || {}).simulation_id) || 0;
+      var ai = _simIdNum(a);
+      var bi = _simIdNum(b);
       if (ai !== bi) return bi - ai;
       return (b.completed_at || b.started_at || 0) - (a.completed_at || a.started_at || 0);
     });

@@ -2773,10 +2773,10 @@
     // "sms-api unreachable"). Local runs track progress via the Runs tab refresh.
     if (!_remoteConfigured) return;
     if (_chainProgressTimer) { clearTimeout(_chainProgressTimer); _chainProgressTimer = null; }
-    // A legacy run is an integer simulation id; a /viva/v1 run (serve --backend-base-url)
-    // carries the backend's opaque string id, asked for as run_id.
-    var idParam = /^\d+$/.test(String(runId)) ? 'simulation_id' : 'run_id';
-    api('GET', '/api/remote-run-chain-progress?' + idParam + '=' + encodeURIComponent(runId) +
+    // Opaque run ids: every run is asked for by run_id, whatever its form (an SMS integer, a
+    // /viva/v1 or compose-api string). The server reads run_id and simulation_id alike and the
+    // run's record picks the backend -- the id's form decides nothing here.
+    api('GET', '/api/remote-run-chain-progress?run_id=' + encodeURIComponent(runId) +
         '&study=' + encodeURIComponent(studyName() || ''))
       .then(function (res) {
         var d = res.body || {};

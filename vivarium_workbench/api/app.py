@@ -7917,7 +7917,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/remote-analysis-figures", tags=["Runs"],
              summary="List a remote sim's completed-analysis figures + ptools")
-    def remote_analysis_figures(simulation_id: int = 0, deployment: Union[str, None] = None,
+    def remote_analysis_figures(simulation_id: str = "", deployment: Union[str, None] = None,
                                 study: Union[str, None] = None,
                                 ws: Path = Depends(get_workspace)) -> JSONResponse:
         """The "accessible through the remote setting" read path: list each
@@ -7926,14 +7926,17 @@ def create_app() -> FastAPI:
         serves it (no storage credentials) and from S3 otherwise; ``via`` says
         which. ``available: false`` + a ``reason`` means fall back to landing /
         show "pending"."""
-        if not simulation_id:
+        # Opaque run ids: the id is a string and the run's record decides -- a compose-api or viva-core run gets
+        # _sms_only's 409 ``not-sms``, not a 422 for its form.
+        rid = _remote_run_views.opaque_run_id(simulation_id)
+        if not rid:
             return JSONResponse(status_code=400, content={"error": "simulation_id required"})
-        refused = _remote_run_views._sms_only(ws, simulation_id, {"deployment": deployment, "study": study})
+        refused = _remote_run_views._sms_only(ws, rid, {"deployment": deployment, "study": study})
         if refused is not None:  # step 1c-2: another backend's run is never asked about here
             return JSONResponse(status_code=refused[1], content=refused[0])
         client = _remote_run_views.SmsApiClient(_remote_run_views._sms_api_base())
         return JSONResponse(content=_remote_analysis_figures.list_remote_analysis_figures(
-            client, simulation_id))
+            client, int(rid)))  # _sms_only passed: an SMS simulation, an integer
 
     @app.get("/api/study-remote-figures", tags=["Runs"],
              summary="Aggregate a study's remote-sim figures + ptools for its Viz/Analyses tabs")
@@ -7951,7 +7954,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/remote-analysis-figure", tags=["Runs"],
              summary="Serve one rendered figure/ptools file from a remote analysis")
-    def remote_analysis_figure(simulation_id: int = 0, analysis: str = "", path: str = "",
+    def remote_analysis_figure(simulation_id: str = "", analysis: str = "", path: str = "",
                                deployment: Union[str, None] = None, study: Union[str, None] = None,
                                ws: Path = Depends(get_workspace)) -> Response:
         """Serve a single ``viz/`` or ``ptools/`` file of the named analysis,
@@ -7959,15 +7962,16 @@ def create_app() -> FastAPI:
         registered there, else from the analysis's S3 ``result_uri``. Both are
         resolved server-side from ``simulation_id`` + ``analysis``, so no raw
         uri crosses the wire; ``path`` is traversal-guarded in the lib."""
-        if not simulation_id or not analysis or not path:
+        rid = _remote_run_views.opaque_run_id(simulation_id)  # opaque run ids: the record decides, as above
+        if not rid or not analysis or not path:
             return Response(content=b'{"error":"simulation_id, analysis, path required"}',
                             status_code=400, media_type="application/json")
-        refused = _remote_run_views._sms_only(ws, simulation_id, {"deployment": deployment, "study": study},
+        refused = _remote_run_views._sms_only(ws, rid, {"deployment": deployment, "study": study},
                                                 memo=True)
         if refused is not None:  # step 1c-2: another backend's run is never asked about here
             return JSONResponse(status_code=refused[1], content=refused[0])
         client = _remote_run_views.SmsApiClient(_remote_run_views._sms_api_base())
-        got = _remote_analysis_figures.fetch_by_analysis(client, simulation_id, analysis, path)
+        got = _remote_analysis_figures.fetch_by_analysis(client, int(rid), analysis, path)
         if not got:
             return Response(content=b'{"error":"not found"}', status_code=404,
                             media_type="application/json")

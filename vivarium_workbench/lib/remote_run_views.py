@@ -361,7 +361,7 @@ def _first_id(params: dict, keys: "tuple[str, ...]") -> str:
         if not value:  # None, "", 0: no id (a falsy id must never reach a backend)
             continue
         text = str(value).strip()
-        if text and not (text.isdigit() and not text.strip("0")):  # "0", "00": no simulation, like the integer 0
+        if text and not (text.isascii() and text.isdigit() and not text.strip("0")):  # "0", "00": no simulation, like the integer 0
             return text
     return ""
 
@@ -401,7 +401,27 @@ def _sms_only(ws_root: Path, sim_id: object, body: dict, *, memo: bool = False) 
 
         return refusal(rid, f"run {rid} ran on {chosen.name}; this operation exists only for SMS simulations",
                        reason="not-sms", phase="not-sms")
+    if not (rid.isascii() and rid.isdigit()):
+        # Opaque run ids: the record said SMS but the id is no SMS simulation id (the callers int() it next). Refused
+        # like any other non-SMS run, rather than a 500 from int().
+        from vivarium_workbench.lib.backends.records import refusal
+
+        return refusal(rid, f"run {rid} is not an SMS simulation id; this operation exists only for SMS simulations",
+                       reason="not-sms", phase="not-sms")
     return None
+
+
+def opaque_run_id(value: object) -> str:
+    """A run id from a query string, as the opaque string every route passes on (the run's record decides what it
+    is, never its form). An integer spelling is normalised the way the old ``int`` query parameter parsed it
+    (``" 12 "``, ``"+12"`` -> ``"12"``), so an SMS simulation id behaves exactly as before; ``0`` / blank -> ``""``
+    (no id). Anything else (``"simulation-E9Ec819"``, ``"compose-7"``) is returned stripped, unchanged."""
+    text = str(value if value is not None else "").strip()
+    digits = text[1:] if text.startswith("+") else text
+    if not (digits.isascii() and digits.isdigit()):  # not "1_2", "١٢" or "²", which int() would read or choke on
+        return text
+    number = int(digits)
+    return str(number) if number else ""
 
 
 def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
