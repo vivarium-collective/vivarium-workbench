@@ -44,6 +44,12 @@ def main() -> None:
     print(f"  Swagger UI : {base}/docs")
     print(f"  ReDoc      : {base}/redoc")
     print(f"  OpenAPI    : {base}/openapi.json")
+    from vivarium_workbench.lib.sms_api_client import BackendConfigError, check_single_backend
+
+    try:
+        check_single_backend()  # one remote backend per process (docs/backend-adapters.md step 1c)
+    except BackendConfigError as e:
+        raise SystemExit(f"ERROR: {e}") from e
     # Import string (not the app object) so --reload works.
     uvicorn.run("vivarium_workbench.api.app:app", host=args.host, port=args.port, reload=args.reload)
 

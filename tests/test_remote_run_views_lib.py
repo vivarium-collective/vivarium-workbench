@@ -317,7 +317,10 @@ def test_submit_writes_a_pending_runs_meta_row(monkeypatch, tmp_path):
     assert status_col == "running"
     import json as _json
     params = _json.loads(params_json)
+    # step 1c adds where the run went (lib/backends/records.py); the existing keys are unchanged
+    remote = params.pop("remote")
     assert params == {"source": "smscdk", "simulation_id": 199, "backend": "ray"}
+    assert remote["kind"] == "sms-legacy" and remote["id"] == "199" and remote["deployment"] == "smscdk"
 
 
 def test_submit_still_succeeds_when_pending_row_write_fails(monkeypatch, tmp_path):

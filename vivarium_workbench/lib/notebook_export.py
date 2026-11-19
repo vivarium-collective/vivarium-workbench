@@ -124,6 +124,8 @@ def _run_recipes(runs_db: Path) -> list[dict]:
         for sim, spec_id, n_steps, params_json, status in cur.fetchall():
             try:
                 params = json.loads(params_json) if params_json else {}
+                if isinstance(params, dict):
+                    params.pop("remote", None)  # where the run went: internal, not a recipe input
             except (ValueError, TypeError):
                 params = {}
             out.append(

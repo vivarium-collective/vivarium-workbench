@@ -600,7 +600,7 @@ def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
             return {"error": f"compose-api refused the run: {_refusal_text(e)}", "reason": "refused", "reachable": True}, 409
         return _backend_error(e)
     run_id = run_id_of(simulation_id)
-    _record_pending(ws_root, study, composite_id, run_id)
+    _record_pending(ws_root, study, composite_id, run_id, _named_base())
     out = {"run_id": run_id, "phase": "running", "backend": BACKEND, "environment": env["name"]}
     if env["stale"]:
         out["manifest_warning"] = (f"compose-api's interface manifest for {env['name']!r} was read from another image "
@@ -703,6 +703,8 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
                             "run_id": run_id}, 422
                 deployment = remote_pinned.remote_deployment_name()
                 landed = cr.generate_run_id(spec_id, params=provenance)
+                # step 1c: where the run went, kept out of the id's hash (added after it is derived)
+                provenance["remote"] = _remote_record("compose-api", run_id, _named_base())
                 try:
                     n_steps = land_composite_results(archive, db_file, landed, emitter=STUDY_EMITTER)
                 except ValueError as e:
@@ -809,7 +811,20 @@ def _image_of(session: "ComposeSession", version: "tuple[str, int] | None", simu
     return env.image if env is not None else simulator
 
 
-def _record_pending(ws_root: Path, study: str, spec_id: str, run_id: str) -> None:
+def _named_base() -> str:
+    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
+
+    return explicit_backend_base_url() or ""
+
+
+def _remote_record(kind: str, remote_id: Any, base_url: str) -> dict:
+    """``params["remote"]`` for a run of this backend (lazy import: lib.backends imports this module)."""
+    from vivarium_workbench.lib.backends.records import remote_record
+
+    return remote_record(kind, remote_id, base_url)
+
+
+def _record_pending(ws_root: Path, study: str, spec_id: str, run_id: str, base_url: str) -> None:
     """A Runs-tab placeholder from the moment compose-api accepted the run (best-effort: a visibility row must
     never fail an already-dispatched run). Same id scheme as the other routes, so landing can replace it."""
     try:
@@ -820,7 +835,8 @@ def _record_pending(ws_root: Path, study: str, spec_id: str, run_id: str) -> Non
         try:
             cr.save_metadata(
                 conn, spec_id=spec_id, run_id=f"remote-pending-{run_id}",
-                params={"source": deployment, "simulation_id": run_id, "backend": BACKEND},
+                params={"source": deployment, "simulation_id": run_id, "backend": BACKEND,
+                        "remote": _remote_record("compose-api", run_id, base_url)},
                 label=f"Remote dispatch ({deployment}) — in progress",
                 started_at=time.time(), n_steps=0, workspace=ws_root,
             )

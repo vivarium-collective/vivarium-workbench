@@ -104,9 +104,12 @@ def _fixture_ws() -> Path:
 
 
 def test_the_backend_flag_is_honoured_by_a_real_detached_server(tmp_path, monkeypatch):
-    """Flag > the env aliases (conftest points VIVA_API_BASE at a closed port), and
-    it survives ``--detach``'s re-exec: the child reports the flag's URL."""
+    """The flag survives ``--detach``'s re-exec: the child reports the flag's URL. (conftest points both aliases at
+    a closed port; a named backend beside a different alias is refused at startup since step 1c, so this test clears
+    them -- "flag beats aliases" stays pinned as a pure ``sms_api_base()`` test above.)"""
     pytest.importorskip("process_bigraph.artifacts")
+    monkeypatch.delenv("VIVA_API_BASE", raising=False)
+    monkeypatch.delenv("SMS_API_BASE", raising=False)
     ws = tmp_path / "ws_copy"
     shutil.copytree(_fixture_ws(), ws)
     cli._clear_server_state(ws)

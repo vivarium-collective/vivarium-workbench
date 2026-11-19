@@ -685,3 +685,24 @@ def test_a_landed_runs_own_provenance_wins_over_a_manifest_ran_on():
            "params_json": json.dumps({"source": "landed.example", "viva_v1": {"run_id": RUN_ID}}),
            "manifest_json": json.dumps({"ran_on": "manifest.example"})}
     assert _row_to_dict(row, "/ws/studies/demo/runs.db")["ran_on"] == "landed.example"
+
+
+def test_a_viva_v1_run_records_where_it_went_while_pending_and_once_landed(
+        ws, stub, clean_backend_env, inproc_client, monkeypatch):
+    """Step 1c: the placeholder and the landed row both carry ``params.remote`` (lib/backends/records.py)."""
+    _name_backend(monkeypatch, stub.url)
+    stub.respond("GET", "/viva/v1/composites/{id}", 200, _run("completed"))
+    _serve_results(stub, [_hpcrun(SIM_ID, 38, RUN_ID)])
+    c = inproc_client(ws)
+    assert c.post("/api/remote-run-submit", json={"study": "demo"}).status_code == 202
+    with _runs_db(ws) as db:
+        pending = json.loads(db.execute("SELECT params_json FROM runs_meta").fetchone()["params_json"])
+    assert pending["remote"]["kind"] == "viva-core" and pending["remote"]["id"] == RUN_ID
+    assert pending["remote"]["base_url"] == stub.url.rstrip("/")
+
+    res = c.post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID})
+    assert res.status_code == 200, res.text
+    with _runs_db(ws) as db:
+        landed = json.loads(db.execute("SELECT params_json FROM runs_meta").fetchone()["params_json"])
+    assert landed["remote"]["kind"] == "viva-core" and landed["remote"]["id"] == RUN_ID
+    assert "simulation_id" not in landed  # still not a remote-store row

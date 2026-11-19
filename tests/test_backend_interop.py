@@ -228,28 +228,6 @@ def sms_host():
     srv.server_close()
 
 
-def test_the_pinned_sms_build_is_asked_of_the_sms_host_when_compose_api_is_named(
-        ws, backend, sms_host, monkeypatch, inproc_client):
-    """The test above pins the *predicate* (a pinned build is not routed to compose-api). The request is what
-    matters: ``SMS_API_BASE`` names the SMS host, ``--backend-base-url`` names compose-api, and the pinned submit
-    must reach the first, because compose-api has no ``/api/v1/simulations`` (docs/backend-compose-api.md: the
-    pinned and switched builds are not on compose-api)."""
-    _Backend.routes = dict(COMPOSE)
-    monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", backend)
-    monkeypatch.setenv("SMS_API_BASE", sms_host)
-    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
-    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_REPO_URL", SMS_ECOLI)
-    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_BRANCH", "main")
-    # What `serve` does at start-up, before any request: read the named backend's profile, which is how it
-    # becomes known as compose-api (the SMS flows then leave it alone).
-    assert sc.explicit_backend_profile()["dispatch"] == sc.DISPATCH_COMPOSE
-    res = inproc_client(ws).post("/api/remote-run-submit", json={
-        "study": "demo", "simulator_id": 66, "num_generations": 2, "num_seeds": 3})
-    assert res.status_code == 202, res.text
-    assert ("POST", "/api/v1/simulations") in _SmsHost.seen
-    assert ("POST", "/api/v1/simulations") not in _Backend.seen, "the pinned build was asked of the compose-api host"
-
-
 # --- a named backend that cannot be reached never runs locally -----------------------------------------------
 
 DEAD = "http://127.0.0.1:9"  # nothing listens on the discard port (the Stanford test above names it too)
@@ -512,66 +490,26 @@ def test_the_failure_window_counts_from_the_end_of_the_probe(monkeypatch):
     assert len(probes) == 2
 
 
-# --- the SMS flows keep the SMS host when compose-api is the named backend -----------------------------------
+# --- one remote backend per process (docs/backend-adapters.md step 1c; Jim, 2026-11-19) --------------------------
+#
+# These replace five tests that pinned a named compose-api running beside an SMS alias (sms_api_base() skipping the
+# named URL for the SMS flows). That configuration is now refused when the process starts, so a workbench never talks
+# to two backends; the refusal itself is pinned in tests/test_backends_startup.py.
 
-def test_a_named_compose_api_is_skipped_for_the_sms_flows_and_stays_skipped_when_it_drops(
-        dropping_backend, sms_host, monkeypatch):
-    """What decides is what the backend IS, learned from its profile, not whether it answers just now: a blip must not
-    send the SMS flows (polls, landing, health) to a URL whose circuit breaker then stays open for a minute."""
-    _Dropping.routes = dict(COMPOSE)
-    monkeypatch.setenv(NAMED, dropping_backend)
-    monkeypatch.setenv("SMS_API_BASE", sms_host)
-    assert sc.explicit_backend_profile()["dispatch"] == sc.DISPATCH_COMPOSE
-    assert sac.sms_api_base() == sms_host
+def test_compose_api_named_beside_the_stanford_alias_is_refused_at_startup(backend, sms_host, monkeypatch):
+    from vivarium_workbench import cli
 
-    _Dropping.up = False
-    _age(dropping_backend, 100.0)
-    assert sc.explicit_backend_profile()["reachable"] is False
-    assert sac.sms_api_base() == sms_host
-
-
-def test_a_backend_that_stops_answering_as_compose_api_is_no_longer_skipped(dropping_backend, sms_host, monkeypatch):
-    _Dropping.routes = dict(COMPOSE)
-    monkeypatch.setenv(NAMED, dropping_backend)
-    monkeypatch.setenv("SMS_API_BASE", sms_host)
-    sc.explicit_backend_profile()
-    assert sac.sms_api_base() == sms_host
-
-    _Dropping.routes = {}  # it answers again, as a legacy backend (every route a 404)
-    _age(dropping_backend, 100.0)
-    assert sc.explicit_backend_profile()["dispatch"] == sc.DISPATCH_LEGACY
-    assert sac.sms_api_base() == dropping_backend
-
-
-def test_the_pinned_submit_does_not_wait_on_a_named_compose_api_that_dropped(
-        ws, dropping_backend, sms_host, monkeypatch, inproc_client):
-    """Stanford plus a named compose-api: the pinned submit carries a simulator id and goes to the SMS host, so a
-    compose-api that has gone away must not stop it. The named backend's refusal is for submits that are its own."""
-    _Dropping.routes = dict(COMPOSE)
-    monkeypatch.setenv(NAMED, dropping_backend)
+    monkeypatch.setenv(NAMED, backend)
     _stanford_env(monkeypatch, sms_host)
-    c = inproc_client(ws)
-    assert c.get("/api/remote-run-config").json()["backend"]["dispatch"] == sc.DISPATCH_COMPOSE  # learned while up
-
-    _Dropping.up = False
-    _age(dropping_backend, 100.0)
-    res = c.post("/api/remote-run-submit", json={
-        "study": "demo", "simulator_id": 66, "num_generations": 2, "num_seeds": 3})
-    assert res.status_code == 202, res.text
-    assert ("POST", "/api/v1/simulations") in _SmsHost.seen
+    with pytest.raises(sac.BackendConfigError):
+        sac.check_single_backend()
+    assert cli.main(["serve", "--workspace", str(FIXTURE_WS)]) == 2
 
 
-def test_the_pinned_build_is_looked_up_on_the_sms_host_even_on_the_first_config_read(
-        ws, dropping_backend, sms_host, monkeypatch, inproc_client):
-    """compose-api was down when ``serve`` started, so nothing has learned that the named URL is compose-api. The
-    first /api/remote-run-config after it is back reads the profile BEFORE it looks the pinned build up, so that
-    lookup already goes to the SMS host."""
-    _Dropping.routes = dict(COMPOSE)
-    monkeypatch.setenv(NAMED, dropping_backend)
-    _stanford_env(monkeypatch, sms_host)
-    inproc_client(ws).get("/api/remote-run-config")
-    assert ("GET", "/core/v1/simulator/versions") in _SmsHost.seen
-    assert ("GET", "/core/v1/simulator/versions") not in _Dropping.seen
+def test_the_named_backend_alone_is_the_sms_base(backend, monkeypatch):
+    monkeypatch.setenv(NAMED, backend)
+    assert sac.sms_api_base() == backend
+    sac.check_single_backend()
 
 
 # --- a backend that cannot say what it is --------------------------------------------------------------------
