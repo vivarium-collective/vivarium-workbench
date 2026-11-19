@@ -510,33 +510,69 @@ def _restore_composite_spec_registry():
             cs.register(spec)
 
 
-@pytest.fixture(autouse=True)
-def _forget_what_the_process_learned_about_backends():
-    """The backend tests start stub servers on ephemeral ports, and what the process learns about a URL (its
-    RemoteLink circuit breaker, whether it answered as compose-api) is keyed by it: a later test that is handed the
-    same port must not inherit another test's state. Only modules already imported have anything to forget."""
+#: Every process-level cache keyed by a backend URL, as ``(module, attribute)``. The backend tests start stub servers
+#: on ephemeral ports and several name the same fixed dead URL, so anything one test learns about a URL (its circuit
+#: breaker, its profile, its identity, a failure remembered for a few seconds) is otherwise still there for the next
+#: test that names it. A module not yet imported has nothing to forget; an attribute the module does not have (code
+#: that predates or postdates it) is skipped.
+BACKEND_CACHES = (
+    # The circuit breakers live in backend_config (step P1a); remote_link re-exports the same registry.
+    ("vivarium_workbench.lib.backend_config", "_links"),
+    ("vivarium_workbench_sms.remote_link", "_links"),
+    ("vivarium_workbench.lib.server_capabilities", "_PROFILE_CACHE"),
+    ("vivarium_workbench.lib.backends.records", "_IDENTITY"),
+    ("vivarium_workbench.lib.backends.records", "_FAILED"),
+    ("vivarium_workbench.lib.backends.records", "_REFRESHED"),
+    ("vivarium_workbench_sms.sms_api_client", "_ENV_IDS"),
+    ("vivarium_workbench_sms.sms_api_client", "COMPOSE_API_BASES"),  # absent since compose-api identities moved
+    ("vivarium_workbench.lib.remote_run_views", "_SMS_ONLY_MEMO"),
+    ("vivarium_workbench_sms.remote_analysis_figures", "_caps_cache"),
+    ("vivarium_workbench_sms.remote_simulations", "_REMOTE_CACHE"),
+    ("vivarium_workbench_sms.remote_simulations", "_REMOTE_META"),
+)
+
+
+def forget_backend_caches() -> None:
     import sys
 
-    def _clear():
-        # The circuit breakers live in backend_config (step P1a); remote_link re-exports the same registry.
-        for name in ("vivarium_workbench.lib.backend_config", "vivarium_workbench_sms.remote_link"):
-            link = sys.modules.get(name)
-            if link is not None:
-                with link._links_lock:
-                    link._links.clear()
-        client = sys.modules.get("vivarium_workbench_sms.sms_api_client")
-        identities = getattr(client, "COMPOSE_API_BASES", None)  # absent in code that predates compose-api identities
-        if identities is not None:
-            identities.clear()
-        # The server identities run records carry (backends.records), cached per (identity family, URL): a stub
-        # compose-api or viva-api on a reused port must not hand its deployment_id to a later test.
-        records = sys.modules.get("vivarium_workbench.lib.backends.records")
-        for cache in ("_IDENTITY", "_FAILED", "_REFRESHED"):
-            getattr(records, cache, {}).clear()
+    for name, attr in BACKEND_CACHES:
+        module = sys.modules.get(name)
+        cache = getattr(module, attr, None)
+        if cache is None:
+            continue
+        lock = getattr(module, "_links_lock", None) if attr == "_links" else None
+        if lock is not None:
+            with lock:
+                cache.clear()
+        else:
+            cache.clear()
 
-    _clear()
+
+def forget_the_github_session() -> None:
+    """``github_auth.current_session()`` caches the first session it finds for the life of the process -- and on a
+    developer's machine that is their real ``gh auth`` login, found by any test that merely sends a request
+    (``caller_identity()`` reads it for the identity header). A later test that hides ``gh`` and the keyring to
+    assert "not authenticated" would still see the cached login. CI has no ``gh`` login, so this only failed
+    locally."""
+    import sys
+
+    auth = sys.modules.get("vivarium_workbench.lib.github_auth")
+    if auth is None:
+        return
+    auth._set_cached_session(None)
+    with auth._STATE_LOCK:
+        auth._PENDING_FLOWS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _forget_what_the_process_learned_about_backends():
+    """What the process learns about a backend URL, or about who is signed in, must not outlive the test that
+    learned it: see :data:`BACKEND_CACHES` and :func:`forget_the_github_session`."""
+    forget_backend_caches()
+    forget_the_github_session()
     yield
-    _clear()
+    forget_backend_caches()
+    forget_the_github_session()
 
 
 @pytest.fixture(autouse=True)
