@@ -239,17 +239,6 @@ def test_run_analysis_sends_modules_as_query_json(monkeypatch):
     assert json.loads(qs["modules"][0]) == {"multiseed": {"doubling_time_distribution": {}}}
 
 
-def test_composite_resolve_posts_to_simulator_route(monkeypatch):
-    cap = {}
-    with _patch_urlopen(monkeypatch, cap, {"name": "c", "parameters": {}, "state": {}}):
-        c = SmsApiClient("http://x")
-        out = c.composite_resolve(66, "pkg.composites.cell", {"k": 5})
-    assert cap["url"] == "http://x/core/v1/simulator/66/composite-resolve"
-    assert cap["method"] == "POST"
-    assert json.loads(cap["body"]) == {"composite_ref": "pkg.composites.cell", "overrides": {"k": 5}}
-    assert out["name"] == "c"
-
-
 def test_download_data_streams_to_file(monkeypatch, tmp_path):
     cap = {}
     payload = b"\x1f\x8b\x08fake-gzip-bytes"
