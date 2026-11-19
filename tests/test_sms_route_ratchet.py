@@ -12,6 +12,11 @@ that list:
 
 Only ``lib/sms_api_client.py`` may spell an SMS route; anything else that does (a ``client._get("/api/v1/...")``
 that bypasses the methods) is pinned by ``ROUTE_LITERALS`` the same way.
+
+What counts as a use: any reference to the method by name -- a call, a bound method passed on
+(``status_of or client.compose_status``), or ``getattr(client, "compose_status")``. ``SMS_METHODS`` itself
+is checked against the client: it must be exactly the public methods whose bodies reach an SMS route,
+directly or through other client methods and module helpers, so a new SMS method cannot slip past.
 """
 from __future__ import annotations
 
@@ -29,6 +34,8 @@ SMS_METHODS = frozenset({
     # /core/v1/simulator* (fallback)
     "latest_simulator", "register_simulator", "register_branch_head", "simulator_status",
     "list_branch_builds", "list_simulators", "simulator_commit", "upload_simulator",
+    # /viva/v1/capabilities first, /core/v1/capabilities on a 404 (fallback)
+    "capabilities",
     # /api/v1/simulations*
     "list_build_simulations", "download_workspace", "simulation_status", "get_simulation",
     "cancel_simulation", "simulation_chain_progress", "simulation_trace", "run_simulation", "download_data",
@@ -38,8 +45,15 @@ SMS_METHODS = frozenset({
     "compose_submit", "compose_status", "compose_status_batch", "download_compose_results",
 })
 
-#: Receivers that are NOT an ``SmsApiClient`` although they share a method name (compose-api's own client).
-NOT_SMS_RECEIVERS = frozenset({"session"})
+#: (module, receiver) pairs that are NOT an ``SmsApiClient`` although they share a method name. Pinned to the
+#: module, so naming some other variable ``session`` does not hide an SMS call.
+NOT_SMS_RECEIVERS = frozenset({
+    ("lib.remote_run_compose", "session"),   # compose-api's own client (compose_api_client.ComposeSession)
+    ("lib.ai_views", "ai_tools"),            # the AI chat's own capabilities() (a module function)
+    # ServerCapabilities.capabilities, a frozenset field; only ``client.capabilities()`` here is the SMS call
+    ("lib.server_capabilities", "self"),
+    ("lib.server_capabilities", "caps"),
+})
 
 #: Today's callers. Shrink this as steps 1-6 land; never grow it.
 ALLOWED: dict[str, frozenset[str]] = {
@@ -49,7 +63,9 @@ ALLOWED: dict[str, frozenset[str]] = {
     "lib.remote_build_source": frozenset({"download_workspace", "list_simulators"}),
     "lib.remote_pinned": frozenset({"list_branch_builds"}),
     "lib.remote_reconcile": frozenset({"simulation_status"}),
-    "lib.remote_run": frozenset({"compose_status_batch", "compose_submit", "download_compose_results"}),
+    # compose_status is passed as a bound method: ``(status_of or client.compose_status)(sim_id)``.
+    "lib.remote_run": frozenset({"compose_status", "compose_status_batch", "compose_submit",
+                                 "download_compose_results"}),
     "lib.remote_run_jobs": frozenset({"download_data", "run_simulation", "simulation_status", "simulator_status",
                                       "upload_simulator"}),
     "lib.remote_run_landing": frozenset({"download_data"}),
@@ -64,6 +80,8 @@ ALLOWED: dict[str, frozenset[str]] = {
     "lib.remote_trace": frozenset({"compose_status", "simulation_trace"}),
     "lib.run_jobs": frozenset({"compose_status_batch"}),
     "lib.simulations_index": frozenset({"download_data"}),
+    # Reads the deployment's capability list; the /core/v1 half goes when no site predates /viva/v1.
+    "lib.server_capabilities": frozenset({"capabilities"}),
     "lib.source_build_views": frozenset({"register_branch_head"}),
 }
 
@@ -73,7 +91,9 @@ ROUTE_LITERALS: dict[str, frozenset[str]] = {
     "lib.composite_test_run_views": frozenset({"/api/v1/simulations/discovery"}),
 }
 
-_ROUTE = re.compile(r"^/(api/v1|core/v1|compose/v1|env-worker/v1)(/|$)")
+#: The SMS-specific prefixes. ``/viva/v1/compose`` is the interim home of ``/compose/v1``; the rest of
+#: ``/viva/v1`` (and the hosted-worker routes) is viva-core, which the design keeps.
+_ROUTE = re.compile(r"^/(api/v1|core/v1|compose/v1|viva/v1/compose)(/|$)")
 
 
 def _modules():
@@ -84,18 +104,75 @@ def _modules():
         yield name, ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def _receiver(func: ast.Attribute) -> str | None:
-    return func.value.id if isinstance(func.value, ast.Name) else None
+def _receiver(node: ast.Attribute) -> str | None:
+    return node.value.id if isinstance(node.value, ast.Name) else None
 
 
 def _sms_calls() -> dict[str, set[str]]:
+    """Every reference to an SMS method by name: ``x.method`` (called or not) and ``getattr(x, "method")``."""
     found: dict[str, set[str]] = {}
     for name, tree in _modules():
         for node in ast.walk(tree):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                    and node.func.attr in SMS_METHODS and _receiver(node.func) not in NOT_SMS_RECEIVERS):
-                found.setdefault(name, set()).add(node.func.attr)
+            if (isinstance(node, ast.Attribute) and node.attr in SMS_METHODS
+                    and (name, _receiver(node)) not in NOT_SMS_RECEIVERS):
+                found.setdefault(name, set()).add(node.attr)
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("getattr", "hasattr")
+                    and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant)
+                    and node.args[1].value in SMS_METHODS):
+                found.setdefault(name, set()).add(node.args[1].value)
     return found
+
+
+def _client_sms_methods() -> set[str]:
+    """The public ``SmsApiClient`` methods that reach an SMS route: a route literal in their body, or a
+    reference (by name) to a client method, module-level helper, or module/class constant of
+    ``sms_api_client`` that holds or reaches one (``_COMPOSE_PREFIX + "/..."`` counts)."""
+    tree = ast.parse(CLIENT.read_text(encoding="utf-8"))
+    # Transport every request goes through, so not a route for other methods to inherit: the path
+    # rewriter (it spells /viva/v1/compose to map /compose/v1 onto it) and the capability lookup it
+    # consults (whose /core/v1 fallback makes ``capabilities`` itself an SMS method, listed above).
+    transport = {"resolve_path", "_has_successor", "_server_capabilities"}
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "SmsApiClient")
+    methods = {n.name: n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name not in transport}
+    helpers = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name not in transport}
+
+    def constants(body: list) -> dict[str, ast.AST]:
+        out: dict[str, ast.AST] = {}
+        for n in body:
+            targets = n.targets if isinstance(n, ast.Assign) else [n.target] if isinstance(n, ast.AnnAssign) else []
+            for t in targets:
+                if isinstance(t, ast.Name) and getattr(n, "value", None) is not None:
+                    out[t.id] = n
+        return out
+    module_consts, class_consts = constants(tree.body), constants(cls.body)
+    nodes = {**{f"m:{k}": v for k, v in methods.items()}, **{f"f:{k}": v for k, v in helpers.items()},
+             **{f"c:{k}": v for k, v in module_consts.items()}, **{f"a:{k}": v for k, v in class_consts.items()}}
+
+    def edges(fn: ast.AST) -> set[str]:
+        out = set()
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Attribute) and n.attr in methods:
+                out.add(f"m:{n.attr}")
+            elif isinstance(n, ast.Attribute) and n.attr in class_consts:
+                out.add(f"a:{n.attr}")
+            elif isinstance(n, ast.Name) and n.id in helpers:
+                out.add(f"f:{n.id}")
+            elif isinstance(n, ast.Name) and n.id in module_consts:
+                out.add(f"c:{n.id}")
+        return out
+
+    reach = {k for k, fn in nodes.items()
+             if any(isinstance(n, ast.Constant) and isinstance(n.value, str) and _ROUTE.match(n.value)
+                    for n in ast.walk(fn))}
+    graph = {k: edges(fn) for k, fn in nodes.items()}
+    grew = True
+    while grew:
+        grew = False
+        for k in nodes:
+            if k not in reach and graph[k] & reach:
+                reach.add(k)
+                grew = True
+    return {k[2:] for k in reach if k.startswith("m:") and not k[2:].startswith("_")}
 
 
 def _route_literals() -> dict[str, set[str]]:
@@ -134,8 +211,9 @@ def test_no_new_sms_route_literals():
     assert not gone, "these route literals are gone; remove them from ROUTE_LITERALS:\n  " + "\n  ".join(gone)
 
 
-def test_every_listed_method_exists_on_the_client():
-    """A renamed or deleted client method must leave SMS_METHODS too, or the ratchet silently stops seeing it."""
-    tree = ast.parse(CLIENT.read_text(encoding="utf-8"))
-    defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
-    assert SMS_METHODS <= defined, sorted(SMS_METHODS - defined)
+def test_sms_methods_match_the_client():
+    """SMS_METHODS is exactly the client's public methods that reach an SMS route: a new one (or a renamed
+    one) must be listed, and a method that stops reaching one must leave the list."""
+    derived = _client_sms_methods()
+    assert derived == SMS_METHODS, {"missing from SMS_METHODS": sorted(derived - SMS_METHODS),
+                                    "listed but not SMS": sorted(SMS_METHODS - derived)}

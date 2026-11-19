@@ -10,7 +10,8 @@ implementations:
 
 Calls to the SMS-specific surfaces (`/api/v1/*`, `/core/v1/*`, and the interim `/viva/v1/compose`) are removed
 from everything except one frozen module. That module serves only runs recorded before the move, and it is
-deleted when viva-api retires those routes (its milestone M6).
+deleted when viva-api retires those routes (its milestone M6). Routes the PTools page still calls are not
+retired by this plan (§4, "Contracts every step must keep").
 
 Neighbours:
 
@@ -50,7 +51,7 @@ Stanford flow (§3).
 
 ### Where the branching lives
 
-The predicates are tested in 13 modules. `SmsApiClient` is used in 25. The run lifecycle is routed by the form of
+The predicates are tested in 13 modules. `SmsApiClient` is named in 19 modules besides the client itself. The run lifecycle is routed by the form of
 the run id:
 
 | Run id | Example | Route | Module |
@@ -165,7 +166,7 @@ vivarium_workbench/lib/backends/
 
 ## 3. Each SMS call and its replacement
 
-Verified against viva-api **code** on `main` (1c8b27ae), 2026-11-18, not against its docs:
+Verified against viva-api **code** on `main` (1c8b27ae; re-checked at a38cfde6), 2026-11-18, not against its docs:
 
 - **Route table.** The app was built from `viva_api.api.main` and its 218 method+path routes listed. Every route
   that `sms_api_client.py` spells exists there, including the regex-built `/viva/v1/workers/{job}/{rest}` (as
@@ -198,12 +199,12 @@ Verified against viva-api **code** on `main` (1c8b27ae), 2026-11-18, not against
 | Workbench call (route) | Callers | Replacement on viva-core | Blocked by |
 |---|---|---|---|
 | `run_simulation` (`POST /api/v1/simulations`) | `remote_run_views`, `remote_run_jobs`, `composite_test_run_views` | `POST /viva/v1/composites` with `composite: ecoli-simulation`, `environment: {id}`, the same params | nothing for new runs |
-| `simulation_status`, `get_simulation`, `simulation_chain_progress`, `cancel_simulation` | `remote_run_views`, `remote_simulations`, `remote_reconcile`, `remote_run_jobs` | `/composites/{id}`, `/status`, `/progress`, `DELETE` | old integer ids: the id lookup (Eran issue) |
+| `simulation_status`, `get_simulation`, `simulation_chain_progress`, `cancel_simulation` | `remote_run_views`, `remote_simulations`, `remote_reconcile`, `remote_run_jobs`, `remote_analysis_figures` | `/composites/{id}`, `/status`, `/progress`, `DELETE` | old integer ids: the id lookup (Eran issue) |
 | `simulation_trace` | `remote_trace` | `/composites/{id}/trace` (the adapter already has `composite_run_trace`) | as above |
 | `download_data` | `remote_run_views`, `simulations_index`, `remote_run_jobs`, `remote_run_landing` | `/composites/{id}/datasets` | as above |
 | `list_build_simulations` | `remote_simulations` (Remote tab) | `GET /composites?environment_id=` | nothing |
 | `compose_submit`, `compose_status[_batch]`, `download_compose_results` (`/viva/v1/compose`, interim) | `remote_run.run_remote`, `run_jobs`, `remote_trace`, **and `remote_run_viva_v1.land`** (the viva-core adapter itself lands results through the interim route) | the viva-core document route (`create_composite_run`) | Stanford must advertise `viva-v1-composites-documents` (to verify) |
-| `simulator_status`, `list_branch_builds`, `list_simulators`, `simulator_commit`, `upload_simulator`, `register_branch_head` (`/core/v1/simulator*`) | `remote_pinned`, `comparison_pinning`, `remote_build_source`, `source_build_views`, `remote_run_views` | `/viva/v1/environments` (W2 already goes there first; these are fallbacks) | both Stanford sites advertising `viva-v1-environments[-build]` (to verify) |
+| `simulator_status`, `list_branch_builds`, `list_simulators`, `simulator_commit`, `upload_simulator`, `register_branch_head` (`/core/v1/simulator*`) | `remote_pinned`, `comparison_pinning`, `remote_build_source`, `source_build_views`, `remote_run_views`, `remote_run_jobs`, `remote_simulations` | `/viva/v1/environments` (W2 already goes there first; these are fallbacks) | both Stanford sites advertising `viva-v1-environments[-build]` (to verify) |
 | `download_workspace` | `remote_build_source` | `/environments/{id}/source` | ~~nothing~~ the route is a 501 stub: ask D |
 | `/api/v1/simulations/discovery` (raw `client._get`) | `composite_test_run_views` | a vEcoli-specific listing of `configs/*.json` and `ecoli/analysis/<category>/*.py`, done over SSH on the HPC checkout or through the GitHub Contents API. Replacement: the environment's read-back manifest, extended by the SMS package (Q-config, settled) | ask D |
 | `run_analysis`, `analysis_status`, `list_analyses` | `remote_run_views`, `remote_analysis_figures` | analyses requested **at submit** already travel as `analysis_options` in the params. Re-running analyses on a finished run has no core route | Eran (Q2) |
@@ -216,25 +217,27 @@ Verified against viva-api **code** on `main` (1c8b27ae), 2026-11-18, not against
 Hosted workers matter in one situation: a **hosted** workbench, which has no local venv, such as the Stanford pod.
 There, `env_worker_launcher.default_launcher()` picks `ProxyWorkerLauncher` (when `ENV_WORKER_PROXY_BASE` is set)
 or `RemoteWorkerLauncher` (when `ENV_WORKER_ADVERTISE_HOST` is set); both go through viva-core's `/viva/v1/workers`.
-Everywhere else it picks `LocalWorkerLauncher`. All 30 worker methods go through the one choke point
-`WorkerPool.call`; `env_worker_routing.py` classifies them. Grouped by what could replace a hosted worker:
+Everywhere else it picks `LocalWorkerLauncher`. All 37 methods `env_worker.py` dispatches go through the one choke
+point `WorkerPool.call`; `env_worker_routing.py` classifies some of them (`JOB_CLASS_METHODS` is `run_study`,
+`run_study_analyses` and `run_investigation_analysis`). Grouped by what could replace a hosted worker:
 
 | Group | Methods | Alternative without a hosted worker | Direction |
 |---|---|---|---|
 | **Catalog**: what classes, ports and config schemas exist | `registry_catalog`, `reexport_map`, `attach_process_docs`, `viz_classes`, `viz_class_inputs`, `analysis_viewers`, `data_sources_provider` | read from the environment's **interface manifest** (compose-api `/registry/environments/{name}/manifest`, `/registry/entries`; viva-core `/environments/{id}/manifest`, **a 501 stub today**: ask D). Alex's first step for a hosted workbench | move behind `EnvFacet.manifest()`; the worker becomes the fallback |
-| **Composite discovery**: generators, `composites_full` | `discover_composites`, `composites_full` | documents are workspace files and need no code; **generators** execute workspace code | documents need nothing; generators stay on the worker (or get pre-rendered at build time: open) |
-| **Jobs** (`JOB_CLASS_METHODS`) | `run_study` (already refused on a deployment target), `run_study_analyses`, `run_investigation_analysis`, plus `report_core_snapshot` | the **Run facet**: a batch run on the backend. Analyses at submit go in the run's params; post-run analyses over landed output need an analysis job | move to `runs.submit` once the Run facet has analysis jobs (Q2). A hosted worker should never run science |
-| **Probes**: single update, state resolution | `run_process`, `resolve_composite_state`, `resolve_inner_composite_state`, `config_to_composite`, `composite_contract_audit` | none yet: they execute live code | stay local. Hosted: viva-core workers only. **The open problem** for a fully remote workbench, deferred until a real user needs it (Alex) |
+| **Composite discovery**: generators, `composites_full` | `discover_composites`, `composites_full`, `list_generators` | documents are workspace files and need no code; **generators** execute workspace code | documents need nothing; generators stay on the worker (or get pre-rendered at build time: open) |
+| **Jobs** (`JOB_CLASS_METHODS`, plus one more) | `run_study` (already refused on a deployment target), `run_study_analyses`, `run_investigation_analysis`; and `report_core_snapshot`, which is not job-class but runs the core the same way | the **Run facet**: a batch run on the backend. Analyses at submit go in the run's params; post-run analyses over landed output need an analysis job | move to `runs.submit` once the Run facet has analysis jobs (Q2). A hosted worker should never run science |
+| **Probes**: single update, state resolution, readouts | `run_process`, `resolve_composite_state`, `resolve_inner_composite_state`, `config_to_composite`, `composite_contract_audit`, `observables` (`readouts_views`), `study_readout_check` (`observables_views`), `study_precheck` (no caller today) | none yet: they execute live code | stay local. Hosted: viva-core workers only. **The open problem** for a fully remote workbench, deferred until a real user needs it (Alex) |
 | **Authoring and source editing** | `authoring_create`, `authoring_validate`, `process_source[_write]`, `composite_source[_write]`, `process_template`, `scaffold_template` | the source belongs to the science workspace, not the environment; reading and writing files needs no worker | audit why each goes through the worker; most should become plain file operations |
 | **Viz** | `render_viz_doc`, `viz_preview`, `validate_generated_visualization` | heavy rendering goes into the run; light previews stay interactive (§2A.7: "split as it comes") | stay local; hosted: viva-core workers only |
-| Housekeeping | `ping` | — | — |
+| Housekeeping | `ping`, `initialize`, `install_modules`, `shutdown` | — | — |
 
 So:
 
 - **On compose-api,** a local workbench loses nothing.
 - **A hosted workbench on compose-api** is possible for the catalog, documents, runs and authoring groups once the
   manifest route and plain file access land.
-- **Probes, generator discovery and viz previews** are what still need live code. They remain viva-core-only
+- **Probes (including the readout checks a study page runs), generator discovery and viz previews** are what
+  still need live code. They remain viva-core-only
   (`workers` facet) until a remote design exists.
 
 ### 3.2 Every outbound call, swept 2026-11-18
@@ -257,6 +260,21 @@ package, along with absolute URLs in `static/` and `templates/`:
 
 Each step is one PR and leaves `main` working at Stanford.
 
+**Contracts every step must keep: PTools.** Pathway Tools reads simulation output in two places, and neither may
+break:
+
+- **The pbg-ptools viewer** (the Analyses page's PTools card) reads the on-disk file contract
+  `<study>/**/ptools/*.tsv`, fetched over HTTP from the workbench (`pbg_ptools.workbench_viewers`). The workbench
+  produces it at landing (`remote_run_landing.land_ptools_tsvs`, which copies `**/ptools/*.tsv` out of the run's
+  archive into the study). Any new landing path must reproduce that layout, filenames included. That means ask E's
+  archive (step 2) and any per-file landing through datasets (step 4). The contract is the **folder**: it includes
+  the `cd1_*` tables, which viva-api's registry files as kind `analysis`. `ptools-analysis` is only the Omics
+  Viewer series (`ptools_*`), so landing or listing by `kind=ptools-analysis` would drop files.
+- **viva-api's PTools page** (SRI's `sms.js`, vendored) calls `/api/v1/simulations`,
+  `/api/v1/analyses?experiment_id=` and `/api/v1/analyses/{id}/data`. viva-api pins those by response shape
+  (`app/contract.py`, callers `ptools`; a facade may add keys, never remove them). The workbench leaving
+  `/api/v1` does **not** mean those routes can go, and anything this plan asks of viva-api must be additive there.
+
 0. **Ratchet and dead code.** Add `tests/test_sms_route_ratchet.py`, which pins today's callers of SMS-route client
    methods and SMS route literals. It fails on a new call, and on a removed call that is still listed, so the list
    shrinks in the PR that removes the call. Delete the `composite_resolve` remote fallback. No behaviour change.
@@ -271,11 +289,26 @@ Each step is one PR and leaves `main` working at Stanford.
    `BuildRef`, and **new** pinned runs go to viva-core `ecoli-simulation` when the backend advertises
    `viva-v1-composites`; otherwise they stay legacy. This is the first visible change, so it needs a stanford-test
    soak before prod.
+   - **Blocked on landing (found 2026-11-18).** `remote_run_viva_v1.land` finds the run's compose simulation
+     (`remote_run.compose_simulation_id`, which refuses a `job_id` that is not `compose:<n>`) and downloads the
+     interim `/viva/v1/compose/simulation/{n}/results`. An `ecoli-simulation` run has `job_id` `hpcrun:<n>`, so
+     that refuses it. viva-core's own `/composites/{id}/results` doesn't help either: it serves only document runs
+     (`compose_simulation_id`) and answers 404 for this one (checked live on stanford-test). The native output
+     (`parquet`) is not served as a dataset, and the job's `output_uri` is empty. Step 2 needs a landing path of its own: **ask E** on viva-api#1055
+     (`/results` for SMS runs), or, as an interim, the run's job owner (`GET /viva/v1/jobs/{job_id}` →
+     `simulation:<id>`, checked live on stanford-test) and the legacy
+     `/api/v1/simulations/{id}/data`.
+   - **What a new run loses until steps 4–6.** Its record carries a run id, not an integer simulation id, so the
+     integer-only reads (`run_analysis`/`analysis_status`/`list_analyses`, and `remote_analysis_figures`) do not
+     apply. Figures come back with step 4 (`/composites/{id}/datasets`, by the run); re-running an analysis comes
+     back with step 6. Until step 6, either keep the integer id beside the run id (from the job owner, above), or
+     accept that a new run cannot re-run analyses. Decide before step 2 ships.
 3. **Composites tab off `/viva/v1/compose`.** Composites-tab runs use the viva-core document route.
 4. **Reads off `/api/v1`.** Remote-tab listing, datasets, `/source` and trace for new runs. Drop the `/core/v1`
    build fallbacks once both sites advertise the environments capabilities.
-5. **Old runs.** Once viva-api exposes the run id of a legacy simulation, rewrite stored integer ids on first read.
-   `sms_legacy` then serves only post-hoc analyses.
+5. **Old runs.** Once viva-api exposes the run id of a legacy simulation, add it to stored records on first read,
+   **keeping the integer id beside it**: run reads go by the run id, and `sms_legacy` still needs the integer for
+   post-hoc analyses until step 6.
 6. **Analyses.** Implement whatever Q2 decides, then delete `sms_legacy.py` (or delete it at M6, whichever comes
    first).
 

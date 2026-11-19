@@ -518,11 +518,10 @@ def resolve_composite_for_request(
         #      the same safe, out-of-process env-worker discovery
         #      discover_all_composites already uses elsewhere (and which the
         #      managed materialization path now provisions a real venv for).
-        # Only when NEITHER general path can see it does this degrade -- the
-        # one case with nothing local to introspect at all is a bare
-        # deployment-wide pin (VIVARIUM_WORKBENCH_REMOTE_PINNED, no
-        # materialized clone), which the same waterfall degrades through
-        # cleanly (both local attempts miss, unconditionally, for any id).
+        # Only when NEITHER general path can see it does this degrade. (A bare
+        # deployment-wide pin -- VIVARIUM_WORKBENCH_REMOTE_PINNED with no
+        # materialized clone -- never gets here: it has no .viv-build.json
+        # stamp, so its target is "local" and it resolves locally.)
         local = resolve_composite(ws_root, spec_id, overrides)
         if local is not None:
             return local
