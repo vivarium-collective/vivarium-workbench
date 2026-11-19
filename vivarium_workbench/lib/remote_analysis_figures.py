@@ -1,4 +1,32 @@
-"""Read a remote analysis's rendered figures + ptools straight from S3.
+"""Read a remote analysis's rendered figures + ptools tables.
+
+Two sources, tried in this order for each simulation:
+
+1. **Registered datasets** (viva-core, ``viva-v1-datasets``). A deployment that
+   advertises the capability registers an analysis's rendered figures and ptools
+   tables as single-file datasets, with ``source = simulation:<id>`` and (from the
+   registry's walk) the analysis directory in ``attributes.analysis_dir``. They are
+   placed by folder (``viz/``, ``ptools/``), not by kind, so the ``ptools/`` listing is
+   the same set of files as on S3 (see ``_BUCKET_BY_FOLDER``). The bytes are the same
+   objects, served through the API. The listing is ``GET /viva/v1/datasets?source=...``
+   and the bytes come from ``GET /viva/v1/datasets/{id}/content``: through the API,
+   with **no storage credentials** in the workbench. This includes in-region toolkit
+   re-fires that have no analysis record (the registry walks the output prefix).
+
+2. **S3 directly** (the legacy path, below). Used when the backend does not
+   advertise ``viva-v1-datasets``, or advertises it but has registered nothing for
+   this simulation (a registry not yet backfilled -- prod at 0.9.182 has ~800 figure
+   datasets against ~150k on stanford-test). It is removed once every site's
+   registry covers its analyses (docs/backend-adapters.md, step 4).
+
+Both produce the same listing shape. A simulation is listed from BOTH when the
+backend serves the registry: the registry's analyses, plus any analysis directory
+S3 has that the registry has not registered yet (a partial backfill must not hide
+analyses the legacy path showed). The registry names an analysis by its output
+directory; S3 rows keep the analysis record's name. ``fetch_by_analysis`` tries
+the registry with the name it is given, then S3, so either kind of name resolves.
+
+The legacy S3 path, as it was:
 
 A completed GovCloud analysis (sms-api ``GET /api/v1/simulations/{id}/analyses``)
 carries a ``result_uri`` — an ``s3://`` prefix like
@@ -28,8 +56,13 @@ land-the-tar path.
 
 from __future__ import annotations
 
+import logging
 import os
+import threading
+import time
 from typing import Optional, Tuple
+
+log = logging.getLogger(__name__)
 
 # The bucket is in the AWS GovCloud partition; default there but let the env win.
 _DEFAULT_REGION = "us-gov-west-1"
@@ -57,6 +90,141 @@ def _figure_base_name(path: str) -> str:
         if stem.lower().endswith(suf):
             return stem[: -len(suf)]
     return stem
+
+
+# ---------------------------------------------------------------------------
+# Source 1: registered datasets (viva-core /viva/v1/datasets)
+# ---------------------------------------------------------------------------
+
+#: Listing bucket by the file's folder inside the analysis directory, as the S3 path lists them. Placed
+#: by folder, not by dataset kind, because the PTools contract is the folder (``**/ptools/*.tsv``, what
+#: pbg-ptools globs). The registry's ``ptools-analysis`` kind is narrower on purpose: only Omics Viewer
+#: time series (``ptools_*``); the other tables v2ecoli writes to ``ptools/`` (``cd1_*``) are ``analysis``.
+_BUCKET_BY_FOLDER = {"viz": ("figures", _FIGURE_SUFFIXES), "ptools": ("ptools", _PTOOLS_SUFFIXES)}
+_DATASET_PAGE = 200            # viva-core's DATASET_LIST_MAX_LIMIT
+_DATASET_MAX_PAGES = 50        # 10k rows per simulation; past that the listing says "truncated"
+_CAPS_TTL = 60.0
+_CAPS_FAIL_TTL = 10.0          # an unreachable backend is re-probed sooner, but not once per figure
+
+_caps_lock = threading.Lock()
+_caps_cache: dict = {}         # base_url -> (served: bool, checked_at: float, ttl: float)
+
+
+def datasets_served(client) -> bool:
+    """True when the backend advertises ``viva-v1-datasets``. Cached per base URL, because a
+    gallery fetches one figure per request. Never raises: an unreachable or capability-less
+    backend means "use the legacy path" (cached briefly, so an outage costs one probe per
+    ``_CAPS_FAIL_TTL``, not one per figure)."""
+    base = getattr(client, "base_url", None)
+    now = time.monotonic()
+    if base is not None:
+        with _caps_lock:
+            hit = _caps_cache.get(base)
+        if hit and now - hit[1] < hit[2]:
+            return hit[0]
+    try:
+        from vivarium_workbench.lib.server_capabilities import (
+            CAPABILITY_VIVA_V1_DATASETS, fetch_capabilities)
+        served, ttl = fetch_capabilities(client).supports(CAPABILITY_VIVA_V1_DATASETS), _CAPS_TTL
+    except Exception as e:
+        log.warning("capability check failed for %s; using S3 for analysis figures: %s", base, e)
+        served, ttl = False, _CAPS_FAIL_TTL
+    if base is not None:
+        with _caps_lock:
+            _caps_cache[base] = (served, now, ttl)
+    return served
+
+
+def _path_in_analysis(uri: str, analysis_dir: str) -> Optional[str]:
+    """``.../analyses/<analysis_dir>/viz/x.html`` -> ``viz/x.html``; None if the uri does not
+    contain the directory."""
+    marker = f"/{analysis_dir}/"
+    i = (uri or "").rfind(marker)
+    return uri[i + len(marker):] if i >= 0 else None
+
+
+def _analysis_dir_of(dataset: dict) -> Optional[str]:
+    """The analysis directory a registered file belongs to. The registry's walk records it as
+    ``attributes.analysis_dir``; a row registered from a run event may not, so fall back to the
+    path segment after ``/analyses/`` in its uri. None when neither places it."""
+    adir = (dataset.get("attributes") or {}).get("analysis_dir")
+    if isinstance(adir, str) and adir and "/" not in adir:
+        return adir
+    uri = dataset.get("uri") or ""
+    i = uri.rfind("/analyses/")
+    if i < 0:
+        return None
+    head, sep, _ = uri[i + len("/analyses/"):].partition("/")
+    return head if sep and head else None
+
+
+def _list_via_datasets(client, simulation_id: int) -> Tuple[list, list, bool]:
+    """``(rows, errors, truncated)`` from the registry: one row per analysis directory, holding
+    its ``viz/`` figures and ``ptools/`` tables.
+
+    A listing failure is reported in ``errors`` (and logged), keeping the rows read before it.
+    Rows are de-duplicated by dataset id, because offset paging over a newest-change-first order
+    can repeat a row the registry touched mid-listing. (It can also skip one that moved behind
+    the offset; the next listing picks it up.)"""
+    rows: dict = {}
+    seen: set = set()
+    errors: list = []
+    truncated = False
+    offset = 0
+    try:
+        for _ in range(_DATASET_MAX_PAGES):
+            page = client.list_datasets({"source": f"simulation:{int(simulation_id)}",
+                                         "limit": _DATASET_PAGE, "offset": offset}) or {}
+            for d in page.get("datasets") or []:
+                if d.get("id") in seen:
+                    continue
+                seen.add(d.get("id"))
+                adir = _analysis_dir_of(d)
+                rel = _path_in_analysis(d.get("uri") or "", adir) if adir else None
+                folder = rel.split("/", 1)[0] if rel and "/" in rel else None
+                if folder not in _BUCKET_BY_FOLDER:
+                    continue
+                bucket, suffixes = _BUCKET_BY_FOLDER[folder]
+                if not rel.lower().endswith(suffixes):
+                    continue
+                if bucket == "figures" and _figure_base_name(rel) in _HIDDEN_FIGURE_NAMES:
+                    continue
+                row = rows.setdefault(adir, {"name": adir, "status": "completed", "result_uri": None,
+                                             "figures": [], "ptools": [], "source": "datasets"})
+                row[bucket].append({"path": rel, "dataset_id": d.get("id"), "size": d.get("size_bytes") or 0})
+            nxt = page.get("next_offset")
+            if nxt is None:
+                break
+            offset = int(nxt)
+        else:
+            truncated = True
+    except Exception as e:
+        log.warning("listing the datasets of simulation %s failed: %s", simulation_id, e)
+        errors.append(str(e))
+    for row in rows.values():
+        row["figures"].sort(key=lambda f: f["path"])
+        row["ptools"].sort(key=lambda f: f["path"])
+    return [rows[k] for k in sorted(rows)], errors, truncated
+
+
+def _fetch_via_datasets(client, simulation_id: int, analysis_dir: str,
+                        relpath: str) -> Optional[Tuple[bytes, str]]:
+    """One registered file's bytes through the API, or None when the registry has no file at
+    ``<analysis_dir>/<relpath>`` for this simulation. Found by a uri substring (``q``), which
+    works whether or not the row carries ``analysis_dir``. viva-api runs ``q`` as an unescaped
+    ILIKE, so ``_`` matches any character: the match is then checked exactly.
+    Transport errors propagate."""
+    page = client.list_datasets({"source": f"simulation:{int(simulation_id)}",
+                                 "q": f"/{analysis_dir}/{relpath}", "limit": _DATASET_PAGE}) or {}
+    for d in page.get("datasets") or []:
+        if _path_in_analysis(d.get("uri") or "", analysis_dir) == relpath and d.get("id") is not None:
+            return client.dataset_content(int(d["id"])), _content_type(relpath)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Source 2: S3 directly (legacy; see the module docstring)
+# ---------------------------------------------------------------------------
 
 
 def _region() -> str:
@@ -208,7 +376,85 @@ def _analyses_root(client, simulation_id: int, analyses: list) -> Optional[Tuple
     return None
 
 
-def list_remote_analysis_figures(client, simulation_id: int) -> dict:
+def list_remote_analysis_figures(client, simulation_id: int, *,
+                                 use_datasets: Optional[bool] = None) -> dict:
+    """List ``simulation_id``'s rendered figures and ptools tables, one row per analysis.
+
+    Without the registry, this is the S3 listing (:func:`_list_via_s3`). With it, the
+    registry's analyses come first, and S3 adds only the analysis directories the registry
+    has not registered. ``via`` is ``datasets``, ``s3`` or ``datasets+s3``, by where the
+    files shown came from. ``errors`` lists registry failures; ``truncated`` means the
+    registry listing hit its page cap. ``use_datasets`` skips the capability check when the
+    caller already made it."""
+    if use_datasets is None:
+        use_datasets = datasets_served(client)
+    if not use_datasets:
+        return {**_list_via_s3(client, simulation_id), "via": "s3"}
+
+    reg_rows, errors, truncated = _list_via_datasets(client, simulation_id)
+    if reg_rows and not _s3_readable():
+        # No credentials (the deployment this path exists for): the registry is all there is to show,
+        # and walking S3 would only pay the credential chain's timeouts on every request.
+        legacy: dict = {"analyses": []}
+    else:
+        legacy = _list_via_s3(client, simulation_id)
+    by_dir = {r["name"]: r for r in reg_rows}
+    extra: list = []
+    s3_files = False
+    for r in legacy.get("analyses") or []:
+        has_files = bool(r.get("figures") or r.get("ptools"))
+        reg = by_dir.get(_s3_row_dir(r) or "")
+        if reg is not None:
+            # Same directory from both: add the files the registry has not registered yet.
+            for bucket in ("figures", "ptools"):
+                known = {f["path"] for f in reg[bucket]}
+                added = [f for f in r.get(bucket) or [] if f.get("path") not in known]
+                if added:
+                    reg[bucket] = sorted(reg[bucket] + added, key=lambda f: f["path"])
+                    s3_files = True
+        elif has_files or not reg_rows:
+            extra.append(r)
+            s3_files = s3_files or has_files
+    out: dict = {"analyses": reg_rows + extra,
+                 "via": ("datasets+s3" if s3_files else "datasets") if reg_rows else "s3"}
+    if reg_rows or legacy.get("available"):
+        out.update(available=True, reason="ok")
+    else:
+        out.update(available=False, reason="datasets-error" if errors else legacy.get("reason", "no-analyses"))
+    if errors:
+        out["errors"] = errors
+    if truncated:
+        out["truncated"] = True
+    return out
+
+
+_S3_CHECK_TTL = 60.0
+_s3_check: list = []   # [(readable: bool, checked_at: float)]
+
+
+def _s3_readable() -> bool:
+    """Whether S3 credentials resolve, checked at most once a minute (the check itself can wait on
+    the credential chain's metadata lookups when there are none)."""
+    now = time.monotonic()
+    with _caps_lock:
+        if _s3_check and now - _s3_check[0][1] < _S3_CHECK_TTL:
+            return _s3_check[0][0]
+    ok = _aws_creds_ok()
+    with _caps_lock:
+        _s3_check[:] = [(ok, now)]
+    return ok
+
+
+def _s3_row_dir(row: dict) -> Optional[str]:
+    """The analysis directory an S3-listed row stands for: the last segment of its
+    ``result_uri``, else its name (an S3-only row is named by its directory)."""
+    uri = row.get("result_uri")
+    if isinstance(uri, str) and uri.rstrip("/"):
+        return uri.rstrip("/").rsplit("/", 1)[-1]
+    return row.get("name")
+
+
+def _list_via_s3(client, simulation_id: int) -> dict:
     """For every completed analysis on ``simulation_id`` with a non-null
     ``result_uri``, list its S3 ``viz/`` figures and ``ptools/`` tables.
 
@@ -332,6 +578,10 @@ def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
 
     out_sims: list = []
     total_figures = 0
+    use_datasets = datasets_served(client) if cand else False
+    read_s3 = False   # did any simulation fall back to S3? Only then can credentials explain "nothing"
+    registry_failed = False
+    truncated_sims = 0
     # Scan candidates until we've collected max_sims sims that actually HAVE
     # figures, bounded by scan_cap so a study whose first rows lack rendered
     # analyses (null result_uri / not-yet-analyzed) still surfaces the ones that
@@ -342,7 +592,10 @@ def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
         if len(out_sims) >= max_sims or scanned >= scan_cap:
             break
         scanned += 1
-        res = list_remote_analysis_figures(client, sid)
+        res = list_remote_analysis_figures(client, sid, use_datasets=use_datasets)
+        read_s3 = read_s3 or res.get("via") != "datasets"
+        truncated_sims += 1 if res.get("truncated") else 0
+        registry_failed = registry_failed or bool(res.get("errors"))
         if not res.get("available"):
             continue
         analyses = []
@@ -369,7 +622,9 @@ def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
         reason = "ok"
     elif not cand:
         reason = "no-remote-sims"
-    elif not _aws_creds_ok():
+    elif registry_failed:
+        reason = "datasets-error"   # the registry failed: never send the user to check AWS credentials
+    elif read_s3 and not _aws_creds_ok():
         reason = "s3-auth-error"
     else:
         reason = "no-figures"
@@ -379,6 +634,8 @@ def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
         "study": slug, "sims": out_sims,
         "total_completed_remote_sims": len(cand), "shown_sims": len(out_sims),
         "scanned_sims": scanned, "total_figures_across_shown": total_figures,
+        # sims whose registry listing hit its page cap: their counts are lower bounds
+        **({"truncated_sims": truncated_sims} if truncated_sims else {}),
     }
 
 
@@ -387,7 +644,24 @@ def fetch_by_analysis(client, simulation_id: int, analysis_name: str,
     """Resolve ``analysis_name``'s ``result_uri`` on ``simulation_id`` (so the
     caller never passes a raw S3 uri), then fetch ``relpath`` under it. Returns
     ``(body, content_type)`` or None (unknown analysis, null result_uri, missing
-    object, or a traversal attempt)."""
+    object, or a traversal attempt).
+
+    The registry first, when the backend serves it and ``analysis_name`` can be a
+    directory name; S3 when it does not, or has no such file registered. The S3 path is
+    unchanged, including for record names the registry cannot resolve."""
+    rel = (relpath or "").lstrip("/")
+    if not rel or ".." in rel.split("/"):
+        return None
+    if (analysis_name and "/" not in analysis_name and analysis_name != ".."
+            and datasets_served(client)):
+        try:
+            got = _fetch_via_datasets(client, simulation_id, analysis_name, rel)
+        except Exception as e:
+            log.warning("registry fetch of %s/%s (simulation %s) failed; trying S3: %s",
+                        analysis_name, rel, simulation_id, e)
+            got = None
+        if got:
+            return got
     try:
         analyses = client.list_analyses(simulation_id)
     except Exception:
