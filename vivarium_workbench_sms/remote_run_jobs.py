@@ -157,8 +157,9 @@ _TERMINAL_BAD = {"failed", "cancelled", "error"}
 
 def run_remote_pipeline(job: RemoteRunJob, ctx: PipelineCtx) -> None:
     """Run push→build→run→poll→download→land, updating job. Records job.error on failure."""
-    # Step 1c-2 (docs/backend-adapters.md): the ids here were dispatched by this process to its one configured
-    # backend, so they are asked of it directly rather than looked up in run records.
+    # Step 1c-2 (docs/backend-adapters.md §2.3): exempt from record routing because this is an SMS-only pipeline
+    # that polls the very client it dispatched with -- the simulator and simulation ids are ones ``ctx.client``
+    # itself answered with a moment earlier, inside this same call, so they are asked of that client directly.
     try:
         # 1. push → commit SHA
         job.set_step("push", "running")
