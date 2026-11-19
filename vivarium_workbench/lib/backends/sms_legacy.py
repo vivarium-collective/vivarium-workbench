@@ -1,4 +1,4 @@
-"""The frozen SMS ``/api/v1`` run path: integer simulation ids (docs/backend-adapters.md §2.4).
+"""The frozen SMS ``/api/v1`` run path: integer simulation ids (docs/backend-adapters.md §2.5).
 
 Moved verbatim from ``remote_run_views`` in step 1a: the legacy tails of ``remote_run_land``,
 ``remote_run_status``, ``remote_run_chain_progress`` and ``remote_run_cancel``, plus their two helpers;
@@ -7,8 +7,8 @@ view keeps its own routing and calls the matching ``*_tail`` here once it has de
 
 Every name tests patch on ``remote_run_views`` (``SmsApiClient``, ``_sms_api_base``, ``load_spec``,
 ``_run_auth_ok``, ``land_remote_run``) and the constants defined there are read through that module at call
-time, so the move changes no behaviour and no test. This module is deleted when viva-api retires ``/api/v1``
-(its milestone M6).
+time, so the move changes no behaviour and no test. It moves to the SMS plugin package in step P1b; it is
+deleted only if the plugin itself leaves ``/api/v1`` (out of scope, Appendix A).
 """
 
 from __future__ import annotations

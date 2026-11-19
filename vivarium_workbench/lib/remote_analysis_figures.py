@@ -17,7 +17,7 @@ Two sources, tried in this order for each simulation:
    advertise ``viva-v1-datasets``, or advertises it but has registered nothing for
    this simulation (a registry not yet backfilled -- prod at 0.9.182 has ~800 figure
    datasets against ~150k on stanford-test). It is removed once every site's
-   registry covers its analyses (docs/backend-adapters.md, step 4).
+   registry covers its analyses (docs/backend-adapters.md, Appendix A, old step 4).
 
 Both produce the same listing shape. A simulation is listed from BOTH when the
 backend serves the registry: the registry's analyses, plus any analysis directory
