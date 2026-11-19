@@ -1,0 +1,585 @@
+// process-code.js — the collapsible right-rail code panel.
+//
+// Shows the source of a registered process/step OR a composite (its spec YAML,
+// or its @composite_generator module) and, when the file lives in the editable
+// workspace tree, saves edits back. The backend refuses writes to installed
+// dependencies and rejects invalid syntax before touching disk; this panel
+// mirrors that with a read-only badge + a "saving modifies workspace source" note.
+//
+// The editor is CodeMirror 5 loaded lazily from cdnjs on first open (Python +
+// YAML modes), with a plain <textarea> fallback when the CDN is unreachable.
+(function () {
+  'use strict';
+
+  var CM_VERSION = '5.65.16';
+  var CM_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/' + CM_VERSION;
+
+  var state = {
+    original: '',      // source as last loaded/saved (for dirty + revert)
+    editable: false,
+    lang: 'python',
+    save: null,        // { url, base } describing how to POST edits
+    cm: null,          // CodeMirror instance, or null (textarea fallback)
+    cmTried: false,
+    modes: {},         // which CM modes have been requested
+    loading: false,
+  };
+
+  function _api(p) {
+    return (window.DataSource && window.DataSource.apiUrl)
+      ? window.DataSource.apiUrl(p) : p;
+  }
+  function _snapshot() {
+    return !!(document.body && document.body.classList.contains('snapshot'));
+  }
+  function $(id) { return document.getElementById(id); }
+  function rail() { return $('viv-code-rail'); }
+  function textarea() { return $('viv-code-textarea'); }
+
+  function getValue() {
+    if (state.cm) return state.cm.getValue();
+    var ta = textarea(); return ta ? ta.value : '';
+  }
+  function setValue(v) {
+    if (state.cm) { state.cm.setValue(v); }
+    else { var ta = textarea(); if (ta) ta.value = v; }
+  }
+  function setReadOnly(ro) {
+    if (state.cm) { state.cm.setOption('readOnly', ro ? 'nocursor' : false); }
+    else { var ta = textarea(); if (ta) ta.readOnly = ro; }
+  }
+  function cmMode(lang) {
+    if (lang === 'yaml') return 'yaml';
+    if (lang === 'json') return { name: 'javascript', json: true };
+    return 'python';
+  }
+  function setMode(lang) {
+    if (state.cm) { try { state.cm.setOption('mode', cmMode(lang)); } catch (e) {} }
+  }
+
+  // ── expand / collapse (delegated to the shared dockable-panel engine) ──
+  // The rail is a VivPanelDock panel (like the chat): dockable left/right/bottom,
+  // drag-re-dockable by its header, resizable, launched from the left nav rail. The
+  // controller (dockCtl) is created in init(); these thin wrappers keep the old
+  // ProcessCode API (open/collapse/toggle) working for the rest of this file.
+  var dockCtl = null;
+  function isOpen() { return dockCtl ? dockCtl.isOpen() : false; }
+  // Mirror the panel's --viv-code-w onto <body> so the fill-the-pane (maximized)
+  // CSS — which pins a RIGHT-docked rail fixed and shrinks the card by that width —
+  // tracks a user-resized rail, not just the 460px default (see style.css
+  // .pcard-maximized + .viv-code-open).
+  function _syncRailWidth() {
+    try {
+      var r = rail(); if (!r) return;
+      var w = getComputedStyle(r).getPropertyValue('--viv-code-w').trim();
+      if (w) document.body.style.setProperty('--viv-code-w', w);
+    } catch (e) {}
+  }
+  function _refreshCm() { if (state.cm) setTimeout(function () { try { state.cm.refresh(); } catch (e) {} }, 30); }
+  function open() { if (dockCtl) dockCtl.open(); }
+  function collapse() { if (dockCtl) dockCtl.close(); }
+  function toggle() { if (dockCtl) dockCtl.toggle(); }
+  function dockMenu(anchor) { if (dockCtl) dockCtl.openDockMenu(anchor); }
+  // Open the current source in a separate window, then close the in-page rail.
+  function popout() {
+    if (!window.VivPanelDock) return;
+    window.VivPanelDock.popout('code', state.popout || {});
+    collapse();
+  }
+
+  // ── Browse available Processes & Composites, right from the panel ──────────
+  // A searchable dropdown (grouped Processes / Composites) that opens the pick
+  // straight into this panel via openProcess/openComposite — no Registry trip.
+  var _browseMenu = null, _browseCache = null;
+  function _onBrowseDoc(ev) { if (_browseMenu && !_browseMenu.contains(ev.target)) _closeBrowse(); }
+  function _onBrowseKey(ev) { if (ev.key === 'Escape') _closeBrowse(); }
+  function _closeBrowse() {
+    if (!_browseMenu) return;
+    _browseMenu.remove(); _browseMenu = null;
+    document.removeEventListener('mousedown', _onBrowseDoc, true);
+    document.removeEventListener('keydown', _onBrowseKey, true);
+  }
+  function _loadBrowse() {
+    if (_browseCache) return Promise.resolve(_browseCache);
+    var J = function (r) { return r.ok ? r.json() : null; };
+    return Promise.all([
+      fetch(_api('/api/registry')).then(J).catch(function () { return null; }),
+      fetch(_api('/api/composites')).then(J).catch(function () { return null; }),
+    ]).then(function (res) {
+      var reg = res[0] || {}, comp = res[1] || {};
+      var procs = (reg.processes || []).map(function (p) {
+        return { kind: 'process', address: p.address,
+                 label: p.name || String(p.address || '').split(/[.:]/).pop(), hint: p.source || p.module || '' };
+      }).filter(function (p) { return p.address; });
+      var list = Array.isArray(comp) ? comp : (comp.composites || []);
+      var comps = (list || []).map(function (c) {
+        return { kind: 'composite', id: c.id, module: c.module || '', source_path: c.source_path || '',
+                 label: c.name || String(c.id || '').split('.').pop(), hint: c.source || c.module || '' };
+      }).filter(function (c) { return c.id; });
+      _browseCache = { procs: procs, comps: comps };
+      return _browseCache;
+    });
+  }
+  function _browseRows(data, q) {
+    q = (q || '').trim().toLowerCase();
+    function match(it) { return !q || (it.label + ' ' + (it.address || it.id) + ' ' + it.hint).toLowerCase().indexOf(q) >= 0; }
+    function group(title, items, attrs) {
+      var rows = items.filter(match);
+      if (!rows.length) return '';
+      return '<div class="vp-browse-group">' + title + ' <span class="vp-browse-n">' + rows.length + '</span></div>' +
+        rows.map(function (it) {
+          return '<button type="button" class="vp-pop-item vp-browse-row" ' + attrs(it) + '>' +
+            '<span class="vp-browse-name">' + esc(it.label) + '</span>' +
+            '<code class="vp-browse-addr">' + esc(it.address || it.id) + '</code></button>';
+        }).join('');
+    }
+    var html =
+      group('Processes', data.procs, function (it) { return 'data-kind="process" data-address="' + esc(it.address) + '"'; }) +
+      group('Composites', data.comps, function (it) {
+        return 'data-kind="composite" data-id="' + esc(it.id) + '" data-module="' + esc(it.module) + '" data-src="' + esc(it.source_path) + '"';
+      });
+    return html || '<div class="vp-browse-empty">No matches.</div>';
+  }
+  function browseMenu(anchor) {
+    if (_browseMenu) { _closeBrowse(); return; }   // toggle
+    var menu = document.createElement('div');
+    menu.className = 'vp-pop vp-browse-menu';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML =
+      '<input type="text" class="vp-browse-search" placeholder="Search processes & composites…" aria-label="Search" spellcheck="false">' +
+      '<div class="vp-browse-list"><div class="vp-browse-empty">Loading…</div></div>';
+    document.body.appendChild(menu);
+    var r = anchor.getBoundingClientRect();
+    menu.style.top = Math.round(r.bottom + 4) + 'px';
+    menu.style.left = Math.round(Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+    _browseMenu = menu;
+    var search = menu.querySelector('.vp-browse-search');
+    var listEl = menu.querySelector('.vp-browse-list');
+    var data = null;
+    _loadBrowse().then(function (d) { data = d; listEl.innerHTML = _browseRows(data, ''); },
+                       function () { listEl.innerHTML = '<div class="vp-browse-empty">Could not load the catalog.</div>'; });
+    search.addEventListener('input', function () { if (data) listEl.innerHTML = _browseRows(data, search.value); });
+    menu.addEventListener('click', function (ev) {
+      var row = ev.target.closest('.vp-browse-row'); if (!row) return;
+      _closeBrowse();
+      if (!isOpen()) open();
+      if (row.getAttribute('data-kind') === 'process') openProcess(row.getAttribute('data-address'));
+      else openComposite({ id: row.getAttribute('data-id'), module: row.getAttribute('data-module'), source_path: row.getAttribute('data-src') });
+    });
+    setTimeout(function () {
+      document.addEventListener('mousedown', _onBrowseDoc, true);
+      document.addEventListener('keydown', _onBrowseKey, true);
+      try { search.focus(); } catch (e) { /* ignore */ }
+    }, 0);
+  }
+
+  function refreshDirty() {
+    var saveBtn = $('viv-code-save'), revertBtn = $('viv-code-revert');
+    var dirty = state.editable && (getValue() !== state.original);
+    if (saveBtn) saveBtn.disabled = !dirty || state.loading;
+    if (revertBtn) revertBtn.disabled = !dirty || state.loading;
+  }
+  function setStatus(msg, kind) {
+    var el = $('viv-code-status'); if (!el) return;
+    el.textContent = msg || '';
+    el.className = 'viv-code-status' + (kind ? ' viv-code-status-' + kind : '');
+  }
+
+  // ── CodeMirror lazy loader ──
+  function loadScript(url) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = url; s.onload = resolve; s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+  function loadCss(url) {
+    var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = url;
+    document.head.appendChild(l);
+  }
+  function ensureCore() {
+    if (window.CodeMirror) return Promise.resolve();
+    if (state.cmTried) return Promise.resolve();
+    state.cmTried = true;
+    loadCss(CM_BASE + '/codemirror.min.css');
+    return loadScript(CM_BASE + '/codemirror.min.js').catch(function () {});
+  }
+  function ensureMode(lang) {
+    if (!window.CodeMirror) return Promise.resolve();
+    var mode = (lang === 'yaml') ? 'yaml' : (lang === 'json') ? 'javascript' : 'python';
+    if (state.modes[mode]) return Promise.resolve();
+    state.modes[mode] = true;
+    return loadScript(CM_BASE + '/mode/' + mode + '/' + mode + '.min.js').catch(function () {});
+  }
+  function ensureEditor(lang) {
+    return ensureCore().then(function () { return ensureMode(lang); }).then(upgradeEditor);
+  }
+  function upgradeEditor() {
+    if (state.cm || !window.CodeMirror) return;
+    var ta = textarea(); if (!ta) return;
+    try {
+      state.cm = window.CodeMirror.fromTextArea(ta, {
+        mode: cmMode(state.lang), lineNumbers: true, indentUnit: 2,
+        lineWrapping: false, viewportMargin: Infinity,
+      });
+      state.cm.on('change', refreshDirty);
+      state.cm.setSize('100%', '100%');
+    } catch (e) { state.cm = null; }
+  }
+
+  // ── unified loader ──
+  // ctx: { title, subtitle, getUrl, lang, save:{url, base} }
+  function load(ctx) {
+    open();
+    setNewMode(false);
+    state.loading = true;
+    state.save = ctx.save || null;
+    state.lang = ctx.lang || 'python';
+    setStatus('Loading…');
+    var name = $('viv-code-name'), addrEl = $('viv-code-addr');
+    if (name) name.textContent = ctx.title || 'Code';
+    if (addrEl) addrEl.textContent = ctx.subtitle || '';
+
+    // Read-only snapshot: the source-serving endpoints (/api/composites/source,
+    // /api/registry/process-source) are live-only and are NOT baked into the
+    // static bundle. Fetching them on a static host returns the SPA's HTML 404,
+    // and r.json() on that throws "SyntaxError: The string did not match the
+    // expected pattern" (Safari) → a bare "Load failed". Degrade honestly
+    // instead: explain it and link to the source on GitHub.
+    if (_snapshot()) { _renderSnapshotNotice(ctx); return; }
+
+    var empty = $('viv-code-empty'); if (empty) empty.hidden = true;
+    var ta = textarea(); if (ta) ta.hidden = false;
+
+    ensureEditor(state.lang).then(function () {
+      return fetch(_api(ctx.getUrl))
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          state.loading = false;
+          if (!j || j.ok !== true) {
+            setStatus((j && j.error) || 'Could not load source.', 'error');
+            state.editable = false; setReadOnly(true); refreshDirty();
+            return;
+          }
+          if (j.lang) {
+            state.lang = j.lang;
+            if (state.save && state.save.base) state.save.base.lang = j.lang;
+          }
+          return ensureMode(state.lang).then(function () {
+            setMode(state.lang);
+            state.original = j.source || '';
+            setValue(state.original);
+            state.editable = !!j.editable && !_snapshot();
+            setReadOnly(!state.editable);
+            renderMeta(j);
+            setStatus('');
+            refreshDirty();
+            if (state.cm) setTimeout(function () { try { state.cm.refresh(); } catch (e) {} }, 20);
+          });
+        })
+        .catch(function (e) { state.loading = false; setStatus('Load failed: ' + e, 'error'); });
+    });
+  }
+
+  // Best-effort "view source" link for a snapshot. We link to the repo at the
+  // pinned commit rather than a guessed file path (source_path is often absent
+  // and a dotted module → file path is ambiguous re: __init__.py), so the link
+  // never 404s. The dotted ref (ctx.subtitle) is shown so the viewer can find it.
+  function _snapshotRepoLink() {
+    var prov = (window.__DASH_CONFIG__ && window.__DASH_CONFIG__.provenance) || {};
+    var base = (prov.repo_url || '').replace(/\/+$/, '');
+    if (!base) return null;
+    var ref = prov.commit || prov.branch || '';
+    return ref ? base + '/tree/' + ref : base;
+  }
+
+  function _renderSnapshotNotice(ctx) {
+    state.loading = false;
+    state.editable = false;
+    setReadOnly(true);
+    setStatus('');
+    var badge = $('viv-code-badge');
+    if (badge) {
+      badge.textContent = 'read-only snapshot';
+      badge.className = 'viv-code-badge viv-code-badge-ro';
+    }
+    var path = $('viv-code-path');
+    if (path) path.textContent = ctx.subtitle || '';
+    // Hide the editor surface (textarea + any CodeMirror instance).
+    var ta = textarea(); if (ta) ta.hidden = true;
+    if (state.cm) { try { state.cm.getWrapperElement().style.display = 'none'; } catch (e) {} }
+    var empty = $('viv-code-empty');
+    if (empty) {
+      var link = _snapshotRepoLink();
+      empty.innerHTML =
+        '<div style="padding:16px 18px;color:#3a4657;font-size:13px;line-height:1.55">' +
+          '<p style="margin:0 0 8px">Source isn’t available in this read-only ' +
+          'snapshot — the code viewer needs the live workbench.</p>' +
+          (ctx.subtitle
+            ? '<p style="margin:0 0 10px"><code style="background:#eef1f6;padding:1px 6px;' +
+              'border-radius:4px">' + esc(ctx.subtitle) + '</code></p>'
+            : '') +
+          (link
+            ? '<a href="' + esc(link) + '" target="_blank" rel="noopener" ' +
+              'style="color:#2f57b5;text-decoration:none">View the source on GitHub →</a>'
+            : '') +
+        '</div>';
+      empty.hidden = false;
+    }
+    refreshDirty();
+  }
+
+  function renderMeta(j) {
+    var badge = $('viv-code-badge'), path = $('viv-code-path');
+    if (path) path.textContent = (j.lang ? j.lang.toUpperCase() + ' · ' : '') + (j.path || '');
+    if (!badge) return;
+    if (_snapshot()) {
+      badge.textContent = 'read-only snapshot';
+      badge.className = 'viv-code-badge viv-code-badge-ro';
+    } else if (j.editable) {
+      badge.textContent = 'editable · saving modifies workspace source';
+      badge.className = 'viv-code-badge viv-code-badge-edit';
+    } else {
+      badge.textContent = 'read-only · outside the workspace';
+      badge.className = 'viv-code-badge viv-code-badge-ro';
+    }
+  }
+
+  // ── public open() entrypoints ──
+  function openProcess(address) {
+    if (!address) return;
+    state.popout = { address: address };          // remembered so Pop out can reopen this view
+    load({
+      title: address.split(/[.:]/).pop() || 'Process',
+      subtitle: address,
+      getUrl: '/api/registry/process-source?address=' + encodeURIComponent(address),
+      lang: 'python',
+      save: { url: '/api/registry/process-source', base: { address: address } },
+    });
+  }
+  // desc: { id, name, module, source_path }
+  function openComposite(desc) {
+    desc = desc || {};
+    var id = desc.id || '';
+    state.popout = { composite: id, module: desc.module || '', source_path: desc.source_path || '' };
+    var q = '/api/composites/source?id=' + encodeURIComponent(id) +
+      '&module=' + encodeURIComponent(desc.module || '') +
+      '&source_path=' + encodeURIComponent(desc.source_path || '');
+    load({
+      title: desc.name || (id.split('.').pop()) || 'Composite',
+      subtitle: id,
+      getUrl: q,
+      lang: desc.source_path && /\.ya?ml$/i.test(desc.source_path) ? 'yaml' : 'python',
+      save: {
+        url: '/api/composites/source',
+        base: { id: id, module: desc.module || '', source_path: desc.source_path || '' },
+      },
+    });
+  }
+
+  // ── authoring a new artifact ────────────────────────────────────────────
+  var enc = encodeURIComponent;
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+    });
+  }
+  function setNewMode(on) {
+    state.newMode = !!on;
+    var nb = $('viv-code-newbar'); if (nb) nb.hidden = !on;
+    document.querySelectorAll('.viv-code-newact').forEach(function (b) { b.hidden = !on; });
+    document.querySelectorAll('.viv-code-editact').forEach(function (b) { b.hidden = !!on; });
+    if (!on) renderChecks(null);
+  }
+  function renderChecks(res) {
+    var host = $('viv-code-checks'); if (!host) return;
+    if (!res || !res.checks || !res.checks.length) { host.hidden = true; host.innerHTML = ''; return; }
+    host.hidden = false;
+    var unmet = res.checks.filter(function (c) { return c.level === 'warn' && !c.ok; }).length;
+    var head = res.valid
+      ? ('✓ Ready to create' + (unmet ? ' · ' + unmet + ' recommendation' + (unmet > 1 ? 's' : '') : ''))
+      : 'Resolve these first';
+    host.innerHTML = '<div class="viv-code-checks-head ' + (res.valid ? 'ok' : 'bad') + '">' + head + '</div>' +
+      res.checks.map(function (c) {
+        var warn = c.level === 'warn';
+        var cls = c.ok ? 'ok' : (warn ? 'warn' : 'bad');
+        var icon = c.ok ? '✓' : (warn ? '⚠' : '✕');
+        return '<div class="viv-code-check ' + cls + '">' + icon + ' ' + esc(c.label) +
+          (c.detail ? ' <span class="viv-code-check-detail">— ' + esc(c.detail) + '</span>' : '') + '</div>';
+      }).join('');
+  }
+  function _newNameEl() { return $('viv-code-newname'); }
+  function _newName() { var e = _newNameEl(); return e ? e.value.trim() : ''; }
+  function _syncCreateEnabled() {
+    var b = $('viv-code-create'); if (b) b.disabled = !_newName();
+  }
+
+  function openNew(kind) {
+    open();
+    setNewMode(true);
+    state.newKind = kind;
+    state.editable = true;
+    var placeholders = { spec: 'my-composite', generator: 'my_composite', step: 'MyStep', process: 'MyProcess' };
+    var title = $('viv-code-name'); if (title) title.textContent = 'New ' + kind;
+    var addrEl = $('viv-code-addr'); if (addrEl) addrEl.textContent = '';
+    var badge = $('viv-code-badge'); if (badge) { badge.textContent = ''; badge.className = 'viv-code-badge'; }
+    var pathEl = $('viv-code-path'); if (pathEl) pathEl.textContent = '';
+    var nameEl = _newNameEl();
+    if (nameEl) { nameEl.value = ''; nameEl.placeholder = placeholders[kind] || 'Name'; }
+    var empty = $('viv-code-empty'); if (empty) empty.hidden = true;
+    var ta = textarea(); if (ta) ta.hidden = false;
+    renderChecks(null);
+    _syncCreateEnabled();
+    ensureCore()
+      .then(function () { return fetch(_api('/api/registry/scaffold?kind=' + enc(kind) + '&name=')).then(function (r) { return r.json(); }); })
+      .then(function (j) {
+        if (!j || !j.ok) { setStatus((j && j.error) || 'template unavailable', 'error'); return; }
+        state.lang = j.lang;
+        state.lastTemplate = j.source;
+        return ensureMode(j.lang).then(function () {
+          upgradeEditor(); setMode(j.lang); setValue(j.source); setReadOnly(false);
+          var tgt = $('viv-code-target'); if (tgt) tgt.textContent = j.target ? '→ ' + j.target : '';
+          setStatus('Fill in the template, Check, then Create.');
+          if (nameEl) nameEl.focus();
+          if (state.cm) setTimeout(function () { try { state.cm.refresh(); } catch (e) {} }, 20);
+        });
+      })
+      .catch(function (e) { setStatus('Template load failed: ' + e, 'error'); });
+  }
+
+  // Keep the class/target tracking the name field until the author edits the body.
+  function onNameInput(name) {
+    var title = $('viv-code-name'); if (title) title.textContent = 'New ' + state.newKind + (name ? ' · ' + name : '');
+    _syncCreateEnabled();
+    clearTimeout(state._nameT);
+    state._nameT = setTimeout(function () {
+      fetch(_api('/api/registry/scaffold?kind=' + enc(state.newKind) + '&name=' + enc(name)))
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j || !j.ok) return;
+          var tgt = $('viv-code-target'); if (tgt) tgt.textContent = j.target ? '→ ' + j.target : '';
+          if (getValue() === state.lastTemplate) {   // editor still pristine → track the name
+            state.lastTemplate = j.source; state.lang = j.lang; setMode(j.lang); setValue(j.source);
+          }
+        }).catch(function () {});
+    }, 250);
+  }
+
+  function check() {
+    var name = _newName();
+    setStatus('Checking…');
+    fetch(_api('/api/registry/validate'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: state.newKind, name: name, source: getValue(), lang: state.lang }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res && res.ok === false && res.error) { setStatus(res.error, 'error'); return; }
+        renderChecks(res);
+        setStatus(res.valid ? 'Valid ✓' : 'Not valid yet', res.valid ? 'ok' : 'error');
+      })
+      .catch(function (e) { setStatus('Check failed: ' + e, 'error'); });
+  }
+
+  function create() {
+    var name = _newName();
+    if (!name) { setStatus('Enter a name first.', 'error'); return; }
+    setStatus('Creating…');
+    fetch(_api('/api/registry/create'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: state.newKind, name: name, source: getValue(), lang: state.lang }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res || res.ok !== true) { setStatus((res && res.error) || 'Create failed.', 'error'); return; }
+        setStatus('Created ✓ ' + (res.note || ''), 'ok');
+        try { if (window._loadRegistry) window._loadRegistry(true); if (window._loadComposites) window._loadComposites(); } catch (e) {}
+        setTimeout(function () {
+          if (res.address) openProcess(res.address);
+          else if (res.id) openComposite({ id: res.id, module: res.id.split('.').slice(0, -1).join('.'), source_path: res.source_path || '' });
+        }, 500);
+      })
+      .catch(function (e) { setStatus('Create failed: ' + e, 'error'); });
+  }
+
+  function revert() { setValue(state.original); setStatus('Reverted.'); refreshDirty(); }
+
+  function save() {
+    if (!state.editable || !state.save) return;
+    var src = getValue();
+    if (src === state.original) return;
+    state.loading = true; refreshDirty(); setStatus('Saving…');
+    var body = {};
+    var base = state.save.base || {};
+    for (var k in base) if (base.hasOwnProperty(k)) body[k] = base[k];
+    body.source = src;
+    fetch(_api(state.save.url), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        state.loading = false;
+        if (j && j.ok === true) {
+          state.original = src;
+          setStatus('Saved ✓ (' + (j.bytes || src.length) + ' bytes)', 'ok');
+        } else { setStatus((j && j.error) || 'Save failed.', 'error'); }
+        refreshDirty();
+      })
+      .catch(function (e) { state.loading = false; setStatus('Save failed: ' + e, 'error'); refreshDirty(); });
+  }
+
+  // Code glyph for the drag ghost while re-docking.
+  var CODE_GHOST = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>';
+
+  function init() {
+    var r = rail(); if (!r) return;
+    // Needs the shared dock engine (+ its dock math). If either failed to load, the
+    // rail simply stays hidden — better than a half-wired panel.
+    if (!window.VivPanelDock || !window.VivChatCore) return;
+    var layout = document.querySelector('.viv-layout');
+    var mainEl = layout && layout.querySelector('.viv-main');
+    if (!layout || !mainEl) return;
+    dockCtl = window.VivPanelDock.make({
+      panel: r, layout: layout, mainEl: mainEl, key: 'code',
+      label: 'Code', ghostIcon: CODE_GHOST,
+      launcher: document.getElementById('viv-code-toggle'),
+      resizeHandle: 'viv-code-resize-handle',
+      dragHandles: ['.viv-code-head'],
+      popout: popout,   // pop-out lives IN the dock menu now (no separate header button)
+      defaultDock: 'right', defaultSize: { side: 460, bottom: 320 },
+      onOpen: function () { _syncRailWidth(); _refreshCm(); },
+      onResize: function () { _syncRailWidth(); _refreshCm(); },
+      onDock: function () { _refreshCm(); },
+    });
+    var tog = document.getElementById('viv-code-toggle');
+    if (tog) tog.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      if (dockCtl.didDrag && dockCtl.didDrag()) return;   // a drag-to-dock isn't a toggle click
+      dockCtl.toggle();
+    });
+  }
+
+  window.ProcessCode = {
+    open: openProcess,        // process/step by registry address
+    openComposite: openComposite,
+    openNew: openNew,         // author a new artifact of a given kind
+    onNameInput: onNameInput,
+    check: check,
+    create: create,
+    toggle: toggle,
+    collapse: collapse,
+    popout: popout,
+    dockMenu: dockMenu,
+    browseMenu: browseMenu,   // browse/open a Process or Composite from the panel
+    save: save,
+    revert: revert,
+    init: init,
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else { init(); }
+})();

@@ -295,6 +295,12 @@ def _refresh_one(job, idx: int, run_id, backend) -> bool:
     except Exception:  # noqa: BLE001 — one backend failing must not stop the others
         return False
     if code != 200 or not isinstance(body, dict):
+        # The viva-core adapter answers every client error as 502 "unreachable" but keeps the server's own HTTP
+        # status in the body: a 404 for this one run (deleted, or a reset server) is an answer about this run, not
+        # a backend that is down -- otherwise one stale run would stop every other viva-core item from settling.
+        upstream = body.get("status") if isinstance(body, dict) else None
+        if isinstance(upstream, int) and upstream < 500:
+            return True
         return code < 500
     phase = str(body.get("phase") or "")
     raw = str(body.get("raw_status") or "").lower()

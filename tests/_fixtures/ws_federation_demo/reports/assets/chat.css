@@ -1,0 +1,434 @@
+/* chat.css — the built-in AI panel, docked on the RIGHT (docs/ai-chat.md).
+ *
+ * Follows marimo's "AI" panel: an "AI" header with a close X; a toolbar (new chat +,
+ * provider status plug, settings gear, history clock); a message column with a bordered
+ * monospace user box, borderless assistant text, collapsible reasoning + compact tool rows,
+ * an amber "Approval required" card, a red error banner with a separate Retry, dashed queued
+ * messages; a Stop strip; and a composer whose footer carries the mode pill, model pill,
+ * capabilities (sliders), @ context, attach and send. Colours are --c-* tokens scoped to
+ * .viv-ai-panel: light is self-contained, dark maps onto the workbench's dark tokens. */
+
+/* .viv-code-rail is included so the process-code panel can reuse the same .vp-head /
+   .vp-icon chrome and read as one system with the chat panel. */
+.viv-graph-panel, .viv-ai-panel, .vp-pop, .viv-code-rail{
+  --c-bg:#ffffff; --c-panel:#ffffff; --c-border:#e2e6eb; --c-text:#1f2937; --c-muted:#6b7280;
+  --c-chip:#eef1f5; --c-chip-hover:#e3e8ef; --c-code:#f3f4f6; --c-input:#f8fafc;
+  --c-accent:#4f46e5; --c-accent-fg:#fff;
+  --c-frame:var(--c-accent);   /* the panel's outline: the accent, solid (contrast >= 3:1 on the surface, both themes) */
+  --c-amber-bg:#fffbeb; --c-amber-bd:#fcd34d; --c-amber-fg:#92400e;
+  --c-green:#15803d; --c-red:#b91c1c; --c-red-bg:#fef2f2;
+}
+.viv-ai-panel{
+  --viv-ai-w:440px;
+  flex:0 0 var(--viv-ai-w); width:var(--viv-ai-w); min-width:0;
+  display:flex; flex-direction:column; position:relative;
+  background:var(--c-bg); color:var(--c-text); font-size:13px; line-height:1.5;
+  border-left:1px solid var(--c-border);
+  /* A solid frame on every dock so the panel's edge is unmistakable. An outline drawn inside the box (negative offset)
+     paints above the panel's own content and leaves its size alone, so flex-basis / dock sizing are untouched. */
+  outline:2px solid var(--c-frame); outline-offset:-2px;
+}
+.viv-ai-panel[hidden]{ display:none; }
+:root[data-theme="dark"] .viv-ai-panel, :root[data-theme="dark"] .vp-pop, :root[data-theme="dark"] .viv-code-rail, :root[data-theme="dark"] .viv-graph-panel{
+  --c-bg:var(--rail, #0f1728); --c-panel:var(--surface, #18233c); --c-border:var(--border, #26324c);
+  --c-text:var(--text, #d3ddeb); --c-muted:var(--text-muted, #93a3b6); --c-chip:var(--surface-3, #1c2946);
+  --c-chip-hover:var(--active, #20304f); --c-code:var(--surface-2, #12203a); --c-input:var(--field, #0d1526);
+  --c-accent:var(--accent, #6366f1);
+  --c-amber-bg:rgba(245,158,11,.12); --c-amber-bd:rgba(245,158,11,.4); --c-amber-fg:#fcd34d;
+  --c-green:#4ade80; --c-red:#f87171; --c-red-bg:rgba(248,113,113,.10);
+}
+.viv-ai-panel *{ box-sizing:border-box; }
+/* `display:flex` on these would otherwise override the [hidden] attribute the JS toggles */
+.viv-ai-panel [hidden]{ display:none !important; }
+.vp-root{ display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
+body.snapshot #viv-ai-panel{ display:none !important; }
+
+/* Rail toggle: pressed state (it is not a .menu-link, so page switches leave it alone) */
+#viv-ai-toggle.viv-ai-on{ background:var(--hover, #eef2ff); color:#4338ca; }
+:root[data-theme="dark"] #viv-ai-toggle.viv-ai-on{ background:var(--active, #20304f); color:var(--link, #8ab4ff); }
+
+/* Resize handle (left edge) */
+.vp-resize{ position:absolute; left:-3px; top:0; bottom:0; width:6px; cursor:col-resize; z-index:5; }
+.vp-resize:hover, .vp-resize.dragging{ background:color-mix(in srgb, var(--c-accent) 35%, transparent); }
+
+/* Header: "AI" + close */
+.vp-head{ display:flex; align-items:center; justify-content:space-between; padding:10px 14px;
+  border-bottom:1px solid var(--c-border); font-weight:600; font-size:13px; }
+/* Toolbar: + on the left; plug · gear · clock on the right */
+.vp-toolbar{ display:flex; align-items:center; gap:2px; padding:6px 10px; border-bottom:1px solid var(--c-border); }
+.vp-spacer{ flex:1 1 auto; }
+.vp-icon{ display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; padding:0;
+  border:none; border-radius:6px; background:transparent; color:var(--c-muted); cursor:pointer; }
+.vp-icon:hover{ background:var(--c-chip); color:var(--c-text); }
+.vp-icon svg{ width:15px; height:15px; }
+.vp-icon.vp-red{ color:var(--c-red); } .vp-icon.vp-ok{ color:var(--c-green); }
+
+/* Buttons + pills */
+.vp-btn{ font:inherit; font-size:12px; height:26px; padding:0 10px; border-radius:6px; cursor:pointer;
+  border:1px solid var(--c-border); background:transparent; color:var(--c-text); white-space:nowrap; }
+.vp-btn:hover{ background:var(--c-chip); }
+.vp-btn:disabled{ opacity:.5; cursor:default; }
+.vp-btn.vp-primary{ background:var(--c-accent); border-color:var(--c-accent); color:var(--c-accent-fg); }
+.vp-btn.vp-primary:hover{ filter:brightness(1.08); }
+.vp-pill{ display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 6px 0 8px; border:1px solid var(--c-border); border-radius:6px;
+  background:var(--c-panel); color:var(--c-text); font:inherit; font-size:12px; cursor:pointer; max-width:200px; }
+.vp-pill:hover{ background:var(--c-chip); }
+.vp-pill:focus-visible{ outline:2px solid var(--c-accent); outline-offset:1px; }
+.vp-pill span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vp-pill svg{ width:13px; height:13px; flex:0 0 13px; color:var(--c-muted); }
+
+/* Main region: chat view (or the settings sheet, which covers it) */
+.vp-main{ position:relative; display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
+.vp-list{ flex:1 1 auto; min-height:0; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:16px; }
+
+/* New-thread state */
+.vp-new{ padding:10px 14px 8px; display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
+/* An empty copy div adds no gap, so a connected fresh thread is composer-only. */
+#vp-new-copy:empty{ display:none; }
+.vp-new h3{ margin:0; font-size:15px; font-weight:600; }
+.vp-new p{ margin:0; color:var(--c-muted); }
+.vp-callout{ display:inline-flex; align-items:center; gap:6px; align-self:flex-start; height:28px; padding:0 10px;
+  border:1px solid var(--c-border); border-radius:6px; background:transparent; color:var(--c-text); cursor:pointer;
+  font:inherit; font-size:12px; }
+.vp-callout:hover{ background:var(--c-chip); }
+.vp-callout svg{ width:13px; height:13px; color:var(--c-amber-fg); }
+
+/* Messages */
+.vp-msg-row{ display:flex; position:relative; }
+.vp-user{ justify-content:flex-end; }
+.vp-userbox{ width:100%; padding:6px 10px; background:var(--c-input); border:1px solid var(--c-border); border-radius:6px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere;
+  cursor:text; }
+.vp-userbox:hover{ border-color:color-mix(in srgb, var(--c-accent) 45%, var(--c-border)); }
+.vp-userbox textarea{ display:block; width:100%; resize:none; border:none; outline:none; background:transparent; color:inherit;
+  font:inherit; padding:0; min-height:20px; }
+.vp-editbar{ display:flex; justify-content:flex-end; gap:6px; margin-top:6px; }
+.vp-files{ display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+.vp-asst{ justify-content:flex-start; }
+.vp-body{ width:95%; overflow-wrap:anywhere; display:flex; flex-direction:column; gap:8px; }
+.vp-copy{ position:absolute; top:-6px; right:0; opacity:0; transition:opacity .15s; }
+.vp-asst:hover .vp-copy{ opacity:1; }
+.vp-typing{ display:inline-block; width:7px; height:13px; margin-left:2px; vertical-align:-2px; background:var(--c-muted);
+  border-radius:1px; animation:vp-blink 1s steps(2) infinite; }
+@keyframes vp-blink{ 50%{ opacity:0; } }
+
+/* Queued messages (sent while a turn is running) */
+.vp-queued .vp-userbox{ border-style:dashed; opacity:.7; display:flex; align-items:center; gap:8px; }
+.vp-queued .vp-spin{ width:13px; height:13px; flex:0 0 13px; }
+
+/* Markdown */
+.vp-md p{ margin:0 0 8px; } .vp-md p:last-child{ margin-bottom:0; }
+.vp-md ul, .vp-md ol{ margin:0 0 8px; padding-left:22px; }
+.vp-md h4{ margin:10px 0 4px; font-size:13px; }
+.vp-md code, .vp-tool pre, .vp-approve pre{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+.vp-md code{ background:var(--c-code); padding:1px 5px; border-radius:4px; }
+.vp-md pre{ background:var(--c-code); border:1px solid var(--c-border); border-radius:6px; padding:8px 10px; overflow-x:auto; margin:0 0 8px; }
+.vp-md pre code{ background:none; padding:0; }
+.vp-md a{ color:var(--c-accent); }
+
+/* Reasoning accordion: "Thinking" while streaming, "View reasoning (N chars)" after */
+.vp-reason > summary{ display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:4px; font-size:12px;
+  color:var(--c-muted); cursor:pointer; list-style:none; }
+.vp-reason > summary::-webkit-details-marker{ display:none; }
+.vp-reason > summary:hover{ background:color-mix(in srgb, var(--c-chip) 50%, transparent); }
+.vp-reason > summary svg{ width:12px; height:12px; transition:transform .15s; }
+.vp-reason[open] > summary svg.vp-chev{ transform:rotate(180deg); }
+.vp-reason-body{ margin-top:6px; padding:10px 12px; background:color-mix(in srgb, var(--c-chip) 30%, transparent);
+  border:1px solid color-mix(in srgb, var(--c-chip) 50%, transparent); border-radius:6px; font-style:italic; color:var(--c-muted); }
+
+/* Tool rows: status icon · label · monospace name · chevron */
+.vp-tool{ border:none; }
+.vp-tool > summary{ display:inline-flex; align-items:center; gap:4px; height:24px; padding:0 8px; border-radius:4px; font-size:12px;
+  cursor:pointer; list-style:none; background:color-mix(in srgb, var(--c-chip) 70%, transparent); color:var(--c-text); max-width:100%; }
+.vp-tool > summary::-webkit-details-marker{ display:none; }
+.vp-tool > summary:hover{ background:var(--c-chip); }
+.vp-tool > summary code{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vp-chev{ width:12px; height:12px; flex:0 0 12px; color:var(--c-muted); transition:transform .15s; }
+.vp-tool[open] .vp-chev{ transform:rotate(180deg); }
+.vp-ic{ width:14px; height:14px; flex:0 0 14px; display:inline-flex; }
+.vp-ic svg{ width:14px; height:14px; }
+.vp-s-done .vp-lbl, .vp-s-done .vp-ic{ color:var(--c-green); }
+.vp-s-error .vp-lbl, .vp-s-error .vp-ic{ color:var(--c-red); }
+.vp-s-denied .vp-lbl, .vp-s-denied .vp-ic{ color:var(--c-muted); }
+.vp-spin{ animation:vp-rot .9s linear infinite; }
+@keyframes vp-rot{ to{ transform:rotate(360deg); } }
+.vp-tool-body{ padding:8px; display:flex; flex-direction:column; gap:8px; }
+.vp-tool pre, .vp-approve pre{ margin:0; padding:8px 10px; background:var(--c-code); border:1px solid var(--c-border);
+  border-radius:6px; overflow:auto; max-height:220px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.vp-approve pre{ max-height:min(60vh, 520px); }   /* a long request scrolls; its size is stated above it */
+.vp-size{ text-transform:none; letter-spacing:0; }
+.vp-warn{ border-color:var(--c-amber, #b7791f); color:var(--c-amber, #b7791f); }
+.vp-effect{ display:flex; flex-direction:column; gap:4px; }
+.vp-bulk-list .vp-sum{ display:block; color:var(--c-muted); font-size:11px; overflow-wrap:anywhere; }
+.vp-k{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--c-muted); margin-bottom:2px; }
+.vp-note{ padding:8px 10px; border:1px solid var(--c-border); border-radius:6px; font-size:12px; color:var(--c-muted);
+  background:color-mix(in srgb, var(--c-chip) 40%, transparent); }
+
+/* Approval card */
+.vp-approve{ border:1px solid var(--c-amber-bd); background:var(--c-amber-bg); border-radius:6px; padding:12px;
+  display:flex; flex-direction:column; gap:10px; }
+.vp-approve-h{ display:flex; align-items:center; gap:6px; color:var(--c-amber-fg); font-size:13px; }
+.vp-approve-h svg{ width:16px; height:16px; flex:0 0 16px; }
+.vp-approve-h code, .vp-req code{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+.vp-req{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.vp-method{ font-size:11px; font-weight:700; padding:1px 6px; border-radius:4px; background:var(--c-amber-fg); color:var(--c-amber-bg); }
+:root[data-theme="dark"] .vp-method{ color:#0b1220; }
+.vp-sum{ color:var(--c-muted); font-size:12px; }
+.vp-actions{ display:flex; justify-content:flex-end; gap:8px; }
+
+/* Error banner + a SEPARATE outlined Retry (as in marimo) */
+.vp-error{ display:flex; align-items:center; gap:8px; }
+.vp-error-msg{ padding:6px 10px; border:1px solid var(--c-red); border-radius:4px; color:var(--c-red);
+  background:var(--c-red-bg); font-size:13px; overflow-wrap:anywhere; }
+.vp-notice{ text-align:center; font-size:12px; color:var(--c-muted); }
+
+/* Stop strip */
+.vp-stop{ display:flex; justify-content:center; padding:4px; border-top:1px solid var(--c-border); }
+.vp-stop button{ border:none; background:none; color:var(--c-red); cursor:pointer; font:inherit; font-size:12px; }
+.vp-stop button:hover{ text-decoration:underline; }
+.vp-scroll{ position:absolute; right:14px; bottom:10px; width:28px; height:28px; border-radius:50%; cursor:pointer;
+  border:1px solid var(--c-border); background:var(--c-panel); color:var(--c-text); box-shadow:0 1px 4px rgba(0,0,0,.15); z-index:3; }
+.vp-scroll[hidden]{ display:none; }
+
+/* Composer: prompt input + footer (mode · model · capabilities … @ · attach · send) */
+.vp-foot{ border-top:1px solid var(--c-border); }
+.vp-composer{ display:flex; flex-direction:column; }
+.vp-new .vp-composer{ border:1px solid var(--c-border); border-radius:6px; background:var(--c-panel); }
+.vp-pills{ display:flex; flex-wrap:wrap; gap:4px; padding:6px 10px 0; }
+.vp-pills:empty{ display:none; }
+.vp-flash{ padding:6px 10px 0; }
+.vp-flash:empty{ display:none; }
+.vp-file{ display:inline-flex; align-items:center; gap:5px; height:22px; padding:0 8px; border-radius:6px;
+  background:var(--c-chip); font-size:12px; max-width:100%; }
+.vp-file svg{ width:12px; height:12px; flex:0 0 12px; color:var(--c-muted); }
+.vp-file span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vp-file button{ border:none; background:none; padding:0; cursor:pointer; color:var(--c-muted); opacity:0; display:inline-flex; }
+.vp-file:hover button{ opacity:1; }
+.vp-input-area{ display:block; width:100%; resize:none; border:none; outline:none; background:transparent; color:inherit;
+  font:inherit; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; padding:10px 12px 6px; max-height:400px;
+  overflow-y:auto; min-height:44px; }
+.vp-new .vp-input-area{ min-height:48px; }
+.vp-composer-bar{ display:flex; align-items:center; gap:6px; padding:4px 8px 8px; }
+
+/* Popovers (mode · model · capabilities · context · history · connect) */
+.vp-pop{ position:fixed; z-index:2000; overflow-y:auto; font-size:12.5px; line-height:1.5; color:var(--c-text); background:var(--c-panel); border:1px solid var(--c-border); border-radius:8px;
+  box-shadow:0 6px 24px rgba(0,0,0,.25); padding:6px; max-width:calc(100vw - 24px); font-size:12.5px; }
+.vp-pop-item{ display:flex; gap:8px; align-items:flex-start; width:100%; padding:6px 8px; border:none; border-radius:6px;
+  background:transparent; color:var(--c-text); text-align:left; cursor:pointer; font:inherit; }
+.vp-pop-item:hover:not(:disabled), .vp-pop-item.hi{ background:var(--c-chip); }
+.vp-pop-item:disabled{ opacity:.5; cursor:not-allowed; }
+.vp-pop-item svg{ width:14px; height:14px; flex:0 0 14px; margin-top:2px; color:var(--c-muted); }
+.vp-pop-item .vp-sub{ display:block; color:var(--c-muted); font-size:11.5px; }
+.vp-pop-item.on{ background:color-mix(in srgb, var(--c-accent) 14%, transparent); }
+.vp-pop-h{ padding:4px 8px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--c-muted); }
+.vp-pop-foot{ border-top:1px solid var(--c-border); margin-top:4px; padding-top:4px; }
+.vp-pop-input{ width:100%; padding:6px 8px; margin-bottom:4px; border:1px solid var(--c-border); border-radius:6px;
+  background:var(--c-input); color:var(--c-text); font:inherit; outline:none; }
+.vp-pop-scroll{ max-height:450px; overflow-y:auto; }
+.vp-pop-empty{ padding:16px 8px; text-align:center; color:var(--c-muted); }
+.vp-pop-empty strong{ display:block; color:var(--c-text); }
+.vp-pop hr{ border:none; border-top:1px solid var(--c-border); margin:4px 0; }
+.vp-hist-row{ display:flex; justify-content:space-between; gap:10px; }
+.vp-hist-row .t{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vp-hist-row .a{ color:var(--c-muted); flex:0 0 auto; font-size:11.5px; }
+.vp-switch{ display:flex; gap:12px; align-items:flex-start; justify-content:space-between; padding:4px 6px; cursor:pointer; }
+.vp-switch input{ margin-top:3px; }
+.vp-switch small{ display:block; color:var(--c-muted); }
+.vp-caps{ padding:4px 6px 2px; color:var(--c-muted); font-size:12px; }
+
+/* Settings sheet (the gear): covers the panel body */
+.vp-settings{ position:absolute; inset:0; background:var(--c-bg); z-index:15; display:flex; flex-direction:column; overflow-y:auto; }
+.vp-settings[hidden]{ display:none; }
+.vp-settings-head{ display:flex; align-items:center; gap:6px; padding:10px 14px; border-bottom:1px solid var(--c-border); }
+.vp-form{ padding:14px; display:flex; flex-direction:column; gap:12px; }
+.vp-field{ display:flex; flex-direction:column; gap:4px; }
+.vp-field > span{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--c-muted); }
+.vp-field[hidden], #viv-ai-key-row[hidden]{ display:none; }
+.vp-input{ width:100%; padding:6px 10px; font:inherit; font-size:13px; border:1px solid var(--c-border); border-radius:6px;
+  background:var(--c-input); color:var(--c-text); outline:none; }
+.vp-input:focus{ border-color:var(--c-accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--c-accent) 14%, transparent); }
+.vp-hint{ font-size:12px; color:var(--c-muted); }
+.vp-msg{ font-size:12px; min-height:16px; }
+.vp-form .vp-actions{ justify-content:flex-start; flex-wrap:wrap; }
+
+/* Settings sheet: the per-provider model list (marimo's "Add model") */
+.vp-chips{ display:flex; flex-wrap:wrap; gap:4px; }
+.vp-chip{ display:inline-flex; align-items:center; gap:4px; max-width:100%; height:22px; padding:0 4px 0 8px; border-radius:6px;
+  background:var(--c-chip); color:var(--c-text); font-size:12px; cursor:pointer; }
+.vp-chip:hover{ background:var(--c-chip-hover); }
+.vp-chip.on{ outline:1px solid var(--c-accent); }
+.vp-chip > span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vp-chip button{ border:none; background:none; padding:0 4px; cursor:pointer; color:var(--c-muted); font-size:14px; line-height:1; }
+.vp-chip button:hover{ color:var(--c-red); }
+
+/* Dropdown (mode / model / dock): a listbox flush under a select-like trigger — NOT a tooltip. */
+.vp-pop.vp-dd-menu{ padding:4px; border-radius:6px; box-shadow:0 4px 14px rgba(0,0,0,.18); }
+.vp-dd-group{ display:flex; align-items:center; gap:6px; padding:8px 8px 4px; font-size:11px; color:var(--c-muted); }
+.vp-dd-group:first-child{ padding-top:4px; }
+.vp-dd-glabel{ flex:1 1 auto; font-weight:600; color:var(--c-text); font-size:12px; }
+.vp-dd-count{ flex:0 0 auto; }
+.vp-badge{ display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 3px; border-radius:5px;
+  color:#fff; font-size:9px; font-weight:700; letter-spacing:0; }
+.vp-dd-item{ display:flex; align-items:flex-start; gap:6px; padding:5px 8px; border-radius:4px; cursor:pointer; color:var(--c-text); }
+.vp-dd-item.hi{ background:var(--c-chip); }
+.vp-dd-item.disabled{ opacity:.5; cursor:not-allowed; }
+.vp-dd-check{ flex:0 0 14px; width:14px; height:16px; color:var(--c-accent); }
+.vp-dd-check svg{ width:13px; height:13px; }
+.vp-dd-icon{ flex:0 0 14px; color:var(--c-muted); margin-top:1px; }
+.vp-dd-icon svg{ width:14px; height:14px; }
+.vp-dd-label{ flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
+.vp-dd-label small{ display:block; color:var(--c-muted); font-size:11.5px; }
+.vp-dd-empty{ padding:10px 8px; color:var(--c-muted); }
+.vp-dd-foot{ margin-top:4px; padding:7px 8px 5px; border-top:1px solid var(--c-border); color:var(--c-accent); cursor:pointer; border-radius:0 0 4px 4px; }
+.vp-dd-foot:hover, .vp-dd-foot:focus-visible{ background:var(--c-chip); outline:none; }
+
+/* Approve all / Deny all (when a turn pauses on several actions) */
+.vp-bulk{ display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--c-muted); }
+.vp-bulk span{ margin-right:auto; }
+
+/* ── Docks: the panel is a flex sibling left of / right of / below the content ── */
+.viv-ai-panel[data-dock="left"]{ border-left:none; border-right:1px solid var(--c-border); }
+.viv-ai-panel[data-dock="left"] .vp-resize{ left:auto; right:-3px; }
+.viv-ai-panel[data-dock="bottom"]{ flex:0 0 var(--viv-ai-h, 320px); width:auto; height:var(--viv-ai-h, 320px); min-height:0;
+  border-left:none; border-top:1px solid var(--c-border); }
+.viv-ai-panel[data-dock="bottom"] .vp-resize{ left:0; right:0; top:-3px; bottom:auto; width:auto; height:6px; cursor:row-resize; }
+body.focus-mode .viv-ai-panel, body.focus-mode #viv-ai-toggle{ display:none !important; }
+.vp-head{ cursor:grab; user-select:none; }
+.vp-head .vp-icon{ cursor:pointer; }
+
+/* Drag chip + drop zones (drag the AI item or the header to an edge to re-dock) */
+body.vp-dragging{ user-select:none; cursor:grabbing; }
+/* pointer events over an iframe never reach this document: without this a drag or resize that crosses the embedded study/composite pages freezes and loses its mouseup */
+body.vp-dragging iframe{ pointer-events:none; }
+.vp-ghost{ position:fixed; z-index:3001; pointer-events:none; display:flex; align-items:center; gap:6px; padding:4px 12px 4px 8px;
+  border-radius:999px; background:#4f46e5; color:#fff; font:600 12px/1.4 -apple-system,"Segoe UI",sans-serif;
+  box-shadow:0 4px 14px rgba(0,0,0,.3); }
+.vp-ghost svg{ width:14px; height:14px; }
+.vp-zones{ position:fixed; inset:0; z-index:3000; pointer-events:none; }
+.vp-zone{ position:absolute; display:flex; align-items:center; justify-content:center; box-sizing:border-box;
+  border:2px dashed #6366f1; border-radius:8px; background:rgba(99,102,241,.06); color:#4f46e5;
+  font:600 13px/1.4 -apple-system,"Segoe UI",sans-serif; opacity:.75; transition:background .1s, opacity .1s; }
+.vp-zone.on{ background:rgba(99,102,241,.22); opacity:1; }
+.vp-zone-left{ left:0; top:20%; bottom:28%; width:33%; }
+.vp-zone-right{ right:0; top:20%; bottom:28%; width:33%; }
+.vp-zone-bottom{ left:0; right:0; bottom:0; height:28%; }
+.vp-zone-top{ left:0; right:0; top:0; height:20%; }
+:root[data-theme="dark"] .vp-zone{ color:#a5b4fc; border-color:#818cf8; }
+/* Insertion line (reorder/co-dock) + swap highlight shown during a panel drag. */
+.vp-insert-line{ position:fixed; z-index:3002; pointer-events:none; background:#4f46e5; border-radius:3px; box-shadow:0 0 0 1px rgba(255,255,255,.6), 0 2px 8px rgba(79,70,229,.5); }
+/* Floating chip at the drop indicator that names the action (Stack above/below, New column/row). */
+.vp-drop-label{ position:fixed; z-index:3003; pointer-events:none; transform:translate(-50%,-50%);
+  background:#4f46e5; color:#fff; font:600 11px/1.3 -apple-system,"Segoe UI",sans-serif; letter-spacing:.02em;
+  padding:3px 8px; border-radius:5px; white-space:nowrap; box-shadow:0 2px 8px rgba(79,70,229,.5); }
+:root[data-theme="dark"] .vp-drop-label{ background:#4338ca; color:#e0e7ff; }
+.vp-swap-hi{ position:fixed; z-index:3000; pointer-events:none; box-sizing:border-box; border:2px solid #4f46e5; border-radius:8px;
+  background:rgba(99,102,241,.14); display:flex; align-items:center; justify-content:center; }
+.vp-swap-hi span{ font:700 12px/1 -apple-system,"Segoe UI",sans-serif; letter-spacing:.08em; text-transform:uppercase; color:#4f46e5;
+  background:#fff; border-radius:999px; padding:4px 10px; box-shadow:0 2px 8px rgba(0,0,0,.18); }
+:root[data-theme="dark"] .vp-swap-hi span{ background:#1e293b; color:#a5b4fc; }
+
+/* ── Slim iTerm-style panel title bar (drag handle + × close) ─────────────── */
+/* While dragging a panel, suppress text selection across every window the cursor
+   crosses, and keep a grab cursor. */
+body.vp-dragging{ cursor:grabbing !important; }
+body.vp-dragging, body.vp-dragging *{ user-select:none !important; -webkit-user-select:none !important; }
+.vp-titlebar{ display:flex; align-items:center; gap:6px; height:24px; padding:0 4px 0 10px; box-sizing:border-box;
+  background:var(--vw-surface-2,#f1f3f5); border-bottom:1px solid var(--vw-border,#e3e3e6);
+  cursor:grab; user-select:none; flex:0 0 auto; }
+.vp-titlebar:active{ cursor:grabbing; }
+body.vp-dragging .vp-titlebar{ cursor:grabbing; }
+.vp-tb-label{ font:600 11.5px/1.5 -apple-system,"Segoe UI",sans-serif; color:var(--vw-muted,#6b7280);
+  letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; padding-bottom:1px; }
+.vp-tb-spacer{ flex:1 1 auto; }
+.vp-tb-btn{ flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px;
+  border:none; background:transparent; color:var(--vw-muted,#9ca3af); cursor:pointer; border-radius:5px; padding:0; }
+.vp-tb-btn:hover{ background:var(--vw-hover,#e5e7eb); color:var(--vw-text,#1f2937); }
+.vp-tb-btn svg{ width:14px; height:14px; }
+.vp-tb-close:hover{ color:#dc2626; }
+:root[data-theme="dark"] .vp-titlebar{ background:var(--vw-surface-2,#1e293b); border-bottom-color:var(--vw-border,#334155); }
+:root[data-theme="dark"] .vp-tb-btn:hover{ background:var(--vw-hover,#334155); color:#e5e7eb; }
+
+/* Inline investigation title bar: the same flat slim bar the docked panels use,
+   shown above the investigation header while the graph is inline. Styled identically
+   to .vp-titlebar (no box / hint) so all four panels read as one system. */
+.vp-titlebar-inline{ margin:0 0 8px; }
+.vp-titlebar-inline[hidden]{ display:none !important; }
+
+/* The title bar supersedes the old dock-menu button + floating × corner controls. */
+.vp-has-titlebar .vp-head{ display:none !important; }
+.vp-has-titlebar [data-act="dock"], .vp-has-titlebar #aig-dock-panel-btn, .vp-has-titlebar .aig-tb-group[title="Dock"]{ display:none !important; }
+
+/* ── iTerm / VS Code-style same-side splitting (lanes) ───────────────────────
+   A .vp-stack holds every panel docked on one side, arranged as one or more
+   LANES. On a left/right side the lanes sit side by side (columns) and each lane
+   stacks its panels top↔bottom; on a top/bottom band the lanes stack (rows) and
+   each lane lays its panels left↔right. ONE lane == the classic single-column
+   layout. The stack carries the side's outer size (set inline by the dock
+   engine); lanes split the cross axis by --vp-lane-grow, panels split a lane's
+   main axis by --vp-grow, and sizer bars drag each ratio. */
+.vp-stack{ display:flex; min-width:0; min-height:0; position:relative; }
+.vp-stack[hidden]{ display:none !important; }
+.vp-stack-left, .vp-stack-right{ flex:0 0 auto; flex-direction:row; height:100%; }    /* lanes side by side; width set inline */
+.vp-stack-top, .vp-stack-bottom{ flex:0 0 auto; flex-direction:column; width:100%; }  /* lanes stacked; height set inline */
+/* A lane splits the cross axis (--vp-lane-grow) and stacks its panels on the main axis. */
+.vp-stack-lane{ display:flex; min-width:0; min-height:0; flex:var(--vp-lane-grow, 1) 1 0; }
+.vp-stack-left .vp-stack-lane, .vp-stack-right .vp-stack-lane{ flex-direction:column; }
+.vp-stack-top .vp-stack-lane, .vp-stack-bottom .vp-stack-lane{ flex-direction:row; }
+/* Panels inside a lane fill their share; override each panel's own fixed-basis /
+   width / height rules (flex:0 0 var(--viv-*-w|h), width:var(...), etc.). flex-grow
+   is set inline per panel to carry the split ratio. */
+.vp-stack-lane > .vp-dockable{ flex:var(--vp-grow, 1) 1 0 !important; width:auto !important; height:auto !important; min-width:0; min-height:0; }
+/* Split handle between two stacked panels within a lane (main axis). */
+.vp-stack-sizer{ flex:0 0 6px; align-self:stretch; background:transparent; z-index:6; }
+.vp-stack-left .vp-stack-sizer, .vp-stack-right .vp-stack-sizer{ cursor:row-resize; }
+.vp-stack-top .vp-stack-sizer, .vp-stack-bottom .vp-stack-sizer{ cursor:col-resize; }
+.vp-stack-sizer:hover, .vp-stack-sizer.dragging{ background:color-mix(in srgb, var(--c-accent,#4f46e5) 35%, transparent); }
+/* Split handle between two LANES (cross axis → a new column / row). */
+.vp-lane-sizer{ flex:0 0 6px; align-self:stretch; background:transparent; z-index:6; }
+.vp-stack-left > .vp-lane-sizer, .vp-stack-right > .vp-lane-sizer{ cursor:col-resize; }
+.vp-stack-top > .vp-lane-sizer, .vp-stack-bottom > .vp-lane-sizer{ cursor:row-resize; }
+.vp-lane-sizer:hover, .vp-lane-sizer.dragging{ background:color-mix(in srgb, var(--c-accent,#4f46e5) 50%, transparent); }
+
+/* ── marimo-style model picker: providers → submenu of models → info card ── */
+.vp-mm{ padding:4px; }
+.vp-mm-cur{ display:flex; align-items:center; gap:8px; padding:6px 8px; }
+.vp-mm-cur b{ display:block; font-weight:500; }
+.vp-mm-cur small, .vp-mm-info code{ display:block; color:var(--c-muted); font-size:11.5px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+.vp-mm-prov, .vp-mm-model{ display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:4px; cursor:pointer; outline:none; }
+.vp-mm-prov > span:nth-child(2), .vp-mm-name{ flex:1 1 auto; min-width:0; }
+.vp-mm-prov:hover, .vp-mm-prov.hi, .vp-mm-prov:focus, .vp-mm-model:hover, .vp-mm-model:focus{ background:var(--c-chip); }
+.vp-mm-chev{ width:14px; height:14px; color:var(--c-muted); flex:0 0 14px; }
+.vp-mm-h{ display:flex; align-items:center; gap:4px; margin:0; padding:6px 8px 2px; color:var(--c-muted); font-size:12px; }
+.vp-mm-i svg{ width:12px; height:12px; }
+.vp-mm-input{ display:block; box-sizing:border-box; width:calc(100% - 16px); margin:2px 8px 6px; padding:5px 8px; font:inherit; font-size:12.5px;
+  color:var(--c-text); background:var(--c-bg, transparent); border:1px solid var(--c-border); border-radius:6px; }
+.vp-mm-input:focus{ outline:2px solid var(--c-accent); outline-offset:0; }
+.vp-mm-input.bad{ border-color:#b91c1c; }
+.vp-mm-desc{ margin:0; padding:6px 8px; max-width:280px; color:var(--c-muted); font-size:12.5px; }
+.vp-mm-desc a{ color:inherit; text-decoration:underline; }
+.vp-mm-sub{ padding:4px; }
+.vp-mm-brain, .vp-mm-bot{ display:inline-flex; color:var(--c-muted); }
+.vp-mm-brain{ padding:3px; border-radius:6px; color:#7c3aed; background:color-mix(in srgb, #7c3aed 14%, transparent); }
+.vp-mm-brain svg, .vp-mm-bot svg{ width:14px; height:14px; }
+.vp-mm-rm{ display:inline-flex; padding:2px; border:0; background:transparent; color:var(--c-muted); cursor:pointer; border-radius:4px; }
+.vp-mm-rm:hover{ color:#b91c1c; background:var(--c-chip); }
+.vp-mm-rm svg{ width:12px; height:12px; }
+.vp-mm-info{ padding:14px; }
+.vp-mm-info h4{ margin:0 0 2px; font-size:14px; }
+.vp-mm-info p{ margin:8px 0 0; color:var(--c-muted); font-size:12.5px; }
+.vp-mm-think{ display:flex; align-items:center; gap:6px; font-size:12px; }
+.vp-mm-think i{ width:8px; height:8px; border-radius:50%; background:#8b5cf6; }
+.vp-mm-by{ display:flex; align-items:center; gap:6px; margin-top:12px; padding-top:8px; border-top:1px solid var(--c-border); color:var(--c-muted); font-size:12px; }
+/* the Settings sheet's Model field: a select-like trigger for the same picker */
+.vp-select{ width:100%; height:32px; justify-content:space-between; }
+.vp-select > span{ display:flex; align-items:center; gap:8px; min-width:0; }
+.vp-select .vp-placeholder{ color:var(--c-muted); }
+
+.vp-hist-del{ display:none; flex:0 0 auto; padding:2px; border:0; background:transparent; color:var(--c-muted); cursor:pointer; border-radius:4px; }
+.vp-pop-item:hover .vp-hist-del, .vp-pop-item:focus-within .vp-hist-del{ display:inline-flex; }
+.vp-hist-del:hover{ color:#b91c1c; background:var(--c-chip); }
+.vp-hist-del svg{ width:12px; height:12px; }
+div.vp-pop-item{ cursor:pointer; }
+
+.vp-bulk-list{ margin:4px 0 0; padding:0 0 0 16px; max-height:96px; overflow:auto; font-size:11.5px; color:var(--c-muted); }
+.vp-bulk-list code{ font-size:11px; }

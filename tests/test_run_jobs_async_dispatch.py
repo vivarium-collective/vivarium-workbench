@@ -240,7 +240,8 @@ def _patch_status(monkeypatch, module, answers):
 
 
 def test_viva_core_and_compose_items_settle_against_their_own_backend(monkeypatch):
-    from vivarium_workbench.lib import remote_run_compose, remote_run_viva_v1
+    from vivarium_workbench.lib import remote_run_compose
+    from vivarium_workbench_sms import remote_run_viva_v1
 
     viva = _patch_status(monkeypatch, remote_run_viva_v1, {
         "simulation-cDA421C": ({"kind": "run", "phase": "done", "raw_status": "completed", "error": None,
@@ -261,7 +262,7 @@ def test_viva_core_and_compose_items_settle_against_their_own_backend(monkeypatc
 
 
 def test_a_failed_document_run_without_a_message_names_its_upstream_state(monkeypatch):
-    from vivarium_workbench.lib import remote_run_viva_v1
+    from vivarium_workbench_sms import remote_run_viva_v1
 
     _patch_status(monkeypatch, remote_run_viva_v1, {
         "simulation-X": ({"kind": "run", "phase": "failed", "raw_status": "cancelled", "error": None,
@@ -291,7 +292,7 @@ def test_a_running_document_run_stays_submitted_with_its_phase(monkeypatch):
 ])
 def test_a_document_backend_that_does_not_answer_leaves_the_item_submitted(monkeypatch, answer):
     """Losing the poll must not turn a running run into a failed one -- on any backend."""
-    from vivarium_workbench.lib import remote_run_viva_v1
+    from vivarium_workbench_sms import remote_run_viva_v1
 
     _patch_status(monkeypatch, remote_run_viva_v1, {"simulation-Y": answer})
     job = _job({"status": "submitted", "simulation_id": "simulation-Y"})
@@ -300,7 +301,8 @@ def test_a_document_backend_that_does_not_answer_leaves_the_item_submitted(monke
 
 
 def test_a_raising_backend_does_not_stop_the_others(monkeypatch):
-    from vivarium_workbench.lib import remote_run_compose, remote_run_viva_v1
+    from vivarium_workbench.lib import remote_run_compose
+    from vivarium_workbench_sms import remote_run_viva_v1
 
     def _boom(run_id):
         raise RuntimeError("down")
@@ -329,3 +331,34 @@ def test_an_unreachable_backend_is_asked_once_per_refresh(monkeypatch):
     run_jobs.refresh_submitted(job, client=_NoSms())
     assert asked == ["compose-1"]
     assert all(it["status"] == "submitted" for it in job.to_dict()["items"])
+
+
+def test_one_stale_viva_core_run_does_not_block_the_others(monkeypatch):
+    """Review of #1661: viva-core's adapter answers a 404 for an unknown run as 502 "unreachable", carrying the
+    server's own status. A deleted run (or a reset server) answers about that run only; the backend is not down,
+    so the next item is still asked and settles."""
+    from vivarium_workbench_sms import remote_run_viva_v1
+
+    asked = _patch_status(monkeypatch, remote_run_viva_v1, {
+        "simulation-GONE": ({"phase": "unreachable", "reachable": False, "reason": "backend unreachable",
+                             "status": 404, "error": "GET .../simulation-GONE/status -> 404"}, 502),
+        "simulation-OK": ({"kind": "run", "phase": "done", "raw_status": "completed", "error": None,
+                           "run_id": "simulation-OK"}, 200)})
+    job = _job({"status": "submitted", "simulation_id": "simulation-GONE"},
+               {"status": "submitted", "simulation_id": "simulation-OK"})
+    run_jobs.refresh_submitted(job, client=_NoSms())
+    items = job.to_dict()["items"]
+    assert asked == ["simulation-GONE", "simulation-OK"]
+    assert (items[0]["status"], items[1]["status"]) == ("submitted", "done")
+
+
+def test_a_viva_core_server_error_still_skips_the_backend(monkeypatch):
+    """A real 5xx (or no HTTP status at all: a refused connection) still means the backend did not answer."""
+    from vivarium_workbench_sms import remote_run_viva_v1
+
+    asked = _patch_status(monkeypatch, remote_run_viva_v1, {
+        f"simulation-{n}": ({"phase": "unreachable", "reachable": False, "status": s, "error": "x"}, 502)
+        for n, s in ((1, 503), (2, None))})
+    job = _job(*({"status": "submitted", "simulation_id": f"simulation-{n}"} for n in (1, 2)))
+    run_jobs.refresh_submitted(job, client=_NoSms())
+    assert asked == ["simulation-1"]
