@@ -18,12 +18,13 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | P1a | Core seams that need no provider (`lib/backend_config.py`, `Backend.identity`); no behaviour change | wb#1658 | **done**, merged 2026-11-19 |
 | P3-ids | Opaque run ids end to end, pulled forward from P3 (runs in parallel with P1, Jim 2026-11-19) | wb#1660 | **done**, merged 2026-11-19 |
 | P3-launch | The vEcoli launch panel quarantined in `static/sms-launch.js`, pulled forward from P3 (parallel) | wb#1659 | **done**, merged 2026-11-19 |
-| — | compose-api server identity (`COMPOSE.identity` = `compose_api.compose_health_identity`, `deployment_id` on `GET /health`); identity caches keyed by (identity family, URL) | compose-api#543 (compose-api PR #545); wb#1665 | in review (2026-11-19) |
+| — | compose-api server identity (`COMPOSE.identity` = `compose_api.compose_health_identity`, `deployment_id` on `GET /health`); identity caches keyed by (identity family, URL) | compose-api#543 (compose-api PR #545); wb#1665 | **done**, merged 2026-11-19 |
 | P1b | Pure move: whole SMS modules into `vivarium_workbench_sms` (same distribution), every import and patch target re-pointed, lazy registry imports; import-linter contract whose ignore list is the ratchet | wb#1662 | **done**, merged 2026-11-19 |
 | — | `refresh_submitted`: batch-job items settle against the backend that ran them (viva-core / compose-api items never settled before) | wb#1661 | **done**, merged 2026-11-19 |
 | — | Route dependencies (`get_workspace`, ...) moved to `api/deps.py`, so a plugin router can use them without importing `api/app.py` | wb#1663 | **done**, merged 2026-11-19 |
-| — | Test isolation: the conftest reset forgets the cached GitHub session and every backend-URL cache | wb#1664 | in review (2026-11-19) |
-| P1c | `Provider` and `SmsProvider`; registry, session build/pin and capability probe through the provider; no behaviour change | — | not started |
+| — | Test isolation: the conftest reset forgets the cached GitHub session and every backend-URL cache | wb#1664 | **done**, merged 2026-11-19 |
+| — | Untrack 57 generated fixture artifacts committed by accident in wb#1661 (`3f52a96e`); ignore their four directories | wb#1666 | **done**, merged 2026-11-19 |
+| P1c | `Provider` (`backends`, `select`, `recognise`) and `SmsProvider`; the registry (one core→plugin edge) with inert sentinels when providers are off; capability probe split; 409 `backend-not-installed`; no behaviour change with providers on | wb#1667 | in review (2026-11-19) |
 | P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, facet routes stay core, SMS-only routes into the plugin's router | — | not started |
 | P3 | Opaque string run ids end to end; the UI shows the nine SMS-today features (§2.5) by declared feature; launch panel quarantined (`sms-launch.js`); core tests run without the plugin | — | not started |
 | P4 | `vivarium_workbench_sms` moves into the viva-api repository as its own distribution, found by entry point; the Stanford image installs it | — | not started |
@@ -130,11 +131,13 @@ A **provider** is what a plugin registers. Until P4 the core imports the one in-
 ```python
 class Provider(Protocol):
     name: str                                                  # "sms"
-    def backends(self) -> Iterable[Backend]: ...               # e.g. VIVA_CORE and SMS_LEGACY
+    # P1c (lib/backends/provider.py):
+    def backends(self) -> tuple[Backend, ...]: ...             # VIVA_CORE and SMS_LEGACY, built once
     def select(self, ws_root: Path) -> Backend | None: ...     # its claim on a NEW run (session build, pin)
-    def recognise(self, base_url: str) -> Profile | None: ...  # a named --backend-base-url it serves: backend,
-                                                               #   reachable, error, dispatch, version, capabilities
-    def check_config(self) -> None: ...                        # startup refusal (BackendConfigError)
+    def recognise(self, client: object) -> Recognised: ...     # its half of backend_profile: (profile,
+                                                               #   has_composites, stop); never raises
+    # added by later steps:
+    def check_config(self) -> None: ...                        # startup refusal (BackendConfigError) (P3)
     def features(self) -> frozenset[str]: ...                  # what the UI may show (P3)
     def router(self) -> APIRouter | None: ...                  # routes only this provider serves
     def cli(self) -> Iterable[Command]: ...                    # its subcommands (`run-remote`)
@@ -177,7 +180,7 @@ class Provider(Protocol):
 
 ### 2.3 Existing runs are routed by their record
 
-This section is unchanged from step 1c. From P1c, the record kinds come from the provider registry.
+This section is unchanged from step 1c. From P1c the backends behind the record kinds come from the provider registry; the kinds themselves (`records.KINDS`) stay a fixed list, the check that a record is well formed. A record whose kind no active provider serves (providers turned off) is refused with 409 `backend-not-installed` (`terminal: true`); it is never routed by its id's form.
 
 - **New runs and existing runs are different questions (Jim, 2026-11-19).**
   - A *new* run goes to the one configured backend (`select` / `active`).
@@ -209,7 +212,7 @@ This section is unchanged from step 1c. From P1c, the record kinds come from the
   - **Exempt** (the code says why): `remote_run_jobs.run_remote_pipeline`, an SMS-only pipeline that polls the same client it dispatched with, inside the same call.
 - **One remote backend per process (Jim, 2026-11-19).**
   - A named backend beside an alias (`VIVA_API_BASE` / `SMS_API_BASE`) that points elsewhere is refused at startup, by `sms_api_client.check_single_backend` for `cli.BACKEND_COMMANDS`.
-  - In P1a the rule moves to `lib/backend_config.py`; in P1c the SMS aliases become the plugin's `check_config`.
+  - In P1a the rule moved to `lib/backend_config.py`; in P3 (moved from P1c) the SMS aliases become the plugin's `check_config`.
 - **Policy, from wb#1630:** a named backend that can't be reached never turns into a local run. A run is local only when no backend is configured.
 
 ### 2.4 Package layout and guards
@@ -281,18 +284,18 @@ vivarium_workbench_sms/   # the plugin, from P1b (module names kept from lib/, s
 
 This list comes from greps and a grimp import graph on 2026-11-19, checked by two independent reviews. It is a starting list; each step's plan verifies its own part.
 
-**Core seams (P1a; rows marked P1c need the provider).** These are the places where core code uses SMS code today, and each is fixed in the core:
+**Core seams (P1a; rows marked P1c need the provider; P1c's are done, and four moved to P3).** These are the places where core code uses SMS code today, and each is fixed in the core:
 
 | Seam | Today | Change |
 |---|---|---|
 | compose-api path (P1a, done) | `remote_run_compose` reads `remote_pinned.remote_deployment_name` and `sms_api_client.explicit_backend_base_url` | reads `lib/backend_config.py`; no longer imports `remote_pinned` |
-| capability probe (P1c) | `server_capabilities.explicit_backend_profile` → `backend_profile(SmsApiClient)`: `client.capabilities()` (`/viva/v1`, then `/core/v1`), then `openapi_operations()` for compose-api, all through the `remote_link` circuit breaker; `require_named_backend_reachable` and `_PROFILE_FAILURE_TTL` rely on that breaker | the profile becomes: core asks each provider's `recognise(url)` (the SMS provider does the viva-core check), then core's own compose-api detection; both go through the generic breaker, which P1a splits out of `remote_link` |
+| capability probe (P1c, done) | `server_capabilities.explicit_backend_profile` → `backend_profile(SmsApiClient)`: `client.capabilities()` (`/viva/v1`, then `/core/v1`), then `openapi_operations()` for compose-api, all through the `remote_link` circuit breaker; `require_named_backend_reachable` and `_PROFILE_FAILURE_TTL` rely on that breaker | `backend_profile(client)` stays the one entry point; the provider's `recognise(client)` does the viva-core half (moved verbatim to `vivarium_workbench_sms/provider.py`); the core asks compose-api's OpenAPI exactly when the capability list lacks `viva-v1-composites`, as before. With providers off the profile starts reachable and legacy and only compose-api is detected |
 | breaker (P1a, done) | `remote_link` imports `SmsApiError` and `sms_api_base` at module level; `CircuitOpen` subclasses `SmsApiError`; `snapshot()` reads the AWS SSO cache | split: the generic per-URL breaker and a core `BackendError` are in `backend_config.py`. **`SmsApiError` is an alias of `BackendError`, not a subclass** (a deliberate deviation): every `except SmsApiError` stays exact and still catches `CircuitOpen(BackendError)`. `remote_link` keeps the SMS default URL, its own `link()` / `start_probe()`, and the SSO expiry as the function `remote_link.snapshot(lk)` (the core breaker has no snapshot); they go to the plugin in P1b |
 | health (P1a, done) | `workspace_deps_views.remote_health` pings with `SmsApiClient.ping()` | `backend_config.ping`, the same request (`GET /version`, 5 s default timeout, `Accept` and caller-identity headers). `SmsApiClient.ping` keeps its own copy until P1b, because tests steer it through `sms_api_client.urlopen`; a test pins that the two agree |
 | records (P1a, done) | `records.py` uses `SmsApiClient` (`/viva/v1/health`), `_canonical_url`, `remote_pinned._DEFAULT_REMOTE_DEPLOYMENT`; `configured_url` / `_deployment_names_now` use `sms_api_base` and `BACKEND_BASE_ENV_VARS` | `Backend.identity` (viva-core and sms-legacy: `viva_core.viva_health_identity`; compose-api: `compose_api.compose_health_identity`, `deployment_id` on `GET /health`, compose-api#543). `records` asks the identity function of the record's own kind, and keys its caches by (identity family, URL), so a compose-api record never picks up viva-core's identity at a shared URL. URL canonicaliser, deployment name and configured URL come from `backend_config.py` |
-| registry (P1c) | `backends/__init__.py` imports `SmsLegacyRuns`, `VivaCoreRuns` at load | registry via provider |
-| deployment name (P1a, done) | `remote_pinned.remote_deployment_name()` (default `"smsvpctest"`) | `backend_config.deployment_name()`; `remote_pinned`'s function is a call-time wrapper. The default stays `"smsvpctest"` until P1c, then neutral, with the provider supplying its own |
-| session build and pin (P1c) | `run_core.run_target_for` (`.viv-build.json`) and `remote_pinned.is_pinned_enabled()`, used by `backends.select`; `.viv-build.json` is also read by `report.py`, `provenance_manifest.py`, `composite_resolve`, `env_worker_launcher`, `readouts_views` and `run_core` | `SmsProvider.select`; the other readers ask the provider (P2 plans each) |
+| registry (P1c, done) | `backends/__init__.py` imports `SmsLegacyRuns`, `VivaCoreRuns` at load | `lib/backends/provider.providers()` imports `vivarium_workbench_sms.provider` (the one registry edge; P4: an entry point); `VIVA_CORE` / `SMS_LEGACY` / `_ALL` resolve through it, the same objects every time. `VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none` turns providers off: the attributes become inert sentinels (they own no run; `is` comparisons stay false) that no lookup returns. "Providers off" is not "plugin absent": the core cannot be imported without the package until P2 finishes. With providers off, a reachable named viva-api reads as a legacy backend and runs locally, by the existing "reachable legacy stays local" rule (P3 may add a startup warning) |
+| deployment name (P1a, done) | `remote_pinned.remote_deployment_name()` (default `"smsvpctest"`) | `backend_config.deployment_name()`; `remote_pinned`'s function is a call-time wrapper. The default stays `"smsvpctest"` until P3 (moved from P1c), then neutral, with the provider supplying its own |
+| session build and pin (P1c, done: `SmsProvider.select`) | `run_core.run_target_for` (`.viv-build.json`) and `remote_pinned.is_pinned_enabled()`, used by `backends.select`; `.viv-build.json` is also read by `report.py`, `provenance_manifest.py`, `composite_resolve`, `env_worker_launcher`, `readouts_views` and `run_core` | `SmsProvider.select`; the other readers ask the provider (P2 plans each) |
 | generic helpers in SMS modules | `remote_simulations._read_build_meta` (used by `composite_resolve`, `composite_state_views`), `source_build_views._normalize_repo_url` (used by `git_status`) | move to a core module, or behind `builds` if SMS-only |
 
 `remote_run_landing` is mixed. Its archive landing (`land_composite_results`, `fold_analyses`, `land_ptools_tsvs`, §3) is core, and compose-api and the plugin both call it. `land_remote_run` (which hardcodes the `"sms-legacy"` record and imports `remote_pinned` and `sms_api_base`) and `land_remote_simulation_artifacts` (`download_data`) are SMS: they go in P2's Runs area.
@@ -404,10 +407,11 @@ Rounds repeat until they find nothing new. The PR description says what each rev
    - Add the import-linter contract, the tool and test coverage, and the ratchet's new rule (§2.4).
    - Review checks one thing: that this is a pure move.
 4. **P1c: the provider.**
-   - Add `Provider`, `SmsProvider` and the registry's lazy provider import.
+   - Add `Provider` (`backends`, `select`, `recognise`), `SmsProvider` and the registry's lazy provider import.
    - Fix the P1c seam rows: the registry, the session build and pin, and the capability probe with `recognise`.
-   - Route `select`, `for_existing` and the record kinds through the registry. Startup calls `check_config`.
-   - **No behaviour change.**
+   - Route `select`, `for_existing` and the record kinds' backends through the registry; refuse a record of an inactive kind (409 `backend-not-installed`).
+   - **No behaviour change** with providers on.
+   - **Moved to P3 (2026-11-19, plan reviews):** the configured base URL, the default deployment name, the SMS alias env vars and the alias half of the one-backend check (`check_single_backend`). They stay plain data in `backend_config`, because its import-linter contract forbids it from asking `lib.backends` or the plugin, and `sms_api_client` imports it at module level (a cycle). Also moved: the bare-id `backend-not-installed` refusal (a run with no record whose id no active backend owns), which needs `Resolution(kind=None)` to stop meaning both "blank id" and "no owner".
 5. **P2: split the mixed modules, one area per PR,** in the order of §2.5's plugin-set table. Each PR:
    - moves the area's SMS parts into the plugin;
    - re-points core callers at `backends` and the facet;
@@ -417,6 +421,7 @@ Rounds repeat until they find nothing new. The PR description says what each rev
    When P2 ends, only the registry's provider import is left on the ignore list.
    **Pulled forward, in parallel with P1 (Jim, 2026-11-19).** Two P3 items don't depend on the P1 chain and run as their own PRs now: opaque run ids end to end, and the launch-panel quarantine (`static/sms-launch.js`, gated by today's signals until P1c's declared features exist). A short parallel PR gives compose-api a server identity if compose-api reports one; it does (compose-api#543, `deployment_id` on `GET /health`), see the Progress row.
 6. **P3: features, and a core without the plugin.**
+   - From P1c: the configured base URL, default deployment name, SMS alias env vars and the alias half of the one-backend check become neutral in the core (the provider supplies SMS's), and the bare-id `backend-not-installed` refusal.
    - Run ids become opaque strings end to end (routes and browser); the record's `kind` decides, never the id's form (§2.5).
    - The browser reads the active provider's `features` and hides SMS-only UI when they're absent.
    - Quarantine the launch panel in `static/sms-launch.js` behind the `sms-launch` feature (Q-launch-ui, decided); move the SMS branches of mixed routes behind their facets (§2.2).

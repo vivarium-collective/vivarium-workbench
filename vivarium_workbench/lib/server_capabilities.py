@@ -176,37 +176,35 @@ def backend_profile(client: SmsApiClient) -> dict:
     on ``/openapi.json``) is *unreachable*, not legacy: what a run on it would do is
     unknown, and :func:`require_named_backend_reachable` refuses a local run for it.
     """
-    out: dict = {"reachable": True, "version": None, "capabilities": [], "services": {},
-                 "dispatch": DISPATCH_LEGACY, "error": None}
+    # Step P1c: the viva-core half (capabilities, health services, document dispatch) is the provider's
+    # ``recognise`` (vivarium_workbench_sms/provider.py), moved verbatim. With providers off there is none: the
+    # profile starts reachable and legacy, and only compose-api is detected.
+    import vivarium_workbench.lib.backends.provider as _provider
+
+    active = _provider.providers()
+    if active:
+        recognised = active[0].recognise(client)
+        out = recognised.profile
+        if recognised.stop or recognised.has_composites:
+            return out
+    else:
+        out = {"reachable": True, "version": None, "capabilities": [], "services": {},
+               "dispatch": DISPATCH_LEGACY, "error": None}
+    # compose-api: asked exactly when the capability list lacks viva-v1-composites, as before step P1c.
     try:
-        caps = fetch_capabilities(client)
+        version, operations = client.openapi_operations()
     except SmsApiError as e:
-        out.update(reachable=False, error=str(e))
-        return out
-    out["version"] = caps.version
-    out["capabilities"] = sorted(caps.capabilities)
-    if not caps.supports(CAPABILITY_VIVA_V1_COMPOSITES):
-        try:
-            version, operations = client.openapi_operations()
-        except SmsApiError as e:
-            if e.status is None or e.status >= 500:
-                # The capabilities route answered 404, so something is there, but it cannot say what it is
-                # (a refused connection, a timeout, a 5xx): not a legacy backend that is up.
-                out.update(reachable=False, error=str(e))
-                return out
-            version, operations = None, frozenset()  # a 4xx: this backend has no OpenAPI document
-        except ValueError:  # an /openapi.json that is not JSON is not compose-api
-            version, operations = None, frozenset()
-        if COMPOSE_OPERATIONS <= operations:
-            out["dispatch"] = DISPATCH_COMPOSE
-            out["version"] = version or out["version"]
-        return out
-    try:
-        out["services"] = dict(client.health_v1().get("services") or {})
-    except SmsApiError:
-        out["services"] = {}
-    if caps.supports(CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS):
-        out["dispatch"] = DISPATCH_DOCUMENT
+        if e.status is None or e.status >= 500:
+            # Something is there (the capabilities route answered 404, or -- providers off -- was not asked), but it
+            # cannot say what it is (a refused connection, a timeout, a 5xx): not a legacy backend that is up.
+            out.update(reachable=False, error=str(e))
+            return out
+        version, operations = None, frozenset()  # a 4xx: this backend has no OpenAPI document
+    except ValueError:  # an /openapi.json that is not JSON is not compose-api
+        version, operations = None, frozenset()
+    if COMPOSE_OPERATIONS <= operations:
+        out["dispatch"] = DISPATCH_COMPOSE
+        out["version"] = version or out["version"]
     return out
 
 

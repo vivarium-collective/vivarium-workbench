@@ -54,41 +54,88 @@ class Backend:
 
 
 COMPOSE = Backend("compose-api", ComposeApiRuns(), identity=compose_health_identity)
-# The SMS plugin's two backends (``vivarium_workbench_sms``) are built on first use, not at import: the plugin's
-# ``sms_legacy`` imports ``backends.records``, so importing the plugin from here at load time would be a cycle
-# (docs/backend-adapters.md §2.4, step P1b). Each is built once and cached in the module globals, so every access
-# returns the same object. Step P1c replaces this with the provider registry.
+# --- the provider registry (step P1c) ------------------------------------------------------------------------------
+#
+# Backends other than compose-api come from providers (``provider.providers()``; today the SMS plugin's two). Kept
+# as module attributes because code compares ``chosen is backends.VIVA_CORE``: each resolves to its provider's
+# backend (the same object every time) or, with providers off, to an inert sentinel that no lookup ever returns,
+# so those comparisons stay false (``None`` would not: ``None is None`` is true for a local run).
 if TYPE_CHECKING:
     VIVA_CORE: Backend
     SMS_LEGACY: Backend
     _ALL: "tuple[Backend, ...]"
 
-_LAZY = ("VIVA_CORE", "SMS_LEGACY", "_ALL")
+#: The attribute each provider kind is published under (``backends.VIVA_CORE``...).
+_ATTRS = {"viva-core": "VIVA_CORE", "sms-legacy": "SMS_LEGACY"}
+_LAZY = (*_ATTRS.values(), "_ALL")
 _LAZY_LOCK = threading.RLock()
+_BY_KIND: "dict[str, Backend] | None" = None
+
+
+class _Inert:
+    """The runs facet of a backend whose provider is not active: it owns no run and answers nothing."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def owns(self, run_id: object) -> bool:
+        return False
+
+    def _refuse(self, *a: object, **k: object) -> "tuple[dict, int]":
+        raise RuntimeError(f"the {self.name} backend's provider is not active")
+
+    submit = land = status = progress = cancel = trace = _refuse  # type: ignore[assignment]
+
+
+_SENTINELS = {kind: Backend(kind, _Inert(kind)) for kind in _ATTRS}  # type: ignore[arg-type]
+
+
+def _registry() -> "dict[str, Backend]":
+    """Every active provider's backends by kind (built once, under the lock)."""
+    global _BY_KIND
+    with _LAZY_LOCK:
+        if _BY_KIND is None:
+            import vivarium_workbench.lib.backends.provider as _provider
+
+            found: "dict[str, Backend]" = {}
+            for p in _provider.providers():
+                for backend in p.backends():
+                    found.setdefault(backend.name, backend)
+            _BY_KIND = found
+        return _BY_KIND
 
 
 def __getattr__(name: str) -> object:
     if name not in _LAZY:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    from vivarium_workbench_sms.sms_legacy import SmsLegacyRuns
-    from vivarium_workbench_sms.viva_core import VivaCoreRuns, viva_health_identity
-
     g = globals()
-    with _LAZY_LOCK:  # two request threads on first use must not each build (and keep) their own Backend
-        if "VIVA_CORE" not in g:
-            g["VIVA_CORE"] = Backend("viva-core", VivaCoreRuns(), identity=viva_health_identity)
-        if "SMS_LEGACY" not in g:
-            g["SMS_LEGACY"] = Backend("sms-legacy", SmsLegacyRuns(), identity=viva_health_identity)  # one viva-api
-        if "_ALL" not in g:
-            g["_ALL"] = (COMPOSE, g["VIVA_CORE"], g["SMS_LEGACY"])
+    with _LAZY_LOCK:
+        if name not in g:
+            reg = _registry()
+            if name == "_ALL":
+                g[name] = (COMPOSE, *reg.values())
+            else:
+                kind = next(k for k, attr in _ATTRS.items() if attr == name)
+                g[name] = reg.get(kind, _SENTINELS[kind])
         return g[name]
 
 
-def _lazy(name: str) -> Backend:
-    """``VIVA_CORE`` / ``SMS_LEGACY`` through the module (built on first use; a test's patch of the global wins)."""
-    import sys
+def reset_registry() -> None:
+    """Forget the active providers and the core's view of them (tests; a changed providers switch): the next access
+    reads them again. A provider keeps the backends it built (``SmsProvider`` is a module singleton), so the same
+    objects come back and ``is`` comparisons stay valid across a toggle. Also forgets cached capability profiles,
+    which may name a provider's backend."""
+    global _BY_KIND
+    import vivarium_workbench.lib.backends.provider as _provider
 
-    return getattr(sys.modules[__name__], name)
+    with _LAZY_LOCK:
+        _provider.reset()
+        _BY_KIND = None
+        for name in _LAZY:
+            globals().pop(name, None)
+    from vivarium_workbench.lib import server_capabilities as sc
+
+    sc._PROFILE_CACHE.clear()
 
 
 def for_run(run_id: object) -> "Backend | None":
@@ -119,22 +166,25 @@ def named() -> "Backend | None":
     if profile["dispatch"] == sc.DISPATCH_COMPOSE:
         return COMPOSE
     if profile["dispatch"] == sc.DISPATCH_DOCUMENT:
-        return _lazy("VIVA_CORE")
+        # Through the registry, never the attribute: a profile cached before providers were turned off must not
+        # hand out the inert viva-core sentinel.
+        return _registry().get("viva-core")
     return None
 
 
 def select(ws_root: "Path | str") -> "Backend | None":
     """Where a new run of ``ws_root`` goes, without refusing anything. ``None`` means "run locally".
 
-    1. The session's own build (``.viv-build.json``) or the deployment's pinned config: SMS, with no network call.
-       The session build is checked first and short-circuits the pin.
+    1. A provider's claim (step P1c): the SMS provider claims a run of the session's own build (``.viv-build.json``)
+       or of the deployment's pinned config, with no network call.
     2. Otherwise the named backend, when it runs documents (:func:`named`).
     """
-    from vivarium_workbench.lib import run_core
-    from vivarium_workbench_sms import remote_pinned
+    import vivarium_workbench.lib.backends.provider as _provider
 
-    if run_core.run_target_for(Path(ws_root)) == "deployment" or remote_pinned.is_pinned_enabled():
-        return _lazy("SMS_LEGACY")
+    for p in _provider.providers():
+        claimed = p.select(Path(ws_root))
+        if claimed is not None:
+            return claimed
     return named()
 
 
@@ -152,9 +202,11 @@ def active(ws_root: "Path | str") -> "Backend | None":
 # --- an EXISTING run: the backend its record names (step 1c-2) ---------------------------------------------------
 
 def by_kind(kind: str) -> Backend:
-    """The adapter for a record's ``kind``."""
-    viva, sms = _lazy("VIVA_CORE"), _lazy("SMS_LEGACY")
-    return {COMPOSE.name: COMPOSE, viva.name: viva, sms.name: sms}[kind]
+    """The adapter for a record's ``kind``: compose-api, or an active provider's backend. ``KeyError`` for a kind no
+    active provider serves (never an inert sentinel)."""
+    if kind == COMPOSE.name:
+        return COMPOSE
+    return _registry()[kind]
 
 
 def resolve(ws_root: "Path | str", run_id: object, *, deployment: "str | None" = None,

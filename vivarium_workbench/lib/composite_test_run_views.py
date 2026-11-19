@@ -398,7 +398,6 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     # and the pinned case to the same image dispatch, so they can never drift.
     build_ref = None
     target = "local"
-    from vivarium_workbench_sms import remote_pinned
     from vivarium_workbench.lib import remote_run as _remote_run
 
     from vivarium_workbench.lib import backends
@@ -513,7 +512,9 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     # Where it runs, recorded in the manifest -- never in params, which a re-run sends back as the composite's
     # inputs. The run lands into this workspace's store, so without this its Origin would read "local".
     if plan.target == "deployment":
-        manifest["ran_on"] = remote_pinned.remote_deployment_name()
+        from vivarium_workbench.lib import backend_config
+
+        manifest["ran_on"] = backend_config.deployment_name()
         if on_compose:
             # compose-api runs its environment's image, never this checkout; the image is recorded when the run lands.
             from vivarium_workbench.lib import remote_run_compose

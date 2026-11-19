@@ -184,7 +184,7 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
         if sim_id == "":  # no id at all (as before); an integer 0 still goes on to the old "required" answer
             return {"error": "run not found"}, 404
         from vivarium_workbench.lib import remote_run_views as _rrv
-        from vivarium_workbench_sms.remote_pinned import remote_deployment_name
+        from vivarium_workbench.lib.backend_config import deployment_name as remote_deployment_name
 
         # This process dispatched it, to its own deployment (step 1c-2: an older row of another deployment with
         # the same integer id must not be taken for it).

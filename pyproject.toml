@@ -277,7 +277,8 @@ forbidden_modules = [
 # docs/backend-adapters.md §2.4, step P1b: the core does not import the SMS plugin. Every edge that remains is
 # listed below; THIS LIST IS THE RATCHET. Each step-P2 PR removes the entries it makes unnecessary and none may
 # add one (an entry that matches no import fails the check, so a stale one cannot linger). The lazy registry
-# imports in lib.backends go when step P1c's provider replaces them; the list is empty at step P4.
+# imports in lib.backends were replaced by step P1c's one registry edge (lib.backends.provider), which step P4's
+# entry point removes; the list is empty at step P4.
 name = "the core does not import the SMS plugin (vivarium_workbench_sms), except the listed edges"
 type = "forbidden"
 source_modules = ["vivarium_workbench"]
@@ -289,11 +290,8 @@ ignore_imports = [
     "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_simulations",
     "vivarium_workbench.api.app -> vivarium_workbench_sms.source_build_views",
     "vivarium_workbench.cli -> vivarium_workbench_sms.sms_api_client",
-    "vivarium_workbench.lib.backends -> vivarium_workbench_sms.remote_pinned",
-    "vivarium_workbench.lib.backends -> vivarium_workbench_sms.sms_legacy",
-    "vivarium_workbench.lib.backends -> vivarium_workbench_sms.viva_core",
+    "vivarium_workbench.lib.backends.provider -> vivarium_workbench_sms.provider",  # the registry (P4: entry point)
     "vivarium_workbench.lib.composite_resolve -> vivarium_workbench_sms.remote_simulations",
-    "vivarium_workbench.lib.composite_run_views -> vivarium_workbench_sms.remote_pinned",
     "vivarium_workbench.lib.composite_state_views -> vivarium_workbench_sms.remote_simulations",
     "vivarium_workbench.lib.composite_test_run_views -> vivarium_workbench_sms.remote_pinned",
     "vivarium_workbench.lib.composite_test_run_views -> vivarium_workbench_sms.sms_api_client",
@@ -490,6 +488,8 @@ files = [
     "vivarium_workbench/lib/backends/__init__.py",
     "vivarium_workbench/lib/backends/compose_api.py",
     "vivarium_workbench_sms/viva_core.py",
+    "vivarium_workbench_sms/provider.py",
+    "vivarium_workbench/lib/backends/provider.py",
     "vivarium_workbench_sms/sms_legacy.py",
     "vivarium_workbench/lib/auth_views.py",
     "vivarium_workbench/lib/git_commit_views.py",
