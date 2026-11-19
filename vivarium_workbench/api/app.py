@@ -7915,14 +7915,15 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=status, content=body)
 
     @app.get("/api/remote-analysis-figures", tags=["Runs"],
-             summary="List a remote sim's completed-analysis figures + ptools on S3")
+             summary="List a remote sim's completed-analysis figures + ptools")
     def remote_analysis_figures(simulation_id: int = 0,
                                 ws: Path = Depends(get_workspace)) -> JSONResponse:
-        """The "accessible through the remote setting" read path: for each
-        completed analysis on ``simulation_id`` that carries a ``result_uri``,
-        list its rendered ``viz/*.html`` figures + ``ptools/*`` tables straight
-        from S3 (small-object GETs, no parquet stream). ``available: false`` +
-        a ``reason`` means fall back to landing / show "pending"."""
+        """The "accessible through the remote setting" read path: list each
+        completed analysis's rendered ``viz/*`` figures + ``ptools/*`` tables on
+        ``simulation_id``, from viva-core's dataset registry when the backend
+        serves it (no storage credentials) and from S3 otherwise; ``via`` says
+        which. ``available: false`` + a ``reason`` means fall back to landing /
+        show "pending"."""
         if not simulation_id:
             return JSONResponse(status_code=400, content={"error": "simulation_id required"})
         client = _remote_run_views.SmsApiClient(_remote_run_views._sms_api_base())
@@ -7930,10 +7931,10 @@ def create_app() -> FastAPI:
             client, simulation_id))
 
     @app.get("/api/study-remote-figures", tags=["Runs"],
-             summary="Aggregate a study's remote-sim S3 figures + ptools for its Viz/Analyses tabs")
+             summary="Aggregate a study's remote-sim figures + ptools for its Viz/Analyses tabs")
     def study_remote_figures(study: str = "", limit: int = 10,
                              ws: Path = Depends(get_workspace)) -> JSONResponse:
-        """Volume-capped gallery manifest of the S3 figures/ptools across a
+        """Volume-capped gallery manifest of the remote figures/ptools across a
         study's completed remote sims — the data source for rendering the study
         Visualizations/Analyses tabs via the remote setting. Figure bytes are
         fetched lazily through /api/remote-analysis-figure."""
@@ -7944,13 +7945,14 @@ def create_app() -> FastAPI:
             ws, client, study, max_sims=max(1, min(int(limit or 10), 30))))
 
     @app.get("/api/remote-analysis-figure", tags=["Runs"],
-             summary="Serve one rendered figure/ptools file from a remote analysis's S3 result_uri")
+             summary="Serve one rendered figure/ptools file from a remote analysis")
     def remote_analysis_figure(simulation_id: int = 0, analysis: str = "", path: str = "",
                                ws: Path = Depends(get_workspace)) -> Response:
-        """Stream a single ``viz/`` or ``ptools/`` object from the named
-        analysis's S3 ``result_uri`` (resolved server-side from ``simulation_id``
-        + ``analysis`` so no raw S3 uri crosses the wire; ``path`` is traversal-
-        guarded in the lib)."""
+        """Serve a single ``viz/`` or ``ptools/`` file of the named analysis,
+        through the backend's ``/viva/v1/datasets/{id}/content`` when it is
+        registered there, else from the analysis's S3 ``result_uri``. Both are
+        resolved server-side from ``simulation_id`` + ``analysis``, so no raw
+        uri crosses the wire; ``path`` is traversal-guarded in the lib."""
         if not simulation_id or not analysis or not path:
             return Response(content=b'{"error":"simulation_id, analysis, path required"}',
                             status_code=400, media_type="application/json")

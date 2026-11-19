@@ -47,6 +47,9 @@ CAPABILITY_CHAIN_PROGRESS = "chain-progress"
 # GET /api/v1/simulations/{id}/trace + GET /viva/v1/composites/{id}/trace answer a
 # Chrome Trace Event JSON document (the workbench's "Open in Perfetto").
 CAPABILITY_VIVA_V1_TRACE = "viva-v1-trace"
+# GET /viva/v1/datasets (filter by source/owner/kind/attributes) + /datasets/{id}/content
+# (one registered file's bytes through the API, no storage credentials).
+CAPABILITY_VIVA_V1_DATASETS = "viva-v1-datasets"
 # The /viva/v1 path switches (CAPABILITY_VIVA_V1_SURFACE, CAPABILITY_VIVA_V1_WORKERS)
 # are defined beside the resolver that reads them, in sms_api_client, and
 # re-exported above so every name the workbench branches on is importable here.

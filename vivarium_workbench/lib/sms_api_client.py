@@ -1003,6 +1003,22 @@ class SmsApiClient:
         which for a ``/compose/v1`` submission is its ``correlation_id``."""
         return self._get_bytes(f"/viva/v1/composites/{quote(str(run_id), safe='')}/trace")
 
+    # -- /viva/v1/datasets: registered files, served without storage credentials --
+    # Gated by ``viva-v1-datasets`` (lib.server_capabilities.CAPABILITY_VIVA_V1_DATASETS).
+
+    def list_datasets(self, params: dict) -> dict:
+        """GET /viva/v1/datasets -- one page: ``{datasets, total, limit, offset, next_offset}``.
+
+        Filters are viva-core's: ``kind``, ``source=<kind>:<ref>`` (what the data is OF),
+        ``owner=<kind>:<id>``, ``attr.<key>=<value>``, ``limit`` (at most 200), ``offset``."""
+        return self._get("/viva/v1/datasets", params)
+
+    def dataset_content(self, dataset_id: int) -> bytes:
+        """GET /viva/v1/datasets/{id}/content -- one single-object dataset's bytes.
+
+        A 409 means a store kind or a prefix, which this route does not serve."""
+        return self._get_bytes(f"/viva/v1/datasets/{int(dataset_id)}/content", accept="*/*")
+
     # -- /viva/v1/composites: the generic run surface -----------------------
     # Contract: docs/backend-viva-v1.md (verified against the deployment's own
     # /viva/v1/openapi.json). A run ``id`` is opaque -- pass it back as given.

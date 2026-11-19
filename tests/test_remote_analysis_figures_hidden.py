@@ -2,6 +2,8 @@
 gallery, and only for viz listings — ptools/other prefixes are untouched."""
 from __future__ import annotations
 
+import pytest
+
 from vivarium_workbench.lib import remote_analysis_figures as raf
 
 
@@ -51,6 +53,12 @@ def _remote_row(sid, slug, status="completed"):
             "remote_origin": {"simulation_id": sid}, "sim_name": f"sim{sid}"}
 
 
+@pytest.fixture(autouse=True)
+def _no_registry(monkeypatch):
+    """These cover the S3 path: the backend does not serve the dataset registry."""
+    monkeypatch.setattr(raf, "datasets_served", lambda client: False)
+
+
 def test_study_remote_figures_sources_candidates_from_remote_list(monkeypatch):
     """Candidates come from list_remote_simulations even when the SWR-cached
     combined index is cold (returns no remote rows) — the bug that collapsed a
@@ -64,7 +72,7 @@ def test_study_remote_figures_sources_candidates_from_remote_list(monkeypatch):
     monkeypatch.setattr(si, "build_simulations_data_cached",
                         lambda ws, **k: {"simulations": []})
     monkeypatch.setattr(raf, "list_remote_analysis_figures",
-                        lambda client, sid: {"available": True, "reason": "ok",
+                        lambda client, sid, **k: {"available": True, "reason": "ok",
                                              "analyses": [{"name": "analysis-percell-run3",
                                                            "status": "completed",
                                                            "figures": [{"path": "viz/a.html"}],
@@ -82,7 +90,7 @@ def test_study_remote_figures_reports_s3_auth_error(monkeypatch):
     monkeypatch.setattr(rs, "list_remote_simulations",
                         lambda ws, **k: [_remote_row(1086, "cd2-antibiotic-cocktail")])
     monkeypatch.setattr(raf, "list_remote_analysis_figures",
-                        lambda client, sid: {"available": True, "reason": "ok", "analyses": []})
+                        lambda client, sid, **k: {"available": True, "reason": "ok", "analyses": []})
     monkeypatch.setattr(raf, "_aws_creds_ok", lambda: False)
     out = raf.study_remote_figures("/ws", client=object(), slug="cd2-antibiotic-cocktail")
     assert out["available"] is False
@@ -96,7 +104,7 @@ def test_study_remote_figures_no_figures_when_creds_ok(monkeypatch):
     monkeypatch.setattr(rs, "list_remote_simulations",
                         lambda ws, **k: [_remote_row(1086, "cd2-antibiotic-cocktail")])
     monkeypatch.setattr(raf, "list_remote_analysis_figures",
-                        lambda client, sid: {"available": True, "reason": "ok", "analyses": []})
+                        lambda client, sid, **k: {"available": True, "reason": "ok", "analyses": []})
     monkeypatch.setattr(raf, "_aws_creds_ok", lambda: True)
     out = raf.study_remote_figures("/ws", client=object(), slug="cd2-antibiotic-cocktail")
     assert out["reason"] == "no-figures"
