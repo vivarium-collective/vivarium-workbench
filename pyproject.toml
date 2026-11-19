@@ -305,7 +305,6 @@ ignore_imports = [
     "vivarium_workbench.lib.remote_run_views -> vivarium_workbench_sms.sms_legacy",
     "vivarium_workbench.lib.remote_trace -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.run_jobs -> vivarium_workbench_sms.sms_api_client",
-    "vivarium_workbench.lib.server_capabilities -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.simulations_index -> vivarium_workbench_sms.remote_simulations",
     "vivarium_workbench.lib.simulations_index -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.startup -> vivarium_workbench_sms.remote_link",

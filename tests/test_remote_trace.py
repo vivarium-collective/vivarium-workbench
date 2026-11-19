@@ -16,8 +16,7 @@ import json
 import pytest
 
 from vivarium_workbench.lib import remote_trace
-from vivarium_workbench.lib.server_capabilities import CAPABILITY_VIVA_V1_TRACE
-from vivarium_workbench_sms.sms_api_client import SmsApiError
+from vivarium_workbench_sms.sms_api_client import CAPABILITY_VIVA_V1_TRACE, SmsApiError
 
 TRACE = json.dumps({"traceEvents": [
     {"name": "run", "ph": "X", "ts": 0, "dur": 1000, "pid": 1, "tid": 1},

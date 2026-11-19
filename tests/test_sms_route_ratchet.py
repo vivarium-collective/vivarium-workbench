@@ -55,9 +55,6 @@ SMS_METHODS = frozenset({
 NOT_SMS_RECEIVERS = frozenset({
     ("lib.remote_run_compose", "session"),   # compose-api's own client (compose_api_client.ComposeSession)
     ("lib.ai_views", "ai_tools"),            # the AI chat's own capabilities() (a module function)
-    # ServerCapabilities.capabilities, a frozenset field; only ``client.capabilities()`` here is the SMS call
-    ("lib.server_capabilities", "self"),
-    ("lib.server_capabilities", "caps"),
 })
 
 #: The core's remaining callers (step P1b: the plugin's own modules are no longer listed -- a move, not a removal
@@ -72,14 +69,12 @@ ALLOWED: dict[str, frozenset[str]] = {
     "lib.remote_trace": frozenset({"compose_status", "simulation_trace"}),
     "lib.run_jobs": frozenset({"compose_status_batch"}),
     "lib.simulations_index": frozenset({"download_data"}),
-    # Reads the deployment's capability list; the /core/v1 half goes when no site predates /viva/v1.
-    "lib.server_capabilities": frozenset({"capabilities"}),
 }
 
 #: Every SMS method any module calls, as of step 1a. With PINNED_PAIRS below, this keeps a move between modules
 #: (a new ALLOWED key) from also slipping a new call in. Only ever remove names from it.
 PINNED_UNION: frozenset[str] = frozenset({
-    "analysis_status", "cancel_simulation", "capabilities", "compose_status", "compose_status_batch",
+    "analysis_status", "cancel_simulation", "compose_status", "compose_status_batch",
     "compose_submit", "download_compose_results", "download_data", "download_workspace", "get_simulation",
     "list_analyses", "list_branch_builds", "list_build_simulations", "list_simulators", "register_branch_head",
     "run_analysis", "run_simulation", "simulation_chain_progress", "simulation_status", "simulation_trace",
@@ -202,8 +197,9 @@ def test_no_new_sms_method_calls():
 
 
 #: (module, method) pairs in ALLOWED: 42 as of step 1a; 13 after step P1b moved the plugin's own modules out of
-#: the core (a move, not 28 removed calls). Only removals lower it.
-PINNED_PAIRS = 13
+#: the core (a move, not 28 removed calls); 12 after step P2 Client moved the capability contract into the plugin.
+#: Only removals lower it.
+PINNED_PAIRS = 12
 
 
 def test_allowed_methods_never_grow():

@@ -163,6 +163,64 @@ def test_with_providers_off_the_profile_never_asks_viva_core(providers_off):
     assert profile["dispatch"] == sc.DISPATCH_COMPOSE and profile["reachable"] is True
 
 
+def test_with_providers_off_a_named_compose_api_is_probed_by_the_core_client(providers_off, monkeypatch):
+    """Step P2 Client: with providers off the named backend is read by ``backend_config.ProbeClient``, never by the
+    SMS client."""
+    from vivarium_workbench.lib import backend_config as bc
+    from vivarium_workbench.lib import server_capabilities as sc
+    from vivarium_workbench_sms import sms_api_client as sac
+
+    def no_sms_client(self, *a, **k):
+        raise AssertionError("built the SMS client with providers off")
+
+    monkeypatch.setattr(sac.SmsApiClient, "__init__", no_sms_client)
+    asked = []
+
+    def ops(self):
+        asked.append(self.base_url)
+        return "0.7", frozenset(sc.COMPOSE_OPERATIONS)
+
+    monkeypatch.setattr(bc.ProbeClient, "openapi_operations", ops)
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "http://p2-off:1")
+    sc._PROFILE_CACHE.clear()
+    try:
+        profile = sc.explicit_backend_profile()
+    finally:
+        sc._PROFILE_CACHE.clear()
+    assert asked == ["http://p2-off:1"]
+    assert profile is not None and profile["dispatch"] == sc.DISPATCH_COMPOSE
+
+
+def test_with_providers_on_the_named_backend_is_probed_by_the_sms_probe_client(monkeypatch):
+    """The golden for the pre-P2 ``SmsApiClient.for_("probe", base)``: the provider's ``probe_client`` builds it."""
+    from vivarium_workbench.lib import server_capabilities as sc
+    from vivarium_workbench_sms import sms_api_client as sac
+    from vivarium_workbench_sms.provider import PROVIDER
+
+    built = []
+
+    class Client:
+        def capabilities(self):
+            return {"version": "1", "capabilities": []}
+
+        def openapi_operations(self):
+            return None, frozenset()
+
+    monkeypatch.setattr(sac.SmsApiClient, "for_",
+                        classmethod(lambda cls, kind, base=None, **k: built.append((kind, base)) or Client()))
+    assert isinstance(PROVIDER.probe_client("http://p2-on:1"), Client)
+    assert built == [("probe", "http://p2-on:1")]
+    built.clear()
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "http://p2-on:2")
+    sc._PROFILE_CACHE.clear()
+    try:
+        profile = sc.explicit_backend_profile()
+    finally:
+        sc._PROFILE_CACHE.clear()
+    assert built == [("probe", "http://p2-on:2")]
+    assert profile is not None and profile["dispatch"] == sc.DISPATCH_LEGACY and profile["version"] == "1"
+
+
 def test_with_providers_off_a_stale_document_profile_does_not_hand_out_the_sentinel(providers_off, monkeypatch):
     from vivarium_workbench.lib import server_capabilities as sc
 

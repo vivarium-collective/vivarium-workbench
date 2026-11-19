@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Protocol
 
 if TYPE_CHECKING:
+    from vivarium_workbench.lib.backend_config import OpenApiProbe
     from vivarium_workbench.lib.backends import Backend
     from vivarium_workbench.lib.env_worker_launcher import WorkerLauncher
 
@@ -63,6 +64,12 @@ class Provider(Protocol):
     def worker_launcher(self) -> "Optional[WorkerLauncher]":
         """The launcher for this deployment's hosted env workers, read from the provider's own deployment config, or
         ``None`` when this deployment configures none. Called once per pool (the pool caches it); no network call."""
+        ...
+
+    # -- P2 Client --
+    def probe_client(self, base_url: str) -> "OpenApiProbe":
+        """The client its ``recognise`` reads ``base_url`` with. It must also answer ``openapi_operations()`` (the
+        core's compose-api detection runs on the same client, after ``recognise``). No network call."""
         ...
 
 
