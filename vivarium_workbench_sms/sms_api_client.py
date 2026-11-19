@@ -654,8 +654,7 @@ class SmsApiClient:
     def list_branch_builds(self, repo_url: str, branch: str) -> dict:
         """The builds registered for ``repo_url``@``branch``, as
         ``{"versions": [SimulatorVersion-shaped]}`` -- what a branch lookup
-        (``resolve_pinned_build``, ``comparison_pinning`` for a branch ref)
-        filters and picks the newest of.
+        (``resolve_pinned_build``) filters and picks the newest of.
 
         With ``viva-v1-environments-filters``: ``GET /viva/v1/environments
         ?repo_url=&branch=`` (the pair), converted by
@@ -669,7 +668,7 @@ class SmsApiClient:
 
         No ``status`` filter: today's lookup is "the newest REGISTERED build on
         the branch" (a newer build still building, or failed, is resolved and
-        then refused by the submit / ``verify_build_ready``), not the newest
+        then refused by the submit), not the newest
         ready one. Temporaries are left out (the server's default): a
         marked-temporary build is never picked by default (D11).
 

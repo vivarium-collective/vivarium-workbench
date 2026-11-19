@@ -16,8 +16,8 @@ level so tests monkeypatch them with fakes and never touch a real network.
 caches).
 
 ``_sms_api_base`` is REUSED from :mod:`lib.workspace_deps_views` (the batch-13
-canonical lib copy) rather than adding a 4th copy.  ``_normalize_repo_url`` is
-COPIED verbatim here as a pure string fn.
+canonical lib copy) rather than adding a 4th copy.  ``normalize_repo_url`` is
+imported from the core :mod:`lib.git_status`.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ import json
 from pathlib import Path
 
 from vivarium_workbench.lib import active_workspace
+from vivarium_workbench.lib.git_status import normalize_repo_url
 from vivarium_workbench_sms.remote_build_source import (
     ensure_git_workspace,
     list_build_sources,
@@ -34,21 +35,6 @@ from vivarium_workbench_sms.remote_build_source import (
 )
 from vivarium_workbench_sms.sms_api_client import BranchHeadUnresolved, SmsApiClient, SmsApiError
 from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
-
-
-def _normalize_repo_url(url: str) -> str:
-    """Normalize a git remote URL for sms-api's simulator/upload.
-
-    sms-api's ``/core/v1/simulator/upload`` 500s on a ``.git``-suffixed URL
-    (it builds an image tag / repo path from the URL), so strip a trailing
-    ``.git`` and surrounding whitespace.
-
-    Verbatim copy of the former ``server._normalize_repo_url``.
-    """
-    url = url.strip()
-    if url.endswith(".git"):
-        url = url[: -len(".git")]
-    return url
 
 
 def build_remote(body: dict) -> tuple[dict, int]:
@@ -65,7 +51,7 @@ def build_remote(body: dict) -> tuple[dict, int]:
     branch = (body or {}).get("branch") or ""
     if not repo or not branch:
         return {"error": "repo and branch are required"}, 400
-    repo = _normalize_repo_url(repo)
+    repo = normalize_repo_url(repo)
     client = SmsApiClient(_sms_api_base())
     try:
         # One call on a server advertising viva-v1-environments-build (it resolves

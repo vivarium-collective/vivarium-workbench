@@ -11,11 +11,11 @@ def test_sms_api_base_default_and_override(monkeypatch):
 
 
 def test_normalize_repo_url_strips_git_suffix():
-    from vivarium_workbench_sms import source_build_views as sbv
+    from vivarium_workbench.lib.git_status import normalize_repo_url
     # sms-api simulator/upload 500s on a .git-suffixed URL
-    assert sbv._normalize_repo_url("https://github.com/x/v2ecoli.git") == "https://github.com/x/v2ecoli"
-    assert sbv._normalize_repo_url("  https://github.com/x/v2ecoli  ") == "https://github.com/x/v2ecoli"
-    assert sbv._normalize_repo_url("https://github.com/x/v2ecoli") == "https://github.com/x/v2ecoli"
+    assert normalize_repo_url("https://github.com/x/v2ecoli.git") == "https://github.com/x/v2ecoli"
+    assert normalize_repo_url("  https://github.com/x/v2ecoli  ") == "https://github.com/x/v2ecoli"
+    assert normalize_repo_url("https://github.com/x/v2ecoli") == "https://github.com/x/v2ecoli"
 
 
 def test_remote_run_start_requires_login(monkeypatch, tmp_path):

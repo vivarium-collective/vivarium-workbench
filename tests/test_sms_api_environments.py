@@ -5,8 +5,8 @@ by capability, with every caller still seeing the legacy SimulatorVersion shape.
   register, one call) via ``POST /viva/v1/environments``
 * ``viva-v1-environments`` -> ``simulator_status`` (all variant rows) and
   ``list_simulators`` via ``GET /viva/v1/environments``
-* ``viva-v1-environments-filters`` -> branch lookups (``resolve_pinned_build``,
-  ``comparison_pinning`` for a branch ref) via ``?repo_url=&branch=``; without it
+* ``viva-v1-environments-filters`` -> branch lookups (``resolve_pinned_build``)
+  via ``?repo_url=&branch=``; without it
   they stay on ``/core/v1/simulator/versions`` (an older server ignores the
   filter silently). The build dropdown's branch column stays legacy either way.
 * capability absent / old server -> the legacy calls, unchanged
@@ -282,20 +282,16 @@ class _RecordingClient:
 
 
 def test_branch_callers_ask_for_the_branch_builds():
-    from vivarium_workbench_sms import comparison_pinning, remote_build_source, remote_pinned
+    from vivarium_workbench_sms import remote_build_source, remote_pinned
 
     v = [{"database_id": 5, "git_repo_url": REPO, "git_branch": "master",
           "git_commit_hash": "abc1234def", "created_at": "x"}]
     c = _RecordingClient(v)
     remote_pinned.resolve_pinned_build(c, REPO, "master")
-    comparison_pinning.resolve_environment_build(c, {"repo": REPO, "ref": "master"})
-    assert c.calls == [("branch", REPO, "master"), ("branch", REPO, "master")]
+    assert c.calls == [("branch", REPO, "master")]
     # the dropdown shows EVERY build's branch: still the legacy branch listing
     remote_build_source.list_build_sources(c)
     assert c.calls[-1] == ("list", True)
-    # a SHA ref needs no branch: the whole listing (environments where served)
-    comparison_pinning.resolve_environment_build(c, {"repo": REPO, "ref": "abc1234"})
-    assert c.calls[-1] == ("list", False)
 
 
 # -- branch lookups on viva-v1-environments-filters ---------------------------
@@ -341,16 +337,6 @@ def test_pinned_build_is_the_newest_registered_on_the_branch(monkeypatch):
     FakeServer(monkeypatch, [READS, FILTERS], envs=_branch_rows())
     got = remote_pinned.resolve_pinned_build(SmsApiClient("http://h"), REPO, "master")
     assert got == {"simulator_id": 12, "commit": "ccc3333", "branch": "master", "repo_url": REPO}
-
-
-def test_comparison_branch_ref_uses_the_pair_filter(monkeypatch):
-    from vivarium_workbench_sms import comparison_pinning
-    server = FakeServer(monkeypatch, [READS, FILTERS], envs=_branch_rows())
-    got = comparison_pinning.resolve_environment_build(
-        SmsApiClient("http://h"), {"repo": "CovertLabEcoli/vEcoli-private", "ref": "feature"})
-    assert got["simulator_id"] == 13 and got["commit"] == "ddd4444"
-    assert any(q.get("branch") == "feature" and q.get("repo_url") == REPO
-               for _, _, q, _ in server.requests)
 
 
 @pytest.mark.parametrize("asked", [

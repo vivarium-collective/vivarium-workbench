@@ -25,7 +25,8 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | — | Test isolation: the conftest reset forgets the cached GitHub session and every backend-URL cache | wb#1664 | **done**, merged 2026-11-19 |
 | — | Untrack 57 generated fixture artifacts committed by accident in wb#1661 (`3f52a96e`); ignore their four directories | wb#1666 | **done**, merged 2026-11-19 |
 | P1c | `Provider` (`backends`, `select`, `recognise`) and `SmsProvider`; the registry (one core→plugin edge) with inert sentinels when providers are off; capability probe split; 409 `backend-not-installed`; no behaviour change with providers on | wb#1667 | **done**, merged 2026-11-19 |
-| P2 (target predicates) | `backends.resolve_run_target` replaces `remote_pinned.resolve_run_target`; the three `uses_*_dispatch` wrappers deleted (no production caller); the preflight and `remote_run_submit` decide once (`backends.active`); ratchet 35 → 31; no behaviour change with providers on | wb#1669 | in review (2026-11-19) |
+| P2 (target predicates) | `backends.resolve_run_target` replaces `remote_pinned.resolve_run_target`; the three `uses_*_dispatch` wrappers deleted (no production caller); the preflight and `remote_run_submit` decide once (`backends.active`); ratchet 35 → 31; no behaviour change with providers on | wb#1669 | **done**, merged 2026-11-19 |
+| P2 (cleanup) | `comparison_pinning` + `smsApiBase` deleted (no reader); `_normalize_repo_url` to core (`git_status.normalize_repo_url`); ratchet −1 | wb#1670 | in review (2026-11-19) |
 | P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, facet routes stay core, SMS-only routes into the plugin's router | — | not started |
 | P3 | Opaque string run ids end to end; the UI shows the nine SMS-today features (§2.5) by declared feature; launch panel quarantined (`sms-launch.js`); core tests run without the plugin | — | not started |
 | P4 | `vivarium_workbench_sms` moves into the viva-api repository as its own distribution, found by entry point; the Stanford image installs it | — | not started |
@@ -236,7 +237,7 @@ vivarium_workbench/lib/backend_config.py   # core: named URL, deployment name, o
 vivarium_workbench_sms/   # the plugin, from P1b (module names kept from lib/, so the move is mechanical)
     sms_api_client.py, remote_link.py, remote_pinned.py, remote_build_source.py, source_build_views.py,
     remote_simulations.py, remote_reconcile.py, remote_analysis_figures.py, remote_run_viva_v1.py,
-    remote_run_jobs.py, comparison_pinning.py, sms_legacy.py, viva_core.py
+    remote_run_jobs.py, sms_legacy.py, viva_core.py
     provider.py        # SmsProvider (P1c)
 ```
 
@@ -297,13 +298,13 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 | registry (P1c, done) | `backends/__init__.py` imports `SmsLegacyRuns`, `VivaCoreRuns` at load | `lib/backends/provider.providers()` imports `vivarium_workbench_sms.provider` (the one registry edge; P4: an entry point); `VIVA_CORE` / `SMS_LEGACY` / `_ALL` resolve through it, the same objects every time. `VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none` turns providers off: the attributes become inert sentinels (they own no run; `is` comparisons stay false) that no lookup returns. "Providers off" is not "plugin absent": the core cannot be imported without the package until P2 finishes. With providers off, a reachable named viva-api reads as a legacy backend and runs locally, by the existing "reachable legacy stays local" rule (P3 may add a startup warning) |
 | deployment name (P1a, done) | `remote_pinned.remote_deployment_name()` (default `"smsvpctest"`) | `backend_config.deployment_name()`; `remote_pinned`'s function is a call-time wrapper. The default stays `"smsvpctest"` until P3 (moved from P1c), then neutral, with the provider supplying its own |
 | session build and pin (P1c, done: `SmsProvider.select`) | `run_core.run_target_for` (`.viv-build.json`) and `remote_pinned.is_pinned_enabled()`, used by `backends.select`; `.viv-build.json` is also read by `report.py`, `provenance_manifest.py`, `composite_resolve`, `env_worker_launcher`, `readouts_views` and `run_core` | `SmsProvider.select`; the other readers ask the provider (P2 plans each) |
-| generic helpers in SMS modules | `remote_simulations._read_build_meta` (used by `composite_resolve`, `composite_state_views`), `source_build_views._normalize_repo_url` (used by `git_status`) | move to a core module, or behind `builds` if SMS-only |
+| generic helpers in SMS modules | `remote_simulations._read_build_meta` (used by `composite_resolve`, `composite_state_views`), ~~`source_build_views._normalize_repo_url` (used by `git_status`)~~ moved to the core as `git_status.normalize_repo_url` (P2 cleanup) | move to a core module, or behind `builds` if SMS-only |
 
 `remote_run_landing` is mixed. Its archive landing (`land_composite_results`, `fold_analyses`, `land_ptools_tsvs`, §3) is core, and compose-api and the plugin both call it. `land_remote_run` (which hardcodes the `"sms-legacy"` record and imports `remote_pinned` and `sms_api_base`) and `land_remote_simulation_artifacts` (`download_data`) are SMS: they go in P2's Runs area.
 
 **Corrections from the P2 inventory (2026-11-19), applied in P1b:**
 - `remote_trace` is mixed, not SMS-only: compose-api's trace goes through it. It stays in the core until P2.
-- `comparison_pinning` has no production caller, and `publish.py`'s `smsApiBase` is read by nothing. Both are deleted in P2 rather than kept (P1b moved `comparison_pinning` as-is).
+- `comparison_pinning` has no production caller, and `publish.py`'s `smsApiBase` is read by nothing. Both were deleted in the P2 cleanup PR rather than kept (P1b moved `comparison_pinning` as-is).
 - Target predicates also include `investigation_run_one_views`.
 - Routes that reach SMS code and are not yet classified: `simulation-run-download`, `composite-run/{id}/artifact`, `composite-run/{id}` and `/state`, `investigation-run-unblocked-status`, `investigation-run-redrive`. P2's Routes area classifies them.
 - `ai_tools.py` hard-codes SMS route paths, `_run_auth_ok` reads the SMS pin, and `app.py` clears the listing module's private caches. These belong to P2's areas.
@@ -314,13 +315,13 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 |---|---|---|---|
 | Client | `sms_api_client` (less the config split out) | viva-core half of `server_capabilities` | — |
 | Runs | `backends/sms_legacy`, `backends/viva_core`, `remote_run_viva_v1`, `remote_trace`, `remote_run_jobs` | `remote_run.run_remote` (called by `run_runner`), SMS parts of `remote_run_views`, `remote_run_landing.land_remote_run` and `land_remote_simulation_artifacts`, `run_jobs.refresh_submitted`'s SMS half (`compose_status_batch`, interim `/viva/v1/compose`) | `runs` |
-| Builds and pinning | `remote_pinned`, `remote_build_source`, `source_build_views`, `comparison_pinning` | build-source half of `workspace_deps_views`, the vEcoli dispatch in `study_runs`, discovery in `composite_test_run_views` | `builds`, `Provider.select` |
+| Builds and pinning | `remote_pinned`, `remote_build_source`, `source_build_views` | build-source half of `workspace_deps_views`, the vEcoli dispatch in `study_runs`, discovery in `composite_test_run_views` | `builds`, `Provider.select` |
 | Remote tab and store | `remote_simulations`, `remote_reconcile` | `simulations_index._append_remote_simulations`, `resolve_or_fetch_store`; `investigations_index`'s `list_remote_simulations_swr` | `listing`, `artifacts` |
 | Analyses and figures | `remote_analysis_figures` | — | `artifacts`, `analyses`; the routes stay core and dispatch by facet (§2.2) |
 | Routes | — | `api/app.py`: imports of 4 plugin modules (`source_build_views`, `remote_run_jobs`, `remote_analysis_figures`, `remote_simulations`), inline `SmsApiClient(...)` at the figure routes, `_sms_only`; its read-only allowlist names SMS routes | facet routes stay core and dispatch by facet; SMS-only routes go to the plugin's `router()` (§2.2) |
 | Workers | — | `ProxyWorkerLauncher`, `RemoteWorkerLauncher` in `env_worker_launcher`; the viva-api proxy assumptions in `env_worker_pool` (its hints), `env_worker_dialback` and `env_worker_client` | `Provider.worker_launcher` |
 | CLI and startup | — | `run-remote` in `cli.py`; startup checks in `cli`, `startup`, `api/__main__` | `Provider.cli`, `check_config` |
-| Models and bundle | — | sms-api status + remote-provenance models in `models.py` (feed `generate_ts`); `publish.py`'s `smsApiBase` | P3 decides |
+| Models and bundle | — | sms-api status + remote-provenance models in `models.py` (feed `generate_ts`) | P3 decides |
 | Target predicates (P2, this area's PR) | — | none. `remote_pinned`'s four predicates were core wrappers: `resolve_run_target` moved to `backends`, the three `uses_*_dispatch` were deleted (no production caller). Callers: `investigation_steps`, `investigation_run_views`, `investigation_run_one_views`, `study_runs`, `composite_test_run_views`, `remote_run_views`, `api/app.py` | `backends.resolve_run_target` / `backends.active`; the SMS half is `Provider.select` (P1c) |
 | To check in P2's plans | — | the vEcoli/ParCa case keyed on `.viv-build.json` in `readouts_views`; the `SMS_API_BASE` hint in `run_runner`; vEcoli knobs (`n_seeds`, `n_generations`) in `preflight.py`, `env_worker.py` | — |
 
@@ -353,7 +354,6 @@ The UI shows these only when the run's backend has the matching feature. Checked
 - **Gating is a server refusal, not a hidden button.** The UI shows features 6–8 on any remote row with an id; P3 hides them by declared feature.
 - **SMS wording and plumbing:**
   - "sms-api" strings in `branch-source.js`, `study-detail.js`, `workspace-picker.js`, `loom-embed.js`, `session.js`, `progress-track.js`, `sim-table.js` and `index.html.j2`;
-  - the `smsApiBase` key that `publish.py` writes into the bundle;
   - the sms-api models in `models.py`, which feed the generated TypeScript types.
 - **To check in P3's plan:** the "remote workspace" Cloud toggle in `workspace-picker.js` (`ws.kind === "remote"`) may be a feature separate from cloud builds.
 
@@ -550,7 +550,7 @@ Verified against viva-api **code** on `main` (1c8b27ae; re-checked at a38cfde6),
 | `download_data` | `remote_run_views`, `simulations_index`, `remote_run_jobs`, `remote_run_landing` | `/composites/{id}/datasets` | as above |
 | `list_build_simulations` | `remote_simulations` (Remote tab) | `GET /composites?environment_id=` | nothing |
 | `compose_submit`, `compose_status[_batch]`, `download_compose_results` (`/viva/v1/compose`, interim) | `remote_run.run_remote`, `run_jobs`, `remote_trace`, **and `remote_run_viva_v1.land`** (the viva-core adapter itself lands results through the interim route) | the viva-core document route (`create_composite_run`) | Stanford must advertise `viva-v1-composites-documents` (to verify) |
-| `simulator_status`, `list_branch_builds`, `list_simulators`, `simulator_commit`, `upload_simulator`, `register_branch_head` (`/core/v1/simulator*`) | `remote_pinned`, `comparison_pinning`, `remote_build_source`, `source_build_views`, `remote_run_views`, `remote_run_jobs`, `remote_simulations` | `/viva/v1/environments` (W2 already goes there first; these are fallbacks) | both Stanford sites advertising `viva-v1-environments[-build]` (to verify) |
+| `simulator_status`, `list_branch_builds`, `list_simulators`, `simulator_commit`, `upload_simulator`, `register_branch_head` (`/core/v1/simulator*`) | `remote_pinned`, `remote_build_source`, `source_build_views`, `remote_run_views`, `remote_run_jobs`, `remote_simulations` | `/viva/v1/environments` (W2 already goes there first; these are fallbacks) | both Stanford sites advertising `viva-v1-environments[-build]` (to verify) |
 | `download_workspace` | `remote_build_source` | `/environments/{id}/source` | ~~nothing~~ the route is a 501 stub: ask D |
 | `/api/v1/simulations/discovery` (raw `client._get`) | `composite_test_run_views` | a vEcoli-specific listing of `configs/*.json` and `ecoli/analysis/<category>/*.py`, done over SSH on the HPC checkout or through the GitHub Contents API. Replacement: the environment's read-back manifest, extended by the SMS package (Q-config, settled) | ask D |
 | `run_analysis`, `analysis_status`, `list_analyses` | `remote_run_views`, `remote_analysis_figures` | analyses requested **at submit** already travel as `analysis_options` in the params. Re-running analyses on a finished run has no core route | Eran (Q2) |
