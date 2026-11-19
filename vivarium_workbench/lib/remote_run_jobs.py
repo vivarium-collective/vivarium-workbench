@@ -157,6 +157,8 @@ _TERMINAL_BAD = {"failed", "cancelled", "error"}
 
 def run_remote_pipeline(job: RemoteRunJob, ctx: PipelineCtx) -> None:
     """Run push→build→run→poll→download→land, updating job. Records job.error on failure."""
+    # Step 1c-2 (docs/backend-adapters.md): the ids here were dispatched by this process to its one configured
+    # backend, so they are asked of it directly rather than looked up in run records.
     try:
         # 1. push → commit SHA
         job.set_step("push", "running")

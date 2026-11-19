@@ -14,7 +14,7 @@ viva-api#1055. "Q2" means §5's Q2 (analyses), which is Question 1 in viva-api#1
 | 1a | `lib/backends/`: the three adapters, `Backend`, `for_run`; SMS code moved to `sms_legacy.py`; routing unchanged | wb#1652 | **done**, merged 2026-11-19 |
 | 1b | `backends.named/select/active`: one place picks the backend for a new run; the six predicates become wrappers; submit goes through the adapter | wb#1653 | **done**, merged 2026-11-19 |
 | 1c-1 | One remote backend per process (startup refusal); every remote run records where it went (`params.remote`); `backends.records.resolve_existing` | wb#1654 | in review (2026-11-19) |
-| 1c-2 | Views, routes, reconciler and figures route existing runs by their record (`resolve_existing`); the Runs tab sends its row's deployment | — | not started |
+| 1c-2 | Views, routes, reconciler and figures route existing runs by their record (`resolve_existing`); the Runs tab sends its row's deployment | wb#1655 | in review (2026-11-19) |
 | 2 | `EnvironmentRef`; new pinned runs on `ecoli-simulation` | — | blocked only on landing: ask E, or the job-owner interim (§4 step 2). Both sites advertise the capabilities and define `ecoli-simulation` (checked 2026-11-18) |
 | 3 | Composites tab off `/viva/v1/compose` | — | not started; composites that carry data files wait on ask C |
 | 4 | Reads off `/api/v1` | wb#1650 (analysis figures and PTools files, taken early) | figures and PTools files **done**, wb#1650 merged 2026-11-19; its S3 fallback stays until prod's registry covers its analyses (prod question below). Remaining: the Remote-tab run listing, `/source`, trace, other data downloads |
@@ -180,8 +180,7 @@ backends.for_run(run_id) -> Backend   # the adapter whose runs.owns(run_id) is t
 
 - Step 1b added `named()` (the named backend's profile alone), `select(ws)` (session build, then pin, then `named()`; never
   raises) and `active(ws)` (`select` plus wb#1630's refusal). The six predicates stay as wrappers and primitives because
-  tests patch `resolve_run_target` at its call sites; callers of the `uses_*` predicates now ask `backends` directly,
-  except `remote_run_land`, which keeps `uses_viva_v1_dispatch` until step 1c rewrites its routing.
+  tests patch `resolve_run_target` at its call sites; callers of the `uses_*` predicates now ask `backends` directly.
   Like today, `active()` reads only the named URL; the aliases do not count.
 - `active()` replaces `resolve_run_target`, `uses_viva_v1_dispatch`, `uses_compose_dispatch`,
   `uses_named_backend_dispatch`, `compose_dispatch_active` and `viva_v1_dispatch_active`. Every call site asks one
@@ -198,6 +197,20 @@ backends.for_run(run_id) -> Backend   # the adapter whose runs.owns(run_id) is t
   decides. Until both do, the URL and the deployment name must both match: a best-effort guard that cannot tell
   apart deployments sharing a URL and a name. Rows written before 1c-1, runs listed live from the configured server
   and the study page's own dispatches fall back to `for_run()`'s id forms.
+- **Every operation on an existing run goes through its record (step 1c-2).** `backends.for_existing(ws, id,
+  deployment=, study=)` is used by land, status, chain progress, cancel, land-artifacts, re-run analysis, trace, the
+  figure routes and study gallery, the store download, `composite_run_views` and the reconciler. The id is `run_id`,
+  else `simulation_id` (for land, `simulation_id`, else a compose-api `run_id`), stripped; a falsy id is no id.
+  - A run that belongs to another backend is refused before anything is asked: **409**, `{error, reason
+    ("other-backend" | "ambiguous" | "not-sms"), phase, terminal: true, simulation_id, run, dispatched_to?}`. Pollers
+    treat it as terminal; the study page shows the reason and hides "Stop campaign".
+  - The Runs tab sends each row's `deployment` and `study`; the study page sends `study`; `composite_run_views`
+    passes this process's own deployment (its `remote-sim-<id>` runs are its own dispatches).
+  - viva-core land refuses **409 `no-backend`** when no backend is named, as compose-api always has.
+  - **Known gap:** placeholder rows are `remote-pending-<id>`, not namespaced by deployment, so two deployments' runs
+    with the same id in one study share a placeholder row. A future fix: `remote-pending-<deployment>-<id>`.
+  - Exempt, with the reason in the code: the in-memory batch jobs (`run_jobs.refresh_submitted`,
+    `remote_run_jobs`), whose ids this process just dispatched to its one backend.
 - **One remote backend per process (Jim, 2026-11-19).** A named backend beside an alias (`VIVA_API_BASE` /
   `SMS_API_BASE`) pointing elsewhere is refused at startup (`sms_api_client.check_single_backend`, for the CLI
   commands in `cli.BACKEND_COMMANDS`). It replaced `sms_api_base()`'s exception for a named compose-api beside an
@@ -344,9 +357,9 @@ break:
    - Move the inline SMS code from `remote_run_views` into `sms_legacy.py`.
    - Views and `run_remote` dispatch through `for_run()` and `active()`.
    - 1a and 1b are pure refactors: existing tests, `test_backend_interop.py` included, pass unchanged, apart
-     from the SMS-call ratchet's table. 1c is the deliberate behaviour change: today's views route by their own
-     per-key rules (pinned in `tests/test_backends_routing.py`), and 1c replaces those rules with `for_run()`,
-     editing that test on purpose. **Was waiting on
+     from the SMS-call ratchet's table. 1c is the deliberate behaviour change: it replaced the views' per-key rules
+     (pinned in `tests/test_backends_routing.py`) with routing by each run's stored record (`for_existing`), editing
+     that test on purpose. **Was waiting on
      wb#1630**, which edits the same modules (merged 2026-11-19).
 2. **Separate the environment from the API.** Introduce `EnvironmentRef`. The session or pinned build produces a
    `BuildRef`, and **new** pinned runs go to viva-core `ecoli-simulation` when the backend advertises

@@ -489,6 +489,30 @@
   // ⬇ Analyses resolves (the PTools viewer reads study folders only: landing into a
   // study, remote-run-land, is what makes a run viewable there). Same delegated,
   // capture-phase, read-id-from-<tr> idiom as ↻ Rerun above.
+  // A remote row's run id and the deployment it was dispatched to, as <tr> attributes. The deployment is sent back
+  // with every action on the run, so the server routes it by its own record and refuses one that belongs to
+  // another backend (docs/backend-adapters.md step 1c).
+  function _remoteAttrs(row) {
+    var ro = row && row.remote_origin;
+    var simId = ro && ro.simulation_id;
+    if (simId == null) return "";
+    return ' data-remote-sim-id="' + esc(simId) + '"' +
+      (ro.deployment ? ' data-remote-deployment="' + esc(ro.deployment) + '"' : "");
+  }
+
+  // Where the row's run went, for the server's record lookup: {deployment, study} from the button's <tr>.
+  function _rowWhere(btn) {
+    var tr = btn && btn.closest ? btn.closest("tr") : null;
+    return {
+      deployment: (tr && tr.getAttribute("data-remote-deployment")) || "",
+      study: (tr && tr.getAttribute("data-study")) || "",
+    };
+  }
+  function _whereQuery(where) {
+    return (where.deployment ? "&deployment=" + encodeURIComponent(where.deployment) : "") +
+      (where.study ? "&study=" + encodeURIComponent(where.study) : "");
+  }
+
   function _landRemote(runId, simId, btn) {
     if (!runId || simId == null || simId === "") return;
     var orig = btn ? btn.textContent : "";
@@ -496,7 +520,7 @@
     function _reset() { if (btn) { btn.disabled = false; btn.textContent = orig || "⬇ Land"; } }
     fetch("/api/remote-run-land-artifacts", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ simulation_id: Number(simId), run_id: runId }),
+      body: JSON.stringify(Object.assign({ simulation_id: Number(simId), run_id: runId }, _rowWhere(btn))),
     }).then(function (r) {
       return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
         .catch(function () { return { ok: r.ok, status: r.status, body: {} }; });
@@ -536,7 +560,7 @@
     }
     fetch((window.__BASE_PATH__ || "") + "/api/remote-run-land", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ study: studySlug, simulation_id: vivaRunId }),
+      body: JSON.stringify({ study: studySlug, simulation_id: vivaRunId, deployment: _rowWhere(btn).deployment }),
     }).then(function (r) {
       return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
         .catch(function () { return { ok: r.ok, status: r.status, body: {} }; });
@@ -582,7 +606,7 @@
     if (btn) { btn.disabled = true; btn.textContent = "… landing"; }
     fetch("/api/remote-run-land-artifacts", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ simulation_id: Number(simId), run_id: runId }),
+      body: JSON.stringify(Object.assign({ simulation_id: Number(simId), run_id: runId }, _rowWhere(btn))),
     }).then(function (r) {
       return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
         .catch(function () { return { ok: r.ok, status: r.status, body: {} }; });
@@ -635,10 +659,15 @@
       w.document.close();
     };
     shell('<p>Loading figures for simulation ' + esc(simId) + '…</p>');
-    fetch(BP + "/api/remote-analysis-figures?simulation_id=" + encodeURIComponent(simId))
+    var where = _rowWhere(btnEl);
+    fetch(BP + "/api/remote-analysis-figures?simulation_id=" + encodeURIComponent(simId) + _whereQuery(where))
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (btnEl) { btnEl.disabled = false; btnEl.textContent = orig || "📊 Viz"; }
+        if (d && d.terminal && d.error) {  // refused: the run belongs to another backend (step 1c)
+          if (w) shell('<p>' + esc(d.error) + '</p>'); else _toast(d.error);
+          return;
+        }
         if (!d || !d.available) {
           var reason = (d && d.reason) || "no-figures";
           var msg = 'No rendered figures for simulation ' + esc(simId) + ' yet (' + esc(reason) +
@@ -656,7 +685,7 @@
           figs.forEach(function (f) {
             nFigs++;
             var url = BP + "/api/remote-analysis-figure?simulation_id=" + encodeURIComponent(simId) +
-              "&analysis=" + encodeURIComponent(a.name) + "&path=" + encodeURIComponent(f.path);
+              "&analysis=" + encodeURIComponent(a.name) + "&path=" + encodeURIComponent(f.path) + _whereQuery(where);
             html += /\.(svg|png|gif|jpe?g)$/i.test(f.path)
               ? '<div style="margin:8px 0"><img src="' + url + '" style="max-width:100%;border:1px solid #e2e8f0"></div>'
               : '<iframe src="' + url + '" style="width:100%;height:520px;border:1px solid #e2e8f0" loading="lazy"></iframe>';
@@ -728,7 +757,8 @@
     fetch("/api/remote-run-analysis", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ simulation_id: Number(simulationId), study: studySlug || "" }),
+      body: JSON.stringify({ simulation_id: Number(simulationId), study: studySlug || "",
+                             deployment: _rowWhere(btnEl).deployment }),
     }).then(function (r) {
       return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
         .catch(function () { return { ok: r.ok, status: r.status, body: {} }; });
@@ -817,7 +847,7 @@
       td('<span class="run-status-live">' + statusChip(row.status) + "</span>") +
       td('<div class="run-actions">' + _globalActions(row) + "</div>", "vertical-align:middle;");
     var remoteSimId = row.remote_origin && row.remote_origin.simulation_id;
-    var remoteAttr = remoteSimId != null ? ' data-remote-sim-id="' + esc(remoteSimId) + '"' : "";
+    var remoteAttr = _remoteAttrs(row);
     return '<tr data-run-id="' + esc(runId) + '" data-study="' + esc(study(row)) + '"' + remoteAttr +
       ' style="border-bottom:1px solid #f3f4f6;cursor:pointer;" ' +
       'title="Click to open this run">' + cells + "</tr>";
@@ -860,7 +890,7 @@
     // than having it interpolated into an inline onclick= string (same reason as
     // data-run-id — see _actions).
     var remoteSimId = row.remote_origin && row.remote_origin.simulation_id;
-    var remoteAttr = remoteSimId != null ? ' data-remote-sim-id="' + esc(remoteSimId) + '"' : "";
+    var remoteAttr = _remoteAttrs(row);
     return '<tr data-run-id="' + esc(runId) + '" data-study="' + esc(study(row)) + '"' + remoteAttr + " " +
       'style="border-bottom:1px solid #f3f4f6;cursor:pointer;" ' +
       'title="Click to open this run — its study, or the Composite Explorer">' + cells + "</tr>";
@@ -1059,5 +1089,6 @@
     originLabel: originLabel, fmtTime: fmtTime, location: location, study: study,
     investigation: investigation, composite: composite, sourceCell: sourceCell, toolsCell: toolsCell,
     renderRow: renderRow, renderTable: renderTable, dropEmptyColumns: dropEmptyColumns,
+    rowWhere: _rowWhere, whereQuery: _whereQuery,
   };
 })();

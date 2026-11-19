@@ -7917,7 +7917,8 @@ def create_app() -> FastAPI:
 
     @app.get("/api/remote-analysis-figures", tags=["Runs"],
              summary="List a remote sim's completed-analysis figures + ptools")
-    def remote_analysis_figures(simulation_id: int = 0,
+    def remote_analysis_figures(simulation_id: int = 0, deployment: Union[str, None] = None,
+                                study: Union[str, None] = None,
                                 ws: Path = Depends(get_workspace)) -> JSONResponse:
         """The "accessible through the remote setting" read path: list each
         completed analysis's rendered ``viz/*`` figures + ``ptools/*`` tables on
@@ -7927,6 +7928,9 @@ def create_app() -> FastAPI:
         show "pending"."""
         if not simulation_id:
             return JSONResponse(status_code=400, content={"error": "simulation_id required"})
+        refused = _remote_run_views._sms_only(ws, simulation_id, {"deployment": deployment, "study": study})
+        if refused is not None:  # step 1c-2: another backend's run is never asked about here
+            return JSONResponse(status_code=refused[1], content=refused[0])
         client = _remote_run_views.SmsApiClient(_remote_run_views._sms_api_base())
         return JSONResponse(content=_remote_analysis_figures.list_remote_analysis_figures(
             client, simulation_id))
@@ -7948,6 +7952,7 @@ def create_app() -> FastAPI:
     @app.get("/api/remote-analysis-figure", tags=["Runs"],
              summary="Serve one rendered figure/ptools file from a remote analysis")
     def remote_analysis_figure(simulation_id: int = 0, analysis: str = "", path: str = "",
+                               deployment: Union[str, None] = None, study: Union[str, None] = None,
                                ws: Path = Depends(get_workspace)) -> Response:
         """Serve a single ``viz/`` or ``ptools/`` file of the named analysis,
         through the backend's ``/viva/v1/datasets/{id}/content`` when it is
@@ -7957,6 +7962,10 @@ def create_app() -> FastAPI:
         if not simulation_id or not analysis or not path:
             return Response(content=b'{"error":"simulation_id, analysis, path required"}',
                             status_code=400, media_type="application/json")
+        refused = _remote_run_views._sms_only(ws, simulation_id, {"deployment": deployment, "study": study},
+                                                memo=True)
+        if refused is not None:  # step 1c-2: another backend's run is never asked about here
+            return JSONResponse(status_code=refused[1], content=refused[0])
         client = _remote_run_views.SmsApiClient(_remote_run_views._sms_api_base())
         got = _remote_analysis_figures.fetch_by_analysis(client, simulation_id, analysis, path)
         if not got:
@@ -7974,8 +7983,16 @@ def create_app() -> FastAPI:
         simulation_id: Union[int, str] = 0,
         analysis_id: int = 0,
         run_id: Union[str, None] = None,
+        # step 1c-2: the Runs-tab row's own deployment and study, to find the run's record
+        deployment: Union[str, None] = None,
+        study: Union[str, None] = None,
+        ws: Path = Depends(get_workspace),
     ) -> JSONResponse:
         params: dict = {}
+        if deployment:
+            params["deployment"] = deployment
+        if study:
+            params["study"] = study
         if run_id:
             params["run_id"] = run_id
         if simulation_id:
@@ -7984,13 +8001,15 @@ def create_app() -> FastAPI:
             params["simulator_id"] = simulator_id
         if analysis_id:
             params["analysis_id"] = analysis_id
-        body, status = _remote_run_views.remote_run_status(params)
+        body, status = _remote_run_views.remote_run_status(params, ws_root=ws)
         return JSONResponse(status_code=status, content=body)
 
     @app.get("/api/remote-run-chain-progress", tags=["Runs"],
              summary="Real per-seed aggregate progress for a chain-dispatch campaign")
     def remote_run_chain_progress(
-        simulation_id: int = 0, run_id: Union[str, None] = None,
+        simulation_id: Union[int, str] = 0, run_id: Union[str, None] = None,
+        deployment: Union[str, None] = None, study: Union[str, None] = None,
+        ws: Path = Depends(get_workspace),
     ) -> JSONResponse:
         """Backlog item 6: proxies viva-api's ``GET /simulations/{id}/chain-
         progress`` (real seed succeeded/failed/in-progress counts, PR #257) the
@@ -7999,24 +8018,27 @@ def create_app() -> FastAPI:
         ``lib.remote_run_views.remote_run_chain_progress`` for the full
         rationale (polling, not SSE). ``run_id`` is a /viva/v1 run's opaque id
         (``--backend-base-url`` backends); ``simulation_id`` stays the legacy integer."""
+        where = {k: v for k, v in (("deployment", deployment), ("study", study)) if v}
         if run_id:
-            body, status = _remote_run_views.remote_run_chain_progress({"run_id": run_id})
+            body, status = _remote_run_views.remote_run_chain_progress({"run_id": run_id, **where}, ws_root=ws)
             return JSONResponse(status_code=status, content=body)
         if not simulation_id:
             return JSONResponse(status_code=400, content={"error": "simulation_id required"})
-        body, status = _remote_run_views.remote_run_chain_progress({"simulation_id": simulation_id})
+        body, status = _remote_run_views.remote_run_chain_progress({"simulation_id": simulation_id, **where},
+                                                                   ws_root=ws)
         return JSONResponse(status_code=status, content=body)
 
     @app.post("/api/remote-run-cancel", tags=["Runs"],
               summary="Cancel a real remote simulation/chain-dispatch campaign (item 53)")
-    def remote_run_cancel(req: Union[dict, None] = Body(default=None)) -> JSONResponse:
+    def remote_run_cancel(req: Union[dict, None] = Body(default=None),
+                          ws: Path = Depends(get_workspace)) -> JSONResponse:
         """Backlog item 53: proxies viva-api's ``DELETE /api/v1/simulations/{id}/
         cancel``, the "Stop campaign" control. For a chain-dispatch campaign row,
         viva-api's own handler walks every seed's own dependsOn chain and
         cancels/terminates whichever job is actually non-terminal per seed — see
         ``lib.remote_run_views.remote_run_cancel`` for the full proxy contract.
         Body: ``{simulation_id}``."""
-        body, status = _remote_run_views.remote_run_cancel(req or {})
+        body, status = _remote_run_views.remote_run_cancel(req or {}, ws_root=ws)
         return JSONResponse(status_code=status, content=body)
 
     @app.get("/api/remote-run-trace-support", tags=["Runs"],
@@ -8037,7 +8059,9 @@ def create_app() -> FastAPI:
              summary="Proxy a remote run's Chrome Trace Event JSON from viva-api (for Perfetto)")
     def remote_run_trace(simulation_id: Union[str, None] = None,
                          composite_run_id: Union[str, None] = None,
-                         compose_id: Union[str, None] = None) -> Response:
+                         compose_id: Union[str, None] = None,
+                         deployment: Union[str, None] = None, study: Union[str, None] = None,
+                         ws: Path = Depends(get_workspace)) -> Response:
         """The trace of exactly one of ``simulation_id`` (viva-api
         ``/api/v1/simulations/{id}/trace``), ``composite_run_id``
         (``/viva/v1/composites/{id}/trace``) or ``compose_id`` (a ``/compose/v1``
@@ -8054,7 +8078,8 @@ def create_app() -> FastAPI:
         from vivarium_workbench.lib import remote_trace as _remote_trace
         body, status, filename = _remote_trace.fetch_trace(
             _remote_trace.make_client(), simulation_id=simulation_id,
-            composite_run_id=composite_run_id, compose_id=compose_id)
+            composite_run_id=composite_run_id, compose_id=compose_id,
+            ws_root=ws, deployment=deployment, study=study)
         if isinstance(body, bytes):
             headers = {"Content-Disposition": f'inline; filename="{filename}"',
                        "Cache-Control": "no-store"}

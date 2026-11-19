@@ -535,6 +535,14 @@ def _list_via_s3(client, simulation_id: int) -> dict:
     return {"available": True, "reason": "ok", "analyses": rows}
 
 
+def _this_backends_sms_run(ws_root, sim_id, deployment, study) -> bool:
+    """Step 1c-2: a candidate from the local index may be another deployment's run, or not an SMS simulation at
+    all; only this backend's SMS simulations are asked for figures."""
+    from vivarium_workbench.lib import backends
+
+    return backends.for_existing(ws_root, sim_id, deployment=deployment, study=study) is backends.SMS_LEGACY
+
+
 def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
                          per_sim: int = 8, per_ptools: int = 60) -> dict:
     """Aggregate S3 figures + ptools across a study's COMPLETED remote sims, so
@@ -559,6 +567,9 @@ def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
         sims = _rs.list_remote_simulations(ws_root) or []
     except Exception:
         sims = []
+    # Listed live from the configured server: its own runs by construction. Only rows from the local index (below)
+    # can be another deployment's, or not SMS simulations, and are checked against their records (step 1c-2).
+    from_index = not sims
     if not sims:
         try:
             from vivarium_workbench.lib import simulations_index
@@ -574,7 +585,7 @@ def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
             ro = s.get("remote_origin") or {}
             sid = ro.get("simulation_id")
             if sid:
-                cand.append((sid, s.get("sim_name") or s.get("label") or str(sid)))
+                cand.append((sid, s.get("sim_name") or s.get("label") or str(sid), ro.get("deployment")))
 
     out_sims: list = []
     total_figures = 0
@@ -588,10 +599,12 @@ def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
     # do, without probing all N (each probe is an sms-api + S3 round-trip).
     scan_cap = max(max_sims * 6, 40)
     scanned = 0
-    for sid, name in cand:
+    for sid, name, deployment in cand:
         if len(out_sims) >= max_sims or scanned >= scan_cap:
             break
         scanned += 1
+        if from_index and not _this_backends_sms_run(ws_root, sid, deployment, slug):
+            continue  # bounded by scan_cap: at most that many record lookups per request
         res = list_remote_analysis_figures(client, sid, use_datasets=use_datasets)
         read_s3 = read_s3 or res.get("via") != "datasets"
         truncated_sims += 1 if res.get("truncated") else 0

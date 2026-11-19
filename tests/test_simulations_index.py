@@ -969,6 +969,12 @@ def test_build_zip_unknown_run_404s(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def _current_deployment() -> str:
+    from vivarium_workbench.lib.remote_pinned import remote_deployment_name
+
+    return remote_deployment_name()
+
+
 def _remote_only_row(run_id, *, simulation_id, s3_uri):
     """A row shaped exactly like remote_simulations.py's _normalize() output —
     a run known to sms-api but never (or no longer) landed into a local
@@ -981,7 +987,8 @@ def _remote_only_row(run_id, *, simulation_id, s3_uri):
         "db_path": None, "store_path": s3_uri, "emitter": "xarray",
         "studies": [], "study_slug": None, "investigation_slug": None,
         "remote_origin": {
-            "deployment": "build #50", "simulation_id": simulation_id,
+            # _normalize() stamps the CURRENT deployment's name (step 1c-2 checks it before fetching)
+            "deployment": _current_deployment(), "simulation_id": simulation_id,
             "experiment_id": run_id, "backend": "aws", "s3_uri": s3_uri,
         },
     }

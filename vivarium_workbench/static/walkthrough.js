@@ -19998,37 +19998,54 @@
       if (!chipHost) continue;
       var simId = tr.getAttribute('data-remote-sim-id');
       if (!simId) continue;
+      // The run's deployment and study, so the server finds its record (docs/backend-adapters.md step 1c); the
+      // cache is keyed by both, since two deployments can each have a run with the same integer id.
+      var where = {deployment: tr.getAttribute('data-remote-deployment') || '',
+                   study: tr.getAttribute('data-study') || ''};
+      var cacheKey = where.deployment + '|' + simId;
 
       // Already known terminal from an earlier poll this page session --
       // reapply immediately (no request, no visible flicker) instead of
       // leaving this tick's fresh-from-DB "running" render stand until the
       // next poll gets around to it.
-      var cachedPhase = window._remoteTerminalCache[simId];
+      var cachedPhase = window._remoteTerminalCache[cacheKey];
       if (cachedPhase) {
         chipHost.innerHTML = window.SimTable.statusChip(cachedPhase);
+        if (window._remoteRefusalReason && window._remoteRefusalReason[cacheKey]) {
+          chipHost.title = window._remoteRefusalReason[cacheKey];  // the refusal's reason survives a re-render
+        }
         continue;
       }
 
       if (!/running/i.test(chipHost.textContent)) continue;
       if (checked >= 20) continue;  // defensive cap, not expected to bind in practice
       checked++;
-      (function (host, id) {
-        apiFetch('GET', '/api/remote-run-poll?simulation_id=' + encodeURIComponent(id))
+      (function (host, id, key, where) {
+        apiFetch('GET', '/api/remote-run-poll?simulation_id=' + encodeURIComponent(id) +
+                 (where.deployment ? '&deployment=' + encodeURIComponent(where.deployment) : '') +
+                 (where.study ? '&study=' + encodeURIComponent(where.study) : ''))
           .then(function (r) { return r.json(); })
           .then(function (body) {
             var phase = body && body.phase;
             if (phase === 'done') {
-              window._remoteTerminalCache[id] = 'completed';
+              window._remoteTerminalCache[key] = 'completed';
               host.innerHTML = window.SimTable.statusChip('completed');
             } else if (phase === 'failed') {
-              window._remoteTerminalCache[id] = 'failed';
+              window._remoteTerminalCache[key] = 'failed';
               host.innerHTML = window.SimTable.statusChip('failed');
+            } else if (body && body.terminal) {
+              // Refused: the run belongs to another backend. Never re-polled; the reason is the chip's tooltip.
+              window._remoteTerminalCache[key] = 'other backend';
+              window._remoteRefusalReason = window._remoteRefusalReason || {};
+              window._remoteRefusalReason[key] = body.error || '';
+              host.innerHTML = window.SimTable.statusChip('other backend');
+              host.title = body.error || '';
             }
             // running / queued / unreachable: leave the chip as-is, the next
             // 15s auto-refresh tick will check again.
           })
           .catch(function () { /* transient -- next tick retries */ });
-      })(chipHost, simId);
+      })(chipHost, simId, cacheKey, where);
     }
   }
 

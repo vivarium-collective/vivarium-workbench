@@ -27,7 +27,7 @@ from pathlib import Path
 from vivarium_workbench.lib import git_status
 from vivarium_workbench.lib import github_auth
 from vivarium_workbench.lib import remote_pinned
-from vivarium_workbench.lib import backends, remote_run_compose, remote_run_viva_v1
+from vivarium_workbench.lib import backends, remote_run_compose
 from vivarium_workbench.lib.backends import sms_legacy
 from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib.investigations import load_spec
@@ -354,6 +354,56 @@ def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:
     return sms_legacy.submit_tail(ws_root, body)
 
 
+def _first_id(params: dict, keys: "tuple[str, ...]") -> str:
+    """The first of ``keys`` whose value is a non-blank id, stripped; ``""`` when none is."""
+    for key in keys:
+        value = params.get(key)
+        if not value:  # None, "", 0: no id (a falsy id must never reach a backend)
+            continue
+        text = str(value).strip()
+        if text and not (text.isdigit() and not text.strip("0")):  # "0", "00": no simulation, like the integer 0
+            return text
+    return ""
+
+
+#: ``_sms_only`` answers memoised for the figure routes, which ask once per image of a gallery (seconds, not
+#: minutes: a run's record changes only when it is dispatched or landed).
+_SMS_ONLY_MEMO: "dict[tuple, tuple[float, tuple[dict, int] | None]]" = {}
+_SMS_ONLY_TTL = 30.0
+
+
+def _no_id(params: dict) -> dict:
+    """``params`` without the run-id keys, for the SMS half's own "id required" answer when no usable id was given
+    (a ``"0"`` must not slip past its ``if not sim_id`` check as a truthy string)."""
+    return {k: v for k, v in params.items() if k not in ("run_id", "simulation_id")}
+
+
+def _sms_only(ws_root: Path, sim_id: object, body: dict, *, memo: bool = False) -> "tuple[dict, int] | None":
+    """For the SMS-only operations (re-run analyses, land artifacts, figures): refuse a run whose record names
+    another backend (or another SMS deployment) before anything is asked; ``None`` lets the SMS path proceed.
+    ``memo`` (the per-image figure route) reuses an answer for :data:`_SMS_ONLY_TTL`."""
+    rid = _first_id({"simulation_id": sim_id}, ("simulation_id",))
+    if not rid:  # a zero / blank id names no simulation (the callers' own checks see only the raw value)
+        return {"error": "simulation_id is required"}, 400
+    key = (str(ws_root), rid, body.get("deployment"), body.get("study"))
+    if memo:
+        hit = _SMS_ONLY_MEMO.get(key)
+        if hit and time.monotonic() - hit[0] < _SMS_ONLY_TTL:
+            return hit[1]
+        answer = _sms_only(ws_root, sim_id, body)
+        _SMS_ONLY_MEMO[key] = (time.monotonic(), answer)
+        return answer
+    chosen = backends.for_existing(ws_root, rid, deployment=body.get("deployment"), study=body.get("study"))
+    if isinstance(chosen, tuple):
+        return chosen
+    if chosen is not None and chosen is not backends.SMS_LEGACY:
+        from vivarium_workbench.lib.backends.records import refusal
+
+        return refusal(rid, f"run {rid} ran on {chosen.name}; this operation exists only for SMS simulations",
+                       reason="not-sms", phase="not-sms")
+    return None
+
+
 def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
     """Phase 3 (on demand): download a COMPLETED sim's store and land it as a
     study run. Returns ``({run_id}, 200)``.
@@ -367,13 +417,18 @@ def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
     folded in yet (landing again later will pick it up).
     """
     body = body or {}
-    if remote_run_compose.is_run_id(body.get("simulation_id")):  # only compose-api has these ids
-        return backends.COMPOSE.runs.land(ws_root, body)
-    if remote_run_viva_v1.is_run_id(body.get("simulation_id")) and remote_pinned.uses_viva_v1_dispatch(ws_root):
-        # A /viva/v1 run (its id is the backend's string) on a backend the operator named for document runs:
-        # that declaration authorizes it, as it did the dispatch.
-        return backends.VIVA_CORE.runs.land(ws_root, body)
-    return sms_legacy.land_tail(ws_root, body)
+    # Step 1c-2: the run's record picks the backend that ran it (backends.for_existing). For land, ``simulation_id``
+    # names the remote run and ``run_id`` is only a fallback (in the land family ``run_id`` is the LOCAL landed run).
+    rid = _first_id(body, ("simulation_id",))
+    if not rid and remote_run_compose.is_run_id(body.get("run_id")):
+        rid = str(body["run_id"]).strip()  # compose-api's land has always accepted its run id as run_id
+    chosen = backends.for_existing(ws_root, rid, deployment=body.get("deployment"),
+                                   study=body.get("study")) if rid else None
+    if isinstance(chosen, tuple):
+        return chosen  # the run belongs to another backend: refused, nothing asked of the configured one
+    if chosen is None:
+        return sms_legacy.land_tail(ws_root, _no_id(body))  # no id: today's exact answers (401 before 400)
+    return chosen.runs.land(ws_root, {**body, "simulation_id": rid})
 
 
 def remote_run_land_artifacts(ws_root: Path, body: dict) -> tuple[dict, int]:
@@ -396,6 +451,9 @@ def remote_run_land_artifacts(ws_root: Path, body: dict) -> tuple[dict, int]:
     run_id = (body.get("run_id") or "").strip()
     if not sim_id or not run_id:
         return {"error": "simulation_id and run_id are required"}, 400
+    refused = _sms_only(ws_root, sim_id, body)  # step 1c-2: never another backend's run
+    if refused is not None:
+        return refused
     from vivarium_workbench.lib.remote_run_landing import land_remote_simulation_artifacts
 
     client = SmsApiClient(_sms_api_base())
@@ -440,6 +498,9 @@ def remote_run_analysis(ws_root: Path, body: dict) -> tuple[dict, int]:
     sim_id = body.get("simulation_id")
     if not sim_id:
         return {"error": "simulation_id is required"}, 400
+    refused = _sms_only(ws_root, sim_id, body)  # step 1c-2: never another backend's run
+    if refused is not None:
+        return refused
 
     modules = body.get("modules") or {}
     study = (body.get("study") or "").strip()
@@ -478,23 +539,26 @@ def remote_run_analysis(ws_root: Path, body: dict) -> tuple[dict, int]:
     return response, 202
 
 
-def remote_run_status(params: dict) -> tuple[dict, int]:
+def remote_run_status(params: dict, *, ws_root: Path) -> tuple[dict, int]:
     """On-demand status read from sms-api (NO in-process state). The JS panel
     polls this per phase. Pass ``simulation_id`` (run phase), ``simulator_id``
     (build phase) or ``analysis_id`` (analysis phase). Maps the raw sms-api
     status into a UI ``phase``."""
     params = params or {}
-    for key in ("run_id", "simulation_id"):  # a compose-api id first: the checks below take any non-digit id
-        if remote_run_compose.is_run_id(params.get(key)):
-            return backends.COMPOSE.runs.status(str(params[key]).strip())
-    if params.get("run_id"):
-        return backends.VIVA_CORE.runs.status(str(params["run_id"]))
-    if remote_run_viva_v1.is_run_id(params.get("simulation_id")):
-        return backends.VIVA_CORE.runs.status(str(params["simulation_id"]))
-    return sms_legacy.status_tail(params)
+    # Step 1c-2: the run's id (``run_id``, else ``simulation_id``) is looked up in its record, which names the
+    # backend that ran it. An SMS simulation, or no run id, goes to the SMS half with the build/analysis ids it may
+    # carry (their precedence there is unchanged: analysis, then simulation, then simulator).
+    rid = _first_id(params, ("run_id", "simulation_id"))
+    chosen = backends.for_existing(ws_root, rid, deployment=params.get("deployment"),
+                                   study=params.get("study")) if rid else None
+    if isinstance(chosen, tuple):
+        return chosen
+    if chosen is backends.COMPOSE or chosen is backends.VIVA_CORE:
+        return chosen.runs.status(rid)
+    return sms_legacy.status_tail({**params, "simulation_id": rid} if rid else _no_id(params))
 
 
-def remote_run_chain_progress(params: dict) -> tuple[dict, int]:
+def remote_run_chain_progress(params: dict, *, ws_root: Path) -> tuple[dict, int]:
     """Backlog item 6: real per-seed aggregate progress for a chain-dispatch
     campaign, proxying viva-api's ``GET /simulations/{id}/chain-progress``
     (PR #257) the same way ``remote_run_status`` proxies ``/status`` — on-demand,
@@ -507,15 +571,17 @@ def remote_run_chain_progress(params: dict) -> tuple[dict, int]:
     distinct, meaningful phases rather than collapsing into one generic error,
     so the frontend can tell "not a campaign" apart from "genuinely broken"."""
     params = params or {}
-    for key in ("run_id", "simulation_id"):
-        if remote_run_compose.is_run_id(params.get(key)):
-            return backends.COMPOSE.runs.progress(str(params[key]).strip())
-    if params.get("run_id"):
-        return backends.VIVA_CORE.runs.progress(str(params["run_id"]))
-    return sms_legacy.chain_progress_tail(params)
+    rid = _first_id(params, ("run_id", "simulation_id"))  # step 1c-2: the run's record picks the backend
+    chosen = backends.for_existing(ws_root, rid, deployment=params.get("deployment"),
+                                   study=params.get("study")) if rid else None
+    if isinstance(chosen, tuple):
+        return chosen
+    if chosen is None:
+        return sms_legacy.chain_progress_tail(_no_id(params))  # no id: today's 400
+    return chosen.runs.progress(rid)
 
 
-def remote_run_cancel(body: dict) -> tuple[dict, int]:
+def remote_run_cancel(body: dict, *, ws_root: Path) -> tuple[dict, int]:
     """Backlog item 53: cancel a real remote simulation/campaign, proxying
     viva-api's ``DELETE /api/v1/simulations/{id}/cancel`` (``SmsApiClient.
     cancel_simulation``) the same way ``remote_run_chain_progress`` proxies
@@ -533,11 +599,11 @@ def remote_run_cancel(body: dict) -> tuple[dict, int]:
     convention of not collapsing every viva-api error into one generic
     message."""
     body = body or {}
-    for key in ("run_id", "simulation_id"):
-        if remote_run_compose.is_run_id(body.get(key)):
-            return backends.COMPOSE.runs.cancel(str(body[key]).strip())
-    run_id = body.get("run_id") or (
-        body.get("simulation_id") if remote_run_viva_v1.is_run_id(body.get("simulation_id")) else None)
-    if run_id:
-        return backends.VIVA_CORE.runs.cancel(str(run_id))
-    return sms_legacy.cancel_tail(body)
+    rid = _first_id(body, ("run_id", "simulation_id"))  # step 1c-2: the run's record picks the backend
+    chosen = backends.for_existing(ws_root, rid, deployment=body.get("deployment"),
+                                   study=body.get("study")) if rid else None
+    if isinstance(chosen, tuple):
+        return chosen
+    if chosen is None:
+        return sms_legacy.cancel_tail(_no_id(body))  # no id: today's 400
+    return chosen.runs.cancel(rid)

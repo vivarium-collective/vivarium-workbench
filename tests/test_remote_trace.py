@@ -9,6 +9,8 @@ in for viva-api throughout -- nothing here reaches a network.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import json
 
 import pytest
@@ -21,6 +23,12 @@ TRACE = json.dumps({"traceEvents": [
     {"name": "run", "ph": "X", "ts": 0, "dur": 1000, "pid": 1, "tid": 1},
 ]}).encode()
 
+
+
+# Step 1c-2: the run views and fetch_trace look the run up in the workspace's records; an empty workspace has none,
+# so these tests keep exercising the id's form.
+import tempfile as _tempfile  # noqa: E402
+_WS = Path(_tempfile.mkdtemp(prefix="no-records-ws-"))
 
 class FakeClient:
     """Just the surface ``remote_trace`` touches."""
@@ -89,7 +97,7 @@ def test_support_unreachable_is_not_reported_as_unsupported():
 
 def test_fetch_simulation_trace_passes_bytes_through():
     client = FakeClient()
-    body, status, filename = remote_trace.fetch_trace(client, simulation_id="42")
+    body, status, filename = remote_trace.fetch_trace(client, simulation_id="42", ws_root=_WS)
     assert status == 200 and body == TRACE
     assert filename == "simulation-42-trace.json"
     assert client.calls == [("simulation_trace", 42)]
@@ -97,7 +105,7 @@ def test_fetch_simulation_trace_passes_bytes_through():
 
 def test_fetch_composite_run_trace():
     client = FakeClient()
-    body, status, filename = remote_trace.fetch_trace(client, composite_run_id="run/../x y")
+    body, status, filename = remote_trace.fetch_trace(client, composite_run_id="run/../x y", ws_root=_WS)
     assert status == 200 and body == TRACE
     assert client.calls == [("composite_run_trace", "run/../x y")]
     assert "/" not in filename and " " not in filename
@@ -105,13 +113,13 @@ def test_fetch_composite_run_trace():
 
 def test_fetch_compose_id_resolves_correlation_id():
     client = FakeClient(correlation_id="compose-sim-xyz")
-    body, status, _ = remote_trace.fetch_trace(client, compose_id=7)
+    body, status, _ = remote_trace.fetch_trace(client, compose_id=7, ws_root=_WS)
     assert status == 200
     assert client.calls == [("compose_status", 7), ("composite_run_trace", "compose-sim-xyz")]
 
 
 def test_fetch_compose_id_without_correlation_is_404():
-    body, status, _ = remote_trace.fetch_trace(FakeClient(correlation_id=None), compose_id=7)
+    body, status, _ = remote_trace.fetch_trace(FakeClient(correlation_id=None), compose_id=7, ws_root=_WS)
     assert status == 404 and "correlation_id" in body["error"]
 
 
@@ -124,28 +132,28 @@ def test_fetch_compose_id_without_correlation_is_404():
 ])
 def test_fetch_rejects_bad_or_ambiguous_ids(kwargs):
     client = FakeClient()
-    body, status, _ = remote_trace.fetch_trace(client, **kwargs)
+    body, status, _ = remote_trace.fetch_trace(client, **kwargs, ws_root=_WS)
     assert status == 400 and "error" in body
     assert client.calls == []
 
 
 def test_fetch_capability_absent_is_409_and_never_calls_trace():
     client = FakeClient(caps=())
-    body, status, _ = remote_trace.fetch_trace(client, simulation_id=1)
+    body, status, _ = remote_trace.fetch_trace(client, simulation_id=1, ws_root=_WS)
     assert status == 409
     assert body["missing"] == ["viva-v1-trace"]
     assert client.calls == []
 
 
 def test_fetch_unreachable_is_502():
-    body, status, _ = remote_trace.fetch_trace(FakeClient(caps_error=SmsApiError("down")), simulation_id=1)
+    body, status, _ = remote_trace.fetch_trace(FakeClient(caps_error=SmsApiError("down")), simulation_id=1, ws_root=_WS)
     assert status == 502
 
 
 @pytest.mark.parametrize("upstream,expected", [(404, 404), (409, 409), (500, 502), (None, 502)])
 def test_fetch_upstream_errors(upstream, expected):
     client = FakeClient(trace_error=SmsApiError("x", status=upstream))
-    body, status, _ = remote_trace.fetch_trace(client, simulation_id=3)
+    body, status, _ = remote_trace.fetch_trace(client, simulation_id=3, ws_root=_WS)
     assert status == expected and "error" in body
 
 

@@ -593,10 +593,12 @@ def test_landing_the_same_run_twice_answers_the_first_landing(ws, stub, clean_ba
 
 def test_a_string_id_is_not_landed_through_viva_v1_unless_a_document_backend_is_named(
         ws, stub, clean_backend_env, inproc_client, monkeypatch):
-    """Without `serve --backend-base-url` naming a document backend, the land route keeps its sign-in gate."""
+    """Without `serve --backend-base-url`, a viva-core run is not landed from whatever the alias points at.
+    Step 1c-2 (deliberate change): viva-core land itself refuses, 409 ``no-backend``, before any network call
+    (it was the SMS path's 401)."""
     monkeypatch.setenv("VIVA_API_BASE", stub.url)  # an alias: does not opt in
     res = inproc_client(ws).post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID})
-    assert res.status_code == 401
+    assert res.status_code == 409 and res.json()["reason"] == "no-backend"
     assert stub.calls_to("viva-get-composite-run") == []
 
 

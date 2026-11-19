@@ -433,7 +433,7 @@
             var links = (a.ptools || []).map(function (pp) {
               var fname = pp.replace(/^ptools\//, '');
               var url = '/api/remote-analysis-figure?simulation_id=' + enc(s.simulation_id)
-                + '&analysis=' + enc(a.name) + '&path=' + enc(pp);
+                + '&analysis=' + enc(a.name) + '&path=' + enc(pp) + '&study=' + enc(slug);
               return '<li><a href="' + url + '" download="' + esc(fname) + '">' + esc(fname) + '</a></li>';
             }).join('');
             var more = a.n_ptools > (a.ptools || []).length
@@ -888,7 +888,7 @@
           (s.analyses || []).forEach(function (a) {
             (a.figures || []).forEach(function (fp) {
               var url = '/api/remote-analysis-figure?simulation_id=' + enc(s.simulation_id)
-                + '&analysis=' + enc(a.name) + '&path=' + enc(fp);
+                + '&analysis=' + enc(a.name) + '&path=' + enc(fp) + '&study=' + enc(slug);
               cards.push('<div class="figure-card">'
                 + '<iframe src="' + url + '" loading="lazy" '
                 + 'class="figure-media-frame figure-media-frame--native"></iframe>'
@@ -3124,7 +3124,8 @@
     var e = escapeHtmlForTests;
     if (!window.confirm('Stop campaign ' + runId + '? This cancels every seed still in flight.')) return;
     btn.disabled = true; btn.textContent = 'Stopping…';
-    api('POST', '/api/remote-run-cancel', { simulation_id: runId })
+    // study: the server finds the run's own record in this study's runs DB (docs/backend-adapters.md step 1c)
+    api('POST', '/api/remote-run-cancel', { simulation_id: runId, study: studyName() })
       .then(function (res) {
         if (res.status !== 200) {
           btn.disabled = false; btn.textContent = '■ Stop campaign';
@@ -3163,6 +3164,12 @@
     if (d.phase === 'unreachable') {
       track.style.display = 'none';
       label.textContent = '⚠ progress unavailable (remote backend unreachable)';
+      return;
+    }
+    if (d.phase === 'other-backend' || d.phase === 'not-sms') {
+      // Refused: the run belongs to another backend than this workbench's (step 1c). Terminal; no Stop button.
+      track.style.display = 'none';
+      label.textContent = '⚠ ' + (d.error || 'this run belongs to another backend');
       return;
     }
     var e = escapeHtmlForTests;
@@ -3209,7 +3216,8 @@
     // A legacy run is an integer simulation id; a /viva/v1 run (serve --backend-base-url)
     // carries the backend's opaque string id, asked for as run_id.
     var idParam = /^\d+$/.test(String(runId)) ? 'simulation_id' : 'run_id';
-    api('GET', '/api/remote-run-chain-progress?' + idParam + '=' + encodeURIComponent(runId))
+    api('GET', '/api/remote-run-chain-progress?' + idParam + '=' + encodeURIComponent(runId) +
+        '&study=' + encodeURIComponent(studyName() || ''))
       .then(function (res) {
         var d = res.body || {};
         _renderChainProgress(d);
@@ -3228,7 +3236,7 @@
         // flight, or vice versa) must never trigger this run's reload.
         if (_gradeAfterRunId != null && String(_gradeAfterRunId) === String(runId)) {
           _gradeAfterRunId = null;
-          if (d.terminal) _reloadStudyAndTests();
+          if (d.terminal && d.phase !== 'other-backend' && d.phase !== 'not-sms') _reloadStudyAndTests();
         }
       })
       .catch(function () {

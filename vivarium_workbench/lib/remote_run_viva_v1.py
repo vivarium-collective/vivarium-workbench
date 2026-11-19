@@ -119,6 +119,13 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
     from vivarium_workbench.lib import remote_run
     from vivarium_workbench.lib.remote_run_landing import land_composite_results
 
+    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
+
+    if explicit_backend_base_url() is None:
+        # Like compose-api runs (remote_run_compose._session): a viva-core run is landed only from the backend the
+        # operator named, never from whatever an SMS alias points at. Refused before any network call.
+        return {"error": "this is a viva-core run, but no backend was named (serve --backend-base-url) to land it "
+                         "from", "reason": "no-backend"}, 409
     study = (body.get("study") or "").strip()
     run_id = str(body.get("simulation_id") or "").strip()
     if not study or not run_id:

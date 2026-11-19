@@ -47,28 +47,56 @@ def _canonical(url: str) -> str:
 
 # --- the backend's own identity -----------------------------------------------------------------------------------
 
-def fetch_server_id(base_url: str) -> Optional[str]:
-    """The identity ``base_url`` reports now (cached for :data:`_IDENTITY_TTL`), or ``None`` when it reports none or
-    cannot be asked. Through the circuit breaker with the probe policy; never raises."""
-    key = _canonical(base_url)
-    hit = _IDENTITY.get(key)
-    if hit and time.monotonic() - hit[0] < _IDENTITY_TTL:
-        return hit[1]
-    return refresh_server_id(base_url)
+#: How long a failed identity request is remembered: short, so a blip does not stick, but long enough that a down
+#: server is not asked again by every lookup (the Runs-tab poller, the reconciler).
+_IDENTITY_FAIL_TTL = 5.0
+_FAILED: "dict[str, float]" = {}
+
+#: When each URL's identity was last re-asked because a record disagreed with the cache (see :func:`refresh_server_id`).
+_REFRESHED: "dict[str, float]" = {}
 
 
-def refresh_server_id(base_url: str) -> Optional[str]:
-    """Ask ``base_url`` for its identity now, bypassing the cache (before refusing on a mismatch)."""
+def _ask(base_url: str) -> Optional[str]:
+    """One identity request (cached on success; a failure remembered for :data:`_IDENTITY_FAIL_TTL`). Never raises."""
     from vivarium_workbench.lib.sms_api_client import SmsApiClient
 
+    key = _canonical(base_url)
+    failed = _FAILED.get(key)
+    if failed is not None and time.monotonic() - failed < _IDENTITY_FAIL_TTL:
+        return None
     try:
         health = SmsApiClient.for_("probe", base_url).health_v1() or {}
         value = health.get(IDENTITY_FIELD)
         ident = str(value).strip() if value not in (None, "") else None
     except Exception:  # noqa: BLE001 -- unreachable or not a viva-core: "reports none", never an error here
-        return None  # not cached: a blip must not stick
-    _IDENTITY[_canonical(base_url)] = (time.monotonic(), ident)
+        _FAILED[key] = time.monotonic()
+        return None
+    _FAILED.pop(key, None)
+    _IDENTITY[key] = (time.monotonic(), ident)
     return ident
+
+
+def fetch_server_id(base_url: str) -> Optional[str]:
+    """The identity ``base_url`` reports (cached for :data:`_IDENTITY_TTL`), or ``None`` when it reports none or
+    cannot be asked. Through the circuit breaker with the probe policy; never raises."""
+    hit = _IDENTITY.get(_canonical(base_url))
+    if hit and time.monotonic() - hit[0] < _IDENTITY_TTL:
+        return hit[1]
+    return _ask(base_url)
+
+
+def refresh_server_id(base_url: str) -> Optional[str]:
+    """Ask ``base_url`` again, bypassing the cache, because a record disagreed with the cached identity (a tunnel
+    re-pointed at another deployment must not refuse that deployment's runs). At most once per
+    :data:`_IDENTITY_TTL` per URL, so a workspace full of another deployment's runs costs one request, not one per
+    lookup; within that window the answer of the last re-ask stands."""
+    key = _canonical(base_url)
+    last = _REFRESHED.get(key)
+    if last is not None and time.monotonic() - last < _IDENTITY_TTL:
+        hit = _IDENTITY.get(key)
+        return hit[1] if hit else None
+    _REFRESHED[key] = time.monotonic()
+    return _ask(base_url)
 
 
 def cached_server_id(base_url: str) -> Optional[str]:
@@ -166,6 +194,16 @@ def find_records(ws_root: Path, remote_id: Any, *, study_db: Optional[Path] = No
     return found or _scan([d for d in run_dbs(ws_root) if d not in dbs], rid)
 
 
+#: The ``backend`` labels remote rows were written with before step 1c (a local run's params may have a ``source``).
+_REMOTE_LABELS = frozenset({"ray", "viva-v1", "compose-api"})
+
+
+def _legacy_source(params: Any) -> Optional[str]:
+    if isinstance(params, dict) and params.get("backend") in _REMOTE_LABELS:
+        return params.get("source") or None
+    return None
+
+
 def _scan(dbs: "list[Path]", rid: str) -> "list[Found]":
     out: list[Found] = []
     for db in dbs:
@@ -178,7 +216,7 @@ def _scan(dbs: "list[Path]", rid: str) -> "list[Found]":
             # Only a well-formed record counts (a local composite may have an input named ``remote``).
             record = block if (isinstance(block, dict) and block.get("kind") in KINDS and block.get("id")) else None
             out.append(Found(db=db, run_id=run_id, record=record,
-                             legacy_source=None if record else ((params.get("source") if isinstance(params, dict) else None)
+                             legacy_source=None if record else (_legacy_source(params)
                                                    or None)))
     return out
 
@@ -221,18 +259,29 @@ def _deployment_names_now() -> set[str]:
     return names
 
 
+def refusal(rid: str, error: str, *, reason: str = "other-backend", phase: str = "other-backend",
+            dispatched_to: Optional[str] = None) -> "tuple[dict, int]":
+    """The one shape every refusal answers (409): terminal, so no poller retries it, and self-describing (the run's
+    id under ``simulation_id`` and ``run``, the reason, and where the run went when that is known)."""
+    body = {"error": error, "reason": reason, "phase": phase, "terminal": True, "reachable": False,
+            "simulation_id": rid, "run": rid}
+    if dispatched_to:
+        body["dispatched_to"] = dispatched_to
+    return body, 409
+
+
 def _other_backend(record: dict, why: str) -> "tuple[dict, int]":
     now = configured_url(record.get("kind") or "")
-    return ({"error": f"this run was dispatched to {record.get('deployment')} ({record.get('base_url')}); this "
-                      f"workbench is configured for {now or 'no such backend'} ({why})",
-             "reason": "other-backend", "phase": "other-backend", "reachable": False,
-             "run": record.get("id"), "dispatched_to": record.get("deployment")}, 409)
+    return refusal(str(record.get("id") or ""),
+                   f"this run was dispatched to {record.get('deployment')} ({record.get('base_url')}); this "
+                   f"workbench is configured for {now or 'no such backend'} ({why})",
+                   dispatched_to=record.get("deployment"))
 
 
 def _ambiguous(rid: str) -> Resolution:
-    return Resolution(refusal=({
-        "error": f"run {rid} is recorded on more than one backend; open it from the Runs tab row it belongs to",
-        "reason": "ambiguous", "phase": "other-backend", "reachable": False}, 409), via="record")
+    return Resolution(refusal=refusal(
+        rid, f"run {rid} is recorded on more than one backend; open it from the Runs tab row it belongs to",
+        reason="ambiguous"), via="record")
 
 
 def _by_record(records: "list[dict]", rid: str, here_name: str) -> Resolution:
@@ -315,19 +364,17 @@ def resolve_existing(ws_root: Path, remote_id: Any, *, deployment: Optional[str]
         records = [r for r in records if r.get("deployment") == deployment]
         legacy = [src for src in legacy if src == deployment]
         if not records and deployment not in _deployment_names_now():
-            return Resolution(refusal=({
-                "error": f"this run was dispatched to {deployment}; this workbench is configured for {here_name}",
-                "reason": "other-backend", "phase": "other-backend", "reachable": False,
-                "run": rid, "dispatched_to": deployment}, 409), via="legacy-guard")
+            return Resolution(refusal=refusal(
+                rid, f"this run was dispatched to {deployment}; this workbench is configured for {here_name}",
+                dispatched_to=deployment), via="legacy-guard")
     if records:
         return _by_record(records, rid, here_name)
     if legacy and not (deployment and deployment == here_name):
         names = _deployment_names_now()
         if not (set(legacy) & names):
             name = sorted(set(legacy))[0]
-            return Resolution(refusal=({
-                "error": f"this run was dispatched to {name}; this workbench is configured for {here_name}",
-                "reason": "other-backend", "phase": "other-backend", "reachable": False,
-                "run": rid, "dispatched_to": name}, 409), via="legacy-guard")
+            return Resolution(refusal=refusal(
+                rid, f"this run was dispatched to {name}; this workbench is configured for {here_name}",
+                dispatched_to=name), via="legacy-guard")
         return Resolution(kind=by_form, via="legacy-guard")
     return Resolution(kind=by_form, via="id-form")

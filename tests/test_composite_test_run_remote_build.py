@@ -213,7 +213,7 @@ def test_remote_sim_run_status_and_trajectory_map_to_sms_api(tmp_path, monkeypat
     from vivarium_workbench.lib import remote_run_views as rrv
 
     calls = {}
-    def _fake_status(params):
+    def _fake_status(params, *, ws_root):  # step 1c-2: the views look the run up in the workspace's records
         calls["params"] = params
         return {"kind": "simulation", "phase": "done", "raw_status": "completed"}, 200
     monkeypatch.setattr(rrv, "remote_run_status", _fake_status)
@@ -223,7 +223,11 @@ def test_remote_sim_run_status_and_trajectory_map_to_sms_api(tmp_path, monkeypat
     assert st["run_id"] == "remote-sim-909"
     assert st["status"] == "completed"      # 'done' -> 'completed'
     assert st["remote"] is True
-    assert calls["params"] == {"simulation_id": 909}
+    # step 1c-2: this process's own dispatch, asked with its own deployment (an older row of another deployment
+    # with the same integer id must not be taken for it)
+    from vivarium_workbench.lib.remote_pinned import remote_deployment_name
+
+    assert calls["params"] == {"simulation_id": 909, "deployment": remote_deployment_name()}
 
     traj, tcode = crv.build_composite_run(tmp_path, "remote-sim-909")
     assert tcode == 200

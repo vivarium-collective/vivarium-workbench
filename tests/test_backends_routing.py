@@ -5,7 +5,9 @@ docs/backend-adapters.md §4 step 1a moves the inline SMS code out of ``remote_r
 routing. The routing is not by run-id form alone: each view checks its own keys in its own order, strips some ids
 and not others, and gates viva-core landing on the named backend. These tests were written and run against
 ``main`` before the move, and pin those rules -- quirks included -- so the move cannot regularise them by accident.
-Making the routing uniform (``backends.for_run``) is a later, deliberate change that edits these tests on purpose.
+Step 1c-2 then replaced the per-view rules with one: the id (``run_id``, else ``simulation_id``; for land the
+reverse), stripped, is looked up in the run's record (``backends.for_existing``), falling back to its form. The
+tests it changed say "step 1c-2 (deliberate change)" and what the old behaviour was.
 
 Observation points that work both before and after the move:
 
@@ -24,6 +26,12 @@ from vivarium_workbench.lib import remote_pinned, remote_run_compose, remote_run
 from vivarium_workbench.lib import remote_run_views as rrv
 from vivarium_workbench.lib import remote_trace
 
+
+
+# Step 1c-2: the views look the run up in the workspace's records; this empty workspace has none, so the id's form
+# decides (the record-driven cases are in tests/test_backends_existing.py).
+import tempfile as _tempfile  # noqa: E402
+_WS = Path(_tempfile.mkdtemp(prefix="no-records-ws-"))
 
 class _Calls(list):
     """``(backend, method, arg)`` in call order."""
@@ -69,7 +77,6 @@ def calls(monkeypatch, tmp_path):
     monkeypatch.setattr(rrv, "SmsApiClient", FakeClient)
     monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
     monkeypatch.setattr(rrv, "_run_auth_ok", lambda: True)
-    monkeypatch.setattr(remote_pinned, "uses_viva_v1_dispatch", lambda ws: False)
     spec_file = tmp_path / "study.yaml"
     spec_file.write_text("baseline: [{composite: c}]\n")
     monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
@@ -91,27 +98,18 @@ def test_land_compose_id_goes_to_compose_without_gate_or_auth(calls, monkeypatch
     assert calls == [("compose", "land", {"simulation_id": "compose-7"})]
 
 
-def test_land_compose_id_in_run_id_only_is_not_compose(calls, tmp_path):
-    body, status = rrv.remote_run_land(tmp_path, {"run_id": "compose-7"})
-    assert status == 400 and "simulation_id" in body["error"]
-    assert calls == []
+def test_land_compose_id_in_run_id_only_is_compose(calls, tmp_path):
+    # step 1c-2 (deliberate change): land reads simulation_id, then run_id; it was a 400
+    rrv.remote_run_land(tmp_path, {"run_id": "compose-7"})
+    assert calls == [("compose", "land", {"run_id": "compose-7", "simulation_id": "compose-7"})]
 
 
-def test_land_viva_id_with_gate_goes_to_viva(calls, monkeypatch, tmp_path):
-    monkeypatch.setattr(remote_pinned, "uses_viva_v1_dispatch", lambda ws: True)
-    rrv.remote_run_land(tmp_path, {"simulation_id": "simulation-D55"})
-    assert _first(calls) == ("viva", "land")
-
-
-def test_land_viva_id_without_gate_unauthenticated_is_401(calls, monkeypatch, tmp_path):
+def test_land_viva_id_goes_to_viva_whatever_is_named(calls, monkeypatch, tmp_path):
+    # step 1c-2 (deliberate change): no named-backend gate in the view (viva-core land refuses 409 no-backend
+    # itself when nothing is named); it was 401 / a ValueError (500) through the SMS path
     monkeypatch.setattr(rrv, "_run_auth_ok", lambda: False)
-    assert rrv.remote_run_land(tmp_path, {"study": "s", "simulation_id": "simulation-D55"})[1] == 401
-    assert calls == []
-
-
-def test_land_viva_id_without_gate_falls_into_legacy_int(calls, tmp_path):
-    with pytest.raises(ValueError):
-        rrv.remote_run_land(tmp_path, {"study": "s", "simulation_id": "simulation-D55"})
+    rrv.remote_run_land(tmp_path, {"study": "s", "simulation_id": "simulation-D55"})
+    assert _first(calls) == ("viva", "land")
 
 
 def test_land_integer_id_goes_to_legacy(calls, tmp_path):
@@ -124,24 +122,36 @@ def test_land_integer_id_goes_to_legacy(calls, tmp_path):
 
 # --- status ----------------------------------------------------------------------------------------------------
 
-def test_status_compose_simulation_id_beats_non_compose_run_id(calls):
-    rrv.remote_run_status({"run_id": "simulation-X", "simulation_id": "compose-3"})
-    assert calls == [("compose", "status", "compose-3")]
+def test_status_run_id_beats_simulation_id(calls):
+    # step 1c-2 (deliberate change): one id rule, run_id first; a compose simulation_id used to win
+    rrv.remote_run_status({"run_id": "simulation-X", "simulation_id": "compose-3"}, ws_root=_WS)
+    assert calls == [("viva", "status", "simulation-X")]
 
 
-@pytest.mark.parametrize("run_id, sent", [("123", "123"), (123, "123"), (" ", " "), (" x ", " x ")])
-def test_status_run_id_goes_to_viva_unstripped_even_if_digits(calls, run_id, sent):
-    rrv.remote_run_status({"run_id": run_id})
-    assert calls == [("viva", "status", sent)]
+@pytest.mark.parametrize("run_id, backend, sent", [
+    ("123", "sms", 123), (123, "sms", 123), (" x ", "viva", "x"),
+])
+def test_status_run_id_goes_to_the_backend_its_form_names_stripped(calls, run_id, backend, sent):
+    # step 1c-2 (deliberate change): a digit run_id is an SMS simulation (was viva-core), ids are stripped
+    rrv.remote_run_status({"run_id": run_id}, ws_root=_WS)
+    if backend == "sms":
+        assert [c[1] for c in calls] == ["simulation_status"] and calls[0][2] == sent
+    else:
+        assert calls == [("viva", "status", sent)]
+
+
+def test_status_blank_run_id_is_no_id(calls):
+    # step 1c-2 (deliberate change): a whitespace run_id is ignored (was sent to viva-core as " ")
+    assert rrv.remote_run_status({"run_id": " "}, ws_root=_WS)[1] == 400 and calls == []
 
 
 def test_status_compose_id_is_stripped(calls):
-    rrv.remote_run_status({"run_id": " compose-3 "})
+    rrv.remote_run_status({"run_id": " compose-3 "}, ws_root=_WS)
     assert calls == [("compose", "status", "compose-3")]
 
 
 def test_status_viva_simulation_id_goes_to_viva(calls):
-    rrv.remote_run_status({"simulation_id": "simulation-X"})
+    rrv.remote_run_status({"simulation_id": "simulation-X"}, ws_root=_WS)
     assert calls == [("viva", "status", "simulation-X")]
 
 
@@ -151,12 +161,12 @@ def test_status_viva_simulation_id_goes_to_viva(calls):
     ({"simulator_id": 9}, "simulator_status"),
 ])
 def test_status_legacy_precedence(calls, params, method):
-    assert rrv.remote_run_status(params)[1] == 200
+    assert rrv.remote_run_status(params, ws_root=_WS)[1] == 200
     assert [c[1] for c in calls] == [method]
 
 
 def test_status_nothing_is_400(calls):
-    assert rrv.remote_run_status({})[1] == 400
+    assert rrv.remote_run_status({}, ws_root=_WS)[1] == 400
 
 
 def test_status_legacy_client_error_is_502_shape(calls, monkeypatch):
@@ -168,29 +178,30 @@ def test_status_legacy_client_error_is_502_shape(calls, monkeypatch):
             raise rrv.SmsApiError("down", status=503)
 
     monkeypatch.setattr(rrv, "SmsApiClient", Boom)
-    body, status = rrv.remote_run_status({"simulation_id": 5})
+    body, status = rrv.remote_run_status({"simulation_id": 5}, ws_root=_WS)
     assert status == 502 and body["phase"] == "unreachable" and body["reachable"] is False
 
 
 # --- chain progress --------------------------------------------------------------------------------------------
 
 def test_progress_run_id_goes_to_viva(calls):
-    rrv.remote_run_chain_progress({"run_id": "simulation-X"})
+    rrv.remote_run_chain_progress({"run_id": "simulation-X"}, ws_root=_WS)
     assert calls == [("viva", "progress", "simulation-X")]
 
 
 def test_progress_compose_simulation_id_goes_to_compose(calls):
-    rrv.remote_run_chain_progress({"simulation_id": "compose-4"})
+    rrv.remote_run_chain_progress({"simulation_id": "compose-4"}, ws_root=_WS)
     assert calls == [("compose", "progress", "compose-4")]
 
 
-def test_progress_viva_form_simulation_id_falls_into_legacy_int(calls):
-    with pytest.raises(ValueError):
-        rrv.remote_run_chain_progress({"simulation_id": "simulation-X"})
+def test_progress_viva_form_simulation_id_goes_to_viva(calls):
+    # step 1c-2 (deliberate change): it was a ValueError (500) through the SMS path
+    rrv.remote_run_chain_progress({"simulation_id": "simulation-X"}, ws_root=_WS)
+    assert calls == [("viva", "progress", "simulation-X")]
 
 
 def test_progress_integer_goes_to_legacy(calls):
-    body, status = rrv.remote_run_chain_progress({"simulation_id": 8})
+    body, status = rrv.remote_run_chain_progress({"simulation_id": 8}, ws_root=_WS)
     assert status == 200 and body["kind"] == "chain_progress"
     assert [c[1] for c in calls] == ["simulation_chain_progress"]
 
@@ -199,22 +210,22 @@ def test_progress_integer_goes_to_legacy(calls):
 
 @pytest.mark.parametrize("body", [{"run_id": "compose-2"}, {"simulation_id": "compose-2"}])
 def test_cancel_compose_either_key(calls, body):
-    rrv.remote_run_cancel(body)
+    rrv.remote_run_cancel(body, ws_root=_WS)
     assert calls == [("compose", "cancel", "compose-2")]
 
 
 def test_cancel_non_digit_simulation_id_goes_to_viva(calls):
-    rrv.remote_run_cancel({"simulation_id": "simulation-X"})
+    rrv.remote_run_cancel({"simulation_id": "simulation-X"}, ws_root=_WS)
     assert calls == [("viva", "cancel", "simulation-X")]
 
 
 def test_cancel_run_id_beats_integer_simulation_id(calls):
-    rrv.remote_run_cancel({"run_id": "simulation-X", "simulation_id": 5})
+    rrv.remote_run_cancel({"run_id": "simulation-X", "simulation_id": 5}, ws_root=_WS)
     assert calls == [("viva", "cancel", "simulation-X")]
 
 
 def test_cancel_integer_goes_to_legacy(calls):
-    body, status = rrv.remote_run_cancel({"simulation_id": 5})
+    body, status = rrv.remote_run_cancel({"simulation_id": 5}, ws_root=_WS)
     assert status == 200 and body == {"kind": "cancel", "simulation_id": 5, "cancelled": True}
 
 
@@ -228,41 +239,41 @@ def test_cancel_legacy_errors(calls, monkeypatch, msg, code):
             raise rrv.SmsApiError(msg)
 
     monkeypatch.setattr(rrv, "SmsApiClient", Boom)
-    assert rrv.remote_run_cancel({"simulation_id": 5})[1] == code
+    assert rrv.remote_run_cancel({"simulation_id": 5}, ws_root=_WS)[1] == code
 
 
 # --- trace -----------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("kw", [{"simulation_id": "compose-6"}, {"composite_run_id": "compose-6"}])
 def test_trace_compose_id_in_sim_or_run_key(calls, kw):
-    assert remote_trace.fetch_trace(object(), **kw)[1] == 200
+    assert remote_trace.fetch_trace(object(), **kw, ws_root=_WS)[1] == 200
     assert calls == [("compose", "trace", "compose-6")]
 
 
 def test_trace_compose_id_in_compose_id_key_is_400(calls):
-    assert remote_trace.fetch_trace(object(), compose_id="compose-6")[1] == 400
+    assert remote_trace.fetch_trace(object(), compose_id="compose-6", ws_root=_WS)[1] == 400
     assert calls == []
 
 
 def test_trace_compose_sim_plus_compose_id_is_compose_not_400(calls):
-    assert remote_trace.fetch_trace(object(), simulation_id="compose-6", compose_id=5)[1] == 200
+    assert remote_trace.fetch_trace(object(), simulation_id="compose-6", compose_id=5, ws_root=_WS)[1] == 200
 
 
 def test_trace_viva_sim_plus_compose_run_goes_to_compose(calls):
-    remote_trace.fetch_trace(object(), simulation_id="simulation-X", composite_run_id="compose-6")
+    remote_trace.fetch_trace(object(), simulation_id="simulation-X", composite_run_id="compose-6", ws_root=_WS)
     assert calls == [("compose", "trace", "compose-6")]
 
 
 # --- whitespace and key order on every entry point --------------------------------------------------------------
 
 @pytest.mark.parametrize("call", [
-    lambda: rrv.remote_run_status({"simulation_id": " compose-9 "}),
-    lambda: rrv.remote_run_chain_progress({"run_id": " compose-9 "}),
-    lambda: rrv.remote_run_chain_progress({"simulation_id": " compose-9 "}),
-    lambda: rrv.remote_run_cancel({"run_id": " compose-9 "}),
-    lambda: rrv.remote_run_cancel({"simulation_id": " compose-9 "}),
-    lambda: remote_trace.fetch_trace(object(), simulation_id=" compose-9 "),
-    lambda: remote_trace.fetch_trace(object(), composite_run_id=" compose-9 "),
+    lambda: rrv.remote_run_status({"simulation_id": " compose-9 "}, ws_root=_WS),
+    lambda: rrv.remote_run_chain_progress({"run_id": " compose-9 "}, ws_root=_WS),
+    lambda: rrv.remote_run_chain_progress({"simulation_id": " compose-9 "}, ws_root=_WS),
+    lambda: rrv.remote_run_cancel({"run_id": " compose-9 "}, ws_root=_WS),
+    lambda: rrv.remote_run_cancel({"simulation_id": " compose-9 "}, ws_root=_WS),
+    lambda: remote_trace.fetch_trace(object(), simulation_id=" compose-9 ", ws_root=_WS),
+    lambda: remote_trace.fetch_trace(object(), composite_run_id=" compose-9 ", ws_root=_WS),
 ])
 def test_compose_ids_are_stripped_everywhere(calls, call):
     call()
@@ -270,19 +281,20 @@ def test_compose_ids_are_stripped_everywhere(calls, call):
 
 
 def test_progress_compose_run_id_goes_to_compose(calls):
-    rrv.remote_run_chain_progress({"run_id": "compose-4"})
+    rrv.remote_run_chain_progress({"run_id": "compose-4"}, ws_root=_WS)
     assert calls == [("compose", "progress", "compose-4")]
 
 
 @pytest.mark.parametrize("call, method", [
-    (lambda: rrv.remote_run_chain_progress({"run_id": " x "}), "progress"),
-    (lambda: rrv.remote_run_cancel({"run_id": " x "}), "cancel"),
-    (lambda: rrv.remote_run_cancel({"simulation_id": " x "}), "cancel"),
-    (lambda: rrv.remote_run_status({"simulation_id": " x "}), "status"),
+    (lambda: rrv.remote_run_chain_progress({"run_id": " x "}, ws_root=_WS), "progress"),
+    (lambda: rrv.remote_run_cancel({"run_id": " x "}, ws_root=_WS), "cancel"),
+    (lambda: rrv.remote_run_cancel({"simulation_id": " x "}, ws_root=_WS), "cancel"),
+    (lambda: rrv.remote_run_status({"simulation_id": " x "}, ws_root=_WS), "status"),
 ])
-def test_viva_ids_are_not_stripped(calls, call, method):
+def test_viva_ids_are_stripped(calls, call, method):
+    # step 1c-2 (deliberate change): one id rule strips every id (viva-core ids were passed unstripped)
     call()
-    assert calls == [("viva", method, " x ")]
+    assert calls == [("viva", method, "x")]
 
 
 # --- for_run / owns (new in step 1a; not used by production routing yet) ---------------------------------------

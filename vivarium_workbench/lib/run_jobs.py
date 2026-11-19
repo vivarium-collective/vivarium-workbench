@@ -249,6 +249,8 @@ def refresh_submitted(job, client=None) -> None:
     ``submitted``, which is what they are. Losing the poll must not turn a
     running campaign into a failed one, nor 500 a status page.
     """
+    # Step 1c-2 (docs/backend-adapters.md): the ids here were dispatched by this process to its one configured
+    # backend, so they are asked of it directly rather than looked up in run records.
     try:
         items = list(getattr(job, "items", None) or [])
         pending = [(i, it.get("simulation_id")) for i, it in enumerate(items)
