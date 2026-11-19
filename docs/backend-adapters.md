@@ -18,8 +18,8 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | P1a | Core seams that need no provider (`lib/backend_config.py`, `Backend.identity`); no behaviour change | — | not started |
 | P1b | Pure move: whole SMS modules into `vivarium_workbench_sms` (same distribution), every import and patch target re-pointed, lazy registry imports; import-linter contract whose ignore list is the ratchet | — | not started |
 | P1c | `Provider` and `SmsProvider`; registry, session build/pin and capability probe through the provider; no behaviour change | — | not started |
-| P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, SMS routes into the plugin's router | — | not started |
-| P3 | The UI shows SMS-only features from the provider's declared features; core tests run without the plugin | — | not started |
+| P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, facet routes stay core, SMS-only routes into the plugin's router | — | not started |
+| P3 | Opaque string run ids end to end; the UI shows the nine SMS-today features (§2.5) by declared feature; launch-panel decision; core tests run without the plugin | — | not started |
 | P4 | `vivarium_workbench_sms` moves into the viva-api repository as its own distribution, found by entry point; the Stanford image installs it | — | not started |
 | — | Already done, now counted as plugin work: analysis figures and PTools files read through `/viva/v1/datasets` | wb#1650 | **done**, merged 2026-11-19 |
 
@@ -93,7 +93,7 @@ Step 1 did **not** draw a package boundary. A grep on 2026-11-19 shows SMS knowl
 
 ### 2.1 The backend interface
 
-The run facet already exists (§1). The features that only SMS has become optional facets, and the UI checks whether a facet is present, never a backend's name:
+The run facet already exists (§1). The features that only SMS has *today* become optional facets. The UI checks whether a facet is present, never which backend it is talking to:
 
 ```python
 @dataclass(frozen=True)
@@ -101,12 +101,16 @@ class Backend:
     name: str                          # a record's `kind`: "compose-api", "viva-core", "sms-legacy", ...
     runs: RunFacet                     # required (exists)
     identity: Callable[[str], str | None] | None  # the server's id for records (today: /viva/v1/health)
-    listing: ListingFacet | None       # remote runs merged into /api/simulations (the Remote tab)
-    artifacts: ArtifactFacet | None    # analysis figures, PTools files, data downloads for a run
-    analyses: AnalysisFacet | None     # re-run analyses on a finished run (SMS only)
-    builds: BuildFacet | None          # pinned/session builds, branch builds, build source, discovery (SMS only)
+    listing: ListingFacet | None       # runs on the server, merged into /api/simulations (SMS today)
+    artifacts: ArtifactFacet | None    # a run's analysis files, figures, PTools files, data downloads (SMS today)
+    analyses: AnalysisFacet | None     # re-run analyses on a finished run (SMS today)
+    builds: BuildFacet | None          # environments this backend can run: build, list, switch, pin (SMS today)
 ```
 
+- **Facets are named by capability, and their interfaces carry no SMS terms** (Jim, 2026-11-19).
+  - A facet says what it does (`listing`, `artifacts`, `analyses`, `builds`), not how SMS does it.
+  - SMS-specific detail lives in the plugin's implementation, for example vEcoli parameters, integer simulation ids and branch builds.
+  - This leaves a path for compose-api: its core adapter can implement any facet later (§2.6), and the existing routes and UI then work for compose-api runs with no other workbench change.
 - **A facet is defined only when a step needs it.** Its methods come from the code it replaces; method shapes are not designed ahead of the code.
 - **Facets keep the views' `(body, status)` shapes,** as the run facet does, so routes and the browser don't change when code moves behind one.
 - **SMS-specific dispatch goes behind `builds` and `runs`, not a predicate swap.** Two examples:
@@ -145,12 +149,23 @@ class Provider(Protocol):
 - **The core's `select`** (from P1c) asks the providers first (the session build and the pin are the SMS provider's claims), then the named backend, then local. That is today's order.
 - **A record whose `kind` no installed provider serves** is refused with 409 `backend-not-installed`. It is never guessed at by id form.
   - A run with no record (written before 1c-1, or listed live) falls back to `for_run()`'s id forms; when the kind that form names has no installed provider (a bare integer without the SMS plugin), it gets the same 409.
-- **Routes keep their paths.**
-  - SMS-only routes move to the plugin's `router()` under the same URLs, so browser code and published bundles keep working. The router is mounted before the app's read-only filter and before the SPA catch-all route, and the provider declares which of its routes are read-only-safe. Examples:
-    - figures, analyses and chain progress;
-    - `/api/source/builds`, `build-remote` and `switch-build` (`remote-health` stays core, on the core ping);
-    - `/api/remote-dispatch-preflight`, `/api/remote-run-config` and `/api/remote-run-pinned-build`.
-  - **The Remote tab has no route of its own.** Remote runs are merged into the core's `/api/simulations` (`simulations_index._append_remote_simulations`), so that is a `listing` facet the core calls, not a plugin route.
+- **Routes keep their paths, so browser code and published bundles keep working.** Where a route lives depends on whether another backend could ever serve it:
+  - **Routes for a facet live in the core.** They dispatch through the run's backend (`for_existing`, as step 1c-2 already does) and answer "feature unavailable" when that backend lacks the facet.
+    - `artifacts`: `/api/remote-run-land-artifacts`, `/api/remote-analysis-figures`, `/api/remote-analysis-figure`, `/api/study-remote-figures`;
+    - `analyses`: `/api/remote-run-analysis`;
+    - `listing`: merged into the core's `/api/simulations` (`simulations_index._append_remote_simulations`). The Runs table has no route of its own.
+  - **The run lifecycle is already core and shared with compose-api:** `/api/remote-run-submit`, `-poll`, `-land`, `-cancel`, `-chain-progress`, `-trace-support` and `-trace`.
+  - **Only SMS-only routes go to the plugin's `router()`**:
+    - `/api/remote-run-pinned-build` and `/api/remote-run-build`;
+    - the old pipeline `/api/remote-run-start` and `/api/remote-run-status`, which no browser code calls but which are on the read-only allowlist;
+    - the `/api/source/builds`, `build-remote` and `switch-build` build routes.
+
+    If `builds` is later made generic, those move to the core with it. `remote-health` stays in the core, on the core ping.
+  - **Mixed routes stay in the core, and their SMS branch goes behind a facet:**
+    - `/api/remote-dispatch-preflight` already has compose-api and viva-core branches; only its "build on cloud / switch build" branch is SMS (`builds`).
+    - `/api/remote-run-config` reports the pin (SMS, `builds`) and the named backend's profile (core).
+    - `/api/composite-run/{id}/status` and `/stop` branch on `remote-sim-<int>` ids (`composite_run_views`, `composite_stop_views`; Loom polls them). They should go through `for_existing`.
+  - The plugin router is mounted before the app's read-only filter and before the SPA catch-all route. The provider declares which of its routes are read-only-safe.
 - **CLI.** `run-remote` is wholly SMS (`--sms-api-url`, `SmsApiClient`). It becomes the provider's `cli()`.
 - **Hosted env workers.** `env_worker_launcher.default_launcher()` asks the active provider for a launcher. The core keeps `LocalWorkerLauncher`. The proxy and remote launchers move to the plugin.
 
@@ -262,10 +277,10 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 | compose-api path | `remote_run_compose` reads `remote_pinned.remote_deployment_name` and `sms_api_client.explicit_backend_base_url` | read `lib/backend_config.py` |
 | capability probe (P1c) | `server_capabilities.explicit_backend_profile` → `backend_profile(SmsApiClient)`: `client.capabilities()` (`/viva/v1`, then `/core/v1`), then `openapi_operations()` for compose-api, all through the `remote_link` circuit breaker; `require_named_backend_reachable` and `_PROFILE_FAILURE_TTL` rely on that breaker | the profile becomes: core asks each provider's `recognise(url)` (the SMS provider does the viva-core check), then core's own compose-api detection; both go through the generic breaker, which P1a splits out of `remote_link` |
 | breaker (P1a) | `remote_link` imports `SmsApiError` and `sms_api_base` at module level; `CircuitOpen` subclasses `SmsApiError`; `snapshot()` reads the AWS SSO cache | split: the generic per-URL breaker, plus a core `BackendError` that `SmsApiError` and `CircuitOpen` derive from, go to `backend_config.py`; the SMS defaults (the base URL, the SSO expiry) go to the plugin in P1b |
-| health | `workspace_deps_views.remote_health` pings with `SmsApiClient.ping()` | a core ping in `config.py` with the same behaviour (`GET /version`, ≤5 s timeout, caller-identity header) |
-| records | `records.py` uses `SmsApiClient` (`/viva/v1/health`), `_canonical_url`, `remote_pinned._DEFAULT_REMOTE_DEPLOYMENT`; `configured_url` / `_deployment_names_now` use `sms_api_base` and `BACKEND_BASE_ENV_VARS` | `Backend.identity`; URL canonicaliser, deployment name and configured URL in `config.py` (the provider adds its aliases) |
+| health | `workspace_deps_views.remote_health` pings with `SmsApiClient.ping()` | a core ping in `backend_config.py` with the same behaviour (`GET /version`, ≤5 s timeout, caller-identity header) |
+| records | `records.py` uses `SmsApiClient` (`/viva/v1/health`), `_canonical_url`, `remote_pinned._DEFAULT_REMOTE_DEPLOYMENT`; `configured_url` / `_deployment_names_now` use `sms_api_base` and `BACKEND_BASE_ENV_VARS` | `Backend.identity`; URL canonicaliser, deployment name and configured URL in `backend_config.py` (the provider adds its aliases) |
 | registry (P1c) | `backends/__init__.py` imports `SmsLegacyRuns`, `VivaCoreRuns` at load | registry via provider |
-| deployment name | `remote_pinned.remote_deployment_name()` (default `"smsvpctest"`) | `config.py`; the default stays `"smsvpctest"` until P1c, then neutral, with the provider supplying its own |
+| deployment name | `remote_pinned.remote_deployment_name()` (default `"smsvpctest"`) | `backend_config.py`; the default stays `"smsvpctest"` until P1c, then neutral, with the provider supplying its own |
 | session build and pin (P1c) | `run_core.run_target_for` (`.viv-build.json`) and `remote_pinned.is_pinned_enabled()`, used by `backends.select`; `.viv-build.json` is also read by `report.py`, `provenance_manifest.py`, `composite_resolve`, `env_worker_launcher`, `readouts_views` and `run_core` | `SmsProvider.select`; the other readers ask the provider (P2 plans each) |
 | generic helpers in SMS modules | `remote_simulations._read_build_meta` (used by `composite_resolve`, `composite_state_views`), `source_build_views._normalize_repo_url` (used by `git_status`) | move to a core module, or behind `builds` if SMS-only |
 
@@ -279,20 +294,62 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 | Runs | `backends/sms_legacy`, `backends/viva_core`, `remote_run_viva_v1`, `remote_trace`, `remote_run_jobs` | `remote_run.run_remote` (called by `run_runner`), SMS parts of `remote_run_views`, `remote_run_landing.land_remote_run` and `land_remote_simulation_artifacts`, `run_jobs.refresh_submitted` (`compose_status_batch`, interim `/viva/v1/compose`) | `runs` |
 | Builds and pinning | `remote_pinned`, `remote_build_source`, `source_build_views`, `comparison_pinning` | build-source half of `workspace_deps_views`, the vEcoli dispatch in `study_runs`, discovery in `composite_test_run_views` | `builds`, `Provider.select` |
 | Remote tab and store | `remote_simulations`, `remote_reconcile` | `simulations_index._append_remote_simulations`, `resolve_or_fetch_store`; `investigations_index`'s `list_remote_simulations_swr` | `listing`, `artifacts` |
-| Analyses and figures | `remote_analysis_figures` | — | `artifacts`, `analyses`, plugin routes |
-| Routes | — | `api/app.py`: 7 import statements over 6 plugin-set modules, inline `SmsApiClient(...)` at the figure routes, `_sms_only`, `resolve_run_target`; its read-only allowlist names SMS routes | plugin `router()`, mounted before the read-only filter; the provider declares its read-only-safe routes |
+| Analyses and figures | `remote_analysis_figures` | — | `artifacts`, `analyses`; the routes stay core and dispatch by facet (§2.2) |
+| Routes | — | `api/app.py`: 7 import statements over 6 plugin-set modules, inline `SmsApiClient(...)` at the figure routes, `_sms_only`, `resolve_run_target`; its read-only allowlist names SMS routes | facet routes stay core and dispatch by facet; SMS-only routes go to the plugin's `router()` (§2.2) |
 | Workers | — | `ProxyWorkerLauncher`, `RemoteWorkerLauncher` in `env_worker_launcher`; the viva-api proxy assumptions in `env_worker_pool` (its hints), `env_worker_dialback` and `env_worker_client` | `Provider.worker_launcher` |
 | CLI and startup | — | `run-remote` in `cli.py`; startup checks in `cli`, `startup`, `api/__main__` | `Provider.cli`, `check_config` |
 | Models and bundle | — | sms-api status + remote-provenance models in `models.py` (feed `generate_ts`); `publish.py`'s `smsApiBase` | P3 decides |
 | Target predicates | — | `investigation_steps`, `investigation_run_views`, `composite_run_views` | `backends.select` |
 | To check in P2's plans | — | the vEcoli/ParCa case keyed on `.viv-build.json` in `readouts_views`; the `SMS_API_BASE` hint in `run_runner`; vEcoli knobs (`n_seeds`, `n_generations`) in `preflight.py`, `env_worker.py` | — |
 
-**Browser (P3).** These files call SMS-only routes or assume SMS features: the Remote tab, chain progress, figures and re-run analyses.
+**Features that are SMS-only today (P3).**
 
-- `walkthrough.js`, `study-detail.js`, `sim-table.js`, `branch-source.js`, `composite-card.js`, `configure-run.js`, `perfetto-open.js`, `progress-track.js`, `session.js`, `workspace-picker.js`;
-- `loom-embed.js` (`run_target=deployment`);
-- `templates/study-detail.html` (the remote-run panel);
-- the "Cloud / Build via sms-api" help text in `index.html.j2`.
+The UI shows these only when the run's backend has the matching feature. Checked against the routes and browser code on 2026-11-19.
+
+| # | Feature | Where in the UI | Routes | Gated today by | Facet / feature | Could compose-api offer it? |
+|---|---|---|---|---|---|---|
+| 1 | Cloud builds: build a branch on the deployment, list or switch builds | Source / branch picker: "Build on cloud", the Cloud toggle (`branch-source.js`, `workspace-picker.js`, `session.js`) | `/api/source/builds`, `build-remote`, `switch-build` | `isRemote` | `builds` | yes: its registry environments and versions are the analogue |
+| 2 | Pinned deployment runs, and the relabelled run card | run card, configure-run dialog (`study-detail.js`, `walkthrough.js`, `configure-run.js`) | `/api/remote-run-config`; `remote-run-pinned-build` and `remote-run-build` (HTTP clients only, no browser caller) | `pinned: true` | `builds` (pin) | maybe: pin a registry version |
+| 3 | Remote preflight with "Build on cloud" / "Switch build" actions | composite card's Run button (`composite-card.js`) | `/api/remote-dispatch-preflight` | remote run target | `builds` | with 1 |
+| 4 | vEcoli launch parameters (generations, seeds, ParCa) and the campaign view | study page's remote-run panel (`study-detail.js`, `templates/study-detail.html`) | `/api/remote-run-submit` with the SMS body | deployment run target | not a facet: UI in core files (Q-launch-ui) | no: model science. Better driven by the composite's own parameter schema |
+| 5 | Runs on the server listed next to local runs | Runs table (`sim-table.js`, `remote-sim-<id>` rows) | merged into `/api/simulations` | rows present | `listing` | yes: it lists runs |
+| 6 | Land a run's analysis files (`analyses.json`, PTools exports) | row action on a completed remote run (`sim-table.js`) | `/api/remote-run-land-artifacts` | any remote row with an id (also compose-api's); the server refuses non-SMS runs with 409 `not-sms` | `artifacts` | yes: run results and datasets |
+| 7 | Re-run analyses on a finished run | row action (`sim-table.js`) | `/api/remote-run-analysis` | as 6 | `analyses` | needs an analysis job kind there |
+| 8 | Analysis figures, per run and as a study gallery (also feeds the Viz / Analyses tabs) | figures window (`sim-table.js`), study tabs (`study-detail.js`) | `/api/remote-analysis-figures`, `remote-analysis-figure`, `study-remote-figures` | per-run: as 6; the study gallery builds an SMS client inline and scans the study's SMS runs, with no refusal | `artifacts` | yes, with 6 |
+| 9 | Explore a remote run's state | Loom embed (`loom-embed.js`: `run_target=deployment&build_sim=`) | `/api/composite-run/{id}/status` and `/stop` (SMS branch on `remote-sim-<int>`) | `remote-sim` rows | later, if ever | later |
+
+**SMS assumptions outside any facet (P3).** A facet carries data, not UI and not id formats, so these need their own work:
+
+- **Run ids are assumed to be SMS integers.**
+  - The figure routes declare `simulation_id: int`.
+  - `sim-table.js` sends `Number(simId)` for land-artifacts and re-run analysis.
+  - `study-detail.js` and `perfetto-open.js` choose `simulation_id` or `run_id` by an all-digits test.
+  - The composite-run status and stop routes match `remote-sim-<int>`.
+
+  P3 makes run ids opaque strings end to end; the record's `kind` decides, never the id's form. This has to land before any facet can serve compose-api runs.
+- **The vEcoli launch panel** (feature 4) is SMS UI in core files (Q-launch-ui).
+- **Gating is a server refusal, not a hidden button.** The UI shows features 6–8 on any remote row with an id; P3 hides them by declared feature.
+- **SMS wording and plumbing:**
+  - "sms-api" strings in `branch-source.js`, `study-detail.js`, `workspace-picker.js`, `loom-embed.js`, `session.js`, `progress-track.js`, `sim-table.js` and `index.html.j2`;
+  - the `smsApiBase` key that `publish.py` writes into the bundle;
+  - the sms-api models in `models.py`, which feed the generated TypeScript types.
+- **To check in P3's plan:** the "remote workspace" Cloud toggle in `workspace-picker.js` (`ws.kind === "remote"`) may be a feature separate from cloud builds.
+
+**Not SMS-only.** The run lifecycle on any remote run is core and shared with compose-api: poll, land, cancel, chain progress and trace (`sim-table.js`, `walkthrough.js`, `study-detail.js`, `perfetto-open.js`, `progress-track.js`). The backend health dot (`/api/source/remote-health`) stays in the core. Some things are SMS wording rather than SMS features: the "Cloud / Build via sms-api" help text in `index.html.j2`.
+
+**What P3 changes.** Each feature is already conditional, but on a different signal each time. P3 gives them one source: the run's backend, or for new runs the active backend, declares its features, and the browser shows or hides features 1–9 by that declaration. With the plugin installed, the UI looks exactly as it does today. Without it, none of 1–9 appear.
+
+### 2.6 Adding a feature to compose-api later
+
+Because the facets and their routes are generic (§2.1, §2.2), giving compose-api one of the features above takes these steps, once P3 has made run ids opaque strings (§2.5):
+
+1. Implement the facet in the core compose-api adapter (`backends/compose_api.py`).
+2. Declare the feature.
+3. If compose-api lacks a server route that the facet needs, ask compose-api for it.
+
+After P3, adopting a facet needs no route, browser or plugin change. Two features need more first:
+- the study figure gallery, which needs a generic `listing` to find a study's runs;
+- feature 4 (vEcoli parameters), which is meant to stay SMS-specific.
 
 ## 3. Contracts every step must keep
 
@@ -336,12 +393,14 @@ Rounds repeat until they find nothing new. The PR description says what each rev
 5. **P2: split the mixed modules, one area per PR,** in the order of §2.5's plugin-set table. Each PR:
    - moves the area's SMS parts into the plugin;
    - re-points core callers at `backends` and the facet;
-   - moves the area's routes into the plugin's router, keeping their paths;
+   - keeps the area's facet routes in the core, dispatching by facet, and moves only its SMS-only routes into the plugin's router, keeping their paths (§2.2);
    - removes the matching `ignore_imports` entries and ratchet entries.
 
    When P2 ends, only the registry's provider import is left on the ignore list.
 6. **P3: features, and a core without the plugin.**
+   - Run ids become opaque strings end to end (routes and browser); the record's `kind` decides, never the id's form (§2.5).
    - The browser reads the active provider's `features` and hides SMS-only UI when they're absent.
+   - Decide Q-launch-ui; move the SMS branches of mixed routes behind their facets (§2.2).
    - The models and the bundle key are settled.
    - A CI job turns the provider off and runs the core suite.
    - The plugin's routes then leave the OpenAPI schema. The tests over the whole route table (`tests/test_traversal_sweep.py` and the generated TypeScript types) run with the plugin, and the core-only job skips them.
@@ -359,6 +418,10 @@ Rounds repeat until they find nothing new. The PR description says what each rev
   - **Versioning.** The plugin pins a compatible range of `vivarium-workbench`, and the workbench states which provider-interface version it offers. A contract test in viva-api runs the plugin against the workbench version it pins.
   - **Needs agreement from viva-api's maintainers:** who owns the package, who reviews it, its CI, and how the Stanford workbench image gets it. Ask before P4; it doesn't block P1–P3.
 - **Q-name: the plugin's package name.** The working name is `vivarium_workbench_sms` (distribution `vivarium-workbench-sms`). Jim's phrase was "sms-client provider".
+- **Q-launch-ui: the vEcoli launch panel.**
+  - (a) Drive it from the composite's own parameter schema: the core renders a generic form, and SMS supplies the schema. Recommended, because it also works for compose-api composites.
+  - (b) Let the plugin add a UI fragment.
+  - Decide in P3's plan.
 - **Q-features: how features reach the browser.** Either extend an existing core view or add a route. Decide in P3's plan.
 
 ---
