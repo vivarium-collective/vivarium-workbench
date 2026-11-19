@@ -494,7 +494,7 @@ def resolve_composite_for_request(
     ``wiring_status: "unavailable"``; a local workspace resolves locally. Returns the resolve payload dict (or None on
     a local miss)."""
     from vivarium_workbench.lib.run_core import run_target_for
-    from vivarium_workbench.lib.remote_simulations import _read_build_meta
+    from vivarium_workbench_sms.remote_simulations import _read_build_meta
 
     ws_root = Path(ws_root)
     if run_target_for(ws_root) == "deployment":

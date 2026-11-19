@@ -9,7 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Union
 
-from vivarium_workbench.lib import remote_run_compose, remote_run_viva_v1
+from vivarium_workbench.lib import remote_run_compose
+from vivarium_workbench_sms import remote_run_viva_v1
 
 
 class VivaCoreRuns:
@@ -44,7 +45,7 @@ def viva_health_identity(base_url: str) -> "str | None":
     (viva-api#1055 ask F), or ``None`` when it reports none. Raises when the server cannot be asked; the caller
     (``records._ask``) caches the answer and remembers a failure. Through the circuit breaker, with the probe policy."""
     from vivarium_workbench.lib.backends.records import IDENTITY_FIELD
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient
 
     health = SmsApiClient.for_("probe", base_url).health_v1() or {}
     value = health.get(IDENTITY_FIELD)

@@ -84,9 +84,9 @@ vivarium-workbench compose-entry --workspace /path/to/ws [--registry URL|FILE] [
 
 There is no separate build step (pure Python + static assets). Linting/typing is
 enforced in CI (`.github/workflows/types.yml`): `ruff check vivarium_workbench
-vivarium_dashboard`, `mypy` on the typed modules, and `lint-imports` (import-linter)
+vivarium_workbench_sms vivarium_dashboard`, `mypy` on the typed modules, and `lint-imports` (import-linter)
 for the package-boundary allowlist — run them the same way locally, e.g.
-`uv run ruff check vivarium_workbench vivarium_dashboard` and `uv run mypy`.
+`uv run ruff check vivarium_workbench vivarium_workbench_sms vivarium_dashboard` and `uv run mypy`.
 Dependencies are managed with `uv` (`uv.lock`); install editable with
 `pip install -e .` (or `uv pip install -e .`) into the venv that will run it. Note `bigraph-loom`, `viva-superpowers` (formerly pbg-superpowers) and
 `discovery-engine` are direct git/path deps.

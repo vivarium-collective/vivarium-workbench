@@ -1557,7 +1557,7 @@ def _append_remote_simulations(sims: list, ws_root: Path, *, fresh: bool = False
     takes the blocking path but bounds it with a short timeout and one retry so
     even the explicit refresh can't hang the request for minutes."""
     try:
-        from vivarium_workbench.lib import remote_simulations as _rs
+        from vivarium_workbench_sms import remote_simulations as _rs
         if fresh:
             remote = _rs.list_remote_simulations(
                 ws_root, use_cache=False,
@@ -2152,7 +2152,7 @@ def _build_simulations_data(ws_root: Path, include_remote: bool = True,
         # "as of HH:MM (refreshing…)" instead of a spinner. Best-effort: a
         # failure here must never break the local listing.
         try:
-            from vivarium_workbench.lib import remote_simulations as _rs
+            from vivarium_workbench_sms import remote_simulations as _rs
             remote_state = _rs.remote_state(ws_root)
         except Exception:  # noqa: BLE001
             remote_state = None
@@ -2228,7 +2228,7 @@ def resolve_or_fetch_store(workspace: Path, row: dict) -> "tuple[Path | None, te
                              study=row.get("study_slug")) is not backends.SMS_LEGACY:
         return None, None
 
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
     from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
     tmp = tempfile.TemporaryDirectory()
     try:

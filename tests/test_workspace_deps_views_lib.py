@@ -37,7 +37,7 @@ class TestBuildSourceBuilds:
              "branch": "main", "label": "v2ecoli @ abc123 (build #1)"},
         ], "error": None}
         monkeypatch.setattr(
-            "vivarium_workbench.lib.remote_build_source.list_build_sources",
+            "vivarium_workbench_sms.remote_build_source.list_build_sources",
             lambda client: canned,
         )
         result = wdv.build_source_builds()
@@ -50,7 +50,7 @@ class TestBuildSourceBuilds:
         from vivarium_workbench.lib import workspace_deps_views as wdv
 
         monkeypatch.setattr(
-            "vivarium_workbench.lib.remote_build_source.list_build_sources",
+            "vivarium_workbench_sms.remote_build_source.list_build_sources",
             lambda client: {"builds": [], "error": "connection refused"},
         )
         result = wdv.build_source_builds()
@@ -73,11 +73,11 @@ class TestBuildSourceBuilds:
         monkeypatch.delenv("VIVA_API_BASE", raising=False)
         monkeypatch.setenv("SMS_API_BASE", "http://myproxy:9090")
         monkeypatch.setattr(
-            "vivarium_workbench.lib.sms_api_client.SmsApiClient",
+            "vivarium_workbench_sms.sms_api_client.SmsApiClient",
             _FakeClient,
         )
         monkeypatch.setattr(
-            "vivarium_workbench.lib.remote_build_source.list_build_sources",
+            "vivarium_workbench_sms.remote_build_source.list_build_sources",
             lambda client: {"builds": [], "error": None},
         )
         wdv.build_source_builds()

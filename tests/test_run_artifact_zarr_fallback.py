@@ -11,7 +11,7 @@ import pytest
 
 from vivarium_workbench.lib.composite_runs import connect, save_metadata
 from vivarium_workbench.lib.composite_run_views import build_run_artifact
-from vivarium_workbench.lib.remote_pinned import remote_deployment_name
+from vivarium_workbench_sms.remote_pinned import remote_deployment_name
 
 
 def make_fake_zarr(store_path, n_steps=4):
@@ -119,7 +119,7 @@ def test_falls_back_through_sms_api_for_s3_only_run(tmp_path, monkeypatch):
         return out
 
     monkeypatch.setattr(
-        "vivarium_workbench.lib.sms_api_client.SmsApiClient.download_data",
+        "vivarium_workbench_sms.sms_api_client.SmsApiClient.download_data",
         _fake_download_data,
     )
 

@@ -32,7 +32,7 @@ from pathlib import Path
 
 from vivarium_workbench.lib import backend_config as _backend_config
 from vivarium_workbench.lib.env_compat import get_env
-from vivarium_workbench.lib.sms_api_client import SmsApiClient
+from vivarium_workbench_sms.sms_api_client import SmsApiClient
 
 _TRUTHY = {"1", "true", "yes", "on"}
 
@@ -142,7 +142,7 @@ def uses_named_backend_dispatch(ws_root: Path) -> bool:
 
 def resolved_from_session_build(ws_root: Path) -> dict | None:
     """This session's own switched build (WS3's ``.viv-build.json`` stamp,
-    written by ``switch_build`` at ``lib/source_build_views.py``), shaped
+    written by ``switch_build`` at ``vivarium_workbench_sms/source_build_views.py``), shaped
     identically to :func:`resolve_pinned_build`'s return value.
 
     A session that has switched to a specific repo@commit via the workspace
@@ -212,7 +212,7 @@ def resolve_pinned_simulator_id(client: SmsApiClient, ws_root: Path) -> int | No
     cfg = pinned_config()
     if cfg is None:
         return None
-    from vivarium_workbench.lib.sms_api_client import SmsApiError
+    from vivarium_workbench_sms.sms_api_client import SmsApiError
     try:
         resolved = resolve_pinned_build(client, cfg.repo_url, cfg.branch)
     except (NoPinnedBuildError, SmsApiError):

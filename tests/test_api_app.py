@@ -4185,14 +4185,14 @@ class TestJobStatusRoutes:
     # -- remote-run-status (lib.remote_run_jobs.manager) ---------------------
 
     def test_remote_run_jobs_list_200(self, client, monkeypatch):
-        from vivarium_workbench.lib import remote_run_jobs
+        from vivarium_workbench_sms import remote_run_jobs
         monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(recent=[{"job_id": "rr1"}]))
         r = client.get("/api/remote-run-status")
         assert r.status_code == 200
         assert r.json() == {"jobs": [{"job_id": "rr1"}]}
 
     def test_remote_run_single_job_200(self, client, monkeypatch):
-        from vivarium_workbench.lib import remote_run_jobs
+        from vivarium_workbench_sms import remote_run_jobs
         job = _FakeJob({"job_id": "rr9", "steps": [{"name": "fetch", "status": "done"}]})
         monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(jobs={"rr9": job}))
         r = client.get("/api/remote-run-status?job_id=rr9")
@@ -4200,7 +4200,7 @@ class TestJobStatusRoutes:
         assert r.json() == {"job_id": "rr9", "steps": [{"name": "fetch", "status": "done"}]}
 
     def test_remote_run_missing_404(self, client, monkeypatch):
-        from vivarium_workbench.lib import remote_run_jobs
+        from vivarium_workbench_sms import remote_run_jobs
         monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(jobs={}))
         r = client.get("/api/remote-run-status?job_id=ghost")
         assert r.status_code == 404
@@ -4399,14 +4399,14 @@ class TestSourceBuildRemoteRoute:
         assert r.json() == {"error": "repo and branch are required"}
 
     def test_no_commit_502(self, client, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench_sms import source_build_views as sbv
 
         class _Client:
             def __init__(self, base=None):
                 pass
 
             def register_branch_head(self, repo, branch):
-                from vivarium_workbench.lib.sms_api_client import register_branch_head_legacy
+                from vivarium_workbench_sms.sms_api_client import register_branch_head_legacy
                 return register_branch_head_legacy(self, repo, branch)
 
             def latest_simulator(self, repo, branch):
@@ -4418,15 +4418,15 @@ class TestSourceBuildRemoteRoute:
         assert r.json() == {"error": "could not resolve branch HEAD via sms-api"}
 
     def test_sms_api_error_502(self, client, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
-        from vivarium_workbench.lib.sms_api_client import SmsApiError
+        from vivarium_workbench_sms import source_build_views as sbv
+        from vivarium_workbench_sms.sms_api_client import SmsApiError
 
         class _Client:
             def __init__(self, base=None):
                 pass
 
             def register_branch_head(self, repo, branch):
-                from vivarium_workbench.lib.sms_api_client import register_branch_head_legacy
+                from vivarium_workbench_sms.sms_api_client import register_branch_head_legacy
                 return register_branch_head_legacy(self, repo, branch)
 
             def latest_simulator(self, repo, branch):
@@ -4438,14 +4438,14 @@ class TestSourceBuildRemoteRoute:
         assert r.json() == {"error": "sms-api: boom"}
 
     def test_happy_path(self, client, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench_sms import source_build_views as sbv
 
         class _Client:
             def __init__(self, base=None):
                 pass
 
             def register_branch_head(self, repo, branch):
-                from vivarium_workbench.lib.sms_api_client import register_branch_head_legacy
+                from vivarium_workbench_sms.sms_api_client import register_branch_head_legacy
                 return register_branch_head_legacy(self, repo, branch)
 
             def latest_simulator(self, repo, branch):
@@ -4488,7 +4488,7 @@ class TestSourceSwitchBuildRoute:
         assert r.json() == {"error": "missing 'simulator_id'"}
 
     def test_listing_error_502(self, client, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench_sms import source_build_views as sbv
         monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
         monkeypatch.setattr(
             sbv, "list_build_sources",
@@ -4499,7 +4499,7 @@ class TestSourceSwitchBuildRoute:
         assert r.json() == {"error": "sms-api unavailable: tunnel down"}
 
     def test_not_found_404(self, client, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench_sms import source_build_views as sbv
         monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
         monkeypatch.setattr(
             sbv, "list_build_sources", lambda c: {"builds": [self._entry(99)]},
@@ -4509,8 +4509,8 @@ class TestSourceSwitchBuildRoute:
         assert r.json() == {"error": "build 5 not found"}
 
     def test_materialize_error_502(self, client, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
-        from vivarium_workbench.lib.sms_api_client import SmsApiError
+        from vivarium_workbench_sms import source_build_views as sbv
+        from vivarium_workbench_sms.sms_api_client import SmsApiError
         monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
         monkeypatch.setattr(
             sbv, "list_build_sources", lambda c: {"builds": [self._entry(5)]},
@@ -4528,7 +4528,7 @@ class TestSourceSwitchBuildRoute:
         assert r.json() == {"error": "materialize failed: no tarball"}
 
     def test_happy_path_repoints(self, client, tmp_path, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench_sms import source_build_views as sbv
         from vivarium_workbench.lib import _root
         cache = tmp_path / "session-clone"
         cache.mkdir()

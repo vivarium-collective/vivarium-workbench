@@ -69,7 +69,8 @@ def _bare_write_text_calls(text: str) -> list[tuple[int, str]]:
 
 
 def test_all_lib_write_text_calls_are_utf8():
-    lib_files = list((ROOT / "lib").rglob("*.py"))
+    # step P1b (deliberate change): the SMS plugin's modules left lib/; check them too.
+    lib_files = list((ROOT / "lib").rglob("*.py")) + list((ROOT.parent / "vivarium_workbench_sms").rglob("*.py"))
     server_file = ROOT / "server.py"
     all_files = sorted(lib_files) + [server_file]
 

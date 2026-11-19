@@ -119,7 +119,7 @@ def test_without_a_named_backend_the_config_and_target_are_exactly_as_before(
 
 
 def test_resolve_run_target_makes_no_network_call_without_a_named_backend(tmp_path, clean_backend_env, monkeypatch):
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
 
     def boom(*a, **k):
         raise AssertionError("probed a backend nobody named")
@@ -201,7 +201,7 @@ def test_named_backend_without_documents_capability_stays_legacy(ws, stub, clean
 
 def test_pinned_and_session_build_keep_the_simulator_path_even_with_a_named_backend(
         ws, stub, clean_backend_env, monkeypatch):
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
 
     _name_backend(monkeypatch, stub.url)
     assert remote_pinned.uses_viva_v1_dispatch(ws) is True
@@ -422,7 +422,7 @@ def test_run_remote_with_a_supplied_client_never_uses_the_run_surface(ws, stub, 
                                                                       tmp_path):
     """CLI ``run-remote --sms-api-url`` and every test double pass a client: unchanged /compose/v1."""
     from vivarium_workbench.lib import remote_run
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient
 
     _name_backend(monkeypatch, stub.url)
     used = []

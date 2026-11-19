@@ -9,7 +9,7 @@ import pytest
 
 from test_backends_existing import HERE, _record, asked, ws  # noqa: F401 -- fixtures, found by name
 from vivarium_workbench.lib import composite_run_views
-from vivarium_workbench.lib import remote_analysis_figures as raf
+from vivarium_workbench_sms import remote_analysis_figures as raf
 from vivarium_workbench.lib import remote_run_views as rrv
 
 FIGURE_ROUTES = ("/api/remote-analysis-figures?simulation_id={id}&study=s",

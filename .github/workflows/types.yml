@@ -32,7 +32,7 @@ jobs:
         # shipped packages; the test tree is not yet under the gate.
         # `--with` layers a pinned ruff onto the frozen env without adding it to
         # uv.lock (re-locking this repo needs a sandbox worktree — avoided here).
-        run: uv run --frozen --with "ruff==0.16.2" ruff check vivarium_workbench vivarium_dashboard
+        run: uv run --frozen --with "ruff==0.16.2" ruff check vivarium_workbench vivarium_workbench_sms vivarium_dashboard
       - name: mypy (typed modules)
         run: uv run --frozen mypy
       - name: import-linter (ports & adapters layering)

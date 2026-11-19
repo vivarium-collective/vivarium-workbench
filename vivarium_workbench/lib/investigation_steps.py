@@ -47,7 +47,7 @@ def _run_study_hook(workspace: str, study_slug: str) -> dict:
 
     from pathlib import Path
 
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
 
     if remote_pinned.resolve_run_target(Path(workspace)) == "deployment":
         raise RuntimeError(

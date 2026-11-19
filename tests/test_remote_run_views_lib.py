@@ -137,7 +137,7 @@ class TestHappyPath:
         assert callable(worker_fn)
 
         # Submits to the SAME singleton (manager.submit was the patched attr).
-        from vivarium_workbench.lib import remote_run_jobs
+        from vivarium_workbench_sms import remote_run_jobs
         assert rrv.manager is remote_run_jobs.manager
 
     def test_pipeline_ctx_spec_id_from_baseline_composite(self, monkeypatch, tmp_path):

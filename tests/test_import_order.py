@@ -14,23 +14,30 @@ import sys
 
 import pytest
 
-MODULES = [
+CORE = [
     "vivarium_workbench.lib.backend_config",
     "vivarium_workbench.lib.backends",
     "vivarium_workbench.lib.backends.records",
     "vivarium_workbench.lib.backends.compose_api",
-    "vivarium_workbench.lib.backends.viva_core",
-    "vivarium_workbench.lib.backends.sms_legacy",
-    "vivarium_workbench.lib.sms_api_client",
-    "vivarium_workbench.lib.remote_link",
-    "vivarium_workbench.lib.remote_pinned",
     "vivarium_workbench.lib.server_capabilities",
     "vivarium_workbench.lib.remote_run_compose",
-    "vivarium_workbench.lib.remote_run_viva_v1",
     "vivarium_workbench.lib.remote_run_views",
     "vivarium_workbench.lib.workspace_deps_views",
     "vivarium_workbench.api.app",
 ]
+
+
+def _plugin_modules() -> list[str]:
+    """Every module of the SMS plugin package (step P1b), so a new one is covered without editing this list."""
+    import pkgutil
+
+    import vivarium_workbench_sms
+
+    return ["vivarium_workbench_sms"] + [f"vivarium_workbench_sms.{m.name}"
+                                         for m in pkgutil.iter_modules(vivarium_workbench_sms.__path__)]
+
+
+MODULES = CORE + _plugin_modules()
 
 
 @pytest.mark.parametrize("module", MODULES)

@@ -29,7 +29,7 @@ import pytest
 import yaml
 
 from vivarium_workbench.lib import server_capabilities as sc
-from vivarium_workbench.lib import sms_api_client as sac
+from vivarium_workbench_sms import sms_api_client as sac
 
 HERE = Path(__file__).parent
 FIXTURE_WS = HERE / "_fixtures" / "ws_increase_demo"
@@ -160,7 +160,7 @@ def test_the_stanford_workbench_env_submits_to_sms_and_asks_nothing_else(ws, bac
 
 
 def test_the_stanford_env_resolves_run_targets_without_probing(ws, monkeypatch):
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
 
     def boom(*a, **k):
         raise AssertionError("probed a backend nobody named")
@@ -175,7 +175,7 @@ def test_the_stanford_env_resolves_run_targets_without_probing(ws, monkeypatch):
 # --- the pinned SMS build beats a named compose-api ----------------------------------------------------------
 
 def test_the_pinned_sms_build_keeps_the_simulator_path_when_compose_api_is_named(ws, backend, monkeypatch):
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
 
     _Backend.routes = dict(COMPOSE)
     monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", backend)
@@ -264,7 +264,7 @@ def local_runs(monkeypatch):
 
 
 def test_a_named_backend_that_cannot_be_reached_never_resolves_to_a_local_run(ws, monkeypatch):
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
     from vivarium_workbench.lib.errors import APIError
 
     monkeypatch.setenv(NAMED, DEAD)
@@ -417,7 +417,7 @@ def test_a_backend_that_comes_back_is_seen_again_once_its_circuit_breaker_closes
     The breaker's own probe (every 30 s while ``serve`` runs, on the one URL ``sms_api_base()`` names at start-up) or
     the first call after its minute is up closes it when the backend is back; the profile reads the backend again
     within its own 5 s window after that."""
-    from vivarium_workbench.lib import remote_link
+    from vivarium_workbench_sms import remote_link
 
     base = dropping_backend
     _Dropping.routes = dict(COMPOSE)

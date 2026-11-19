@@ -5,7 +5,7 @@ viva-api serves a run's trace as a Chrome Trace Event JSON document at
 ``GET /viva/v1/composites/{id}/trace`` (a composite run), advertised by the
 ``viva-v1-trace`` capability. The browser never talks to viva-api: it asks this
 server (``/api/remote-run-trace``), which proxies through
-:class:`~vivarium_workbench.lib.sms_api_client.SmsApiClient`, and then hands the
+:class:`~vivarium_workbench_sms.sms_api_client.SmsApiClient`, and then hands the
 bytes to Perfetto in the browser (``static/perfetto-open.js``).
 
 Both functions return ``(body, status)`` like the other ``*_views`` modules; a
@@ -31,7 +31,7 @@ from vivarium_workbench.lib.server_capabilities import (
     fetch_capabilities,
     require_capabilities,
 )
-from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError, sms_api_base
+from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError, sms_api_base
 
 TraceBody = Union[bytes, dict]
 

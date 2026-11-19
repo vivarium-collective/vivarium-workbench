@@ -27,7 +27,7 @@ def _sms_api_base() -> str:
     Delegates to the single source of truth :func:`sms_api_client.sms_api_base`;
     kept under this name because several modules import it from here.
     """
-    from vivarium_workbench.lib.sms_api_client import sms_api_base
+    from vivarium_workbench_sms.sms_api_client import sms_api_base
 
     return sms_api_base()
 
@@ -39,8 +39,8 @@ def build_source_builds() -> dict:
     no ws_root needed.  Always returns a dict — best-effort (empty builds +
     error reason when sms-api is down).
     """
-    from vivarium_workbench.lib import remote_build_source
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient
+    from vivarium_workbench_sms import remote_build_source
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient
 
     return remote_build_source.list_build_sources(SmsApiClient(_sms_api_base()))
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from vivarium_workbench.lib import remote_pinned as rp
+from vivarium_workbench_sms import remote_pinned as rp
 from vivarium_workbench.lib import remote_run_views as rrv
 
 
@@ -360,7 +360,7 @@ def test_resolve_pinned_simulator_id_none_when_sms_api_unreachable(tmp_path, mon
     same as "no build resolved", so callers get one clean, controlled 409
     instead of a crash (exercised end to end by
     test_study_run_baseline_pinned_deployment_409_over_real_http)."""
-    from vivarium_workbench.lib.sms_api_client import SmsApiError
+    from vivarium_workbench_sms.sms_api_client import SmsApiError
 
     class _BoomClient:
         def list_branch_builds(self, repo_url, branch):
@@ -380,14 +380,14 @@ from vivarium_workbench.lib import backend_config as _backend_config  # noqa: E4
 
 
 def test_remote_deployment_name_default(monkeypatch):
-    import vivarium_workbench.lib.remote_pinned as rp_mod
+    import vivarium_workbench_sms.remote_pinned as rp_mod
 
     monkeypatch.setattr(_backend_config, "get_env", lambda k, d="": d)
     assert rp_mod.remote_deployment_name() == "smsvpctest"
 
 
 def test_remote_deployment_name_from_env(monkeypatch):
-    import vivarium_workbench.lib.remote_pinned as rp_mod
+    import vivarium_workbench_sms.remote_pinned as rp_mod
 
     monkeypatch.setattr(
         _backend_config, "get_env", lambda k, d="": "smscdk" if k == "REMOTE_DEPLOYMENT" else d
@@ -452,7 +452,7 @@ def test_resolve_run_target_short_circuits_before_checking_pin(tmp_path, monkeyp
 def test_a_named_backend_is_the_runs_origin_when_no_deployment_name_is_set(monkeypatch):
     """`serve --backend-base-url https://sms.cam.uchc.edu`: a run's recorded Origin is that backend, not the
     historical `smsvpctest` default."""
-    from vivarium_workbench.lib import remote_pinned as rp_mod
+    from vivarium_workbench_sms import remote_pinned as rp_mod
 
     monkeypatch.delenv("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT", raising=False)
     monkeypatch.delenv("VIVARIUM_DASHBOARD_REMOTE_DEPLOYMENT", raising=False)
@@ -461,7 +461,7 @@ def test_a_named_backend_is_the_runs_origin_when_no_deployment_name_is_set(monke
 
 
 def test_an_explicit_deployment_name_still_wins_over_a_named_backend(monkeypatch):
-    from vivarium_workbench.lib import remote_pinned as rp_mod
+    from vivarium_workbench_sms import remote_pinned as rp_mod
 
     monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "https://sms.cam.uchc.edu")
     monkeypatch.setattr(_backend_config, "get_env", lambda k, d="": "smscdk" if k == "REMOTE_DEPLOYMENT" else d)

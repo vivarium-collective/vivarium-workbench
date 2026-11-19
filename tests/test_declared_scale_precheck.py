@@ -62,7 +62,8 @@ def test_unparseable_budget_falls_back_to_the_default(monkeypatch):
 
 def test_launch_into_study_refuses_an_oversized_local_run(tmp_path, monkeypatch):
     """Proves the guard is on the path, not just importable."""
-    from vivarium_workbench.lib import study_runs, remote_pinned, run_core
+    from vivarium_workbench.lib import study_runs, run_core
+    from vivarium_workbench_sms import remote_pinned
 
     monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda p: "local")
     monkeypatch.setattr(
@@ -83,7 +84,8 @@ def test_launch_into_study_refuses_an_oversized_local_run(tmp_path, monkeypatch)
 
 def test_dry_run_is_exempt(tmp_path, monkeypatch):
     """A preview declares scale but does not spend it."""
-    from vivarium_workbench.lib import study_runs, remote_pinned, run_core
+    from vivarium_workbench.lib import study_runs, run_core
+    from vivarium_workbench_sms import remote_pinned
 
     monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda p: "local")
     monkeypatch.setattr(

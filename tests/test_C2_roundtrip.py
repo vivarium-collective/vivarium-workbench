@@ -291,7 +291,8 @@ def _forbid_git_pip_url(monkeypatch):
 def test_run_remote_pinned_derives_pip_url_from_built_commit(tmp_path, monkeypatch):
     """Pinned mode: the pip URL is git+<repo>.git@<resolved commit> and git_pip_url
     (which would raise on the dirty prod /workspace) is never called."""
-    from vivarium_workbench.lib import remote_run, remote_pinned
+    from vivarium_workbench.lib import remote_run
+    from vivarium_workbench_sms import remote_pinned
     _stub_export_deps_only(monkeypatch)
     _forbid_git_pip_url(monkeypatch)
     monkeypatch.setattr(
@@ -311,7 +312,8 @@ def test_run_remote_pinned_derives_pip_url_from_built_commit(tmp_path, monkeypat
 
 def test_run_remote_pinned_normalizes_dotgit_repo_url(tmp_path, monkeypatch):
     """A repo_url that already ends in .git yields a single .git suffix (no dupe)."""
-    from vivarium_workbench.lib import remote_run, remote_pinned
+    from vivarium_workbench.lib import remote_run
+    from vivarium_workbench_sms import remote_pinned
     _stub_export_deps_only(monkeypatch)
     _forbid_git_pip_url(monkeypatch)
     monkeypatch.setattr(
@@ -330,7 +332,8 @@ def test_run_remote_pinned_normalizes_dotgit_repo_url(tmp_path, monkeypatch):
 
 def test_run_remote_unpinned_falls_back_to_git_pip_url(tmp_path, monkeypatch):
     """Local dev (no pinned config): keeps the clean+pushed git_pip_url path."""
-    from vivarium_workbench.lib import remote_run, remote_pinned
+    from vivarium_workbench.lib import remote_run
+    from vivarium_workbench_sms import remote_pinned
     _stub_remote_boundaries(monkeypatch)  # stubs git_pip_url → git+file:///x@abc1234
     monkeypatch.setattr(remote_pinned, "pinned_config", lambda: None)
     client = _CaptureClient()
@@ -343,7 +346,8 @@ def test_run_remote_pinned_no_build_raises(tmp_path, monkeypatch):
     """Pinned mode with no built simulator surfaces NoPinnedBuildError, so the
     detached runner (_execute_remote) marks the run failed rather than submitting
     garbage. compose_submit is never reached."""
-    from vivarium_workbench.lib import remote_run, remote_pinned
+    from vivarium_workbench.lib import remote_run
+    from vivarium_workbench_sms import remote_pinned
     _stub_export_deps_only(monkeypatch)
     _forbid_git_pip_url(monkeypatch)
     monkeypatch.setattr(

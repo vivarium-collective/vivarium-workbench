@@ -21,7 +21,7 @@ import pytest
 
 from vivarium_workbench.lib import env_compat, github_auth
 from vivarium_workbench.lib import materialization as m
-from vivarium_workbench.lib import remote_build_source as rbs
+from vivarium_workbench_sms import remote_build_source as rbs
 from vivarium_workbench.lib import repo_source as rs
 
 # (module, function name, env var, HOME-relative leaf parts)

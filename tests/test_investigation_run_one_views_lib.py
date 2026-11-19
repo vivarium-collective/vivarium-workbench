@@ -28,7 +28,7 @@ import pytest
 from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib import composite_lookup
 from vivarium_workbench.lib import investigations
-from vivarium_workbench.lib import remote_pinned
+from vivarium_workbench_sms import remote_pinned
 from vivarium_workbench.lib import study_run_state
 from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib import investigation_run_one_views as views

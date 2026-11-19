@@ -12,10 +12,11 @@ from pathlib import Path
 import pytest
 
 from vivarium_workbench.lib import composite_runs as cr
-from vivarium_workbench.lib import remote_run_compose, remote_run_viva_v1
+from vivarium_workbench.lib import remote_run_compose
+from vivarium_workbench_sms import remote_run_viva_v1
 from vivarium_workbench.lib import remote_run_views as rrv
 from vivarium_workbench.lib.backends import records
-from vivarium_workbench.lib.sms_api_client import BACKEND_BASE_ENV_VARS
+from vivarium_workbench_sms.sms_api_client import BACKEND_BASE_ENV_VARS
 
 HERE = "http://api:8000"
 ELSEWHERE = "http://other:8000"
@@ -158,7 +159,8 @@ def test_trace_routes_by_the_record(ws, asked, monkeypatch):
 
 
 def test_resolve_or_fetch_store_never_fetches_another_backends_run(ws, monkeypatch):
-    from vivarium_workbench.lib import simulations_index, sms_api_client
+    from vivarium_workbench.lib import simulations_index
+    from vivarium_workbench_sms import sms_api_client
 
     monkeypatch.setattr(sms_api_client.SmsApiClient, "download_data",
                         lambda *a, **k: pytest.fail("downloaded another backend's run"))
@@ -228,7 +230,7 @@ def test_a_non_string_deployment_is_ignored_not_a_500(ws, asked, junk):
 
 
 def test_the_figures_routes_refuse_another_backends_run(ws, monkeypatch, inproc_client):
-    from vivarium_workbench.lib import sms_api_client
+    from vivarium_workbench_sms import sms_api_client
 
     _record(ws, "66", "sms-legacy", ELSEWHERE, dep="prod-elsewhere")
     monkeypatch.setattr(sms_api_client.SmsApiClient, "__init__", lambda *a, **k: pytest.fail("asked a backend"))
@@ -240,8 +242,9 @@ def test_the_figures_routes_refuse_another_backends_run(ws, monkeypatch, inproc_
 
 
 def test_the_study_gallery_skips_an_index_candidate_of_another_backend(ws, monkeypatch):
-    from vivarium_workbench.lib import remote_analysis_figures as raf
-    from vivarium_workbench.lib import remote_simulations, simulations_index
+    from vivarium_workbench_sms import remote_analysis_figures as raf
+    from vivarium_workbench.lib import simulations_index
+    from vivarium_workbench_sms import remote_simulations
 
     _record(ws, "77", "sms-legacy", ELSEWHERE, dep="prod-elsewhere")
     monkeypatch.setattr(remote_simulations, "list_remote_simulations", lambda ws_root: [])

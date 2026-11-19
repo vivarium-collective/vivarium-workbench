@@ -140,7 +140,7 @@ def test_launch_into_study_pinned_deployment_guard_409(tmp_path, monkeypatch):
     run_target_for fallback), so a pinned deployment with a plain workspace
     silently fell through to a local subprocess. Mirrors
     test_launch_into_study_remote_build_guard_409 but for the pin condition."""
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
     (tmp_path / "studies" / "s1").mkdir(parents=True)
     assert not (tmp_path / ".viv-build.json").exists()  # the pin alone must be sufficient
     monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: True)

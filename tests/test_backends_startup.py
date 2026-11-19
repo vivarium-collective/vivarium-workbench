@@ -11,7 +11,7 @@ import argparse
 import pytest
 
 from vivarium_workbench import cli
-from vivarium_workbench.lib import sms_api_client as sac
+from vivarium_workbench_sms import sms_api_client as sac
 
 NAMED, VIVA, SMS = sac.BACKEND_BASE_ENV_VARS
 

@@ -26,18 +26,18 @@ from pathlib import Path
 
 from vivarium_workbench.lib import git_status
 from vivarium_workbench.lib import github_auth
-from vivarium_workbench.lib import remote_pinned
+from vivarium_workbench_sms import remote_pinned
 from vivarium_workbench.lib import backends, remote_run_compose
-from vivarium_workbench.lib.backends import sms_legacy
+from vivarium_workbench_sms import sms_legacy
 from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib.investigations import load_spec
-from vivarium_workbench.lib.remote_run_jobs import (
+from vivarium_workbench_sms.remote_run_jobs import (
     PipelineCtx,
     manager,
     run_remote_pipeline,
 )
 from vivarium_workbench.lib.remote_run_landing import land_remote_run
-from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
 from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 # sms-api JobStatus terminal sets (relocated here from remote_run_jobs, which R5

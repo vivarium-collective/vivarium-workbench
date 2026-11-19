@@ -99,7 +99,7 @@ def _remote_study_run_stats(ws_root: Path) -> dict:
     cache warms. Best-effort — never raises.
     """
     try:
-        from vivarium_workbench.lib.remote_simulations import (
+        from vivarium_workbench_sms.remote_simulations import (
             _load_remote_study_map, list_remote_simulations_swr)
         if not _load_remote_study_map(ws_root):
             return {}

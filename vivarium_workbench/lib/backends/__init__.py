@@ -17,13 +17,12 @@ is only the fallback for a run with no record (one listed live from the configur
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Protocol, Union
+from typing import TYPE_CHECKING, Callable, Optional, Protocol, Union
 
 from vivarium_workbench.lib.backends.compose_api import ComposeApiRuns
-from vivarium_workbench.lib.backends.sms_legacy import SmsLegacyRuns
-from vivarium_workbench.lib.backends.viva_core import VivaCoreRuns, viva_health_identity
 
 
 
@@ -54,15 +53,48 @@ class Backend:
 
 
 COMPOSE = Backend("compose-api", ComposeApiRuns())
-VIVA_CORE = Backend("viva-core", VivaCoreRuns(), identity=viva_health_identity)
-SMS_LEGACY = Backend("sms-legacy", SmsLegacyRuns(), identity=viva_health_identity)  # the same viva-api server
+# The SMS plugin's two backends (``vivarium_workbench_sms``) are built on first use, not at import: the plugin's
+# ``sms_legacy`` imports ``backends.records``, so importing the plugin from here at load time would be a cycle
+# (docs/backend-adapters.md §2.4, step P1b). Each is built once and cached in the module globals, so every access
+# returns the same object. Step P1c replaces this with the provider registry.
+if TYPE_CHECKING:
+    VIVA_CORE: Backend
+    SMS_LEGACY: Backend
+    _ALL: "tuple[Backend, ...]"
 
-_ALL = (COMPOSE, VIVA_CORE, SMS_LEGACY)
+_LAZY = ("VIVA_CORE", "SMS_LEGACY", "_ALL")
+_LAZY_LOCK = threading.RLock()
+
+
+def __getattr__(name: str) -> object:
+    if name not in _LAZY:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from vivarium_workbench_sms.sms_legacy import SmsLegacyRuns
+    from vivarium_workbench_sms.viva_core import VivaCoreRuns, viva_health_identity
+
+    g = globals()
+    with _LAZY_LOCK:  # two request threads on first use must not each build (and keep) their own Backend
+        if "VIVA_CORE" not in g:
+            g["VIVA_CORE"] = Backend("viva-core", VivaCoreRuns(), identity=viva_health_identity)
+        if "SMS_LEGACY" not in g:
+            g["SMS_LEGACY"] = Backend("sms-legacy", SmsLegacyRuns(), identity=viva_health_identity)  # one viva-api
+        if "_ALL" not in g:
+            g["_ALL"] = (COMPOSE, g["VIVA_CORE"], g["SMS_LEGACY"])
+        return g[name]
+
+
+def _lazy(name: str) -> Backend:
+    """``VIVA_CORE`` / ``SMS_LEGACY`` through the module (built on first use; a test's patch of the global wins)."""
+    import sys
+
+    return getattr(sys.modules[__name__], name)
 
 
 def for_run(run_id: object) -> "Backend | None":
     """The backend that owns ``run_id`` by its form, or ``None`` for an empty id. At most one adapter owns an id."""
-    for backend in _ALL:
+    import sys
+
+    for backend in getattr(sys.modules[__name__], "_ALL"):
         if backend.runs.owns(run_id):
             return backend
     return None
@@ -86,7 +118,7 @@ def named() -> "Backend | None":
     if profile["dispatch"] == sc.DISPATCH_COMPOSE:
         return COMPOSE
     if profile["dispatch"] == sc.DISPATCH_DOCUMENT:
-        return VIVA_CORE
+        return _lazy("VIVA_CORE")
     return None
 
 
@@ -97,10 +129,11 @@ def select(ws_root: "Path | str") -> "Backend | None":
        The session build is checked first and short-circuits the pin.
     2. Otherwise the named backend, when it runs documents (:func:`named`).
     """
-    from vivarium_workbench.lib import remote_pinned, run_core
+    from vivarium_workbench.lib import run_core
+    from vivarium_workbench_sms import remote_pinned
 
     if run_core.run_target_for(Path(ws_root)) == "deployment" or remote_pinned.is_pinned_enabled():
-        return SMS_LEGACY
+        return _lazy("SMS_LEGACY")
     return named()
 
 
@@ -119,7 +152,8 @@ def active(ws_root: "Path | str") -> "Backend | None":
 
 def by_kind(kind: str) -> Backend:
     """The adapter for a record's ``kind``."""
-    return {COMPOSE.name: COMPOSE, VIVA_CORE.name: VIVA_CORE, SMS_LEGACY.name: SMS_LEGACY}[kind]
+    viva, sms = _lazy("VIVA_CORE"), _lazy("SMS_LEGACY")
+    return {COMPOSE.name: COMPOSE, viva.name: viva, sms.name: sms}[kind]
 
 
 def resolve(ws_root: "Path | str", run_id: object, *, deployment: "str | None" = None,
@@ -127,7 +161,7 @@ def resolve(ws_root: "Path | str", run_id: object, *, deployment: "str | None" =
     """``records.resolve_existing`` with the caller-facing arguments of :func:`for_existing` (a study's slug, a
     deployment name from a request), returning the full ``Resolution`` (its ``via`` says whether a record decided)."""
     from vivarium_workbench.lib import study_spec
-    from vivarium_workbench.lib.backends import records
+    from vivarium_workbench.lib.backends.records import resolve_existing  # the submodule (not via __getattr__)
 
     study_db = None
     if isinstance(study, str) and study.strip():
@@ -137,7 +171,7 @@ def resolve(ws_root: "Path | str", run_id: object, *, deployment: "str | None" =
             study_db = None
     # Only a non-blank string is a deployment name (a JSON body may carry anything).
     where = deployment.strip() if isinstance(deployment, str) and deployment.strip() else None
-    return records.resolve_existing(Path(ws_root), run_id, deployment=where, study_db=study_db)
+    return resolve_existing(Path(ws_root), run_id, deployment=where, study_db=study_db)
 
 
 def for_existing(ws_root: "Path | str", run_id: object, *, deployment: "str | None" = None,

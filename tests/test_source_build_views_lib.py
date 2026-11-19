@@ -12,10 +12,10 @@ import json
 import pytest
 
 from vivarium_workbench.lib import _root
-from vivarium_workbench.lib.sms_api_client import register_branch_head_legacy
+from vivarium_workbench_sms.sms_api_client import register_branch_head_legacy
 from vivarium_workbench.lib import active_workspace
-from vivarium_workbench.lib import source_build_views
-from vivarium_workbench.lib.sms_api_client import SmsApiError
+from vivarium_workbench_sms import source_build_views
+from vivarium_workbench_sms.sms_api_client import SmsApiError
 
 
 @pytest.fixture(autouse=True)

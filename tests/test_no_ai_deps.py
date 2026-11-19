@@ -41,7 +41,8 @@ _PKG_ROOT = Path(__file__).resolve().parent.parent / "vivarium_workbench"
 
 
 def _module_files() -> list[Path]:
-    return sorted(_PKG_ROOT.rglob("*.py"))
+    # step P1b (deliberate change): the SMS plugin package ships in the same distribution; check it too.
+    return sorted([*_PKG_ROOT.rglob("*.py"), *(_PKG_ROOT.parent / "vivarium_workbench_sms").rglob("*.py")])
 
 
 def _imported_names(tree: ast.AST) -> set[str]:

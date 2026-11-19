@@ -26,13 +26,13 @@ import json
 from pathlib import Path
 
 from vivarium_workbench.lib import active_workspace
-from vivarium_workbench.lib.remote_build_source import (
+from vivarium_workbench_sms.remote_build_source import (
     ensure_git_workspace,
     list_build_sources,
     materialize_build,
     materialize_session_build,
 )
-from vivarium_workbench.lib.sms_api_client import BranchHeadUnresolved, SmsApiClient, SmsApiError
+from vivarium_workbench_sms.sms_api_client import BranchHeadUnresolved, SmsApiClient, SmsApiError
 from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 

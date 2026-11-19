@@ -10,7 +10,7 @@ import pytest
 
 from _viva_v1_stub import VivaV1Stub, example, load_spec
 from vivarium_workbench.lib import server_capabilities as sc
-from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
 
 CAPS = "/viva/v1/capabilities"
 HEALTH = "/viva/v1/health"

@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
 
 
 class _Resp(io.BytesIO):
@@ -35,7 +35,7 @@ def _patch_urlopen(monkeypatch, capture, payload, status=200):
             raise HTTPError(req.full_url, status, "err", {}, io.BytesIO(b"boom"))
         return _Resp(payload, status)
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
     yield
 
 
@@ -66,7 +66,7 @@ def _http_error(status, body):
 def test_http_error_detail_summarises_html_gateway_page():
     """A 502/504 from a proxy is an HTML page, not JSON — summarise it to its
     <title> instead of echoing the whole markup into the user's alert/logs."""
-    from vivarium_workbench.lib.sms_api_client import _http_error_detail
+    from vivarium_workbench_sms.sms_api_client import _http_error_detail
     html = (b"<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n"
             b"<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n</body>\r\n</html>")
     out = _http_error_detail(_http_error(502, html))
@@ -76,13 +76,13 @@ def test_http_error_detail_summarises_html_gateway_page():
 
 def test_http_error_detail_keeps_json_detail():
     """A FastAPI {"detail": ...} body still surfaces the useful message."""
-    from vivarium_workbench.lib.sms_api_client import _http_error_detail
+    from vivarium_workbench_sms.sms_api_client import _http_error_detail
     out = _http_error_detail(_http_error(422, b'{"detail": "missing field foo"}'))
     assert out == ": missing field foo"
 
 
 def test_http_error_detail_caps_length():
-    from vivarium_workbench.lib.sms_api_client import _http_error_detail
+    from vivarium_workbench_sms.sms_api_client import _http_error_detail
     out = _http_error_detail(_http_error(500, b"x" * 5000))
     assert len(out) <= 210 and out.endswith("…")
 
@@ -263,7 +263,7 @@ def test_download_data_streams_to_file(monkeypatch, tmp_path):
         cap["method"] = req.get_method()
         return _RawResp()
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
     c = SmsApiClient("http://h:8080")
     out = c.download_data(49, tmp_path)
     assert out == tmp_path / "sim_49.tar.gz"
@@ -284,7 +284,7 @@ def test_non_200_surfaces_server_error_body(monkeypatch):
         body = json.dumps({"detail": "num_generations must be >= 1"}).encode()
         raise HTTPError(req.full_url, 422, "Unprocessable Entity", {}, io.BytesIO(body))
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
     c = SmsApiClient("http://h:8080")
     with pytest.raises(SmsApiError) as exc_info:
         c.simulation_status(999)
@@ -300,7 +300,7 @@ def test_post_error_surfaces_server_error_body(monkeypatch):
         body = json.dumps({"detail": {"loc": ["body", "commit"], "msg": "field required"}}).encode()
         raise HTTPError(req.full_url, 422, "Unprocessable Entity", {}, io.BytesIO(body))
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
     c = SmsApiClient("http://h:8080")
     with pytest.raises(SmsApiError) as exc_info:
         c.upload_simulator({"git_commit_hash": "abc"})
@@ -325,7 +325,7 @@ def test_error_body_read_failure_does_not_mask_original_error(monkeypatch):
         e.fp = _BrokenBody()
         raise e
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
     c = SmsApiClient("http://h:8080")
     with pytest.raises(SmsApiError) as exc_info:
         c._get("/x")
@@ -368,8 +368,8 @@ def test_get_retries_on_5xx_then_succeeds(monkeypatch):
         def sleep(self, s):
             sleeps.append(s)
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.time", _FakeTime())
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.time", _FakeTime())
     c = SmsApiClient("http://h:8080")
     out = c.simulation_status(1)
     assert out["status"] == "completed"
@@ -392,8 +392,8 @@ def test_get_gives_up_after_max_retries(monkeypatch):
         def sleep(self, s):
             pass
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.time", _FakeTime())
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.time", _FakeTime())
     c = SmsApiClient("http://h:8080")
     with pytest.raises(SmsApiError) as exc_info:
         c.simulation_status(1)
@@ -412,7 +412,7 @@ def test_get_does_not_retry_on_4xx(monkeypatch):
         calls["n"] += 1
         raise HTTPError(req.full_url, 404, "Not Found", {}, io.BytesIO(b""))
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
     c = SmsApiClient("http://h:8080")
     with pytest.raises(SmsApiError):
         c.simulation_status(1)
@@ -432,7 +432,7 @@ def test_post_is_never_retried_on_5xx(monkeypatch):
             calls["n"] += 1
         raise HTTPError(req.full_url, 503, "Service Unavailable", {}, io.BytesIO(b""))
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
     c = SmsApiClient("http://h:8080")
     with pytest.raises(SmsApiError):
         c.upload_simulator({"git_commit_hash": "abc"})
@@ -442,7 +442,7 @@ def test_post_is_never_retried_on_5xx(monkeypatch):
 def test_download_data_uses_generous_default_timeout(monkeypatch, tmp_path):
     """Multi-GB native-store downloads must not inherit the 30s status-call
     default (§3.12)."""
-    from vivarium_workbench.lib.sms_api_client import DOWNLOAD_TIMEOUT
+    from vivarium_workbench_sms.sms_api_client import DOWNLOAD_TIMEOUT
 
     cap = {}
 
@@ -460,7 +460,7 @@ def test_download_data_uses_generous_default_timeout(monkeypatch, tmp_path):
         cap["timeout"] = timeout
         return _RawResp()
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
     c = SmsApiClient("http://h:8080", timeout=30.0)
     c.download_data(49, tmp_path)
     assert cap["timeout"] == DOWNLOAD_TIMEOUT
@@ -484,7 +484,7 @@ def test_download_data_explicit_timeout_overrides_default(monkeypatch, tmp_path)
         cap["timeout"] = timeout
         return _RawResp()
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
     c = SmsApiClient("http://h:8080")
     c.download_data(49, tmp_path, timeout=7200.0)
     assert cap["timeout"] == 7200.0

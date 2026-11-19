@@ -125,7 +125,7 @@ def investigation_run(ws_root: Path, body: dict) -> "tuple[dict, int]":
         )
         return investigation_run_unblocked(ws_root, {"investigation": name})
 
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
     if remote_pinned.resolve_run_target(Path(ws_root)) == "deployment":
         return {
             "error": "investigation resolves to the 'deployment' run target",

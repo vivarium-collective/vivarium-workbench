@@ -149,7 +149,7 @@ class TestRemoteRepoUrl:
 
     def test_uses_lib_normalize_not_a_new_copy(self, monkeypatch, tmp_path: Path) -> None:
         """remote_repo_url routes through lib.source_build_views._normalize_repo_url."""
-        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench_sms import source_build_views as sbv
         monkeypatch.setattr(
             gs.subprocess, "run",
             lambda *a, **k: _cp(returncode=0, stdout="ssh://git@host/r.git"),

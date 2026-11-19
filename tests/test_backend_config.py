@@ -13,8 +13,8 @@ from urllib.error import HTTPError, URLError
 import pytest
 
 from vivarium_workbench.lib import backend_config as bc
-from vivarium_workbench.lib import remote_link, remote_pinned
-from vivarium_workbench.lib import sms_api_client as sac
+from vivarium_workbench_sms import remote_link, remote_pinned
+from vivarium_workbench_sms import sms_api_client as sac
 
 
 # --- the SMS names are the core's ----------------------------------------------------------------------------------

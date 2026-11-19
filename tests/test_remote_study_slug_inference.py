@@ -8,7 +8,7 @@ and every remote run lands orphaned (``study_slug=None``). ``_load_remote_study_
 """
 import textwrap
 
-from vivarium_workbench.lib.remote_simulations import (
+from vivarium_workbench_sms.remote_simulations import (
     _infer_study_slug,
     _load_remote_study_map,
 )

@@ -9,7 +9,7 @@ import pytest
 
 from vivarium_workbench.lib import remote_run
 from vivarium_workbench.lib.remote_run import _MAX_CONSECUTIVE_POLL_ERRORS, _poll_until_terminal
-from vivarium_workbench.lib.sms_api_client import SmsApiError
+from vivarium_workbench_sms.sms_api_client import SmsApiError
 
 
 class _ScriptedClient:

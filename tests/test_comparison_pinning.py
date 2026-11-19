@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from vivarium_workbench.lib import comparison_pinning as cp
-from vivarium_workbench.lib.remote_pinned import NoPinnedBuildError
+from vivarium_workbench_sms import comparison_pinning as cp
+from vivarium_workbench_sms.remote_pinned import NoPinnedBuildError
 
 
 class FakeClient:
