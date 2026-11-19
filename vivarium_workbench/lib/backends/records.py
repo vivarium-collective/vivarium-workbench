@@ -291,6 +291,20 @@ def _deployment_names_now() -> set[str]:
     return names
 
 
+def _active_kinds() -> "set[str]":
+    """The record kinds an active backend serves: compose-api and every active provider's backends."""
+    from vivarium_workbench.lib.backends import by_kind
+
+    out = set()
+    for kind in KINDS:
+        try:
+            by_kind(kind)
+        except KeyError:
+            continue
+        out.add(kind)
+    return out
+
+
 def refusal(rid: str, error: str, *, reason: str = "other-backend", phase: str = "other-backend",
             dispatched_to: Optional[str] = None) -> "tuple[dict, int]":
     """The one shape every refusal answers (409): terminal, so no poller retries it, and self-describing (the run's
@@ -404,7 +418,24 @@ def resolve_existing(ws_root: Path, remote_id: Any, *, deployment: Optional[str]
                 rid, f"this run was dispatched to {deployment}; this workbench is configured for {here_name}",
                 dispatched_to=deployment), via="legacy-guard")
     if records:
-        return _by_record(records, rid, here_name)
+        active = _active_kinds()
+        inactive = sorted({r["kind"] for r in records} - active)
+        if inactive and not ({r["kind"] for r in records} & active):
+            # Step P1c: every record names a backend whose provider is not active (providers turned off): refuse,
+            # whatever URL is configured now -- never route it by its id's form.
+            return Resolution(refusal=refusal(
+                rid, f"this run was dispatched to a {inactive[0]} backend, and no installed provider serves "
+                     f"{inactive[0]} in this workbench", reason="backend-not-installed", phase="backend-not-installed"),
+                via="record")
+        res = _by_record(records, rid, here_name)
+        if res.kind and res.kind not in active:
+            # Step P1c: the record names a backend whose provider is not active (providers turned off). Refuse;
+            # never route it by its id's form to whatever is configured now.
+            return Resolution(refusal=refusal(
+                rid, f"this run was dispatched to a {res.kind} backend, and no installed provider serves "
+                     f"{res.kind} in this workbench", reason="backend-not-installed", phase="backend-not-installed"),
+                via="record")
+        return res
     if legacy and not (deployment and deployment == here_name):
         names = _deployment_names_now()
         if not (set(legacy) & names):

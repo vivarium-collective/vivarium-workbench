@@ -18,6 +18,7 @@ CORE = [
     "vivarium_workbench.lib.backend_config",
     "vivarium_workbench.lib.backends",
     "vivarium_workbench.lib.backends.records",
+    "vivarium_workbench.lib.backends.provider",
     "vivarium_workbench.lib.backends.compose_api",
     "vivarium_workbench.lib.server_capabilities",
     "vivarium_workbench.lib.remote_run_compose",
