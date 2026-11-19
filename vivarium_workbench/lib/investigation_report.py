@@ -414,6 +414,34 @@ def _embed_native_gallery_panels(ws_root, slug: str, budget: list, skip_names: s
     return out
 
 
+def _placard_unaccounted_viz(viz_list, figs: list) -> list:
+    """Completeness backstop: return a VISIBLE ``skipped`` placard for every
+    declared visualization that is not already accounted for in ``figs`` — either
+    embedded (an ``image:`` data-URI, a committed ``viz/*.html``, a run-gallery
+    panel, or an on-demand ``local:`` render) or already placarded.
+
+    A declared viz represented by nothing — e.g. a ``command``/recipe viz whose
+    chart was never committed, or an ``image:`` viz whose file is missing — would
+    otherwise be silently dropped from the report. This closes that last gap so a
+    declared figure is NEVER silently dropped, whatever its address scheme. Matched
+    on the normalized display name (the HTML / gallery embedders humanize stems).
+    """
+    out: list = []
+    accounted = {_norm_fig_name(f.get("name")) for f in figs
+                 if isinstance(f, dict) and f.get("name")}
+    for v in (viz_list or []):
+        if not isinstance(v, dict):
+            continue
+        vname = v.get("name")
+        if not vname or _norm_fig_name(vname) in accounted:
+            continue
+        out.append({"name": vname, "skipped": True,
+                    "reason": "declared visualization is not present in the report "
+                              "(no committed figure, no run output, no live render)"})
+        accounted.add(_norm_fig_name(vname))
+    return out
+
+
 def _embed_local_viz_ondemand(study_dir: Path, viz_list, budget: list,
                               skip_names: set, hooks) -> list:
     """Render any declared ``local:`` (class-dispatch) visualization that was NOT
@@ -1318,6 +1346,8 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
                           if isinstance(f, dict) and not f.get("skipped")}
         figs.extend(_embed_local_viz_ondemand(
             study_dir, spec.get("visualizations"), img_budget, rendered_names, _viz_hooks))
+        # Completeness backstop: every DECLARED visualization must be ACCOUNTED FOR.
+        figs.extend(_placard_unaccounted_viz(spec.get("visualizations"), figs))
         # Carry the declared `display:` intent (primary / mechanism) from
         # `visualizations[]` onto each embedded figure, so the report's figure-first
         # card can show the decisive figure (+ mechanism) and collapse the rest into

@@ -258,3 +258,35 @@ def test_embed_local_viz_ondemand_ignores_image_and_command(monkeypatch):
     viz = [{"name": "gif", "address": "image:figures/x.gif"},
            {"name": "cmd", "address": "", "render": "some recipe"}]
     assert mod._embed_local_viz_ondemand(Path("."), viz, [0], set(), ({}, lambda *a, **k: "")) == []
+
+
+# --- _placard_unaccounted_viz: completeness backstop (every scheme) -----------
+
+def test_placard_unaccounted_viz_flags_missing():
+    import vivarium_workbench.lib.investigation_report as mod
+    viz = [{"name": "perf-chart", "address": "", "render": "recipe"},     # command, not committed
+           {"name": "anim", "address": "image:figures/anim.gif"}]         # image file missing
+    out = mod._placard_unaccounted_viz(viz, [])
+    assert {f["name"] for f in out} == {"perf-chart", "anim"}
+    assert all(f.get("skipped") and "html" not in f and "data_uri" not in f for f in out)
+
+
+def test_placard_unaccounted_viz_skips_already_embedded_humanized():
+    import vivarium_workbench.lib.investigation_report as mod
+    # committed viz/colony-scaling.html embeds as humanized "Colony scaling"
+    figs = [{"name": "Colony scaling", "html": "<div/>"}]
+    out = mod._placard_unaccounted_viz([{"name": "colony-scaling", "address": "local:V"}], figs)
+    assert out == []
+
+
+def test_placard_unaccounted_viz_skips_already_placarded():
+    import vivarium_workbench.lib.investigation_report as mod
+    figs = [{"name": "cost-baseline", "skipped": True, "reason": "x"}]
+    out = mod._placard_unaccounted_viz([{"name": "cost-baseline", "address": "local:V"}], figs)
+    assert out == []
+
+
+def test_placard_unaccounted_viz_empty_and_malformed():
+    import vivarium_workbench.lib.investigation_report as mod
+    assert mod._placard_unaccounted_viz(None, []) == []
+    assert mod._placard_unaccounted_viz([{"address": "local:V"}, "nope", {}], []) == []
