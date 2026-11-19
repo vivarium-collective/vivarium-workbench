@@ -18,9 +18,10 @@ import time
 import warnings
 from pathlib import Path
 
-from vivarium_workbench.lib import remote_pinned, study_spec
+from vivarium_workbench.lib import study_spec
+from vivarium_workbench_sms import remote_pinned
 from vivarium_workbench.lib.backends.records import remote_record as _remote_record
-from vivarium_workbench.lib.sms_api_client import DOWNLOAD_TIMEOUT, SmsApiClient, SmsApiError
+from vivarium_workbench_sms.sms_api_client import DOWNLOAD_TIMEOUT, SmsApiClient, SmsApiError
 
 
 def _poll_analysis_until_terminal(client: SmsApiClient, database_id: int) -> None:

@@ -17,7 +17,7 @@ fix maps ``experiment_id`` substrings -> study slugs via the workspace's
 """
 import textwrap
 
-from vivarium_workbench.lib.remote_simulations import (
+from vivarium_workbench_sms.remote_simulations import (
     _infer_study_slug,
     _load_remote_study_map,
     _normalize,

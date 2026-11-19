@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from vivarium_workbench.lib import remote_analysis_figures as raf
+from vivarium_workbench_sms import remote_analysis_figures as raf
 
 ADIR = "analysis-sim248-sim248-api_si-d7639e"
 PREFIX = f"s3://bucket/vecoli-output/sim248-sim248-api_simulation_default-15f2/analyses/{ADIR}"
@@ -199,7 +199,7 @@ def test_registry_failure_is_not_reported_as_missing_credentials(monkeypatch):
     out = raf.list_remote_analysis_figures(client, 2088)
     assert out["available"] is False and out["reason"] == "datasets-error"
 
-    from vivarium_workbench.lib import remote_simulations as rs
+    from vivarium_workbench_sms import remote_simulations as rs
     monkeypatch.setattr(rs, "list_remote_simulations", lambda ws, **k: [
         {"study_slug": "s", "status": "completed", "remote_origin": {"simulation_id": 2088}, "sim_name": "x"}])
     monkeypatch.setattr(raf, "_aws_creds_ok", lambda: False)
@@ -280,7 +280,7 @@ def test_capability_check_is_cached_per_backend():
 
 def test_study_gallery_does_not_blame_credentials_when_the_registry_answered(monkeypatch):
     """Every sim answered from the registry with nothing to show -> 'no-figures', never 's3-auth-error'."""
-    from vivarium_workbench.lib import remote_simulations as rs
+    from vivarium_workbench_sms import remote_simulations as rs
     monkeypatch.setattr(rs, "list_remote_simulations", lambda ws, **k: [
         {"study_slug": "s", "status": "completed", "remote_origin": {"simulation_id": 2088}, "sim_name": "x"}])
     monkeypatch.setattr(raf, "list_remote_analysis_figures",
@@ -319,7 +319,7 @@ def test_same_directory_from_both_sources_merges_files(monkeypatch):
 
 
 def test_study_gallery_reports_truncated_sims(monkeypatch):
-    from vivarium_workbench.lib import remote_simulations as rs
+    from vivarium_workbench_sms import remote_simulations as rs
     monkeypatch.setattr(rs, "list_remote_simulations", lambda ws, **k: [
         {"study_slug": "s", "status": "completed", "remote_origin": {"simulation_id": 2088}, "sim_name": "x"}])
     monkeypatch.setattr(raf, "list_remote_analysis_figures", lambda c, sid, **k: {

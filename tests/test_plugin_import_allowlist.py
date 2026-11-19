@@ -77,7 +77,8 @@ def _workbench_imports(package: str) -> dict[str, set[str]]:
     """Map each imported ``package`` submodule -> the files importing it."""
     root = pathlib.Path(__file__).resolve().parents[1] / "vivarium_workbench"
     found: dict[str, set[str]] = {}
-    for f in root.rglob("*.py"):
+    # step P1b (deliberate change): the SMS plugin package ships in the same distribution; check it too.
+    for f in [*root.rglob("*.py"), *(root.parent / "vivarium_workbench_sms").rglob("*.py")]:
         try:
             tree = ast.parse(f.read_text(encoding="utf-8"))
         except SyntaxError:

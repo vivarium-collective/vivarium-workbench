@@ -100,7 +100,7 @@ def _dispatch_build_image_run(simulator_id, overrides, emit_paths, config_filena
     surfaces in the Simulations/Runs tab via remote_simulations.
     """
     from vivarium_workbench.lib import remote_run_views as _rrv
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
 
     overrides = overrides or {}
     client = SmsApiClient(_rrv._sms_api_base())
@@ -262,7 +262,7 @@ def resolve_cloud_target(
     workspace where no build resolves, and the frozen-``PinnedConfig`` ``.get``
     ``AttributeError`` — into one decision with an explicit outcome.
     """
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
 
     build = body.get("build") or {}
     if not isinstance(build, dict):
@@ -291,7 +291,7 @@ def resolve_cloud_target(
                            str(session_build.get("commit") or ""), "session-build")
 
     from vivarium_workbench.lib import remote_run_views as _rrv
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient
 
     client = SmsApiClient(_rrv._sms_api_base())
     # resolve_pinned_simulator_id handles the frozen PinnedConfig + unreachable
@@ -398,7 +398,7 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     # and the pinned case to the same image dispatch, so they can never drift.
     build_ref = None
     target = "local"
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
     from vivarium_workbench.lib import remote_run as _remote_run
 
     from vivarium_workbench.lib import backends

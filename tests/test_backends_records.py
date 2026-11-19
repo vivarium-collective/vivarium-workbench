@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 
 from vivarium_workbench.lib import composite_runs as cr
-from vivarium_workbench.lib import remote_pinned
+from vivarium_workbench_sms import remote_pinned
 from vivarium_workbench.lib.backends import records
-from vivarium_workbench.lib.sms_api_client import BACKEND_BASE_ENV_VARS
+from vivarium_workbench_sms.sms_api_client import BACKEND_BASE_ENV_VARS
 
 NAMED, VIVA, SMS = BACKEND_BASE_ENV_VARS
 
@@ -75,7 +75,7 @@ def test_remote_record_carries_kind_id_url_deployment_and_the_servers_identity(m
 
 
 def test_the_identity_is_read_from_health_and_a_failure_is_remembered_only_briefly(monkeypatch):
-    from vivarium_workbench.lib import sms_api_client as sac
+    from vivarium_workbench_sms import sms_api_client as sac
 
     answers = [RuntimeError("down"), {"deployment_id": "prod"}]
 
@@ -100,13 +100,14 @@ def test_compose_api_runs_record_no_identity_and_ask_for_none(monkeypatch):
 
 
 @pytest.mark.parametrize("module, kind, rid", [
-    ("remote_run_viva_v1", "viva-core", "simulation-D55"),
-    ("remote_run_compose", "compose-api", "compose-7"),
+    # step P1b (patch target moved): remote_run_viva_v1 is in the SMS plugin package now.
+    ("vivarium_workbench_sms.remote_run_viva_v1", "viva-core", "simulation-D55"),
+    ("vivarium_workbench.lib.remote_run_compose", "compose-api", "compose-7"),
 ])
 def test_the_document_backends_placeholders_record_where_the_run_went(ws, monkeypatch, module, kind, rid):
     import importlib
 
-    mod = importlib.import_module(f"vivarium_workbench.lib.{module}")
+    mod = importlib.import_module(module)
     monkeypatch.setattr(mod.study_spec, "study_dir", lambda w, s: ws / "studies" / s)
     mod._record_pending(ws, "s", "c", rid, "http://named.test")
     conn = sqlite3.connect(ws / "studies" / "s" / "runs.db")
@@ -335,7 +336,7 @@ def test_the_same_deployment_behind_another_url_is_accepted_by_identity(ws, stan
 
 def test_sms_submit_and_land_record_the_clients_url(monkeypatch, tmp_path):
     from vivarium_workbench.lib import remote_run_views as rrv
-    from vivarium_workbench.lib.backends import sms_legacy
+    from vivarium_workbench_sms import sms_legacy
 
     monkeypatch.setattr(records, "fetch_server_id", lambda url: None)
     seen = {}
@@ -382,7 +383,7 @@ def test_sms_submit_and_land_record_the_clients_url(monkeypatch, tmp_path):
 def test_the_pipeline_lands_with_its_clients_url(tmp_path):
     jobs = _sibling("test_remote_run_jobs")
     _ctx, _FakeClient = jobs._ctx, jobs._FakeClient
-    from vivarium_workbench.lib.remote_run_jobs import RemoteRunJob, run_remote_pipeline
+    from vivarium_workbench_sms.remote_run_jobs import RemoteRunJob, run_remote_pipeline
 
     client = _FakeClient()
     client.base_url = "http://pipeline.client"
@@ -448,7 +449,7 @@ def test_a_local_runs_source_is_not_a_legacy_deployment(ws, stanford):
 
 
 def test_a_mismatch_refreshes_at_most_once_per_ttl(ws, stanford, monkeypatch):
-    from vivarium_workbench.lib import sms_api_client as sac
+    from vivarium_workbench_sms import sms_api_client as sac
 
     asked = []
 
@@ -467,7 +468,7 @@ def test_a_mismatch_refreshes_at_most_once_per_ttl(ws, stanford, monkeypatch):
 def test_a_tunnel_repointed_after_the_cache_filled_does_not_refuse_its_runs(ws, stanford, monkeypatch):
     """Unpatched end to end: the cache says prod; the tunnel now reaches stanford-test; a stanford-test run must
     resolve (the forced re-ask sees the new identity) -- review finding on step 1c-2."""
-    from vivarium_workbench.lib import sms_api_client as sac
+    from vivarium_workbench_sms import sms_api_client as sac
 
     answers = ["prod", "stanford-test"]
 
@@ -482,7 +483,7 @@ def test_a_tunnel_repointed_after_the_cache_filled_does_not_refuse_its_runs(ws, 
 
 
 def test_a_down_server_is_not_asked_by_every_lookup(ws, stanford, monkeypatch):
-    from vivarium_workbench.lib import sms_api_client as sac
+    from vivarium_workbench_sms import sms_api_client as sac
 
     asked = []
 

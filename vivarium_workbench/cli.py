@@ -554,7 +554,7 @@ def cmd_run_remote(args: argparse.Namespace) -> int:
     completion, and lands results.zip in the workspace.
     """
     from vivarium_workbench.lib.remote_run import run_remote
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
     from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
     workspace = Path(args.workspace).resolve()

@@ -20,8 +20,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from vivarium_workbench.lib import sms_api_client as mod
-from vivarium_workbench.lib.sms_api_client import (
+from vivarium_workbench_sms import sms_api_client as mod
+from vivarium_workbench_sms.sms_api_client import (
     CAPABILITY_VIVA_V1_ENVIRONMENTS as READS,
     CAPABILITY_VIVA_V1_ENVIRONMENTS_FILTERS as FILTERS,
     CAPABILITY_VIVA_V1_ENVIRONMENTS_BUILD as BUILD,
@@ -128,7 +128,7 @@ def test_conversion_uses_legacy_simulator_id_never_the_environment_id():
         "environment_ids": ["301", "302"],
     }]
     # _build_id reads database_id first -- the simulator, not environment 301
-    from vivarium_workbench.lib.remote_simulations import _build_id
+    from vivarium_workbench_sms.remote_simulations import _build_id
     assert _build_id(out[0]) == 77
 
 
@@ -235,7 +235,8 @@ def test_status_without_capability_is_legacy(monkeypatch):
 
 
 def test_ready_is_terminal_ok_for_every_build_poll():
-    from vivarium_workbench.lib import remote_run_jobs, remote_run_views
+    from vivarium_workbench.lib import remote_run_views
+    from vivarium_workbench_sms import remote_run_jobs
     assert "ready" in remote_run_jobs._TERMINAL_OK
     assert "ready" in remote_run_views._TERMINAL_OK
 
@@ -281,7 +282,7 @@ class _RecordingClient:
 
 
 def test_branch_callers_ask_for_the_branch_builds():
-    from vivarium_workbench.lib import comparison_pinning, remote_build_source, remote_pinned
+    from vivarium_workbench_sms import comparison_pinning, remote_build_source, remote_pinned
 
     v = [{"database_id": 5, "git_repo_url": REPO, "git_branch": "master",
           "git_commit_hash": "abc1234def", "created_at": "x"}]
@@ -336,14 +337,14 @@ def test_branch_builds_exclude_temporaries_by_default(monkeypatch):
 def test_pinned_build_is_the_newest_registered_on_the_branch(monkeypatch):
     """Newest REGISTERED build (12, one variant still building), not the newest
     ready one (11) and not the branch head: today's semantics, unchanged."""
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
     FakeServer(monkeypatch, [READS, FILTERS], envs=_branch_rows())
     got = remote_pinned.resolve_pinned_build(SmsApiClient("http://h"), REPO, "master")
     assert got == {"simulator_id": 12, "commit": "ccc3333", "branch": "master", "repo_url": REPO}
 
 
 def test_comparison_branch_ref_uses_the_pair_filter(monkeypatch):
-    from vivarium_workbench.lib import comparison_pinning
+    from vivarium_workbench_sms import comparison_pinning
     server = FakeServer(monkeypatch, [READS, FILTERS], envs=_branch_rows())
     got = comparison_pinning.resolve_environment_build(
         SmsApiClient("http://h"), {"repo": "CovertLabEcoli/vEcoli-private", "ref": "feature"})
@@ -371,7 +372,7 @@ def test_branch_builds_ask_every_registered_spelling(monkeypatch):
     out = SmsApiClient("http://h").list_branch_builds(REPO, "master")
     assert {q["repo_url"] for _, _, q, _ in server.requests if "branch" in q} == {REPO, REPO + ".git"}
     assert sorted(v["database_id"] for v in out["versions"]) == [10, 11, 12, 20]
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
     # the caller's own rule (.git-insensitive) still picks the newest across both
     assert remote_pinned.resolve_pinned_build(SmsApiClient("http://h"), REPO, "master")["simulator_id"] == 20
 

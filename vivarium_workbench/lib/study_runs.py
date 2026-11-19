@@ -34,7 +34,7 @@ import yaml
 
 from vivarium_workbench.lib import composite_subprocess
 from vivarium_workbench.lib import lifecycle_mutations
-from vivarium_workbench.lib import remote_pinned
+from vivarium_workbench_sms import remote_pinned
 from vivarium_workbench.lib import run_core
 from vivarium_workbench.lib import study_run_post
 from vivarium_workbench.lib import study_run_state
@@ -801,7 +801,7 @@ def run_study_baseline(ws_root, body):
                 k: v for k, v in generator_overrides.items()
                 if k not in ("n_generations", "n_seeds")
             }
-            from vivarium_workbench.lib.sms_api_client import SmsApiClient
+            from vivarium_workbench_sms.sms_api_client import SmsApiClient
             from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
             simulator_id = remote_pinned.resolve_pinned_simulator_id(
                 SmsApiClient(_sms_api_base()), ws_root)

@@ -970,7 +970,7 @@ def test_build_zip_unknown_run_404s(tmp_path):
 
 
 def _current_deployment() -> str:
-    from vivarium_workbench.lib.remote_pinned import remote_deployment_name
+    from vivarium_workbench_sms.remote_pinned import remote_deployment_name
 
     return remote_deployment_name()
 
@@ -1023,7 +1023,7 @@ def test_build_zip_falls_back_to_sms_api_for_s3_only_store(tmp_path, monkeypatch
         return out
 
     monkeypatch.setattr(
-        "vivarium_workbench.lib.sms_api_client.SmsApiClient.download_data",
+        "vivarium_workbench_sms.sms_api_client.SmsApiClient.download_data",
         _fake_download_data,
     )
 
@@ -1066,11 +1066,11 @@ def test_build_zip_sms_api_failure_404s_not_crashes(tmp_path, monkeypatch):
     monkeypatch.setattr(_si, "list_simulations", lambda workspace: [row])
 
     def _raise(self, simulation_id, dest_dir, timeout=None):
-        from vivarium_workbench.lib.sms_api_client import SmsApiError
+        from vivarium_workbench_sms.sms_api_client import SmsApiError
         raise SmsApiError("sms-api unreachable")
 
     monkeypatch.setattr(
-        "vivarium_workbench.lib.sms_api_client.SmsApiClient.download_data", _raise
+        "vivarium_workbench_sms.sms_api_client.SmsApiClient.download_data", _raise
     )
 
     data, filename, status = build_simulation_run_zip(ws, "r-s3-down")

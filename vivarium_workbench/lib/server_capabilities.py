@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from vivarium_workbench.lib.errors import APIError
-from vivarium_workbench.lib.sms_api_client import (
+from vivarium_workbench_sms.sms_api_client import (
     CAPABILITY_VIVA_V1_COMPOSITES as CAPABILITY_VIVA_V1_COMPOSITES,
     CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS as CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS,
     CAPABILITY_VIVA_V1_SURFACE as CAPABILITY_VIVA_V1_SURFACE,
@@ -231,7 +231,7 @@ def explicit_backend_profile() -> "dict | None":
     """
     import time
 
-    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
+    from vivarium_workbench_sms.sms_api_client import explicit_backend_base_url
 
     base = explicit_backend_base_url()
     if base is None:
@@ -261,7 +261,7 @@ def require_named_backend_reachable() -> None:
     profile = explicit_backend_profile()
     if profile is None or profile["reachable"]:
         return
-    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
+    from vivarium_workbench_sms.sms_api_client import explicit_backend_base_url
 
     base = explicit_backend_base_url()
     raise APIError(

@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import pytest
 
-from vivarium_workbench.lib import remote_pinned
+from vivarium_workbench_sms import remote_pinned
 from vivarium_workbench.lib import server_capabilities as sc
 from vivarium_workbench.lib.errors import APIError
-from vivarium_workbench.lib.sms_api_client import BACKEND_BASE_ENV_VARS
+from vivarium_workbench_sms.sms_api_client import BACKEND_BASE_ENV_VARS
 
 PROFILES = {
     "compose": {"reachable": True, "dispatch": sc.DISPATCH_COMPOSE, "error": None},

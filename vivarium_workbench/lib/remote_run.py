@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Callable
 from vivarium_workbench.lib.pbg_export import export_composite_pbg  # noqa: E402 (module-level for patch)
 
 if TYPE_CHECKING:
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient
 
 # Default poll interval in seconds
 _DEFAULT_POLL_INTERVAL = 10.0
@@ -313,7 +313,7 @@ def run_remote(
     Path
         Path to the downloaded ``results.tar.gz``.
     """
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient as _SmsApiClient
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient as _SmsApiClient
     from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
     ws_root = Path(ws_root).resolve()
@@ -353,7 +353,7 @@ def run_remote(
     # resolver the pinned "Run on remote" study card uses) and ship git+<repo>@<commit>: no
     # local git, pinned by construction to the commit sms-api built + keyed its ParCa cache
     # by. Local dev (unpinned) keeps the clean+pushed git_pip_url path.
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
     cfg = remote_pinned.pinned_config()
     if build_ref and build_ref.get("commit") and build_ref.get("repo_url"):
         # Explicit build target: a Cloud Run against a SELECTED registered build
@@ -523,7 +523,7 @@ def _poll_until_terminal(
     :exc:`TimeoutError` on deadline and :exc:`RuntimeError` on persistent polling
     failure.
     """
-    from vivarium_workbench.lib.sms_api_client import SmsApiError
+    from vivarium_workbench_sms.sms_api_client import SmsApiError
 
     deadline = time.monotonic() + poll_timeout if poll_timeout and poll_timeout > 0 else None
     consecutive_errors = 0

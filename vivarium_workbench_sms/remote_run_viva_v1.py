@@ -18,9 +18,10 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from vivarium_workbench.lib import remote_pinned, study_spec
+from vivarium_workbench.lib import study_spec
+from vivarium_workbench_sms import remote_pinned
 from vivarium_workbench.lib.investigations import load_spec
-from vivarium_workbench.lib.sms_api_client import DOWNLOAD_TIMEOUT, SmsApiClient, SmsApiError
+from vivarium_workbench_sms.sms_api_client import DOWNLOAD_TIMEOUT, SmsApiClient, SmsApiError
 from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 _TERMINAL_OK = {"completed"}
@@ -120,7 +121,7 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
     from vivarium_workbench.lib import remote_run
     from vivarium_workbench.lib.remote_run_landing import land_composite_results
 
-    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
+    from vivarium_workbench_sms.sms_api_client import explicit_backend_base_url
 
     if explicit_backend_base_url() is None:
         # Like compose-api runs (remote_run_compose._session): a viva-core run is landed only from the backend the

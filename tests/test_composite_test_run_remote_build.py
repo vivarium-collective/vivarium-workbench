@@ -116,7 +116,7 @@ def test_composite_test_run_explicit_cloud_build_dispatches_image(tmp_path, monk
     the loom polls, and the run surfaces in the Simulations/Runs tab."""
     from vivarium_workbench.lib import composite_test_run_views as v
     from vivarium_workbench.lib import run_registry, remote_run
-    from vivarium_workbench.lib import sms_api_client as sac
+    from vivarium_workbench_sms import sms_api_client as sac
 
     (tmp_path / ".pbg").mkdir()
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
@@ -225,7 +225,7 @@ def test_remote_sim_run_status_and_trajectory_map_to_sms_api(tmp_path, monkeypat
     assert st["remote"] is True
     # step 1c-2: this process's own dispatch, asked with its own deployment (an older row of another deployment
     # with the same integer id must not be taken for it)
-    from vivarium_workbench.lib.remote_pinned import remote_deployment_name
+    from vivarium_workbench_sms.remote_pinned import remote_deployment_name
 
     assert calls["params"] == {"simulation_id": 909, "deployment": remote_deployment_name()}
 
@@ -240,8 +240,9 @@ def test_composite_test_run_pinned_workspace_dispatches_image(tmp_path, monkeypa
     when the scope is toggled. resolve_run_target → 'deployment', and the run must
     still dispatch the pinned build's image (not fall to compose/preflight)."""
     from vivarium_workbench.lib import composite_test_run_views as v
-    from vivarium_workbench.lib import run_registry, remote_run, remote_pinned
-    from vivarium_workbench.lib import sms_api_client as sac
+    from vivarium_workbench.lib import run_registry, remote_run
+    from vivarium_workbench_sms import remote_pinned
+    from vivarium_workbench_sms import sms_api_client as sac
 
     (tmp_path / ".pbg").mkdir()
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
@@ -277,7 +278,7 @@ def test_config_selection_honors_spec_id_over_default(tmp_path, monkeypatch):
     so a mecillinam composite ran the whole-cell default)."""
     from vivarium_workbench.lib import composite_test_run_views as v
     from vivarium_workbench.lib import run_registry, remote_run
-    from vivarium_workbench.lib import sms_api_client as sac
+    from vivarium_workbench_sms import sms_api_client as sac
 
     (tmp_path / ".pbg").mkdir()
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
@@ -312,7 +313,7 @@ def test_config_selection_spec_match_no_default(tmp_path, monkeypatch):
     (``fss_pathway_oe_native_oe_carina`` here)."""
     from vivarium_workbench.lib import composite_test_run_views as v
     from vivarium_workbench.lib import run_registry, remote_run
-    from vivarium_workbench.lib import sms_api_client as sac
+    from vivarium_workbench_sms import sms_api_client as sac
 
     (tmp_path / ".pbg").mkdir()
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
@@ -348,7 +349,7 @@ def test_composite_test_run_no_config_no_default_fails_closed(tmp_path, monkeypa
     fss_pathway_oe_native_oe_carina. run_simulation must NOT be called."""
     from vivarium_workbench.lib import composite_test_run_views as v
     from vivarium_workbench.lib import run_registry, remote_run
-    from vivarium_workbench.lib import sms_api_client as sac
+    from vivarium_workbench_sms import sms_api_client as sac
 
     (tmp_path / ".pbg").mkdir()
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")

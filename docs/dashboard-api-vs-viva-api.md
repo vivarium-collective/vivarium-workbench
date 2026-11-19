@@ -23,7 +23,7 @@ runs, stores results in XArray/Zarr on S3, and exposes them via versioned paths:
 The dashboard **consumes** viva-api — it does not duplicate it.  The stdlib
 server's `/api/source/builds` and `/api/source/switch-build` routes call
 viva-api's `simulator/versions` endpoint today (hand-written in
-`lib/sms_api_client.py`).  Those build-management routes have not yet been
+`vivarium_workbench_sms/sms_api_client.py`).  Those build-management routes have not yet been
 ported into the typed seam (`app.py`), so the dependency is implicit.
 
 Neither service owns the other's domain:
@@ -61,7 +61,7 @@ hosts and the mismatch causes no practical conflict.
 ## Recommended reconciliation (separate services, reduced drift)
 
 1. **Generate the dashboard's viva-api client from viva-api's OpenAPI spec.**
-   Replace `lib/sms_api_client.py` (hand-written, drifts silently) with a
+   Replace `vivarium_workbench_sms/sms_api_client.py` (hand-written, drifts silently) with a
    generated client (`openapi-python-client` or equivalent) pinned to the
    viva-api schema version.  This is the highest-leverage change: a one-time
    fix that eliminates a whole class of drift.
@@ -72,7 +72,7 @@ hosts and the mismatch causes no practical conflict.
    `SimRow` index use the same field names at the boundary.
 
 3. **Document ownership explicitly.**  Add a one-line ownership comment to
-   each `lib/sms_api_client.py` call site: "viva-api owns this, dashboard
+   each `vivarium_workbench_sms/sms_api_client.py` call site: "viva-api owns this, dashboard
    is the consumer."  Prevents future routes from accidentally duplicating
    viva-api logic inside the dashboard.
 

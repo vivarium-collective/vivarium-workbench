@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from vivarium_workbench.lib import server_capabilities as sc
-from vivarium_workbench.lib.sms_api_client import SmsApiError
+from vivarium_workbench_sms.sms_api_client import SmsApiError
 
 
 class FakeClient:

@@ -1,17 +1,16 @@
-"""Ratchet: the workbench's calls to the SMS-specific viva-api surfaces may shrink, never grow.
+"""Ratchet: the CORE's calls to the SMS-specific viva-api surfaces may shrink, never grow.
 
-docs/backend-adapters.md moves the workbench onto viva-core (``/viva/v1``) and compose-api only. Until that
-is done, the SMS-specific surfaces (``/api/v1/*``, ``/core/v1/*``, the interim ``/viva/v1/compose`` and the
-legacy-fallback halves of the build methods) are still called from the modules listed below. This test pins
-that list:
+docs/backend-adapters.md §2.4 (step P1b, deliberate change): SMS code lives in the plugin package
+``vivarium_workbench_sms``, which may call these surfaces freely. The workbench core (``vivarium_workbench``) may
+call them only from the mixed modules listed in ``ALLOWED`` below -- the modules step P2 splits -- and that list
+only shrinks; it is empty when P2 ends.
 
-* a NEW module calling one of these methods, or a listed module calling one it did not call before, fails --
-  add the call through the backend adapter instead, or argue for it here on purpose;
-* a listed call that is GONE also fails, so the list is shrunk in the same PR that removes the call and the
-  ratchet never goes slack.
+* a core module calling one of these methods that is not listed, or a listed one calling one it did not call
+  before, fails -- put the call in the plugin (behind a backend facet) instead;
+* a listed call that is GONE also fails, so the list is shrunk in the same PR that removes the call.
 
-Only ``lib/sms_api_client.py`` may spell an SMS route; anything else that does (a ``client._get("/api/v1/...")``
-that bypasses the methods) is pinned by ``ROUTE_LITERALS`` the same way.
+Only the plugin may spell an SMS route; a core module that does (a ``client._get("/api/v1/...")`` that bypasses
+the methods) is pinned by ``ROUTE_LITERALS`` the same way.
 
 What counts as a use: any reference to the method by name -- a call, a bound method passed on
 (``status_of or client.compose_status``), or ``getattr(client, "compose_status")``. ``SMS_METHODS`` itself
@@ -25,7 +24,8 @@ import re
 from pathlib import Path
 
 PKG = Path(__file__).resolve().parent.parent / "vivarium_workbench"
-CLIENT = PKG / "lib" / "sms_api_client.py"
+PLUGIN = Path(__file__).resolve().parent.parent / "vivarium_workbench_sms"
+CLIENT = PLUGIN / "sms_api_client.py"
 
 #: ``SmsApiClient`` methods that can reach an SMS-specific route. Those marked (fallback) go to
 #: ``/viva/v1/environments`` first and to ``/core/v1/simulator*`` only when the backend lacks the
@@ -55,35 +55,20 @@ NOT_SMS_RECEIVERS = frozenset({
     ("lib.server_capabilities", "caps"),
 })
 
-#: Today's callers. Shrink this as steps 1-6 land; never grow it.
+#: The core's remaining callers (step P1b: the plugin's own modules are no longer listed -- a move, not a removal
+#: of calls). Shrink this as step P2 lands; never grow it.
 ALLOWED: dict[str, frozenset[str]] = {
-    # The frozen SMS path (steps 1a and 1b moved these here verbatim from lib.remote_run_views: a move, not growth).
-    "lib.backends.sms_legacy": frozenset({"analysis_status", "cancel_simulation", "download_data", "get_simulation",
-                                          "run_analysis", "run_simulation", "simulation_chain_progress",
-                                          "simulation_status", "simulator_commit", "simulator_status"}),
-    "lib.comparison_pinning": frozenset({"list_branch_builds", "list_simulators", "simulator_status"}),
     "lib.composite_test_run_views": frozenset({"run_simulation"}),
-    "lib.remote_analysis_figures": frozenset({"get_simulation", "list_analyses"}),
-    "lib.remote_build_source": frozenset({"download_workspace", "list_simulators"}),
-    "lib.remote_pinned": frozenset({"list_branch_builds"}),
-    "lib.remote_reconcile": frozenset({"simulation_status"}),
     # compose_status is passed as a bound method: ``(status_of or client.compose_status)(sim_id)``.
     "lib.remote_run": frozenset({"compose_status", "compose_status_batch", "compose_submit",
                                  "download_compose_results"}),
-    "lib.remote_run_jobs": frozenset({"download_data", "run_simulation", "simulation_status", "simulator_status",
-                                      "upload_simulator"}),
     "lib.remote_run_landing": frozenset({"download_data"}),
     "lib.remote_run_views": frozenset({"run_analysis", "upload_simulator"}),
-    # The viva-core adapter still lands results through the interim compose route; viva-core 0.1.10's
-    # /composites/{id}/results replaces it.
-    "lib.remote_run_viva_v1": frozenset({"download_compose_results"}),
-    "lib.remote_simulations": frozenset({"list_build_simulations", "list_simulators", "simulation_status"}),
     "lib.remote_trace": frozenset({"compose_status", "simulation_trace"}),
     "lib.run_jobs": frozenset({"compose_status_batch"}),
     "lib.simulations_index": frozenset({"download_data"}),
     # Reads the deployment's capability list; the /core/v1 half goes when no site predates /viva/v1.
     "lib.server_capabilities": frozenset({"capabilities"}),
-    "lib.source_build_views": frozenset({"register_branch_head"}),
 }
 
 #: Every SMS method any module calls, as of step 1a. With PINNED_PAIRS below, this keeps a move between modules
@@ -206,13 +191,13 @@ def _diff(found: dict[str, set[str]], allowed: dict[str, frozenset[str]]) -> tup
 def test_no_new_sms_method_calls():
     new, _ = _diff(_sms_calls(), ALLOWED)
     assert not new, (
-        "new calls to SMS-specific SmsApiClient methods (docs/backend-adapters.md): go through viva-core "
-        "(/viva/v1) or the backend adapter instead:\n  " + "\n  ".join(new))
+        "new SMS-specific SmsApiClient calls in the core (docs/backend-adapters.md §2.4): put them in the SMS "
+        "plugin (vivarium_workbench_sms) behind a backend facet instead:\n  " + "\n  ".join(new))
 
 
-#: (module, method) pairs in ALLOWED as of step 1a (41 on main; step 1a split run_analysis between
-#: remote_run_views and backends.sms_legacy). A move keeps the count; only removals lower it.
-PINNED_PAIRS = 42
+#: (module, method) pairs in ALLOWED: 42 as of step 1a; 13 after step P1b moved the plugin's own modules out of
+#: the core (a move, not 28 removed calls). Only removals lower it.
+PINNED_PAIRS = 13
 
 
 def test_allowed_methods_never_grow():
@@ -230,7 +215,7 @@ def test_removed_sms_method_calls_are_dropped_from_the_ratchet():
 
 def test_no_new_sms_route_literals():
     new, gone = _diff(_route_literals(), ROUTE_LITERALS)
-    assert not new, ("SMS routes spelled outside lib/sms_api_client.py; add a client method (or use viva-core):\n  "
+    assert not new, ("SMS routes spelled in the core; put the call in vivarium_workbench_sms (the plugin):\n  "
                      + "\n  ".join(new))
     assert not gone, "these route literals are gone; remove them from ROUTE_LITERALS:\n  " + "\n  ".join(gone)
 

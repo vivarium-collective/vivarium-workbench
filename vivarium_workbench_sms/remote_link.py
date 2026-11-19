@@ -45,7 +45,7 @@ from vivarium_workbench.lib.backend_config import CircuitOpen as CircuitOpen
 from vivarium_workbench.lib.backend_config import RemoteLink as RemoteLink
 from vivarium_workbench.lib.backend_config import _links as _links
 from vivarium_workbench.lib.backend_config import _links_lock as _links_lock
-from vivarium_workbench.lib.sms_api_client import sms_api_base
+from vivarium_workbench_sms.sms_api_client import sms_api_base
 
 
 def _sso_expiry() -> Optional[str]:

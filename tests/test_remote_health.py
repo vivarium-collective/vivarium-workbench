@@ -7,9 +7,9 @@ degrade cleanly (never raise) so a fresh operator/Chris always gets a clear sign
 import pytest
 
 from vivarium_workbench.lib import backend_config
-from vivarium_workbench.lib import sms_api_client as sac
+from vivarium_workbench_sms import sms_api_client as sac
 from vivarium_workbench.lib import workspace_deps_views as wdv
-from vivarium_workbench.lib.sms_api_client import SmsApiError
+from vivarium_workbench_sms.sms_api_client import SmsApiError
 
 
 def _ping_with(monkeypatch, client_cls):

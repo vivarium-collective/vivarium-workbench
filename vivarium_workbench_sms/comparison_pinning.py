@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import re
 
-from vivarium_workbench.lib.remote_pinned import NoPinnedBuildError, _normalize_repo
+from vivarium_workbench_sms.remote_pinned import NoPinnedBuildError, _normalize_repo
 
 
 def _repo_key(url_or_slug: str) -> str:
@@ -43,7 +43,7 @@ def _repo_key(url_or_slug: str) -> str:
         u = u.split("/", 1)[1] if "/" in u else u   # drop host
     parts = [s for s in u.split("/") if s]
     return "/".join(parts[-2:]) if len(parts) >= 2 else u
-from vivarium_workbench.lib.sms_api_client import SmsApiClient
+from vivarium_workbench_sms.sms_api_client import SmsApiClient
 
 # Build-status vocabulary shared with the remote-run status panel
 # (lib/remote_run_views.py) — one source of truth for "what counts as built".

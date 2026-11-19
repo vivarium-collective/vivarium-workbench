@@ -13,7 +13,7 @@ dependencies = [
     # related to os.kill. As before, psutil is being imported to manage process checks
     # across systems.
     "psutil>=5.9",
-    # boto3: the remote analysis figures read S3 directly (lib/remote_analysis_figures.py,
+    # boto3: the remote analysis figures read S3 directly (vivarium_workbench_sms/remote_analysis_figures.py,
     # #1072/#1078). Without it that path reports s3-unavailable in the image.
     "boto3>=1.34",
     "jinja2",
@@ -257,7 +257,7 @@ investigation-contracts = { git = "https://github.com/vivarium-collective/invest
 # the interface without dragging in an implementation, and a cloud adapter swaps
 # in without the port changing. Enforced in CI (`lint-imports`).
 [tool.importlinter]
-root_packages = ["vivarium_workbench", "viva_superpowers", "discovery_engine"]
+root_packages = ["vivarium_workbench", "vivarium_workbench_sms", "viva_superpowers", "discovery_engine"]
 
 [[tool.importlinter.contracts]]
 # docs/backend-adapters.md step P1a: the core's generic backend plumbing never reaches into SMS code or the
@@ -268,11 +268,59 @@ name = "backend_config imports no SMS code and not lib.backends"
 type = "forbidden"
 source_modules = ["vivarium_workbench.lib.backend_config"]
 forbidden_modules = [
-    "vivarium_workbench.lib.sms_api_client",
-    "vivarium_workbench.lib.remote_pinned",
-    "vivarium_workbench.lib.remote_link",
+    "vivarium_workbench_sms",
     "vivarium_workbench.lib.server_capabilities",
     "vivarium_workbench.lib.backends",
+]
+
+[[tool.importlinter.contracts]]
+# docs/backend-adapters.md §2.4, step P1b: the core does not import the SMS plugin. Every edge that remains is
+# listed below; THIS LIST IS THE RATCHET. Each step-P2 PR removes the entries it makes unnecessary and none may
+# add one (an entry that matches no import fails the check, so a stale one cannot linger). The lazy registry
+# imports in lib.backends go when step P1c's provider replaces them; the list is empty at step P4.
+name = "the core does not import the SMS plugin (vivarium_workbench_sms), except the listed edges"
+type = "forbidden"
+source_modules = ["vivarium_workbench"]
+forbidden_modules = ["vivarium_workbench_sms"]
+ignore_imports = [
+    "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_analysis_figures",
+    "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_pinned",
+    "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_run_jobs",
+    "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_simulations",
+    "vivarium_workbench.api.app -> vivarium_workbench_sms.source_build_views",
+    "vivarium_workbench.cli -> vivarium_workbench_sms.sms_api_client",
+    "vivarium_workbench.lib.backends -> vivarium_workbench_sms.remote_pinned",
+    "vivarium_workbench.lib.backends -> vivarium_workbench_sms.sms_legacy",
+    "vivarium_workbench.lib.backends -> vivarium_workbench_sms.viva_core",
+    "vivarium_workbench.lib.composite_resolve -> vivarium_workbench_sms.remote_simulations",
+    "vivarium_workbench.lib.composite_run_views -> vivarium_workbench_sms.remote_pinned",
+    "vivarium_workbench.lib.composite_state_views -> vivarium_workbench_sms.remote_simulations",
+    "vivarium_workbench.lib.composite_test_run_views -> vivarium_workbench_sms.remote_pinned",
+    "vivarium_workbench.lib.composite_test_run_views -> vivarium_workbench_sms.sms_api_client",
+    "vivarium_workbench.lib.env_worker_launcher -> vivarium_workbench_sms.sms_api_client",
+    "vivarium_workbench.lib.git_status -> vivarium_workbench_sms.source_build_views",
+    "vivarium_workbench.lib.investigation_run_one_views -> vivarium_workbench_sms.remote_pinned",
+    "vivarium_workbench.lib.investigation_run_views -> vivarium_workbench_sms.remote_pinned",
+    "vivarium_workbench.lib.investigation_steps -> vivarium_workbench_sms.remote_pinned",
+    "vivarium_workbench.lib.investigations_index -> vivarium_workbench_sms.remote_simulations",
+    "vivarium_workbench.lib.remote_run -> vivarium_workbench_sms.remote_pinned",
+    "vivarium_workbench.lib.remote_run -> vivarium_workbench_sms.sms_api_client",
+    "vivarium_workbench.lib.remote_run_landing -> vivarium_workbench_sms.remote_pinned",
+    "vivarium_workbench.lib.remote_run_landing -> vivarium_workbench_sms.sms_api_client",
+    "vivarium_workbench.lib.remote_run_views -> vivarium_workbench_sms.remote_pinned",
+    "vivarium_workbench.lib.remote_run_views -> vivarium_workbench_sms.remote_run_jobs",
+    "vivarium_workbench.lib.remote_run_views -> vivarium_workbench_sms.sms_api_client",
+    "vivarium_workbench.lib.remote_run_views -> vivarium_workbench_sms.sms_legacy",
+    "vivarium_workbench.lib.remote_trace -> vivarium_workbench_sms.sms_api_client",
+    "vivarium_workbench.lib.run_jobs -> vivarium_workbench_sms.sms_api_client",
+    "vivarium_workbench.lib.server_capabilities -> vivarium_workbench_sms.sms_api_client",
+    "vivarium_workbench.lib.simulations_index -> vivarium_workbench_sms.remote_simulations",
+    "vivarium_workbench.lib.simulations_index -> vivarium_workbench_sms.sms_api_client",
+    "vivarium_workbench.lib.startup -> vivarium_workbench_sms.remote_link",
+    "vivarium_workbench.lib.study_runs -> vivarium_workbench_sms.remote_pinned",
+    "vivarium_workbench.lib.study_runs -> vivarium_workbench_sms.sms_api_client",
+    "vivarium_workbench.lib.workspace_deps_views -> vivarium_workbench_sms.remote_build_source",
+    "vivarium_workbench.lib.workspace_deps_views -> vivarium_workbench_sms.sms_api_client",
 ]
 
 [[tool.importlinter.contracts]]
@@ -427,12 +475,12 @@ files = [
     "vivarium_workbench/lib/csrf.py",
     "vivarium_workbench/lib/path_safety.py",
     "vivarium_workbench/lib/source_switch_views.py",
-    "vivarium_workbench/lib/source_build_views.py",
+    "vivarium_workbench_sms/source_build_views.py",
     "vivarium_workbench/lib/remote_run_views.py",
     "vivarium_workbench/lib/backends/__init__.py",
     "vivarium_workbench/lib/backends/compose_api.py",
-    "vivarium_workbench/lib/backends/viva_core.py",
-    "vivarium_workbench/lib/backends/sms_legacy.py",
+    "vivarium_workbench_sms/viva_core.py",
+    "vivarium_workbench_sms/sms_legacy.py",
     "vivarium_workbench/lib/auth_views.py",
     "vivarium_workbench/lib/git_commit_views.py",
     "vivarium_workbench/lib/work_mutations.py",
@@ -447,11 +495,11 @@ files = [
     "vivarium_workbench/lib/study_run_post.py",
     "vivarium_workbench/lib/study_runs.py",
     "vivarium_workbench/lib/smoke.py",
-    "vivarium_workbench/lib/comparison_pinning.py",
+    "vivarium_workbench_sms/comparison_pinning.py",
     "vivarium_workbench/lib/server_capabilities.py",
     "vivarium_workbench/lib/remote_trace.py",
     "vivarium_workbench/lib/perfetto_ui.py",
-    "vivarium_workbench/lib/remote_link.py",
+    "vivarium_workbench_sms/remote_link.py",
     "vivarium_workbench/lib/test_run_views.py",
     "vivarium_workbench/lib/comparative_runs.py",
     "vivarium_workbench/lib/run_unblocked_views.py",
@@ -489,7 +537,7 @@ allow-direct-references = true
 # Docker). They stay shipped via `packages`; no force-include needed.
 # Ship the renamed package AND the thin vivarium_dashboard/ back-compat shim
 # (deprecated; removed in Phase 3) so old imports keep resolving in wheels too.
-packages = ["vivarium_workbench", "vivarium_dashboard"]
+packages = ["vivarium_workbench", "vivarium_workbench_sms", "vivarium_dashboard"]
 # vivarium_workbench/loom/_dist (the Vite build output of the vendored
 # bigraph-loom, produced by `scripts/build_loom.sh` / `npm run build`) is
 # gitignored — it's a generated artifact, not source. hatchling's default

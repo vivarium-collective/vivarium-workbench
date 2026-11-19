@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from vivarium_workbench.lib import composite_test_run_views as v
-from vivarium_workbench.lib import remote_pinned
+from vivarium_workbench_sms import remote_pinned
 
 
 def test_explicit_build_with_simulator_id_returns_cloud_target(tmp_path):

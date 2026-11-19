@@ -107,7 +107,7 @@ def remote_repo_url(ws_root: Path) -> str | None:
     non-zero exit or empty URL, else the URL normalized via
     :func:`lib.source_build_views._normalize_repo_url` (reused, not re-copied).
     """
-    from vivarium_workbench.lib.source_build_views import _normalize_repo_url
+    from vivarium_workbench_sms.source_build_views import _normalize_repo_url
 
     r = subprocess.run(
         ["git", "remote", "get-url", "origin"], cwd=ws_root,

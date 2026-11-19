@@ -145,7 +145,7 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
         # only when the remote endpoint is configured (this branch), so tests and
         # the CLI never spawn the thread. Best-effort; never blocks/raises.
         try:
-            from vivarium_workbench.lib.remote_link import start_probe
+            from vivarium_workbench_sms.remote_link import start_probe
             start_probe()
         except Exception as e:  # noqa: BLE001
             print(f"warning: remote-link probe failed to start: {e}", file=sys.stderr)

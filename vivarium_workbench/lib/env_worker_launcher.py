@@ -376,7 +376,7 @@ def default_launcher() -> WorkerLauncher:
     Remote when this deployment declares where workers should dial back to;
     local otherwise. Deliberately not a per-call or per-workspace switch.
     """
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient
     from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
     # PROXY first (plan §C/§C1). It is the only transport that works where the

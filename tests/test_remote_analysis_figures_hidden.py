@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from vivarium_workbench.lib import remote_analysis_figures as raf
+from vivarium_workbench_sms import remote_analysis_figures as raf
 
 
 def test_figure_base_name_strips_variant_suffix():
@@ -63,7 +63,7 @@ def test_study_remote_figures_sources_candidates_from_remote_list(monkeypatch):
     """Candidates come from list_remote_simulations even when the SWR-cached
     combined index is cold (returns no remote rows) — the bug that collapsed a
     figure-bearing study to 'no-remote-sims'."""
-    from vivarium_workbench.lib import remote_simulations as rs
+    from vivarium_workbench_sms import remote_simulations as rs
     from vivarium_workbench.lib import simulations_index as si
     monkeypatch.setattr(rs, "list_remote_simulations",
                         lambda ws, **k: [_remote_row(1086, "cd2-antibiotic-cocktail"),
@@ -86,7 +86,7 @@ def test_study_remote_figures_sources_candidates_from_remote_list(monkeypatch):
 def test_study_remote_figures_reports_s3_auth_error(monkeypatch):
     """Candidates exist but every S3 walk comes back empty AND creds don't
     resolve -> reason 's3-auth-error', not the misleading 'no-figures'."""
-    from vivarium_workbench.lib import remote_simulations as rs
+    from vivarium_workbench_sms import remote_simulations as rs
     monkeypatch.setattr(rs, "list_remote_simulations",
                         lambda ws, **k: [_remote_row(1086, "cd2-antibiotic-cocktail")])
     monkeypatch.setattr(raf, "list_remote_analysis_figures",
@@ -100,7 +100,7 @@ def test_study_remote_figures_reports_s3_auth_error(monkeypatch):
 
 def test_study_remote_figures_no_figures_when_creds_ok(monkeypatch):
     """Same empty walk but creds DO resolve -> honest 'no-figures'."""
-    from vivarium_workbench.lib import remote_simulations as rs
+    from vivarium_workbench_sms import remote_simulations as rs
     monkeypatch.setattr(rs, "list_remote_simulations",
                         lambda ws, **k: [_remote_row(1086, "cd2-antibiotic-cocktail")])
     monkeypatch.setattr(raf, "list_remote_analysis_figures",

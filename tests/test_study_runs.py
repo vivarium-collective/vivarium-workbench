@@ -31,7 +31,7 @@ def test_study_run_baseline_on_pinned_deployment_409(tmp_path, monkeypatch):
     checked remote_pinned.is_pinned_enabled() directly, so the two run
     entrypoints disagreed on the exact same deployment. Mirrors
     test_study_run_baseline_on_remote_build_409 but for the pin condition."""
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
     from vivarium_workbench.lib import study_runs
     assert not (tmp_path / ".viv-build.json").exists()  # the pin alone must be sufficient
     monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: True)
@@ -129,7 +129,8 @@ def test_study_run_baseline_on_deployment_delegates_to_remote_run_submit(tmp_pat
     not a 409. Faking remote_run_submit itself (not the sms-api boundary it
     calls) proves the delegation wiring — remote_run_submit's own internal
     behavior is independently covered by test_remote_run_views_lib.py."""
-    from vivarium_workbench.lib import remote_pinned, study_runs
+    from vivarium_workbench.lib import study_runs
+    from vivarium_workbench_sms import remote_pinned
     from vivarium_workbench.lib import remote_run_views
 
     monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws_root: "deployment")
@@ -166,7 +167,8 @@ def test_study_run_baseline_on_deployment_forwards_extra_composite_params(tmp_pa
     """Backlog items 86/88: any baseline param beyond n_seeds/n_generations rides through
     to remote_run_submit as a generic extra_params dict, keyed by whatever the composite
     itself declares — never silently dropped, never inspected by name here."""
-    from vivarium_workbench.lib import remote_pinned, study_runs
+    from vivarium_workbench.lib import study_runs
+    from vivarium_workbench_sms import remote_pinned
     from vivarium_workbench.lib import remote_run_views
 
     monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws_root: "deployment")
@@ -201,7 +203,8 @@ def test_study_run_baseline_explicit_composite_on_deployment_still_409s(tmp_path
     explicit non-default ?composite= override on a deployment target must
     NOT silently delegate (which would run the wrong composite); it keeps
     the existing, honest 409 instead."""
-    from vivarium_workbench.lib import remote_pinned, study_runs
+    from vivarium_workbench.lib import study_runs
+    from vivarium_workbench_sms import remote_pinned
     from vivarium_workbench.lib import remote_run_views
 
     monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws_root: "deployment")
@@ -229,7 +232,8 @@ def test_study_run_baseline_deployment_no_resolvable_build_409s_cleanly(tmp_path
     exception — this is the exact path test_study_run_baseline_pinned_
     deployment_409_over_real_http exercises end to end via the real
     (unreachable-in-tests) sms-api boundary."""
-    from vivarium_workbench.lib import remote_pinned, study_runs
+    from vivarium_workbench.lib import study_runs
+    from vivarium_workbench_sms import remote_pinned
 
     monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws_root: "deployment")
     monkeypatch.setattr(remote_pinned, "resolve_pinned_simulator_id", lambda client, ws_root: None)

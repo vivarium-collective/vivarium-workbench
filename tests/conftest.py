@@ -519,12 +519,12 @@ def _forget_what_the_process_learned_about_backends():
 
     def _clear():
         # The circuit breakers live in backend_config (step P1a); remote_link re-exports the same registry.
-        for name in ("vivarium_workbench.lib.backend_config", "vivarium_workbench.lib.remote_link"):
+        for name in ("vivarium_workbench.lib.backend_config", "vivarium_workbench_sms.remote_link"):
             link = sys.modules.get(name)
             if link is not None:
                 with link._links_lock:
                     link._links.clear()
-        client = sys.modules.get("vivarium_workbench.lib.sms_api_client")
+        client = sys.modules.get("vivarium_workbench_sms.sms_api_client")
         identities = getattr(client, "COMPOSE_API_BASES", None)  # absent in code that predates compose-api identities
         if identities is not None:
             identities.clear()

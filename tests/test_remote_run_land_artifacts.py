@@ -99,7 +99,7 @@ def test_view_returns_landing_result(_ws, tmp_path, monkeypatch):
 
 
 def test_view_shapes_sms_api_error(_ws, monkeypatch):
-    from vivarium_workbench.lib.sms_api_client import SmsApiError
+    from vivarium_workbench_sms.sms_api_client import SmsApiError
     monkeypatch.setattr(rrv, "_run_auth_ok", lambda: True)
     monkeypatch.setattr(rrv, "SmsApiClient", lambda *a, **k: object())
 

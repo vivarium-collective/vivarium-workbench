@@ -26,7 +26,7 @@ import yaml
 
 from _viva_v1_stub import VivaV1Stub
 from vivarium_workbench.lib import remote_run_compose as rc
-from vivarium_workbench.lib import remote_run_viva_v1
+from vivarium_workbench_sms import remote_run_viva_v1
 from vivarium_workbench.lib import server_capabilities as sc
 from vivarium_workbench.lib.remote_run_landing import land_composite_results
 

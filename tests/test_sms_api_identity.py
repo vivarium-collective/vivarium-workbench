@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from vivarium_workbench.lib import sms_api_client as sac
+from vivarium_workbench_sms import sms_api_client as sac
 
 
 class _Session:

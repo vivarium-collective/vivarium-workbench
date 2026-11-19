@@ -101,8 +101,10 @@ def test_every_module_that_can_push_is_accounted_for():
     pat = re.compile(r"""["']push["']\s*[,\]]|remote_push_and_sha|remote_commit_and_push|\bgit\b[^\n]*\bpush\b""")
     # prose mentions only; compose_entry.py runs read-only git and has no route, its messages just tell a person to push
     skip = {"models.py", "generate_ts.py", "ai_chat.py", "ai_tools.py", "compose_entry.py"}
-    found = {f.name for f in (REPO / "vivarium_workbench" / "lib").glob("*.py")
-             if f.name not in skip and pat.search(f.read_text())}
+    # step P1b (deliberate change): the SMS plugin's modules moved out of lib/; scan them too, or this tripwire
+    # would pass without looking at them.
+    scanned = [*(REPO / "vivarium_workbench" / "lib").glob("*.py"), *(REPO / "vivarium_workbench_sms").glob("*.py")]
+    found = {f.name for f in scanned if f.name not in skip and pat.search(f.read_text())}
     expected = {"git_status.py", "git_commit_views.py", "work_mutations.py", "work_pr_views.py",
                 "remote_run_views.py", "remote_run_jobs.py", "github_auth.py", "study_spec.py",
                 "work_state.py", "remote_link.py", "remote_run.py", "remote_pinned.py",

@@ -7,15 +7,15 @@ from urllib.error import URLError
 
 import pytest
 
-from vivarium_workbench.lib import remote_link
-from vivarium_workbench.lib.remote_link import (
+from vivarium_workbench_sms import remote_link
+from vivarium_workbench_sms.remote_link import (
     CircuitOpen,
     RemoteLink,
     STATE_DOWN,
     STATE_UP,
     link,
 )
-from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
 
 
 class _Resp(io.BytesIO):
@@ -36,7 +36,7 @@ def _patch_ok(monkeypatch, payload):
         return _Resp(payload)
 
     # step P1a (patch target moved): the probe pings through backend_config; SmsApiClient._get still uses its own.
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
     monkeypatch.setattr("vivarium_workbench.lib.backend_config.urlopen", fake_urlopen)
 
 
@@ -47,7 +47,7 @@ def _patch_unreachable(monkeypatch, sentinel=None):
         raise URLError("connection refused")
 
     # step P1a (patch target moved): the probe pings through backend_config; SmsApiClient._get still uses its own.
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
     monkeypatch.setattr("vivarium_workbench.lib.backend_config.urlopen", fake_urlopen)
 
 
@@ -152,7 +152,7 @@ def test_http_error_does_not_trip_breaker(monkeypatch):
 
         raise HTTPError(req.full_url, 404, "not found", {}, io.BytesIO(b"nope"))
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.urlopen", fake_urlopen)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.urlopen", fake_urlopen)
     with pytest.raises(SmsApiError):
         SmsApiClient(base, max_retries=1).list_simulators()
     # 404 means the server answered — the tunnel is alive, breaker untouched.

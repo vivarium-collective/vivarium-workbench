@@ -160,7 +160,7 @@ class RemoteRunStep(BaseModel):
 
 
 class RemoteRunJob(BaseModel):
-    """A remote-run job (``lib/remote_run_jobs.py`` ``RemoteRunJob.to_dict``)."""
+    """A remote-run job (``vivarium_workbench_sms/remote_run_jobs.py`` ``RemoteRunJob.to_dict``)."""
 
     job_id: str
     study: str

@@ -251,7 +251,7 @@ def _study_investigation_map(ws_root: Path) -> dict:
 def _sms_api_base() -> str:
     # Single source of truth: sms_api_client.sms_api_base (VIVA_API_BASE canonical,
     # SMS_API_BASE a fallback alias from the sms-api -> viva-api rename).
-    from vivarium_workbench.lib.sms_api_client import sms_api_base
+    from vivarium_workbench_sms.sms_api_client import sms_api_base
 
     return sms_api_base()
 
@@ -293,7 +293,7 @@ def _repo_key(url) -> str:
 def _deployment_name() -> str:
     """The deployment a remote run targets — the truthful Origin label."""
     try:
-        from vivarium_workbench.lib.remote_pinned import remote_deployment_name
+        from vivarium_workbench_sms.remote_pinned import remote_deployment_name
         return remote_deployment_name()
     except Exception:
         return "remote"
@@ -512,7 +512,7 @@ def _fetch_remote_simulations_meta(
     the caller cannot tolerate the default (30s x 3) budget.
     """
     try:
-        from vivarium_workbench.lib.sms_api_client import SmsApiClient
+        from vivarium_workbench_sms.sms_api_client import SmsApiClient
     except ImportError:
         return [], None
     client = SmsApiClient(
@@ -581,7 +581,7 @@ def _fetch_remote_simulations_meta(
     # then terminalize any whose sim is done/failed/unknown. Best-effort — a
     # down tunnel or a broken workspace layout must not break the remote listing.
     try:
-        from vivarium_workbench.lib import remote_reconcile
+        from vivarium_workbench_sms import remote_reconcile
         remote_reconcile.enrich_placeholder_status(client, ws_root, live_status)
         remote_reconcile.reconcile_pending_placeholders(ws_root, live_status)
     except Exception:  # noqa: BLE001

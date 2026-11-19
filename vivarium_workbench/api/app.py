@@ -52,12 +52,12 @@ from vivarium_workbench.lib.workspace_context import WorkspaceContext
 from vivarium_workbench.lib import csrf as _csrf
 from vivarium_workbench.lib import path_safety as _path_safety
 from vivarium_workbench.lib import source_switch_views as _source_switch_views
-from vivarium_workbench.lib import source_build_views as _source_build_views
+from vivarium_workbench_sms import source_build_views as _source_build_views
 from vivarium_workbench.lib import job_status_views as _job_status_views
 from vivarium_workbench.lib import run_jobs as _run_jobs
-from vivarium_workbench.lib import remote_run_jobs as _remote_run_jobs
+from vivarium_workbench_sms import remote_run_jobs as _remote_run_jobs
 from vivarium_workbench.lib import remote_run_views as _remote_run_views
-from vivarium_workbench.lib import remote_analysis_figures as _remote_analysis_figures
+from vivarium_workbench_sms import remote_analysis_figures as _remote_analysis_figures
 from vivarium_workbench.lib import auth_views as _auth_views
 from vivarium_workbench.lib import ai_auth as _ai_auth
 from vivarium_workbench.lib import chat_limits as _chat_limits
@@ -927,7 +927,7 @@ def create_app() -> FastAPI:
             annotate_composite_registered,
         )
         if refresh:
-            from vivarium_workbench.lib import remote_simulations as _rs
+            from vivarium_workbench_sms import remote_simulations as _rs
             _rs._REMOTE_CACHE.clear()
             _rs._REMOTE_META.clear()
             clear_build_cache()
@@ -7510,7 +7510,7 @@ def create_app() -> FastAPI:
         ``VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH=1``.
         Returns ``{target, ok, reason, message, actions?, ...}``; a local
         workspace is always ok (no push needed)."""
-        from vivarium_workbench.lib.remote_pinned import resolve_run_target
+        from vivarium_workbench_sms.remote_pinned import resolve_run_target
         from vivarium_workbench.lib import remote_run as _remote_run
         from vivarium_workbench.lib import composite_test_run_views as _ctr
         try:

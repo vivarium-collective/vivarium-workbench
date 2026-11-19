@@ -19,7 +19,7 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | P3-ids | Opaque run ids end to end, pulled forward from P3 (runs in parallel with P1, Jim 2026-11-19) | — | in progress |
 | P3-launch | The vEcoli launch panel quarantined in `static/sms-launch.js`, pulled forward from P3 (parallel) | — | in progress |
 | — | compose-api server identity (`COMPOSE.identity`) | compose-api#543 | waits on compose-api: it reports no deployment identity today (asked 2026-11-19) |
-| P1b | Pure move: whole SMS modules into `vivarium_workbench_sms` (same distribution), every import and patch target re-pointed, lazy registry imports; import-linter contract whose ignore list is the ratchet | — | not started |
+| P1b | Pure move: whole SMS modules into `vivarium_workbench_sms` (same distribution), every import and patch target re-pointed, lazy registry imports; import-linter contract whose ignore list is the ratchet | wb#1662 | in review (2026-11-19) |
 | P1c | `Provider` and `SmsProvider`; registry, session build/pin and capability probe through the provider; no behaviour change | — | not started |
 | P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, facet routes stay core, SMS-only routes into the plugin's router | — | not started |
 | P3 | Opaque string run ids end to end; the UI shows the nine SMS-today features (§2.5) by declared feature; launch panel quarantined (`sms-launch.js`); core tests run without the plugin | — | not started |
@@ -224,9 +224,11 @@ vivarium_workbench/lib/backends/
 vivarium_workbench/lib/backend_config.py   # core: named URL, deployment name, one-backend + reachability rules,
                                            #   generic per-URL breaker + BackendError (P1a); outside `backends/` so the
                                            #   SMS client can import it without running `backends/__init__` (no cycle)
-vivarium_workbench_sms/   # the plugin, from P1b
+vivarium_workbench_sms/   # the plugin, from P1b (module names kept from lib/, so the move is mechanical)
+    sms_api_client.py, remote_link.py, remote_pinned.py, remote_build_source.py, source_build_views.py,
+    remote_simulations.py, remote_reconcile.py, remote_analysis_figures.py, remote_run_viva_v1.py,
+    remote_run_jobs.py, comparison_pinning.py, sms_legacy.py, viva_core.py
     provider.py        # SmsProvider (P1c)
-    client.py, pinned.py, legacy_runs.py, viva_core_runs.py, ...   # §2.5's whole modules
 ```
 
 **The registry loads lazily, and the move must not create an import cycle.**
@@ -251,6 +253,7 @@ vivarium_workbench_sms/   # the plugin, from P1b
     - from the half-SMS core modules, until P2 splits them;
     - the registry's one provider import, until P4.
   - That list **is the ratchet**. Each later PR removes entries, and none may add one. An unmatched entry fails the check, so stale entries can't linger.
+  - **As landed in P1b:** 38 edges, generated with grimp after the move (`pyproject.toml`, the contract named "the core does not import the SMS plugin"). The route ratchet's `ALLOWED` list holds the core's 13 remaining (module, method) pairs.
 - **The route-literal ratchet** (`tests/test_sms_route_ratchet.py`).
   - Its `ALLOWED` list becomes "SMS client methods and `/api/v1` / `/core/v1` literals outside the plugin". After P1b that is exactly the mixed core modules.
   - The list shrinks with P2 and is empty when P2 ends.
@@ -288,6 +291,13 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 | generic helpers in SMS modules | `remote_simulations._read_build_meta` (used by `composite_resolve`, `composite_state_views`), `source_build_views._normalize_repo_url` (used by `git_status`) | move to a core module, or behind `builds` if SMS-only |
 
 `remote_run_landing` is mixed. Its archive landing (`land_composite_results`, `fold_analyses`, `land_ptools_tsvs`, §3) is core, and compose-api and the plugin both call it. `land_remote_run` (which hardcodes the `"sms-legacy"` record and imports `remote_pinned` and `sms_api_base`) and `land_remote_simulation_artifacts` (`download_data`) are SMS: they go in P2's Runs area.
+
+**Corrections from the P2 inventory (2026-11-19), applied in P1b:**
+- `remote_trace` is mixed, not SMS-only: compose-api's trace goes through it. It stays in the core until P2.
+- `comparison_pinning` has no production caller, and `publish.py`'s `smsApiBase` is read by nothing. Both are deleted in P2 rather than kept (P1b moved `comparison_pinning` as-is).
+- Target predicates also include `investigation_run_one_views`.
+- Routes that reach SMS code and are not yet classified: `simulation-run-download`, `composite-run/{id}/artifact`, `composite-run/{id}` and `/state`, `investigation-run-unblocked-status`, `investigation-run-redrive`. P2's Routes area classifies them.
+- `ai_tools.py` hard-codes SMS route paths, `_run_auth_ok` reads the SMS pin, and `app.py` clears the listing module's private caches. These belong to P2's areas.
 
 **The plugin set.** Whole modules move in P1b. The SMS parts of mixed modules are split out in P2, one area per PR. Until then their calls into the plugin are the contract's `ignore_imports`.
 

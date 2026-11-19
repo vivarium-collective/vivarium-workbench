@@ -563,7 +563,7 @@ def study_remote_figures(ws_root, client, slug: str, max_sims: int = 10,
     # locally with a runs_meta ``remote_origin`` the sms-api list may not echo).
     sims: list = []
     try:
-        from vivarium_workbench.lib import remote_simulations as _rs
+        from vivarium_workbench_sms import remote_simulations as _rs
         sims = _rs.list_remote_simulations(ws_root) or []
     except Exception:
         sims = []

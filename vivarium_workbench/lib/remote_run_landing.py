@@ -415,7 +415,7 @@ def land_remote_run(
     study_dir = Path(study_dir)
     study_dir.mkdir(parents=True, exist_ok=True)
 
-    from vivarium_workbench.lib.remote_pinned import remote_deployment_name
+    from vivarium_workbench_sms.remote_pinned import remote_deployment_name
     deployment = remote_deployment_name()
 
     provenance = {
@@ -433,7 +433,7 @@ def land_remote_run(
     # step 1c: where the run went (lib/backends/records.py), kept out of the id's hash (added after it is
     # derived). ``base_url`` is the client's; a caller that does not say is landing from the configured backend.
     from vivarium_workbench.lib.backends.records import remote_record
-    from vivarium_workbench.lib.sms_api_client import sms_api_base
+    from vivarium_workbench_sms.sms_api_client import sms_api_base
 
     provenance["remote"] = remote_record("sms-legacy", simulation_id, base_url or sms_api_base())
 

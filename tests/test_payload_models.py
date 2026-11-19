@@ -12,7 +12,7 @@ from vivarium_workbench.lib.models import (
     SimulationsPayload,
     StudyChartsPayload,
 )
-from vivarium_workbench.lib.remote_run_jobs import RemoteRunJob
+from vivarium_workbench_sms.remote_run_jobs import RemoteRunJob
 from vivarium_workbench.lib.simulations_index import _row_to_dict
 
 import json

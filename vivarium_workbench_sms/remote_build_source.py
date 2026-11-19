@@ -20,7 +20,7 @@ import warnings
 from pathlib import Path
 from typing import Any
 
-from vivarium_workbench.lib.sms_api_client import SmsApiError
+from vivarium_workbench_sms.sms_api_client import SmsApiError
 
 # A git commit ref (the only non-server-controlled value that flows into a
 # filesystem path) must be plain hex. This closes the one allow-list gap in the
@@ -42,7 +42,7 @@ _DOWNLOAD_TIMEOUT_S = 600.0
 
 def _stamp_build_meta(cache: Path, simulator_id: int, commit: str) -> None:
     """Mark a materialized cache as a remote build so the Simulations DB merges
-    the deployment's runs (lib/remote_simulations.py reads this). No-clobber:
+    the deployment's runs (vivarium_workbench_sms/remote_simulations.py reads this). No-clobber:
     switch-build writes a richer stamp (repo/branch/repo_url); never overwrite it."""
     meta = cache / ".viv-build.json"
     if meta.exists():

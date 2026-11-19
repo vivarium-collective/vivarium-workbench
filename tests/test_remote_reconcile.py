@@ -7,7 +7,8 @@ import time
 import pytest
 
 from vivarium_workbench.lib import composite_runs as cr
-from vivarium_workbench.lib import remote_reconcile, run_log
+from vivarium_workbench.lib import run_log
+from vivarium_workbench_sms import remote_reconcile
 from vivarium_workbench.lib.simulations_index import (
     backfill_index_into_jsonl,
     build_simulations_data,
@@ -183,7 +184,7 @@ class _StubClient:
         self._missing = set(missing)
 
     def simulation_status(self, sim_id):
-        from vivarium_workbench.lib.sms_api_client import SmsApiError
+        from vivarium_workbench_sms.sms_api_client import SmsApiError
         if sim_id in self._missing:
             raise SmsApiError(f"GET /status -> 404", status=404)
         return {"status": self._statuses.get(sim_id)}

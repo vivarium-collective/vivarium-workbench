@@ -125,7 +125,7 @@ def reconcile_pending_placeholders(ws_root: "str | Path",
     this stays trivially testable with a plain dict.
     """
     from vivarium_workbench.lib import composite_runs as cr
-    from vivarium_workbench.lib.remote_simulations import _map_remote_status
+    from vivarium_workbench_sms.remote_simulations import _map_remote_status
     ws_root = Path(ws_root)
     deployment = _deployment_name()
     n = 0
@@ -195,7 +195,7 @@ def _terminalize(conn, ws_root: Path, *, run_id: str, status: str,
 def _deployment_name() -> str:
     """Best-effort remote deployment name for reason strings ("the deployment")."""
     try:
-        from vivarium_workbench.lib import remote_pinned
+        from vivarium_workbench_sms import remote_pinned
         return remote_pinned.remote_deployment_name() or "the deployment"
     except Exception:  # noqa: BLE001
         return "the deployment"

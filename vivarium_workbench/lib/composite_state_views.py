@@ -153,7 +153,7 @@ def _degrade_build_error(
     # expected-for-Cloud wording as the notice rather than a raw build trace.
     if _is_parca_cache_error(err_str):
         try:
-            from vivarium_workbench.lib.remote_simulations import _read_build_meta
+            from vivarium_workbench_sms.remote_simulations import _read_build_meta
             _meta = _read_build_meta(ws_root)
         except Exception:
             _meta = None
