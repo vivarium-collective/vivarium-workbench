@@ -11,7 +11,7 @@ viva-api#1055. "Q2" means §5's Q2 (analyses), which is Question 1 in viva-api#1
 | Step | What | PR | State (date) |
 |---|---|---|---|
 | 0 | SMS-call ratchet; drop the dead `composite_resolve` fallback | wb#1646 | **done**, merged 2026-11-19 |
-| 1a | `lib/backends/`: the three adapters, `Backend`, `for_run`; SMS code moved to `sms_legacy.py`; routing unchanged | (this PR) | in review (2026-11-19) |
+| 1a | `lib/backends/`: the three adapters, `Backend`, `for_run`; SMS code moved to `sms_legacy.py`; routing unchanged | wb#1652 | in review (2026-11-19) |
 | 1b | `active()`: selection for submit and the 9 modules that call the dispatch predicates | — | not started; plan after 1a |
 | 1c | Route every view through `for_run` (a deliberate behaviour change; edits `test_backends_routing.py` on purpose) | — | not started |
 | 2 | `EnvironmentRef`; new pinned runs on `ecoli-simulation` | — | blocked only on landing: ask E, or the job-owner interim (§4 step 2). Both sites advertise the capabilities and define `ecoli-simulation` (checked 2026-11-18) |
