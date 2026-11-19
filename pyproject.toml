@@ -324,6 +324,15 @@ ignore_imports = [
 ]
 
 [[tool.importlinter.contracts]]
+# api/deps.py holds the route dependencies (get_workspace, ...) so a router module -- e.g. a backend plugin's
+# Provider.router(), docs/backend-adapters.md section 2.2 -- can declare routes without importing api/app.py, which
+# will import that router. If deps imported app.py, that would be a cycle again.
+name = "route dependencies do not import the app"
+type = "forbidden"
+source_modules = ["vivarium_workbench.api.deps"]
+forbidden_modules = ["vivarium_workbench.api.app"]
+
+[[tool.importlinter.contracts]]
 name = "ports are pure interfaces (no adapter / no git-impl imports)"
 type = "forbidden"
 source_modules = ["vivarium_workbench.lib.ports"]
@@ -451,6 +460,7 @@ files = [
     "vivarium_workbench/lib/static_serving.py",
     "vivarium_workbench/lib/study_page.py",
     "vivarium_workbench/api/app.py",
+    "vivarium_workbench/api/deps.py",
     "vivarium_workbench/lib/env_resolver.py",
     "vivarium_workbench/lib/materialization.py",
     "vivarium_workbench/lib/repo_source.py",
