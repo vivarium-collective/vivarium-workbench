@@ -11,9 +11,13 @@ The record is one block in a run row's ``params`` (placeholder and landed rows a
                "server_id": "<the backend's own deployment identity, or null>"}
 
 ``server_id`` is what tells two deployments apart that share a URL (both Stanford sites are ``http://api:8000``;
-every laptop tunnel is ``http://localhost:8080``). It comes from the backend itself (viva-api#1055 ask F: a stable
-``deployment_id`` on ``GET /viva/v1/health``); until a deployment reports one it is null and the lookup falls back to
-the URL and deployment name, which cannot tell such deployments apart.
+every laptop tunnel is ``http://localhost:8080``). It comes from the backend itself, through its ``Backend.identity``:
+a stable ``deployment_id`` on viva-api's ``GET /viva/v1/health`` (viva-api#1055 ask F) for viva-core and sms-legacy,
+and on compose-api's ``GET /health`` (biosimulations/compose-api#543). Until a deployment reports one it is null and
+the lookup falls back to the URL and deployment name, which cannot tell such deployments apart.
+
+Identities are cached per (identity family, URL): a family is one ``Backend.identity`` function, so viva-core and
+sms-legacy (one viva-api) share an entry, and a compose-api and a viva-api at the same URL never share or cross one.
 """
 
 from __future__ import annotations
@@ -23,17 +27,23 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 KINDS = ("sms-legacy", "viva-core", "compose-api")
 
 #: How long a backend's reported identity is trusted. A tunnel on localhost:8080 can be re-pointed at another
 #: deployment while the workbench runs, so this is not per-process.
 _IDENTITY_TTL = 30.0
-_IDENTITY: "dict[str, tuple[float, Optional[str]]]" = {}
+#: Keyed by :func:`_key` (identity family, canonical URL), as are :data:`_FAILED` and :data:`_REFRESHED`.
+_IDENTITY: "dict[tuple[object, str], tuple[float, Optional[str]]]" = {}
 
-#: The field ask F asks viva-api to add to ``GET /viva/v1/health``.
+#: The field both servers report their identity in: viva-api's ``GET /viva/v1/health`` (ask F) and compose-api's
+#: ``GET /health``.
 IDENTITY_FIELD = "deployment_id"
+
+#: The kind the one-argument forms of :func:`fetch_server_id` and friends mean: the viva family (viva-core and
+#: sms-legacy), the only one that reported an identity before compose-api did.
+DEFAULT_IDENTITY_KIND = "viva-core"
 
 
 def _canonical(url: str) -> str:
@@ -50,26 +60,43 @@ def _canonical(url: str) -> str:
 #: How long a failed identity request is remembered: short, so a blip does not stick, but long enough that a down
 #: server is not asked again by every lookup (the Runs-tab poller, the reconciler).
 _IDENTITY_FAIL_TTL = 5.0
-_FAILED: "dict[str, float]" = {}
+_FAILED: "dict[tuple[object, str], float]" = {}
 
-#: When each URL's identity was last re-asked because a record disagreed with the cache (see :func:`refresh_server_id`).
-_REFRESHED: "dict[str, float]" = {}
+#: When each (family, URL)'s identity was last re-asked because a record disagreed with the cache
+#: (see :func:`refresh_server_id`).
+_REFRESHED: "dict[tuple[object, str], float]" = {}
 
 
-def _ask(base_url: str) -> Optional[str]:
-    """One identity request (cached on success; a failure remembered for :data:`_IDENTITY_FAIL_TTL`). Never raises."""
-    from vivarium_workbench.lib.backends import VIVA_CORE
+def _identity_fn(kind: str) -> "Optional[Callable[[str], Optional[str]]]":
+    """``Backend.identity`` of ``kind``'s backend (``None`` for a kind that reports none, or no such kind)."""
+    from vivarium_workbench.lib.backends import by_kind
 
-    key = _canonical(base_url)
+    try:
+        return by_kind(kind).identity
+    except KeyError:
+        return None
+
+
+def _key(base_url: str, kind: str = DEFAULT_IDENTITY_KIND) -> "tuple[object, str]":
+    """The cache key of ``kind``'s server at ``base_url``: (identity family, canonical URL). The family is the
+    backend's identity function, so kinds served by one server (viva-core, sms-legacy) share an entry, and another
+    server at the same URL (compose-api, when a backend is named) never shares or crosses it."""
+    return (_identity_fn(kind), _canonical(base_url))
+
+
+def _ask(base_url: str, kind: str) -> Optional[str]:
+    """One identity request to ``kind``'s server at ``base_url``, through that backend's own ``identity`` (cached on
+    success; a failure remembered for :data:`_IDENTITY_FAIL_TTL`). Never raises."""
+    ask = _identity_fn(kind)
+    if ask is None:  # callers check has_identity first; a kind with no identity asks nothing and caches nothing
+        return None
+    key = (ask, _canonical(base_url))
     failed = _FAILED.get(key)
     if failed is not None and time.monotonic() - failed < _IDENTITY_FAIL_TTL:
         return None
     try:
-        # Only viva-core-family backends (viva-core, sms-legacy: one server) report an identity today; the caller
-        # has already checked the record's kind has one (has_identity). The request is the backend's.
-        ask = VIVA_CORE.identity
-        ident = ask(base_url) if ask is not None else None
-    except Exception:  # noqa: BLE001 -- unreachable or not a viva-core: "reports none", never an error here
+        ident = ask(base_url)
+    except Exception:  # noqa: BLE001 -- unreachable or not that kind of server: "reports none", never an error here
         _FAILED[key] = time.monotonic()
         return None
     _FAILED.pop(key, None)
@@ -77,43 +104,38 @@ def _ask(base_url: str) -> Optional[str]:
     return ident
 
 
-def fetch_server_id(base_url: str) -> Optional[str]:
-    """The identity ``base_url`` reports (cached for :data:`_IDENTITY_TTL`), or ``None`` when it reports none or
-    cannot be asked. Through the circuit breaker with the probe policy; never raises."""
-    hit = _IDENTITY.get(_canonical(base_url))
+def fetch_server_id(base_url: str, *, kind: str = DEFAULT_IDENTITY_KIND) -> Optional[str]:
+    """The identity ``kind``'s server at ``base_url`` reports (cached for :data:`_IDENTITY_TTL`), or ``None`` when
+    it reports none or cannot be asked. Through the circuit breaker with the probe policy; never raises."""
+    hit = _IDENTITY.get(_key(base_url, kind))
     if hit and time.monotonic() - hit[0] < _IDENTITY_TTL:
         return hit[1]
-    return _ask(base_url)
+    return _ask(base_url, kind)
 
 
-def refresh_server_id(base_url: str) -> Optional[str]:
-    """Ask ``base_url`` again, bypassing the cache, because a record disagreed with the cached identity (a tunnel
-    re-pointed at another deployment must not refuse that deployment's runs). At most once per
-    :data:`_IDENTITY_TTL` per URL, so a workspace full of another deployment's runs costs one request, not one per
-    lookup; within that window the answer of the last re-ask stands."""
-    key = _canonical(base_url)
+def refresh_server_id(base_url: str, *, kind: str = DEFAULT_IDENTITY_KIND) -> Optional[str]:
+    """Ask ``kind``'s server at ``base_url`` again, bypassing the cache, because a record disagreed with the cached
+    identity (a tunnel re-pointed at another deployment must not refuse that deployment's runs). At most once per
+    :data:`_IDENTITY_TTL` per (family, URL), so a workspace full of another deployment's runs costs one request, not
+    one per lookup; within that window the answer of the last re-ask stands."""
+    key = _key(base_url, kind)
     last = _REFRESHED.get(key)
     if last is not None and time.monotonic() - last < _IDENTITY_TTL:
         hit = _IDENTITY.get(key)
         return hit[1] if hit else None
     _REFRESHED[key] = time.monotonic()
-    return _ask(base_url)
+    return _ask(base_url, kind)
 
 
-def cached_server_id(base_url: str) -> Optional[str]:
+def cached_server_id(base_url: str, *, kind: str = DEFAULT_IDENTITY_KIND) -> Optional[str]:
     """The cached identity only (no network call)."""
-    hit = _IDENTITY.get(_canonical(base_url))
+    hit = _IDENTITY.get(_key(base_url, kind))
     return hit[1] if hit and time.monotonic() - hit[0] < _IDENTITY_TTL else None
 
 
 def has_identity(kind: str) -> bool:
-    """Whether a backend of ``kind`` reports a server identity (``Backend.identity``; compose-api does not, yet)."""
-    from vivarium_workbench.lib.backends import by_kind
-
-    try:
-        return by_kind(kind).identity is not None
-    except KeyError:
-        return False
+    """Whether a backend of ``kind`` reports a server identity (``Backend.identity``)."""
+    return _identity_fn(kind) is not None
 
 
 # --- writing the record ---------------------------------------------------------------------------------------------
@@ -132,7 +154,7 @@ def remote_record(kind: str, remote_id: Any, base_url: str) -> dict:
         "id": str(remote_id).strip(),
         "base_url": _canonical(base_url),
         "deployment": backend_config.deployment_name(),
-        "server_id": fetch_server_id(base_url) if has_identity(kind) else None,
+        "server_id": fetch_server_id(base_url, kind=kind) if has_identity(kind) else None,
     }
 
 
@@ -306,21 +328,23 @@ def _by_record(records: "list[dict]", rid: str, here_name: str) -> Resolution:
 
     Exactly one kind left: that backend. None: refused (``other-backend``). Several: refused (``ambiguous``).
     """
-    now: "dict[str, Optional[str]]" = {}   # by URL: sms-legacy and viva-core share one
-    refreshed: set[str] = set()
+    # By (identity family, URL), as the module caches are: sms-legacy and viva-core share one entry, and a
+    # compose-api at viva-core's URL (possible when a backend is named) has its own.
+    now: "dict[tuple[object, str], Optional[str]]" = {}
+    refreshed: "set[tuple[object, str]]" = set()
 
     def identity(kind: str, *, fresh: bool = False) -> Optional[str]:
-        if not has_identity(kind):  # before the URL-keyed cache: compose-api may share viva-core's URL
+        if not has_identity(kind):
             return None
         url = configured_url(kind)
         if not url:
             return None
-        key = _canonical(url)
+        key = _key(url, kind)
         if fresh and key not in refreshed:
             refreshed.add(key)
-            now[key] = refresh_server_id(url)
+            now[key] = refresh_server_id(url, kind=kind)
         elif key not in now:
-            now[key] = fetch_server_id(url)
+            now[key] = fetch_server_id(url, kind=kind)
         return now[key]
 
     def _here(r: dict) -> bool:

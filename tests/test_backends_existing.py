@@ -27,8 +27,8 @@ def ws(tmp_path, monkeypatch):
     for v in BACKEND_BASE_ENV_VARS + ("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT",):
         monkeypatch.delenv(v, raising=False)
     monkeypatch.setenv("SMS_API_BASE", HERE)  # this workbench's one backend (Stanford-style)
-    monkeypatch.setattr(records, "fetch_server_id", lambda url: None)
-    monkeypatch.setattr(records, "refresh_server_id", lambda url: None)
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: None)
+    monkeypatch.setattr(records, "refresh_server_id", lambda url, **_: None)
     root = tmp_path / "ws"
     (root / "studies" / "s").mkdir(parents=True)
     (root / "workspace.yaml").write_text("name: ws\n")

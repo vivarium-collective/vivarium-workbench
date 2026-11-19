@@ -528,6 +528,11 @@ def _forget_what_the_process_learned_about_backends():
         identities = getattr(client, "COMPOSE_API_BASES", None)  # absent in code that predates compose-api identities
         if identities is not None:
             identities.clear()
+        # The server identities run records carry (backends.records), cached per (identity family, URL): a stub
+        # compose-api or viva-api on a reused port must not hand its deployment_id to a later test.
+        records = sys.modules.get("vivarium_workbench.lib.backends.records")
+        for cache in ("_IDENTITY", "_FAILED", "_REFRESHED"):
+            getattr(records, cache, {}).clear()
 
     _clear()
     yield

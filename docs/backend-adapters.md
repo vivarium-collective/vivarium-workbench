@@ -15,11 +15,14 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | 1c-1 | One remote backend per process (startup refusal); every remote run records where it went (`params.remote`); `backends.records.resolve_existing` | wb#1654 | **done**, merged 2026-11-19 |
 | 1c-2 | Views, routes, reconciler and figures route existing runs by their record (`resolve_existing`); the Runs tab sends its row's deployment | wb#1655 | **done**, merged 2026-11-19 |
 | — | Plan rewritten for the narrower scope (SMS as a plugin) | wb#1657 | **done**, merged 2026-11-19 |
-| P1a | Core seams that need no provider (`lib/backend_config.py`, `Backend.identity`); no behaviour change | wb#1658 | in review (2026-11-19) |
-| P3-ids | Opaque run ids end to end, pulled forward from P3 (runs in parallel with P1, Jim 2026-11-19) | — | in progress |
-| P3-launch | The vEcoli launch panel quarantined in `static/sms-launch.js`, pulled forward from P3 (parallel) | — | in progress |
-| — | compose-api server identity (`COMPOSE.identity`) | compose-api#543 | waits on compose-api: it reports no deployment identity today (asked 2026-11-19) |
-| P1b | Pure move: whole SMS modules into `vivarium_workbench_sms` (same distribution), every import and patch target re-pointed, lazy registry imports; import-linter contract whose ignore list is the ratchet | wb#1662 | in review (2026-11-19) |
+| P1a | Core seams that need no provider (`lib/backend_config.py`, `Backend.identity`); no behaviour change | wb#1658 | **done**, merged 2026-11-19 |
+| P3-ids | Opaque run ids end to end, pulled forward from P3 (runs in parallel with P1, Jim 2026-11-19) | wb#1660 | **done**, merged 2026-11-19 |
+| P3-launch | The vEcoli launch panel quarantined in `static/sms-launch.js`, pulled forward from P3 (parallel) | wb#1659 | **done**, merged 2026-11-19 |
+| — | compose-api server identity (`COMPOSE.identity` = `compose_api.compose_health_identity`, `deployment_id` on `GET /health`); identity caches keyed by (identity family, URL) | compose-api#543 (compose-api PR #545); this PR | in review (2026-11-20) |
+| P1b | Pure move: whole SMS modules into `vivarium_workbench_sms` (same distribution), every import and patch target re-pointed, lazy registry imports; import-linter contract whose ignore list is the ratchet | wb#1662 | **done**, merged 2026-11-20 |
+| — | `refresh_submitted`: batch-job items settle against the backend that ran them (viva-core / compose-api items never settled before) | wb#1661 | **done**, merged 2026-11-20 |
+| — | Route dependencies (`get_workspace`, ...) moved to `api/deps.py`, so a plugin router can use them without importing `api/app.py` | wb#1663 | **done**, merged 2026-11-20 |
+| — | Test isolation: the conftest reset forgets the cached GitHub session and every backend-URL cache | wb#1664 | in review (2026-11-20) |
 | P1c | `Provider` and `SmsProvider`; registry, session build/pin and capability probe through the provider; no behaviour change | — | not started |
 | P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, facet routes stay core, SMS-only routes into the plugin's router | — | not started |
 | P3 | Opaque string run ids end to end; the UI shows the nine SMS-today features (§2.5) by declared feature; launch panel quarantined (`sms-launch.js`); core tests run without the plugin | — | not started |
@@ -103,7 +106,7 @@ The run facet already exists (§1). The features that only SMS has *today* becom
 class Backend:
     name: str                          # a record's `kind`: "compose-api", "viva-core", "sms-legacy", ...
     runs: RunFacet                     # required (exists)
-    identity: Callable[[str], str | None] | None  # the server's id for records (today: /viva/v1/health)
+    identity: Callable[[str], str | None] | None  # the server's id for records (viva: /viva/v1/health; compose-api: /health)
     listing: ListingFacet | None       # runs on the server, merged into /api/simulations (SMS today)
     artifacts: ArtifactFacet | None    # a run's analysis files, figures, PTools files, data downloads (SMS today)
     analyses: AnalysisFacet | None     # re-run analyses on a finished run (SMS today)
@@ -182,7 +185,8 @@ This section is unchanged from step 1c. From P1c, the record kinds come from the
   - `backends.records.resolve_existing` routes by that record. A run that belongs to another backend is refused (409 `other-backend`) rather than sent to the configured one.
 - **A run's provenance is (server identity, run id); a URL is only an address.**
   - The same deployment has several URLs, and different deployments share one. Both Stanford sites are `http://api:8000`, and every laptop tunnel is `http://localhost:8080`.
-  - When the record and the configured server both report an identity (`server_id`, ask F), the identity alone decides.
+  - When the record and the configured server both report an identity (`server_id`: ask F for viva-core and sms-legacy, compose-api#543 for compose-api), the identity alone decides.
+  - Each backend's identity comes from its own `Backend.identity`, and the identity caches are keyed by (identity family, URL). viva-core and sms-legacy are one viva-api, so they share an entry; a compose-api named at viva-core's URL never shares or crosses its identity.
   - Until both do, the URL and the deployment name must both match. This best-effort guard can't tell apart deployments that share a URL and a name.
   - Rows written before 1c-1, runs listed live from the configured server, and the study page's own dispatches fall back to `for_run()`'s id forms.
 - **Every operation on an existing run goes through its record (step 1c-2).**
@@ -285,7 +289,7 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 | capability probe (P1c) | `server_capabilities.explicit_backend_profile` → `backend_profile(SmsApiClient)`: `client.capabilities()` (`/viva/v1`, then `/core/v1`), then `openapi_operations()` for compose-api, all through the `remote_link` circuit breaker; `require_named_backend_reachable` and `_PROFILE_FAILURE_TTL` rely on that breaker | the profile becomes: core asks each provider's `recognise(url)` (the SMS provider does the viva-core check), then core's own compose-api detection; both go through the generic breaker, which P1a splits out of `remote_link` |
 | breaker (P1a, done) | `remote_link` imports `SmsApiError` and `sms_api_base` at module level; `CircuitOpen` subclasses `SmsApiError`; `snapshot()` reads the AWS SSO cache | split: the generic per-URL breaker and a core `BackendError` are in `backend_config.py`. **`SmsApiError` is an alias of `BackendError`, not a subclass** (a deliberate deviation): every `except SmsApiError` stays exact and still catches `CircuitOpen(BackendError)`. `remote_link` keeps the SMS default URL, its own `link()` / `start_probe()`, and the SSO expiry as the function `remote_link.snapshot(lk)` (the core breaker has no snapshot); they go to the plugin in P1b |
 | health (P1a, done) | `workspace_deps_views.remote_health` pings with `SmsApiClient.ping()` | `backend_config.ping`, the same request (`GET /version`, 5 s default timeout, `Accept` and caller-identity headers). `SmsApiClient.ping` keeps its own copy until P1b, because tests steer it through `sms_api_client.urlopen`; a test pins that the two agree |
-| records (P1a, done) | `records.py` uses `SmsApiClient` (`/viva/v1/health`), `_canonical_url`, `remote_pinned._DEFAULT_REMOTE_DEPLOYMENT`; `configured_url` / `_deployment_names_now` use `sms_api_base` and `BACKEND_BASE_ENV_VARS` | `Backend.identity` (viva-core and sms-legacy: `viva_core.viva_health_identity`; compose-api: none yet — giving it one is a function on `COMPOSE`). `records.has_identity(kind)` is checked before the URL-keyed cache, so a compose-api record never picks up viva-core's identity. URL canonicaliser, deployment name and configured URL come from `backend_config.py` |
+| records (P1a, done) | `records.py` uses `SmsApiClient` (`/viva/v1/health`), `_canonical_url`, `remote_pinned._DEFAULT_REMOTE_DEPLOYMENT`; `configured_url` / `_deployment_names_now` use `sms_api_base` and `BACKEND_BASE_ENV_VARS` | `Backend.identity` (viva-core and sms-legacy: `viva_core.viva_health_identity`; compose-api: `compose_api.compose_health_identity`, `deployment_id` on `GET /health`, compose-api#543). `records` asks the identity function of the record's own kind, and keys its caches by (identity family, URL), so a compose-api record never picks up viva-core's identity at a shared URL. URL canonicaliser, deployment name and configured URL come from `backend_config.py` |
 | registry (P1c) | `backends/__init__.py` imports `SmsLegacyRuns`, `VivaCoreRuns` at load | registry via provider |
 | deployment name (P1a, done) | `remote_pinned.remote_deployment_name()` (default `"smsvpctest"`) | `backend_config.deployment_name()`; `remote_pinned`'s function is a call-time wrapper. The default stays `"smsvpctest"` until P1c, then neutral, with the provider supplying its own |
 | session build and pin (P1c) | `run_core.run_target_for` (`.viv-build.json`) and `remote_pinned.is_pinned_enabled()`, used by `backends.select`; `.viv-build.json` is also read by `report.py`, `provenance_manifest.py`, `composite_resolve`, `env_worker_launcher`, `readouts_views` and `run_core` | `SmsProvider.select`; the other readers ask the provider (P2 plans each) |
@@ -411,7 +415,7 @@ Rounds repeat until they find nothing new. The PR description says what each rev
    - removes the matching `ignore_imports` entries and ratchet entries.
 
    When P2 ends, only the registry's provider import is left on the ignore list.
-   **Pulled forward, in parallel with P1 (Jim, 2026-11-19).** Two P3 items don't depend on the P1 chain and run as their own PRs now: opaque run ids end to end, and the launch-panel quarantine (`static/sms-launch.js`, gated by today's signals until P1c's declared features exist). A short parallel PR gives compose-api a server identity if compose-api reports one.
+   **Pulled forward, in parallel with P1 (Jim, 2026-11-19).** Two P3 items don't depend on the P1 chain and run as their own PRs now: opaque run ids end to end, and the launch-panel quarantine (`static/sms-launch.js`, gated by today's signals until P1c's declared features exist). A short parallel PR gives compose-api a server identity if compose-api reports one; it does (compose-api#543, `deployment_id` on `GET /health`), see the Progress row.
 6. **P3: features, and a core without the plugin.**
    - Run ids become opaque strings end to end (routes and browser); the record's `kind` decides, never the id's form (§2.5).
    - The browser reads the active provider's `features` and hides SMS-only UI when they're absent.

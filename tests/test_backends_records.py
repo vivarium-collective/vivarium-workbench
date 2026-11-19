@@ -68,9 +68,9 @@ def _rec(kind="sms-legacy", rid="12", base="http://api:8000", dep="smsvpctest", 
 
 def test_remote_record_carries_kind_id_url_deployment_and_the_servers_identity(monkeypatch):
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT", "stanford-test")
-    monkeypatch.setattr(records, "fetch_server_id", lambda url: None)
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: None)
     assert records.remote_record("sms-legacy", 12, "http://API:8000/") == _rec(dep="stanford-test")
-    monkeypatch.setattr(records, "fetch_server_id", lambda url: "st" if url == "http://api:8000" else None)
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: "st" if url == "http://api:8000" else None)
     assert records.remote_record("sms-legacy", 12, "http://api:8000")["server_id"] == "st"
 
 
@@ -89,14 +89,197 @@ def test_the_identity_is_read_from_health_and_a_failure_is_remembered_only_brief
     monkeypatch.setattr(sac.SmsApiClient, "for_", classmethod(lambda cls, kind, base=None, **k: Client()))
     assert records.fetch_server_id("http://api:8000") is None   # never raises
     assert records.fetch_server_id("http://api:8000") is None   # a failure is remembered briefly, not re-asked
-    records._FAILED["http://api:8000"] -= records._IDENTITY_FAIL_TTL + 1  # ...only briefly
+    records._FAILED[records._key("http://api:8000")] -= records._IDENTITY_FAIL_TTL + 1  # ...only briefly
     assert records.fetch_server_id("http://api:8000") == "prod"
     assert records.cached_server_id("http://api:8000") == "prod"
 
 
-def test_compose_api_runs_record_no_identity_and_ask_for_none(monkeypatch):
-    monkeypatch.setattr(records, "fetch_server_id", lambda url: pytest.fail("compose-api has no identity route"))
+# --- compose-api's identity (compose-api#543: deployment_id on GET /health) -----------------------------------------
+
+@pytest.fixture
+def compose_health(monkeypatch):
+    """Stub compose-api's ``GET /health``: each answer is a health dict, or an exception the request raises (the
+    last answer repeats). Returns ``(answers, asked)``, ``asked`` being the URLs asked."""
+    import compose_api_client.ext as ext
+
+    answers: list = []
+    asked: list = []
+
+    class Session:
+        def __init__(self, base_url, **kw):
+            self.base_url = base_url
+            assert kw.get("timeout") == 3.0  # the probe policy, not the session's 300 s default
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def health(self):
+            asked.append(self.base_url)
+            a = answers.pop(0) if len(answers) > 1 else answers[0]
+            if isinstance(a, Exception):
+                raise a
+            return a
+
+    monkeypatch.setattr(ext, "ComposeSession", Session)
+    return answers, asked
+
+
+@pytest.fixture
+def viva_health(monkeypatch):
+    """Stub viva-api's ``GET /viva/v1/health`` (the viva family's identity). Returns ``(answers, asked)``."""
+    from vivarium_workbench_sms import sms_api_client as sac
+
+    answers: list = []
+    asked: list = []
+
+    class Client:
+        def __init__(self, base):
+            self.base = base
+
+        def health_v1(self):
+            asked.append(self.base)
+            return answers[0]
+
+    monkeypatch.setattr(sac.SmsApiClient, "for_", classmethod(lambda cls, kind, base=None, **k: Client(base)))
+    return answers, asked
+
+
+def test_a_compose_api_record_carries_the_identity_from_health(compose_health):
+    # compose-api identity (deliberate change): was server_id None, compose-api had no identity route.
+    answers, asked = compose_health
+    answers.append({"version": "1", "docs": "x", "deployment_id": "  c0ffee-1  "})
+    assert records.remote_record("compose-api", "compose-1", "http://C.test/")["server_id"] == "c0ffee-1"
+    assert asked == ["http://C.test/"]
+    assert records.cached_server_id("http://c.test", kind="compose-api") == "c0ffee-1"
+    assert records.cached_server_id("http://c.test") is None  # the viva family's entry is untouched
+
+
+@pytest.mark.parametrize("health", [{"version": "1", "docs": "x"}, {"version": "1", "deployment_id": "   "}])
+def test_a_compose_api_without_deployment_id_records_none(compose_health, health):
+    answers, _ = compose_health
+    answers.append(health)
     assert records.remote_record("compose-api", "compose-1", "http://c.test")["server_id"] is None
+
+
+def test_an_unreachable_compose_api_records_none_and_is_not_asked_again_at_once(compose_health):
+    from compose_api_client.ext import NetworkError
+
+    from vivarium_workbench.lib import backend_config
+
+    answers, asked = compose_health
+    answers.extend([NetworkError("cannot reach http://c.test"), {"deployment_id": "c-1"}])
+    assert records.remote_record("compose-api", "compose-1", "http://c.test")["server_id"] is None
+    assert records.fetch_server_id("http://c.test", kind="compose-api") is None  # remembered, not re-asked
+    assert len(asked) == 1
+    records._FAILED[records._key("http://c.test", "compose-api")] -= records._IDENTITY_FAIL_TTL + 1
+    backend_config.link("http://c.test").mark_up()  # ...and the breaker's own probe has found it back up
+    assert records.fetch_server_id("http://c.test", kind="compose-api") == "c-1"
+    assert len(asked) == 2
+
+
+def test_an_unreachable_compose_api_opens_the_circuit_breaker(compose_health):
+    from compose_api_client.ext import NetworkError
+
+    from vivarium_workbench.lib import backend_config, backends
+
+    answers, _ = compose_health
+    answers.append(NetworkError("cannot reach http://c.test"))
+    with pytest.raises(NetworkError):
+        backends.COMPOSE.identity("http://c.test")
+    assert backend_config.link("http://c.test").state == backend_config.STATE_DOWN
+
+
+def test_an_error_answer_from_compose_api_does_not_open_the_circuit_breaker(compose_health):
+    """429 and 502/503/504 are NetworkErrors in the client's hierarchy, but the server answered (review finding)."""
+    from compose_api_client.ext import RateLimitedError, ServiceUnavailableError
+
+    from vivarium_workbench.lib import backend_config, backends
+
+    answers, _ = compose_health
+    for err in (RateLimitedError("429"), ServiceUnavailableError("503")):
+        answers[:] = [err]
+        with pytest.raises(type(err)):
+            backends.COMPOSE.identity("http://c.test")
+        assert backend_config.link("http://c.test").state != backend_config.STATE_DOWN
+
+
+def test_an_open_circuit_breaker_asks_compose_api_nothing(compose_health, monkeypatch):
+    from vivarium_workbench.lib import backend_config, backends
+
+    answers, asked = compose_health
+    answers.append({"deployment_id": "c-1"})
+    lk = backend_config.link("http://c.test")
+    lk.mark_down("down")
+    monkeypatch.setattr(lk, "probe", lambda: False)  # the half-open probe (if due) finds it still down
+    with pytest.raises(backend_config.CircuitOpen):
+        backends.COMPOSE.identity("http://c.test")
+    assert asked == []
+    assert records.fetch_server_id("http://c.test", kind="compose-api") is None  # records never raises
+
+
+def test_compose_api_and_viva_core_at_one_url_never_cross_identities(compose_health, viva_health):
+    """A backend named at a URL a viva-api also answers on: each kind asks its own server, and caches its own."""
+    import time
+
+    c_answers, c_asked = compose_health
+    v_answers, v_asked = viva_health
+    c_answers.append({"deployment_id": "compose-dep"})
+    v_answers.append({"deployment_id": "viva-dep"})
+    url = "http://shared:8000"
+    assert records.remote_record("compose-api", "compose-1", url)["server_id"] == "compose-dep"
+    assert records.remote_record("viva-core", "simulation-X", url)["server_id"] == "viva-dep"
+    assert records.remote_record("sms-legacy", 12, url)["server_id"] == "viva-dep"  # one viva-api: one entry
+    assert (len(c_asked), len(v_asked)) == (1, 1)
+    assert records.cached_server_id(url, kind="compose-api") == "compose-dep"
+    assert records.cached_server_id(url) == records.cached_server_id(url, kind="sms-legacy") == "viva-dep"
+    # A failure remembered for one family is not the other's.
+    records._IDENTITY.clear()
+    records._FAILED[records._key(url, "compose-api")] = time.monotonic()
+    assert records.fetch_server_id(url, kind="compose-api") is None
+    assert records.fetch_server_id(url, kind="viva-core") == "viva-dep"
+
+
+@pytest.fixture
+def named_compose(monkeypatch):
+    monkeypatch.setenv(NAMED, "http://shared:8000")
+
+
+def test_a_compose_record_whose_identity_matches_routes_to_compose_api(ws, named_compose, compose_health,
+                                                                      viva_health):
+    """Identity first: the record was written through another address (a tunnel) and under another deployment
+    name, but the configured compose-api reports the identity it recorded."""
+    compose_health[0].append({"deployment_id": "compose-dep"})
+    viva_health[0].append({"deployment_id": "viva-dep"})
+    _row(ws, "remote-pending-compose-7",
+         {"remote": _rec(kind="compose-api", rid="compose-7", base="http://localhost:9", dep="old-name",
+                         server_id="compose-dep")})
+    assert records.resolve_existing(ws, "compose-7") == records.Resolution(kind="compose-api", via="record")
+
+
+def test_a_compose_record_from_another_compose_deployment_is_refused(ws, named_compose, compose_health):
+    compose_health[0].append({"deployment_id": "compose-dep"})
+    _row(ws, "remote-pending-compose-7",
+         {"remote": _rec(kind="compose-api", rid="compose-7", base="http://shared:8000",
+                         dep=remote_pinned.remote_deployment_name(), server_id="other-compose")})
+    res = records.resolve_existing(ws, "compose-7")
+    assert res.refusal and res.refusal[0]["reason"] == "other-backend" and "other-compose" in res.refusal[0]["error"]
+    assert len(compose_health[1]) == 2  # asked once more, bypassing the cache, before refusing
+
+
+def test_a_compose_record_carrying_the_viva_identity_is_not_routed_by_it(ws, named_compose, compose_health,
+                                                                         viva_health):
+    """At a shared URL, the viva-api's identity is not compose-api's: a compose record that names it is refused."""
+    compose_health[0].append({"deployment_id": "compose-dep"})
+    viva_health[0].append({"deployment_id": "viva-dep"})
+    assert records.fetch_server_id("http://shared:8000") == "viva-dep"  # the viva family's entry is filled first
+    _row(ws, "remote-pending-compose-7",
+         {"remote": _rec(kind="compose-api", rid="compose-7", base="http://shared:8000",
+                         dep=remote_pinned.remote_deployment_name(), server_id="viva-dep")})
+    res = records.resolve_existing(ws, "compose-7")
+    assert res.refusal and "compose-dep" in res.refusal[0]["error"]
 
 
 @pytest.mark.parametrize("module, kind, rid", [
@@ -109,6 +292,7 @@ def test_the_document_backends_placeholders_record_where_the_run_went(ws, monkey
 
     mod = importlib.import_module(module)
     monkeypatch.setattr(mod.study_spec, "study_dir", lambda w, s: ws / "studies" / s)
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: None)  # no network: neither reports one here
     mod._record_pending(ws, "s", "c", rid, "http://named.test")
     conn = sqlite3.connect(ws / "studies" / "s" / "runs.db")
     params = json.loads(conn.execute("SELECT params_json FROM runs_meta").fetchone()[0])
@@ -182,31 +366,31 @@ def test_the_records_kind_wins_over_the_ids_form(ws, stanford):
 
 
 def test_a_record_on_another_url_is_refused_without_a_network_call(ws, stanford, monkeypatch):
-    monkeypatch.setattr(records, "fetch_server_id", lambda u: pytest.fail("network"))
+    monkeypatch.setattr(records, "fetch_server_id", lambda u, **_: pytest.fail("network"))
     _row(ws, "remote-pending-12", {"remote": _rec(base="http://other:8000", dep="aws")})
     res = records.resolve_existing(ws, "12")
     assert res.refusal and res.refusal[1] == 409 and res.refusal[0]["reason"] == "other-backend"
 
 
 def test_a_record_from_another_deployment_on_the_same_url_is_refused_by_identity(ws, stanford, monkeypatch):
-    monkeypatch.setattr(records, "fetch_server_id", lambda u: "prod")
+    monkeypatch.setattr(records, "fetch_server_id", lambda u, **_: "prod")
     asked = []
-    monkeypatch.setattr(records, "refresh_server_id", lambda u: asked.append(u) or "prod")
+    monkeypatch.setattr(records, "refresh_server_id", lambda u, **_: asked.append(u) or "prod")
     _row(ws, "remote-pending-12", {"remote": _rec(server_id="stanford-test")})
     res = records.resolve_existing(ws, "12")
     assert res.refusal and "stanford-test" in res.refusal[0]["error"] and asked  # re-asked before refusing
 
 
 def test_a_stale_identity_cache_does_not_refuse(ws, stanford, monkeypatch):
-    monkeypatch.setattr(records, "fetch_server_id", lambda u: "prod")
-    monkeypatch.setattr(records, "refresh_server_id", lambda u: "stanford-test")
+    monkeypatch.setattr(records, "fetch_server_id", lambda u, **_: "prod")
+    monkeypatch.setattr(records, "refresh_server_id", lambda u, **_: "stanford-test")
     _row(ws, "remote-pending-12", {"remote": _rec(server_id="stanford-test")})
     assert records.resolve_existing(ws, "12").kind == "sms-legacy"
 
 
 @pytest.mark.parametrize("now", [None, "stanford-test"])
 def test_an_identity_missing_on_either_side_falls_back_to_the_url(ws, stanford, monkeypatch, now):
-    monkeypatch.setattr(records, "fetch_server_id", lambda u: now)
+    monkeypatch.setattr(records, "fetch_server_id", lambda u, **_: now)
     _row(ws, "remote-pending-12", {"remote": _rec(server_id=None if now else "stanford-test")})
     assert records.resolve_existing(ws, "12").kind == "sms-legacy"
 
@@ -259,8 +443,8 @@ def test_nothing_stored_falls_back_to_the_ids_form(ws, stanford, rid, kind):
 
 @pytest.fixture
 def no_identity(monkeypatch):
-    monkeypatch.setattr(records, "fetch_server_id", lambda url: None)
-    monkeypatch.setattr(records, "refresh_server_id", lambda url: None)
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: None)
+    monkeypatch.setattr(records, "refresh_server_id", lambda url, **_: None)
 
 
 def test_same_url_other_deployment_name_is_refused_without_identity(ws, stanford, no_identity, monkeypatch):
@@ -272,7 +456,7 @@ def test_same_url_other_deployment_name_is_refused_without_identity(ws, stanford
 
 
 def test_matching_identity_accepts_even_if_the_name_changed(ws, stanford, monkeypatch):
-    monkeypatch.setattr(records, "fetch_server_id", lambda url: "st")
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: "st")
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT", "renamed")
     _row(ws, "remote-pending-12", {"remote": _rec(dep="smsvpctest", server_id="st")})
     assert records.resolve_existing(ws, "12").kind == "sms-legacy"
@@ -291,7 +475,7 @@ def test_a_deployment_hint_this_workbench_could_not_have_written_is_refused(ws, 
 
 
 def test_one_run_recorded_with_and_without_identity_is_one_run(ws, stanford, monkeypatch):
-    monkeypatch.setattr(records, "fetch_server_id", lambda url: "st")
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: "st")
     _row(ws, "a", {"remote": _rec(server_id=None)})
     _row(ws, "b", {"remote": _rec(server_id="st")}, study="t")
     assert records.resolve_existing(ws, "12").kind == "sms-legacy"
@@ -327,7 +511,7 @@ def test_remote_is_not_shown_in_study_detail_or_manifests(ws):
 
 def test_the_same_deployment_behind_another_url_is_accepted_by_identity(ws, stanford, monkeypatch):
     """A tunnel or the in-cluster name: another address, the same server identity -- the same deployment."""
-    monkeypatch.setattr(records, "fetch_server_id", lambda url: "st")
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: "st")
     _row(ws, "remote-pending-12", {"remote": _rec(base="http://localhost:8080", server_id="st")})
     assert records.resolve_existing(ws, "12").kind == "sms-legacy"
 
@@ -338,7 +522,7 @@ def test_sms_submit_and_land_record_the_clients_url(monkeypatch, tmp_path):
     from vivarium_workbench.lib import remote_run_views as rrv
     from vivarium_workbench_sms import sms_legacy
 
-    monkeypatch.setattr(records, "fetch_server_id", lambda url: None)
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: None)
     seen = {}
 
     class Client:
@@ -406,22 +590,22 @@ def test_the_compose_placeholder_records_the_named_url(monkeypatch, tmp_path):
 
 def test_two_deployments_sharing_url_and_name_are_told_apart_by_identity(ws, stanford, monkeypatch):
     """stanford-test and prod: same URL, same default name, same integer id; the server says it is prod."""
-    monkeypatch.setattr(records, "fetch_server_id", lambda url: "prod")
-    monkeypatch.setattr(records, "refresh_server_id", lambda url: "prod")
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: "prod")
+    monkeypatch.setattr(records, "refresh_server_id", lambda url, **_: "prod")
     _row(ws, "a", {"remote": _rec(server_id="stanford-test")})
     _row(ws, "b", {"remote": _rec(server_id="prod")}, study="t")
     assert records.resolve_existing(ws, "12").kind == "sms-legacy"
 
 
 def test_a_mismatch_with_a_failed_refresh_falls_back_to_url_and_name(ws, stanford, monkeypatch):
-    monkeypatch.setattr(records, "fetch_server_id", lambda url: "prod")
-    monkeypatch.setattr(records, "refresh_server_id", lambda url: None)
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: "prod")
+    monkeypatch.setattr(records, "refresh_server_id", lambda url, **_: None)
     _row(ws, "a", {"remote": _rec(base="http://elsewhere:1", dep="aws", server_id="st")})
     assert records.resolve_existing(ws, "12").refusal
 
 
 def test_one_deployment_under_two_urls_seen_from_a_third_is_one_run(ws, stanford, monkeypatch):
-    monkeypatch.setattr(records, "fetch_server_id", lambda url: "st")
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: "st")
     _row(ws, "a", {"remote": _rec(base="http://localhost:8080", server_id="st")})
     _row(ws, "b", {"remote": _rec(base="http://in-cluster:8000", server_id="st")}, study="t")
     assert records.resolve_existing(ws, "12").kind == "sms-legacy"

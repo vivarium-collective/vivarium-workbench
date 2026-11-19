@@ -184,14 +184,16 @@ def test_the_breaker_probe_pings_through_the_core(monkeypatch):
 
 # --- server identity is the backend's (Backend.identity) -----------------------------------------------------------
 
-def test_compose_api_has_no_identity_and_is_never_asked(monkeypatch):
+def test_compose_api_reports_its_identity_through_its_own_function(monkeypatch):
+    # compose-api identity (deliberate change): compose-api reports deployment_id on GET /health (compose-api#543).
     from vivarium_workbench.lib import backends
-    from vivarium_workbench.lib.backends import records
+    from vivarium_workbench.lib.backends import compose_api, records
 
-    assert backends.COMPOSE.identity is None
-    assert records.has_identity("compose-api") is False
+    assert backends.COMPOSE.identity is compose_api.compose_health_identity
+    assert records.has_identity("compose-api") is True
     assert records.has_identity("viva-core") and records.has_identity("sms-legacy")
     assert records.has_identity("no-such-kind") is False
-    monkeypatch.setattr(records, "fetch_server_id", lambda url: pytest.fail("compose-api has no identity to ask"))
+    asked = []
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **k: asked.append((url, k)) or "c-1")
     rec = records.remote_record("compose-api", "compose-1", "http://compose:1")
-    assert rec["server_id"] is None
+    assert rec["server_id"] == "c-1" and asked == [("http://compose:1", {"kind": "compose-api"})]

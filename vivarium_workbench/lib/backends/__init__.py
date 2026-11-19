@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional, Protocol, Union
 
-from vivarium_workbench.lib.backends.compose_api import ComposeApiRuns
+from vivarium_workbench.lib.backends.compose_api import ComposeApiRuns, compose_health_identity
 
 
 
@@ -45,14 +45,15 @@ class Backend:
     """One backend. Only the run facet exists so far (§2.1's other facets come with later steps).
 
     ``identity`` maps a base URL to the identity that server reports (``None`` when the backend reports none);
-    run records store it as ``server_id`` (§2.3). compose-api has none yet: adding one is a function here."""
+    run records store it as ``server_id`` (§2.3). Backends that share one function are one server and share its
+    cached identity (viva-core and sms-legacy); each other function is its own family (compose-api)."""
 
     name: str
     runs: RunFacet
     identity: Optional[Callable[[str], Optional[str]]] = None
 
 
-COMPOSE = Backend("compose-api", ComposeApiRuns())
+COMPOSE = Backend("compose-api", ComposeApiRuns(), identity=compose_health_identity)
 # The SMS plugin's two backends (``vivarium_workbench_sms``) are built on first use, not at import: the plugin's
 # ``sms_legacy`` imports ``backends.records``, so importing the plugin from here at load time would be a cycle
 # (docs/backend-adapters.md §2.4, step P1b). Each is built once and cached in the module globals, so every access
