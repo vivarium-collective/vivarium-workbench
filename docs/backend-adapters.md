@@ -292,6 +292,12 @@ package, along with absolute URLs in `static/` and `templates/`:
 
 Each step is one PR and leaves `main` working at Stanford.
 
+**Review, from step 1 on (Jim, 2026-11-19).** Each step gets two independent reviews by a reviewer with fresh
+context, given the material rather than the author's conclusions: one of the step's plan before implementation
+starts (checked against the code and against the contracts below), and one of the implementation before it is
+committed. Rounds repeat until they find nothing new; the PR description says what each review found and what
+changed.
+
 **Contracts every step must keep: PTools.** Pathway Tools reads simulation output in two places, and neither may
 break:
 
