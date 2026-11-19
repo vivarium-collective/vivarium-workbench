@@ -8,7 +8,6 @@ base_url (the SSM tunnel, default http://localhost:8080).
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import time
@@ -19,122 +18,32 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 
-#: Env vars naming the backend, highest precedence first. ``serve --backend-base-url``
-#: sets the first; the other two are the pre-existing names, kept as aliases.
-BACKEND_BASE_ENV_VARS = ("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "VIVA_API_BASE", "SMS_API_BASE")
-DEFAULT_BACKEND_BASE = "http://localhost:8080"
-
-
-
-def normalize_backend_base_url(url: str) -> str:
-    """Validate a backend base URL: http(s), a host, no credentials, no trailing slash.
-
-    Credentials are refused because the value is forwarded on a child process's
-    argv (``serve --detach``) where any local user can read it.
-    """
-    from urllib.parse import urlsplit
-
-    raw = (url or "").strip()
-    parts = urlsplit(raw)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        raise ValueError(f"backend base URL must be http(s)://host[:port][/prefix], got {raw!r}")
-    if parts.username or parts.password:
-        raise ValueError("backend base URL must not embed credentials")
-    if parts.query or parts.fragment:
-        raise ValueError("backend base URL must not carry a query or fragment")
-    return raw.rstrip("/")
-
-
-class BackendConfigError(ValueError):
-    """More than one remote backend is configured for this process (docs/backend-adapters.md step 1c)."""
-
-
-def _canonical_url(url: str) -> str:
-    """``normalize_backend_base_url`` plus a lower-cased scheme and host, for comparing two settings."""
-    from urllib.parse import urlsplit, urlunsplit
-
-    parts = urlsplit(normalize_backend_base_url(url))
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, "", ""))
-
-
-def check_single_backend(named: "str | None" = None) -> None:
-    """Refuse a process configured for more than one remote backend.
-
-    One workbench process talks to one remote backend (Jim, 2026-11-19). A backend named with
-    ``--backend-base-url`` / ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL`` (or ``named``, the flag's value before it
-    reaches the environment) must therefore equal every alias that is also set (``VIVA_API_BASE``,
-    ``SMS_API_BASE``), compared after normalising. With no backend named, the aliases are left alone: they
-    are the one backend. Reads the environment only; no network call. Raises :class:`BackendConfigError`.
-
-    Called at process entry (``cli.main``, ``serve``), never from :func:`sms_api_base`, which must not fail.
-    """
-    named = named or os.environ.get(BACKEND_BASE_ENV_VARS[0])
-    if not named:
-        return
-    try:
-        want = _canonical_url(named)
-    except ValueError as e:
-        raise BackendConfigError(f"{BACKEND_BASE_ENV_VARS[0]}: {e}") from e
-    for var in BACKEND_BASE_ENV_VARS[1:]:
-        value = os.environ.get(var)
-        if not value:
-            continue
-        try:
-            got = _canonical_url(value)
-        except ValueError as e:
-            raise BackendConfigError(f"{var}: {e} (a backend is also named: {named})") from e
-        if got != want:
-            raise BackendConfigError(
-                f"two remote backends are configured: the named backend {named} and {var}={value}. "
-                f"A workbench talks to one backend; unset {var} or name the same URL.")
-
-
-def backend_configured() -> bool:
-    """Whether the operator named a backend at all (flag or any env alias)."""
-    return any(os.environ.get(v) for v in BACKEND_BASE_ENV_VARS)
-
-
-def explicit_backend_base_url() -> "str | None":
-    """The backend the operator NAMED for this process (flag / new env), else ``None``.
-
-    Distinct from :func:`sms_api_base`, which also honours the legacy aliases and a
-    localhost default: only an explicit name opts a process into running studies on
-    the backend through ``/viva/v1/composites``.
-    """
-    return os.environ.get(BACKEND_BASE_ENV_VARS[0]) or None
+# The generic backend configuration lives in the core (docs/backend-adapters.md step P1a); these names stay
+# importable from here for SMS code and tests.
+from vivarium_workbench.lib import backend_config as _backend_config
+from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS as BACKEND_BASE_ENV_VARS
+from vivarium_workbench.lib.backend_config import DEFAULT_BACKEND_BASE as DEFAULT_BACKEND_BASE
+from vivarium_workbench.lib.backend_config import BackendConfigError as BackendConfigError
+from vivarium_workbench.lib.backend_config import backend_configured as backend_configured
+from vivarium_workbench.lib.backend_config import check_single_backend as check_single_backend
+from vivarium_workbench.lib.backend_config import explicit_backend_base_url as explicit_backend_base_url
+from vivarium_workbench.lib.backend_config import normalize_backend_base_url as normalize_backend_base_url
+from vivarium_workbench.lib.backend_config import IDENTITY_HEADER as IDENTITY_HEADER
+from vivarium_workbench.lib.backend_config import caller_identity as caller_identity
+from vivarium_workbench.lib.backend_config import _http_error_detail as _http_error_detail
 
 
 def sms_api_base() -> str:
-    """Base URL of the backend (viva-api / viva-core; nee sms-api).
+    """Base URL of the backend (viva-api / viva-core; nee sms-api): :func:`backend_config.configured_base_url`.
 
-    Precedence: ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL`` (what ``serve
-    --backend-base-url`` sets) > ``VIVA_API_BASE`` > ``SMS_API_BASE`` (the
-    legacy alias, since the backend repo was renamed sms-api -> viva-api) >
-    ``http://localhost:8080`` (the SSM tunnel). The single source of truth for
-    this lookup — ``workspace_deps_views`` and ``remote_simulations`` re-export
-    it under their old ``_sms_api_base`` name.
-
-    Exactly one backend is configured per process (:func:`check_single_backend`, at process entry), so a named
-    backend and an alias, when both are set, are the same URL. This reads the environment only: no network call,
-    and it cannot fail.
+    Kept as a function (not a re-export) because callers and tests patch it here; it reads the core's at call time.
     """
-    named = os.environ.get(BACKEND_BASE_ENV_VARS[0])
-    alias = next((v for v in (os.environ.get(n) for n in BACKEND_BASE_ENV_VARS[1:]) if v), None)
-    return named or alias or DEFAULT_BACKEND_BASE
+    return _backend_config.configured_base_url()
 
 
-class SmsApiError(Exception):
-    """Raised when an sms-api call fails (non-200 or connection error).
-
-    ``status`` carries the HTTP status code when the failure was an HTTP error
-    (e.g. 404 from a deployment that predates an endpoint), else ``None`` for
-    connection-level failures — so callers can distinguish "old server" from
-    "unreachable" without parsing the message.
-    """
-
-    def __init__(self, message: str, status: "int | None" = None) -> None:
-        super().__init__(message)
-        self.status = status
+#: ``SmsApiError`` IS the core's :class:`backend_config.BackendError` (an alias, not a subclass; step P1a), so every
+#: ``except SmsApiError`` keeps catching the circuit breaker's ``CircuitOpen``.
+SmsApiError = _backend_config.BackendError
 
 
 #: Multi-GB native-store / results.zip / workspace-tarball downloads must not run
@@ -168,90 +77,6 @@ _CALL_CLASS_POLICY: "dict[str, tuple[float, int]]" = {
     "list": (15.0, 2),
     "download": (DOWNLOAD_TIMEOUT, 1),
 }
-
-
-def _http_error_detail(e: HTTPError, limit: int = 200) -> str:
-    """Best-effort extraction of the server's error body for diagnostics.
-
-    Without this, a FastAPI 422/500 with a JSON ``{"detail": ...}`` body reaches
-    the operator as only ``"POST <url> -> 422"`` (CD2 pipeline audit §3.12) —
-    ``HTTPError.read()`` is never called. Returns a string like
-    ``": missing field 'foo'"`` ready to append to the summary message, or
-    ``""`` if the body couldn't be read/decoded (never raises — surfacing a
-    better error must not itself produce a worse one).
-
-    A gateway/proxy in front of sms-api (the SSM tunnel, an ALB) answers a
-    502/503/504 with a full **HTML error page**, not JSON. Dumping that page
-    into the message put a wall of ``<html>…`` markup into the user's alert
-    (and the logs). So an HTML body is summarised to its ``<title>`` (e.g.
-    ``502 Bad Gateway``) rather than echoed, and every body is capped short.
-    """
-    try:
-        raw = e.read()
-    except Exception:  # noqa: BLE001 — reading the error body must never mask the real error
-        return ""
-    if not raw:
-        return ""
-    text = raw.decode("utf-8", errors="replace").strip()
-    try:
-        parsed = json.loads(text)
-    except (json.JSONDecodeError, ValueError):
-        parsed = None
-    if isinstance(parsed, dict) and "detail" in parsed:
-        detail = parsed["detail"]
-        text = detail if isinstance(detail, str) else json.dumps(detail)
-    elif text[:1] == "<" or "<html" in text[:256].lower():
-        # HTML error page from a proxy/gateway (e.g. a 502/504 while the tunnel
-        # or upstream is down) — summarise, never echo the markup.
-        m = re.search(r"<title>\s*(.*?)\s*</title>", text, re.IGNORECASE | re.DOTALL)
-        title = re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
-        text = title or "gateway error page"
-    if len(text) > limit:
-        text = text[:limit] + "…"
-    return f": {text}" if text else ""
-
-
-#: Header viva-api reads caller identity from where a deployment names one
-#: (its IDENTITY_HEADER setting). Default matches oauth2-proxy's, which is what
-#: sms-api-stanford-test is configured for.
-IDENTITY_HEADER = "X-Auth-Request-Email"
-
-#: GitHub session sources that identify a PERSON. `token` is deliberately absent:
-#: it is `VIVARIUM_WORKBENCH_GH_TOKEN`, a shared machine credential supplied as a
-#: k8s Secret, and on a deployed workbench EVERY user resolves to it. Forwarding
-#: that would give every user the same identity -- so they could all cancel each
-#: other's tasks, while the record claimed a specific owner. That is worse than
-#: anonymous: it looks like attribution and provides none.
-_PERSONAL_SOURCES = ("device_flow", "gh_cli")
-
-
-def caller_identity() -> str | None:
-    """The signed-in GitHub login, when a PERSON is signed in. Else ``None``.
-
-    NOT authentication, and viva-api's own docs are explicit that its header is
-    not either: this is the best attribution the workbench can currently offer,
-    which is a real `@login` GitHub already verified, forwarded so a task has an
-    owner instead of being unowned and cancellable by anyone.
-
-    The proper answer is the `Principal` that `session_registry.SessionEntry`
-    already reserves space for -- a workbench identity that does not depend on a
-    user happening to have signed into GitHub for an unrelated reason.
-
-    Never raises. Identity is a nicety on every path that calls it, and an
-    unreachable keyring or a slow `gh` must not fail the request it decorates.
-    """
-    try:
-        from vivarium_workbench.lib import github_auth
-
-        session = github_auth.current_session()
-    except Exception:  # noqa: BLE001 - see docstring
-        return None
-    if session is None or session.source not in _PERSONAL_SOURCES:
-        return None
-    login = (session.login or "").strip()
-    # Qualify it: a bare `octocat` next to `you@example.com` in the same column
-    # reads as an email that lost its domain. This says where it came from.
-    return f"{login}@github" if login else None
 
 
 #: Capability names the path resolver keys on (viva-api's ``viva_core.api.capabilities``;
@@ -508,11 +333,8 @@ class SmsApiClient:
                    max_retries=retries, force_link=force_link)
 
     def _link(self) -> Any:
-        """The RemoteLink circuit breaker for this client's base_url (lazy import
-        to avoid an import cycle: remote_link imports this module)."""
-        from vivarium_workbench.lib.remote_link import link
-
-        return link(self.base_url)
+        """The circuit breaker for this client's base_url (the core's, :func:`backend_config.link`)."""
+        return _backend_config.link(self.base_url)
 
     def _mark_link_up(self) -> None:
         """Passive success signal to the breaker — never let bookkeeping raise."""

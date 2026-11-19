@@ -69,7 +69,7 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
 
     # One remote backend per process (docs/backend-adapters.md step 1c). cli.main and cmd_serve check first; this
     # covers a caller that set the environment directly and boots the app without them.
-    from vivarium_workbench.lib.sms_api_client import BackendConfigError, check_single_backend
+    from vivarium_workbench.lib.backend_config import BackendConfigError, check_single_backend
 
     try:
         check_single_backend()
@@ -105,7 +105,7 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     # Only probe when VIVA_API_BASE/SMS_API_BASE is explicitly set — a local-only
     # user hasn't opted into remote and shouldn't pay a probe delay. Best-effort:
     # never blocks/raises.
-    from vivarium_workbench.lib.sms_api_client import backend_configured
+    from vivarium_workbench.lib.backend_config import backend_configured
 
     if backend_configured():
         # A backend named with --backend-base-url: say which dispatch route its

@@ -30,6 +30,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from vivarium_workbench.lib import backend_config as _backend_config
 from vivarium_workbench.lib.env_compat import get_env
 from vivarium_workbench.lib.sms_api_client import SmsApiClient
 
@@ -171,28 +172,14 @@ def resolved_from_session_build(ws_root: Path) -> dict | None:
     }
 
 
-# Default when VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT is unset — the historical
-# hardcoded value, kept only as the fallback so existing deployments don't change
-# behavior on upgrade. New deployments set the env explicitly (e.g. "smscdk").
-_DEFAULT_REMOTE_DEPLOYMENT = "smsvpctest"
+# The deployment name is core configuration (docs/backend-adapters.md step P1a: ``backend_config.deployment_name``).
+_DEFAULT_REMOTE_DEPLOYMENT = _backend_config._DEFAULT_DEPLOYMENT
 
 
 def remote_deployment_name() -> str:
-    """The deployment namespace a remote run targets (the run's truthful Origin).
-
-    Config-derived via ``VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT`` (same env-driven
-    pattern as :func:`pinned_config`), replacing the hardcoded ``"smsvpctest"`` so
-    a run's recorded Origin reflects the deployment it actually ran on. Unset, a
-    backend the operator named (``serve --backend-base-url``) is that deployment:
-    its host. ``"smsvpctest"`` only when neither says.
-    """
-    from urllib.parse import urlsplit
-
-    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
-
-    named = explicit_backend_base_url()
-    default = (urlsplit(named).hostname if named else None) or _DEFAULT_REMOTE_DEPLOYMENT
-    return (get_env("REMOTE_DEPLOYMENT", default) or default).strip() or default
+    """The deployment namespace a remote run targets: :func:`backend_config.deployment_name`, read at call time
+    (tests patch this function, and ``backend_config.deployment_name``)."""
+    return _backend_config.deployment_name()
 
 
 def _normalize_repo(url: str) -> str:

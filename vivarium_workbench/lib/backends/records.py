@@ -37,10 +37,10 @@ IDENTITY_FIELD = "deployment_id"
 
 
 def _canonical(url: str) -> str:
-    from vivarium_workbench.lib.sms_api_client import _canonical_url
+    from vivarium_workbench.lib import backend_config
 
     try:
-        return _canonical_url(url)
+        return backend_config.canonical_url(url)
     except ValueError:
         return (url or "").strip().rstrip("/")
 
@@ -58,16 +58,17 @@ _REFRESHED: "dict[str, float]" = {}
 
 def _ask(base_url: str) -> Optional[str]:
     """One identity request (cached on success; a failure remembered for :data:`_IDENTITY_FAIL_TTL`). Never raises."""
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient
+    from vivarium_workbench.lib.backends import VIVA_CORE
 
     key = _canonical(base_url)
     failed = _FAILED.get(key)
     if failed is not None and time.monotonic() - failed < _IDENTITY_FAIL_TTL:
         return None
     try:
-        health = SmsApiClient.for_("probe", base_url).health_v1() or {}
-        value = health.get(IDENTITY_FIELD)
-        ident = str(value).strip() if value not in (None, "") else None
+        # Only viva-core-family backends (viva-core, sms-legacy: one server) report an identity today; the caller
+        # has already checked the record's kind has one (has_identity). The request is the backend's.
+        ask = VIVA_CORE.identity
+        ident = ask(base_url) if ask is not None else None
     except Exception:  # noqa: BLE001 -- unreachable or not a viva-core: "reports none", never an error here
         _FAILED[key] = time.monotonic()
         return None
@@ -105,6 +106,16 @@ def cached_server_id(base_url: str) -> Optional[str]:
     return hit[1] if hit and time.monotonic() - hit[0] < _IDENTITY_TTL else None
 
 
+def has_identity(kind: str) -> bool:
+    """Whether a backend of ``kind`` reports a server identity (``Backend.identity``; compose-api does not, yet)."""
+    from vivarium_workbench.lib.backends import by_kind
+
+    try:
+        return by_kind(kind).identity is not None
+    except KeyError:
+        return False
+
+
 # --- writing the record ---------------------------------------------------------------------------------------------
 
 def remote_record(kind: str, remote_id: Any, base_url: str) -> dict:
@@ -113,15 +124,15 @@ def remote_record(kind: str, remote_id: Any, base_url: str) -> dict:
     Called once the backend has accepted (or served) the run. ``server_id`` is asked of it then, through the 30 s
     cache with the probe policy (one attempt, a short timeout, the circuit breaker): a backend that just answered
     answers this at once, and one that cannot be asked records ``null`` -- never an error."""
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench.lib import backend_config
 
     assert kind in KINDS, kind
     return {
         "kind": kind,
         "id": str(remote_id).strip(),
         "base_url": _canonical(base_url),
-        "deployment": remote_pinned.remote_deployment_name(),
-        "server_id": fetch_server_id(base_url) if kind != "compose-api" else None,
+        "deployment": backend_config.deployment_name(),
+        "server_id": fetch_server_id(base_url) if has_identity(kind) else None,
     }
 
 
@@ -235,9 +246,9 @@ class Resolution:
 
 def configured_url(kind: str) -> Optional[str]:
     """The URL a run of ``kind`` would be asked at under the current configuration."""
-    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url, sms_api_base
+    from vivarium_workbench.lib import backend_config
 
-    return explicit_backend_base_url() if kind == "compose-api" else sms_api_base()
+    return backend_config.explicit_backend_base_url() if kind == "compose-api" else backend_config.configured_base_url()
 
 
 def _deployment_names_now() -> set[str]:
@@ -246,16 +257,15 @@ def _deployment_names_now() -> set[str]:
     import os
     from urllib.parse import urlsplit
 
-    from vivarium_workbench.lib import remote_pinned
-    from vivarium_workbench.lib.sms_api_client import BACKEND_BASE_ENV_VARS
+    from vivarium_workbench.lib import backend_config
 
-    names = {remote_pinned.remote_deployment_name()}
-    for var in BACKEND_BASE_ENV_VARS:
+    names = {backend_config.deployment_name()}
+    for var in backend_config.BACKEND_BASE_ENV_VARS:
         host = urlsplit(os.environ.get(var) or "").hostname
         if host:
             names.add(host)
     if not (os.environ.get("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT") or "").strip():
-        names.add(remote_pinned._DEFAULT_REMOTE_DEPLOYMENT)
+        names.add(backend_config._DEFAULT_DEPLOYMENT)
     return names
 
 
@@ -300,6 +310,8 @@ def _by_record(records: "list[dict]", rid: str, here_name: str) -> Resolution:
     refreshed: set[str] = set()
 
     def identity(kind: str, *, fresh: bool = False) -> Optional[str]:
+        if not has_identity(kind):  # before the URL-keyed cache: compose-api may share viva-core's URL
+            return None
         url = configured_url(kind)
         if not url:
             return None
@@ -350,12 +362,12 @@ def resolve_existing(ws_root: Path, remote_id: Any, *, deployment: Optional[str]
        current name proceeds (a run listed live from the configured server).
     3. Nothing stored (a run listed live, or just dispatched by this page): the id's form, current configuration.
     """
-    from vivarium_workbench.lib import backends, remote_pinned
+    from vivarium_workbench.lib import backend_config, backends
 
     rid = str(remote_id if remote_id is not None else "").strip()
     owner = backends.for_run(rid)
     by_form = owner.name if owner else None
-    here_name = remote_pinned.remote_deployment_name()
+    here_name = backend_config.deployment_name()
     found = find_records(ws_root, rid, study_db=study_db) if rid else []
     records = [f.record for f in found if f.record]
     legacy = [f.legacy_source for f in found if f.record is None and f.legacy_source]

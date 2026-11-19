@@ -303,7 +303,10 @@ def test_submit_writes_a_pending_runs_meta_row(monkeypatch, tmp_path):
 
     _wire_thin(monkeypatch, tmp_path)
     monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
-    monkeypatch.setattr(rrv.remote_pinned, "remote_deployment_name", lambda: "smscdk")
+    # step P1a (patch target moved): the deployment name is backend_config's; remote_pinned's wrapper and the run
+    # record both read it at call time.
+    from vivarium_workbench.lib import backend_config
+    monkeypatch.setattr(backend_config, "deployment_name", lambda: "smscdk")
     body, status = rrv.remote_run_submit(
         tmp_path, {"simulator_id": 66, "study": "s", "num_generations": 10, "num_seeds": 1000})
     assert status == 202

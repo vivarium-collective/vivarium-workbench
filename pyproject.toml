@@ -260,6 +260,22 @@ investigation-contracts = { git = "https://github.com/vivarium-collective/invest
 root_packages = ["vivarium_workbench", "viva_superpowers", "discovery_engine"]
 
 [[tool.importlinter.contracts]]
+# docs/backend-adapters.md step P1a: the core's generic backend plumbing never reaches into SMS code or the
+# backends package (which imports the SMS adapters). Otherwise compose-api and the run records would import SMS
+# code through it, and the SMS client's module-level import of it would become a cycle. P1b adds the package-level
+# contract (vivarium_workbench must not import vivarium_workbench_sms) beside this one.
+name = "backend_config imports no SMS code and not lib.backends"
+type = "forbidden"
+source_modules = ["vivarium_workbench.lib.backend_config"]
+forbidden_modules = [
+    "vivarium_workbench.lib.sms_api_client",
+    "vivarium_workbench.lib.remote_pinned",
+    "vivarium_workbench.lib.remote_link",
+    "vivarium_workbench.lib.server_capabilities",
+    "vivarium_workbench.lib.backends",
+]
+
+[[tool.importlinter.contracts]]
 name = "ports are pure interfaces (no adapter / no git-impl imports)"
 type = "forbidden"
 source_modules = ["vivarium_workbench.lib.ports"]
@@ -350,6 +366,7 @@ python_version = "3.11"
 # (server.py, the dict-building helpers) is intentionally not checked yet.
 files = [
     "vivarium_workbench/lib/startup.py",
+    "vivarium_workbench/lib/backend_config.py",
     "vivarium_workbench/lib/models.py",
     "vivarium_workbench/lib/field_migrate.py",
     "vivarium_workbench/lib/structured_resources.py",
