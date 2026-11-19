@@ -48,7 +48,7 @@ def test_configure_run_adhoc_confirms_before_pinned_dispatch():
     """Item 20a: _runAdhoc (the Composites-tab ad-hoc run path) must fetch the
     server-resolved remote-run-config and require explicit confirmation
     before a remote-pinned deployment's POST /api/composite-test-run fires —
-    mirrors study-detail.js's _dispatchRemotePinned pattern (same message
+    mirrors sms-launch.js's _dispatchRemotePinned pattern (same message
     shape: repo/branch/commit/simulator id)."""
     js = _js()
     # _confirmRemoteDispatchMsg is the message-building helper, defined right

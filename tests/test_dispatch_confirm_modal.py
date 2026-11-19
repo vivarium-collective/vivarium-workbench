@@ -11,6 +11,9 @@ must see the resolved simulator_id/mechanism/params and explicitly click
 before real AWS spend happens) via a plain DOM overlay instead, which never
 blocks the event loop.
 
+The dispatch itself lives in sms-launch.js (the quarantined SMS launch UI);
+the shared `_confirmModal` it is handed stays in study-detail.js.
+
 No JS test runner in this repo (vanilla JS, no bundler) -- source-level
 assertions against the served JS, matching this project's own established
 convention (test_remote_run_panel.py, test_composite_run_pinned_confirm.py,
@@ -73,7 +76,7 @@ def test_confirm_modal_never_uses_innerhtml_for_the_message():
 
 
 def test_dispatch_remote_composite_uses_async_modal_not_blocking_confirm():
-    block = _dispatch_remote_composite_block(_js("study-detail.js"))
+    block = _dispatch_remote_composite_block(_js("sms-launch.js"))
     assert "confirm(msg)" not in block
     assert "_confirmModal(msg)" in block
 
@@ -82,7 +85,7 @@ def test_dispatch_remote_composite_still_confirms_before_submit():
     """The core safety property item 20a added and this fix must preserve:
     the real POST only fires after the user has explicitly confirmed --
     never before, never unconditionally."""
-    block = _dispatch_remote_composite_block(_js("study-detail.js"))
+    block = _dispatch_remote_composite_block(_js("sms-launch.js"))
     i_confirm = block.index("_confirmModal(msg)")
     i_ok_check = block.index("if (!ok) return _CANCELLED;", i_confirm)
     i_post = block.index("/api/remote-run-submit", i_ok_check)

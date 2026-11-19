@@ -5,7 +5,7 @@ Three real problems this closes:
   1. There was no UI (or API-level equivalent) path to set
      baseline[0].params — in particular n_generations/n_seeds — at all, once
      a study existed.
-  2. `_dispatchRemotePinned` (study-detail.js) silently defaulted an unset
+  2. `_dispatchRemotePinned` (now static/sms-launch.js) silently defaulted an unset
      n_generations/n_seeds to 1x1 (``params.n_generations || 1``) with zero
      warning — a real, expensive-to-discover correctness bug for a real AWS
      Batch dispatch.
@@ -258,6 +258,11 @@ def _js_text() -> str:
     return (Path(vivarium_workbench.__file__).parent / "static" / "study-detail.js").read_text(encoding="utf-8")
 
 
+def _sms_launch_text() -> str:
+    """The quarantined SMS launch UI (moved out of study-detail.js)."""
+    return (Path(vivarium_workbench.__file__).parent / "static" / "sms-launch.js").read_text(encoding="utf-8")
+
+
 def _dispatch_remote_composite_block(js: str) -> str:
     i = js.index("function _dispatchRemoteComposite()")
     j = js.index("window._dispatchRemoteComposite = _dispatchRemoteComposite;", i)
@@ -270,14 +275,14 @@ def test_dispatch_remote_composite_reads_and_forwards_config_filename():
     convention for testing static JS with no bundler/test runner (see module
     docstring). Confirms the advanced panel's new field is actually wired
     into the request, not just present as inert markup."""
-    block = _dispatch_remote_composite_block(_js_text())
+    block = _dispatch_remote_composite_block(_sms_launch_text())
     assert "cp-config-filename" in block
     assert "config_filename: configFilename" in block
 
 
 def _dispatch_remote_pinned_block(js: str) -> str:
     i = js.index("function _dispatchRemotePinned(cfg)")
-    j = js.index("window._dispatchCurrentSpecBaseline = _dispatchCurrentSpecBaseline;", i)
+    j = js.index("function _compositePanelEl()", i)
     return js[i:j]
 
 
@@ -288,14 +293,14 @@ def _model_config_block(js: str) -> str:
 
 
 def test_dispatch_remote_pinned_has_no_silent_default_fallback():
-    block = _dispatch_remote_pinned_block(_js_text())
+    block = _dispatch_remote_pinned_block(_sms_launch_text())
     assert "|| 1" not in block
     assert "params.n_generations || 1" not in block
     assert "params.n_seeds || 1" not in block
 
 
 def test_dispatch_remote_pinned_blocks_when_generations_or_seeds_unset():
-    block = _dispatch_remote_pinned_block(_js_text())
+    block = _dispatch_remote_pinned_block(_sms_launch_text())
     assert "if (!numGenerations) missing.push('n_generations');" in block
     assert "if (!numSeeds) missing.push('n_seeds');" in block
     # Blocks BEFORE the confirm()/POST — never asks the user to confirm a
@@ -309,7 +314,7 @@ def test_dispatch_remote_pinned_blocks_when_generations_or_seeds_unset():
 
 
 def test_dispatch_remote_pinned_confirm_shows_resolved_generations_and_seeds():
-    block = _dispatch_remote_pinned_block(_js_text())
+    block = _dispatch_remote_pinned_block(_sms_launch_text())
     i_msg = block.index("var msg =")
     i_confirm = block.index("_confirmModal(msg)")
     msg_block = block[i_msg:i_confirm]
@@ -325,7 +330,7 @@ def test_dispatch_remote_pinned_refetches_fresh_study_state_before_reading_param
     params from memory even though study.yaml on disk was already correct).
     _dispatchRemotePinned must re-fetch via DataSource.loadStudy before
     reading baseline[0].params."""
-    block = _dispatch_remote_pinned_block(_js_text())
+    block = _dispatch_remote_pinned_block(_sms_launch_text())
     assert "window.DataSource.loadStudy(slug)" in block
     i_fetch = block.index("loadStudy(slug)")
     i_read = block.index("baseline[0] && baseline[0].params")
