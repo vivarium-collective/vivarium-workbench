@@ -20,7 +20,6 @@ real network / git / auth service.  ``_sms_api_base`` is REUSED from
 from __future__ import annotations
 
 import subprocess
-import tempfile
 import time
 import warnings
 from pathlib import Path
@@ -28,7 +27,8 @@ from pathlib import Path
 from vivarium_workbench.lib import git_status
 from vivarium_workbench.lib import github_auth
 from vivarium_workbench.lib import remote_pinned
-from vivarium_workbench.lib import remote_run_compose, remote_run_viva_v1
+from vivarium_workbench.lib import backends, remote_run_compose, remote_run_viva_v1
+from vivarium_workbench.lib.backends import sms_legacy
 from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib.investigations import load_spec
 from vivarium_workbench.lib.remote_run_jobs import (
@@ -37,7 +37,7 @@ from vivarium_workbench.lib.remote_run_jobs import (
     run_remote_pipeline,
 )
 from vivarium_workbench.lib.remote_run_landing import land_remote_run
-from vivarium_workbench.lib.sms_api_client import DOWNLOAD_TIMEOUT, SmsApiClient, SmsApiError
+from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
 from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 # sms-api JobStatus terminal sets (relocated here from remote_run_jobs, which R5
@@ -69,58 +69,6 @@ _ANALYSIS_LAND_WAIT_SECONDS = 90
 _ANALYSIS_TERMINAL_STATUSES = {"completed", "failed"}
 
 
-def _poll_analysis_until_terminal(client: SmsApiClient, database_id: int) -> None:
-    """Poll GET /api/v1/analyses/{id}/status until COMPLETED/FAILED or the attempt
-    ceiling is reached. A miss just means the analysis isn't folded into THIS
-    landing -- landing again later picks it up (see land_remote_run)."""
-    for _ in range(_ANALYSIS_POLL_MAX_ATTEMPTS):
-        try:
-            status = client.analysis_status(database_id)
-        except SmsApiError:
-            return  # best-effort: a transient poll failure must not block landing
-        if status.get("status") in _ANALYSIS_TERMINAL_STATUSES:
-            return
-        time.sleep(_ANALYSIS_POLL_INTERVAL_SECONDS)
-
-
-def _resolve_execution_provenance(client: SmsApiClient, simulation_id: int) -> dict:
-    """P1-11 (audit §3.9): the provenance of what sms-api actually ran for
-    ``simulation_id``, read from sms-api's OWN records — never inferred from
-    the landing laptop's checkout. Returns ``{commit, image, merged_config_hash,
-    expected_seeds}``; any field sms-api's current API can't answer (or a
-    reachability failure) comes back ``None`` rather than a locally-guessed
-    value, so :func:`land_remote_run` records an honest gap instead of a
-    fabricated one.
-
-    ``image`` is the ECR tag sms-api actually built and ran under — which
-    IS the commit itself (sms-api tags every image ``<repo>:<commit>``, see
-    ``simulation_service_ray.SimulationServiceRay._image_uri``), not a
-    laptop-side guess. Reconstructing the FULL image URI (registry account +
-    region) would need deployment config this client has no access to; that
-    stays a follow-up until sms-api's API surfaces it directly.
-    """
-    out: dict = {"commit": None, "image": None, "merged_config_hash": None, "expected_seeds": None}
-    try:
-        sim_record = client.get_simulation(simulation_id)
-    except SmsApiError:
-        return out
-    simulator_id = sim_record.get("simulator_id")
-    if simulator_id is not None:
-        commit = client.simulator_commit(int(simulator_id))
-        out["commit"] = commit
-        out["image"] = commit
-    out["expected_seeds"] = sim_record.get("num_seeds")
-    config = sim_record.get("config")
-    if config is not None:
-        import hashlib
-        import json as _json
-        try:
-            out["merged_config_hash"] = hashlib.sha256(
-                _json.dumps(config, sort_keys=True, default=str).encode()
-            ).hexdigest()
-        except (TypeError, ValueError):
-            pass
-    return out
 
 
 def _run_auth_ok() -> bool:
@@ -534,88 +482,12 @@ def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
     """
     body = body or {}
     if remote_run_compose.is_run_id(body.get("simulation_id")):  # only compose-api has these ids
-        return remote_run_compose.land(ws_root, body)
+        return backends.COMPOSE.runs.land(ws_root, body)
     if remote_run_viva_v1.is_run_id(body.get("simulation_id")) and remote_pinned.uses_viva_v1_dispatch(ws_root):
         # A /viva/v1 run (its id is the backend's string) on a backend the operator named for document runs:
         # that declaration authorizes it, as it did the dispatch.
-        return remote_run_viva_v1.land(ws_root, body)
-    if not _run_auth_ok():
-        return {"error": "not authenticated"}, 401
-    study = (body.get("study") or "").strip()
-    sim_id = body.get("simulation_id")
-    if not study or not sim_id:
-        return {"error": "study and simulation_id are required"}, 400
-    spec_path = study_spec.study_spec_path(ws_root, study)
-    if spec_path is None or not spec_path.is_file():
-        return {"error": f"study {study!r} not found"}, 404
-    spec = load_spec(spec_path)
-    _baseline = spec.get("baseline") or []
-    spec_id = (_baseline[0].get("composite") if _baseline else None) or study
-    client = SmsApiClient(_sms_api_base())
-
-    analyses = spec.get("analyses") or []
-    analysis_errors: list[dict] = []
-    if analyses:
-        from vivarium_workbench.lib.study_run_post import build_analysis_options
-
-        # backlog item 39: unresolvable analysis names are surfaced in the
-        # response below (informational) but never block landing -- this
-        # trigger is best-effort, and landing the simulation itself is the
-        # primary, always-must-succeed action of this route.
-        analysis_options, analysis_errors = build_analysis_options(analyses, ws_root)
-        if analysis_options:
-            try:
-                triggered = client.run_analysis(int(sim_id), analysis_options)
-            except SmsApiError:
-                pass
-            else:
-                database_id = triggered.get("database_id")
-                if database_id is not None:
-                    _poll_analysis_until_terminal(client, database_id)
-                else:
-                    # No database_id came back -- this simulator's analysis path
-                    # has no status endpoint (shouldn't happen for Ray-backend
-                    # triggers post gap-3; kept as a safety net for anything else).
-                    time.sleep(_ANALYSIS_LAND_WAIT_SECONDS)
-
-    # P1-11 (audit §3.9): every provenance field below is sourced from sms-api
-    # itself -- the server that actually ran this simulation -- not from the
-    # landing laptop's local checkout. `commit` previously defaulted to
-    # body.get("commit"), which no caller has ever actually supplied, so a
-    # landed run's recorded commit silently fell back to save_metadata's own
-    # local-workspace-HEAD inference (the found "partly wrong" bug). A caller
-    # that DOES pass a commit/expected_seeds in the body still wins -- this is
-    # a fallback for when sms-api's own lookup can't answer, not an override.
-    exec_prov = _resolve_execution_provenance(client, int(sim_id))
-    commit = body.get("commit") or exec_prov["commit"] or ""
-    expected_seeds = body.get("num_seeds") or exec_prov["expected_seeds"]
-
-    with tempfile.TemporaryDirectory() as td:
-        # Explicit, generous timeout — this streams the run's whole native-store
-        # tar.gz, which can be multi-GB; the 30s status-call default would abort
-        # it mid-download (CD2 pipeline audit §3.12).
-        tar_path = client.download_data(int(sim_id), Path(td), timeout=DOWNLOAD_TIMEOUT)
-        run_id = land_remote_run(
-            study_spec.study_dir(ws_root, study),
-            spec_id=spec_id,
-            simulation_id=int(sim_id),
-            experiment_id=body.get("experiment_id") or f"sim-{sim_id}-{study}",
-            commit=commit,
-            tar_path=tar_path,
-            ws_root=ws_root,
-            s3_uri=body.get("s3_uri"),
-            image=exec_prov["image"],
-            merged_config_hash=exec_prov["merged_config_hash"],
-            expected_seeds=int(expected_seeds) if expected_seeds else None,
-        )
-    response: dict = {"run_id": run_id}
-    if analysis_errors:
-        # backlog item 39: surface which requested analyses couldn't be
-        # resolved (e.g. a stale workspace PVC missing a newer v2ecoli
-        # analysis) instead of silently dropping them -- landing itself
-        # still succeeds, this is informational.
-        response["analysis_errors"] = analysis_errors
-    return response, 200
+        return backends.VIVA_CORE.runs.land(ws_root, body)
+    return sms_legacy.land_tail(ws_root, body)
 
 
 def remote_run_land_artifacts(ws_root: Path, body: dict) -> tuple[dict, int]:
@@ -728,84 +600,12 @@ def remote_run_status(params: dict) -> tuple[dict, int]:
     params = params or {}
     for key in ("run_id", "simulation_id"):  # a compose-api id first: the checks below take any non-digit id
         if remote_run_compose.is_run_id(params.get(key)):
-            return remote_run_compose.status(str(params[key]).strip())
+            return backends.COMPOSE.runs.status(str(params[key]).strip())
     if params.get("run_id"):
-        return remote_run_viva_v1.status(str(params["run_id"]))
+        return backends.VIVA_CORE.runs.status(str(params["run_id"]))
     if remote_run_viva_v1.is_run_id(params.get("simulation_id")):
-        return remote_run_viva_v1.status(str(params["simulation_id"]))
-    sim_id = params.get("simulation_id")
-    sm_id = params.get("simulator_id")
-    an_id = params.get("analysis_id")
-    if not sim_id and not sm_id and not an_id:
-        return {"error": "simulator_id, simulation_id or analysis_id required"}, 400
-    client = SmsApiClient(_sms_api_base())
-    try:
-        if an_id:
-            # GET /api/v1/analyses/{id}/status resolves against the job's own S3
-            # _manifest.json, so it answers for an auto-triggered (dispatch-DAG)
-            # analysis and a button-triggered one identically.
-            st = client.analysis_status(int(an_id))
-            raw = str(st.get("status", "")).lower()
-            phase = "done" if raw in _TERMINAL_OK else "failed" if raw in _TERMINAL_BAD else "running"
-            return {
-                "kind": "analysis",
-                "phase": phase,
-                "raw_status": raw,
-                "error": st.get("error_log") or st.get("error_message"),
-                "analysis_id": int(an_id),
-            }, 200
-        if sim_id:
-            st = client.simulation_status(int(sim_id))
-            raw = str(st.get("status", "")).lower()
-            phase = (
-                "done"
-                if raw in _TERMINAL_OK
-                else "failed"
-                if raw in _TERMINAL_BAD
-                else "queued"
-                if raw == "queued"
-                else "running"
-            )
-            return {
-                "kind": "run",
-                "phase": phase,
-                "raw_status": raw,
-                "error": st.get("error_message"),
-                "simulation_id": int(sim_id),
-            }, 200
-        if sm_id:
-            st = client.simulator_status(int(sm_id))
-            raw = str(st.get("status", "")).lower()
-            phase = (
-                "built"
-                if raw in _TERMINAL_OK
-                else "failed"
-                if raw in _TERMINAL_BAD
-                else "building"
-            )
-            return {
-                "kind": "build",
-                "phase": phase,
-                "raw_status": raw,
-                "error": st.get("error_message"),
-                "simulator_id": int(sm_id),
-            }, 200
-        return {"error": "simulator_id, simulation_id or analysis_id required"}, 400
-    except SmsApiError as e:
-        # Tunnel down / SSO expired / sms-api error — surface a reachable=false
-        # status so the panel shows it without the whole poll crashing.
-        reason = (
-            "auth expired (re-run aws sso login)"
-            if getattr(e, "status", None) == 401
-            else "sms-api unreachable (is the tunnel up?)"
-        )
-        return {
-            "phase": "unreachable",
-            "reachable": False,
-            "reason": reason,
-            "status": getattr(e, "status", None),
-            "error": str(e),
-        }, 502
+        return backends.VIVA_CORE.runs.status(str(params["simulation_id"]))
+    return sms_legacy.status_tail(params)
 
 
 def remote_run_chain_progress(params: dict) -> tuple[dict, int]:
@@ -823,48 +623,10 @@ def remote_run_chain_progress(params: dict) -> tuple[dict, int]:
     params = params or {}
     for key in ("run_id", "simulation_id"):
         if remote_run_compose.is_run_id(params.get(key)):
-            return remote_run_compose.progress(str(params[key]).strip())
+            return backends.COMPOSE.runs.progress(str(params[key]).strip())
     if params.get("run_id"):
-        return remote_run_viva_v1.progress(str(params["run_id"]))
-    sim_id = params.get("simulation_id")
-    if not sim_id:
-        return {"error": "simulation_id required"}, 400
-    client = SmsApiClient(_sms_api_base())
-    try:
-        cp = client.simulation_chain_progress(int(sim_id))
-        raw = str(cp.get("status", "")).lower()
-        phase = (
-            "done"
-            if raw in _TERMINAL_OK
-            else "failed"
-            if raw in _TERMINAL_BAD
-            else "running"
-        )
-        return {
-            "kind": "chain_progress",
-            "phase": phase,
-            "terminal": bool(cp.get("terminal")),
-            "seeds_total": cp.get("seeds_total"),
-            "seeds_succeeded": cp.get("seeds_succeeded"),
-            "seeds_failed": cp.get("seeds_failed"),
-            "seeds_in_progress": cp.get("seeds_in_progress"),
-            "simulation_id": int(sim_id),
-        }, 200
-    except SmsApiError as e:
-        msg = str(e)
-        if msg.endswith("-> 404"):
-            return {"kind": "chain_progress", "phase": "not_found", "error": msg,
-                     "simulation_id": int(sim_id)}, 404
-        if msg.endswith("-> 409"):
-            # Real, expected case for a plain (non-chain-dispatch) run — not an
-            # error the panel should alarm on, just "nothing to aggregate here."
-            return {"kind": "chain_progress", "phase": "not_a_campaign", "error": msg,
-                     "simulation_id": int(sim_id)}, 200
-        return {
-            "kind": "chain_progress", "phase": "unreachable", "reachable": False,
-            "reason": "sms-api unreachable (is the tunnel up?)", "error": msg,
-            "simulation_id": int(sim_id),
-        }, 502
+        return backends.VIVA_CORE.runs.progress(str(params["run_id"]))
+    return sms_legacy.chain_progress_tail(params)
 
 
 def remote_run_cancel(body: dict) -> tuple[dict, int]:
@@ -887,24 +649,9 @@ def remote_run_cancel(body: dict) -> tuple[dict, int]:
     body = body or {}
     for key in ("run_id", "simulation_id"):
         if remote_run_compose.is_run_id(body.get(key)):
-            return remote_run_compose.cancel(str(body[key]).strip())
+            return backends.COMPOSE.runs.cancel(str(body[key]).strip())
     run_id = body.get("run_id") or (
         body.get("simulation_id") if remote_run_viva_v1.is_run_id(body.get("simulation_id")) else None)
     if run_id:
-        return remote_run_viva_v1.cancel(str(run_id))
-    sim_id = body.get("simulation_id")
-    if not sim_id:
-        return {"error": "simulation_id required"}, 400
-    client = SmsApiClient(_sms_api_base())
-    try:
-        result = client.cancel_simulation(int(sim_id))
-        return {"kind": "cancel", "simulation_id": int(sim_id), **result}, 200
-    except SmsApiError as e:
-        msg = str(e)
-        if msg.endswith("-> 404"):
-            return {"kind": "cancel", "error": msg, "simulation_id": int(sim_id)}, 404
-        return {
-            "kind": "cancel", "reachable": False,
-            "reason": "sms-api unreachable (is the tunnel up?)", "error": msg,
-            "simulation_id": int(sim_id),
-        }, 502
+        return backends.VIVA_CORE.runs.cancel(str(run_id))
+    return sms_legacy.cancel_tail(body)

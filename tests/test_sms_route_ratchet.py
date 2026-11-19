@@ -57,6 +57,10 @@ NOT_SMS_RECEIVERS = frozenset({
 
 #: Today's callers. Shrink this as steps 1-6 land; never grow it.
 ALLOWED: dict[str, frozenset[str]] = {
+    # The frozen SMS path (step 1a moved these here verbatim from lib.remote_run_views: a move, not growth).
+    "lib.backends.sms_legacy": frozenset({"analysis_status", "cancel_simulation", "download_data", "get_simulation",
+                                          "run_analysis", "simulation_chain_progress", "simulation_status",
+                                          "simulator_commit", "simulator_status"}),
     "lib.comparison_pinning": frozenset({"list_branch_builds", "list_simulators", "simulator_status"}),
     "lib.composite_test_run_views": frozenset({"run_simulation"}),
     "lib.remote_analysis_figures": frozenset({"get_simulation", "list_analyses"}),
@@ -69,10 +73,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "lib.remote_run_jobs": frozenset({"download_data", "run_simulation", "simulation_status", "simulator_status",
                                       "upload_simulator"}),
     "lib.remote_run_landing": frozenset({"download_data"}),
-    "lib.remote_run_views": frozenset({"analysis_status", "cancel_simulation", "download_data", "get_simulation",
-                                       "run_analysis", "run_simulation", "simulation_chain_progress",
-                                       "simulation_status", "simulator_commit", "simulator_status",
-                                       "upload_simulator"}),
+    "lib.remote_run_views": frozenset({"run_analysis", "run_simulation", "upload_simulator"}),
     # The viva-core adapter still lands results through the interim compose route; viva-core 0.1.10's
     # /composites/{id}/results replaces it.
     "lib.remote_run_viva_v1": frozenset({"download_compose_results"}),
@@ -84,6 +85,16 @@ ALLOWED: dict[str, frozenset[str]] = {
     "lib.server_capabilities": frozenset({"capabilities"}),
     "lib.source_build_views": frozenset({"register_branch_head"}),
 }
+
+#: Every SMS method any module calls, as of step 1a. With PINNED_PAIRS below, this keeps a move between modules
+#: (a new ALLOWED key) from also slipping a new call in. Only ever remove names from it.
+PINNED_UNION: frozenset[str] = frozenset({
+    "analysis_status", "cancel_simulation", "capabilities", "compose_status", "compose_status_batch",
+    "compose_submit", "download_compose_results", "download_data", "download_workspace", "get_simulation",
+    "list_analyses", "list_branch_builds", "list_build_simulations", "list_simulators", "register_branch_head",
+    "run_analysis", "run_simulation", "simulation_chain_progress", "simulation_status", "simulation_trace",
+    "simulator_commit", "simulator_status", "upload_simulator",
+})
 
 #: SMS route literals outside the client: module -> the routes it spells.
 ROUTE_LITERALS: dict[str, frozenset[str]] = {
@@ -197,6 +208,19 @@ def test_no_new_sms_method_calls():
     assert not new, (
         "new calls to SMS-specific SmsApiClient methods (docs/backend-adapters.md): go through viva-core "
         "(/viva/v1) or the backend adapter instead:\n  " + "\n  ".join(new))
+
+
+#: (module, method) pairs in ALLOWED as of step 1a (41 on main; step 1a split run_analysis between
+#: remote_run_views and backends.sms_legacy). A move keeps the count; only removals lower it.
+PINNED_PAIRS = 42
+
+
+def test_allowed_methods_never_grow():
+    extra = set().union(*ALLOWED.values()) - PINNED_UNION
+    assert not extra, f"ALLOWED gained SMS methods no module called before: {sorted(extra)}"
+    pairs = sum(len(v) for v in ALLOWED.values())
+    assert pairs <= PINNED_PAIRS, (
+        f"ALLOWED has {pairs} (module, method) pairs, more than {PINNED_PAIRS}: a move must remove what it adds")
 
 
 def test_removed_sms_method_calls_are_dropped_from_the_ratchet():

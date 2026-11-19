@@ -11,7 +11,9 @@ viva-api#1055. "Q2" means §5's Q2 (analyses), which is Question 1 in viva-api#1
 | Step | What | PR | State (date) |
 |---|---|---|---|
 | 0 | SMS-call ratchet; drop the dead `composite_resolve` fallback | wb#1646 | **done**, merged 2026-11-19 |
-| 1 | `lib/backends/` interface; existing paths as adapters | — | not started; unblocked by wb#1630 (merged 2026-11-19) |
+| 1a | `lib/backends/`: the three adapters, `Backend`, `for_run`; SMS code moved to `sms_legacy.py`; routing unchanged | (this PR) | in review (2026-11-19) |
+| 1b | `active()`: selection for submit and the 9 modules that call the dispatch predicates | — | not started; plan after 1a |
+| 1c | Route every view through `for_run` (a deliberate behaviour change; edits `test_backends_routing.py` on purpose) | — | not started |
 | 2 | `EnvironmentRef`; new pinned runs on `ecoli-simulation` | — | blocked only on landing: ask E, or the job-owner interim (§4 step 2). Both sites advertise the capabilities and define `ecoli-simulation` (checked 2026-11-18) |
 | 3 | Composites tab off `/viva/v1/compose` | — | not started; composites that carry data files wait on ask C |
 | 4 | Reads off `/api/v1` | wb#1650 (analysis figures and PTools files, taken early) | figures and PTools files **done**, wb#1650 merged 2026-11-19; its S3 fallback stays until prod's registry covers its analyses (prod question below). Remaining: the Remote-tab run listing, `/source`, trace, other data downloads |
@@ -317,11 +319,14 @@ break:
    methods and SMS route literals. It fails on a new call, and on a removed call that is still listed, so the list
    shrinks in the PR that removes the call. Delete the `composite_resolve` remote fallback. No behaviour change.
    (Done: wb#1646.)
-1. **Extract the interface.** Create `lib/backends/` with the Protocols, `active()` and `for_run()`.
+1. **Extract the interface** (split into 1a, 1b and 1c; see Progress). Create `lib/backends/` with the Protocols, `active()` and `for_run()`.
    - Wrap `remote_run_viva_v1` and `remote_run_compose` as adapters; their logic doesn't change.
    - Move the inline SMS code from `remote_run_views` into `sms_legacy.py`.
    - Views and `run_remote` dispatch through `for_run()` and `active()`.
-   - It's a pure refactor: the existing tests, `test_backend_interop.py` included, pass unchanged. **Was waiting on
+   - 1a and 1b are pure refactors: existing tests, `test_backend_interop.py` included, pass unchanged, apart
+     from the SMS-call ratchet's table. 1c is the deliberate behaviour change: today's views route by their own
+     per-key rules (pinned in `tests/test_backends_routing.py`), and 1c replaces those rules with `for_run()`,
+     editing that test on purpose. **Was waiting on
      wb#1630**, which edits the same modules (merged 2026-11-19).
 2. **Separate the environment from the API.** Introduce `EnvironmentRef`. The session or pinned build produces a
    `BuildRef`, and **new** pinned runs go to viva-core `ecoli-simulation` when the backend advertises
