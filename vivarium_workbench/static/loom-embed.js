@@ -66,9 +66,11 @@
     var chip = '<span class="pcard-cloud-chip" style="display:inline-flex;align-items:center;gap:6px;' +
       'background:' + pal[0] + ';color:' + pal[1] + ';padding:2px 9px;border-radius:10px;' +
       'font-size:12px;font-weight:600">' + label + '</span>';
+    // Opaque run ids: the id goes into the handler as a string literal (JSON-quoted, then
+    // attribute-escaped), never Number()-coerced -- a non-integer run id would become NaN.
     var link = (simId != null && phase !== 'dispatching' && phase !== 'dispatch-failed')
       ? ' <a href="#simulations" class="pcard-cloud-link" onclick="return _viewCloudRunInRuns(' +
-          Number(simId) + ')" style="font-size:12px;margin-left:8px">View in Runs DB →</a>'
+          _esc(JSON.stringify(String(simId))) + ')" style="font-size:12px;margin-left:8px">View in Runs DB →</a>'
       : '';
     var err = (phase === 'dispatch-failed' && state.error)
       ? '<div class="muted" style="font-size:11px;margin-top:3px">' + _esc(state.error) + '</div>' : '';
@@ -133,7 +135,11 @@
   function _focusRemoteRow(simId) {
     var tries = 0;
     (function look() {
-      var row = document.querySelector('tr[data-remote-sim-id="' + simId + '"]');
+      // Match by attribute value, not by a selector built from the id (an opaque id may hold quotes).
+      var row = null, rows = document.querySelectorAll('tr[data-remote-sim-id]');
+      for (var k = 0; k < rows.length; k++) {
+        if (rows[k].getAttribute('data-remote-sim-id') === String(simId)) { row = rows[k]; break; }
+      }
       if (row) {
         try { row.scrollIntoView({ block: 'center' }); } catch (e) { /* ignore */ }
         var prev = row.style.boxShadow;

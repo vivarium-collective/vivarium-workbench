@@ -173,9 +173,15 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
     # the sms-api simulation status so the run bar shows running -> completed. The
     # run itself surfaces in the Simulations/Runs tab via remote_simulations.
     if run_id.startswith("remote-sim-"):
+        # Opaque run ids: the suffix is the remote run's id, whatever its form; remote_run_status routes it by its
+        # record. An integer suffix stays an int, so an SMS simulation is asked and answered exactly as before.
+        suffix = run_id[len("remote-sim-"):].strip()
+        sim_id: "int | str"
         try:
-            sim_id = int(run_id[len("remote-sim-"):])
+            sim_id = int(suffix)
         except ValueError:
+            sim_id = suffix
+        if sim_id == "":  # no id at all (as before); an integer 0 still goes on to the old "required" answer
             return {"error": "run not found"}, 404
         from vivarium_workbench.lib import remote_run_views as _rrv
         from vivarium_workbench.lib.remote_pinned import remote_deployment_name

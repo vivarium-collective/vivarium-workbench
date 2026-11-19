@@ -72,7 +72,18 @@ function run() {
 
   const queued = chip({ phase: 'queued', simId: 4567 });
   assert.ok(/Cloud run #4567 · queued/.test(queued), 'queued chip labels the sim id + phase');
-  assert.ok(/_viewCloudRunInRuns\(4567\)/.test(queued), 'queued chip links into the Runs tab by sim id');
+  // opaque run ids (deliberate change): the id is a quoted string literal, no longer Number(simId).
+  assert.ok(/_viewCloudRunInRuns\(&quot;4567&quot;\)/.test(queued), 'queued chip links into the Runs tab by sim id');
+
+  // A non-integer run id stays itself (not NaN), and cannot break out of the onclick attribute.
+  const opaque = chip({ phase: 'running', simId: 'simulation-E9Ec819' });
+  assert.ok(/_viewCloudRunInRuns\(&quot;simulation-E9Ec819&quot;\)/.test(opaque), opaque);
+  assert.ok(!/NaN/.test(opaque), 'no NaN for a string id');
+  const hostile = chip({ phase: 'running', simId: 'x"); alert(1); ("' });
+  const onclick = /onclick="([^"]*)"/.exec(hostile)[1]
+    .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  assert.strictEqual(onclick, 'return _viewCloudRunInRuns(' + JSON.stringify('x"); alert(1); ("') + ')',
+    'the decoded handler passes the id as one JSON string literal');
 
   const running = chip({ phase: 'running', simId: 4567 });
   assert.ok(/Cloud run #4567 · running/.test(running), 'running chip label');

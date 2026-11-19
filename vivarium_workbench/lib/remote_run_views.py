@@ -401,7 +401,29 @@ def _sms_only(ws_root: Path, sim_id: object, body: dict, *, memo: bool = False) 
 
         return refusal(rid, f"run {rid} ran on {chosen.name}; this operation exists only for SMS simulations",
                        reason="not-sms", phase="not-sms")
+    if not (rid.isascii() and rid.isdigit()):
+        # Opaque run ids: the record said SMS but the id is no SMS simulation id (the callers int() it next). Refused
+        # like any other non-SMS run, rather than a 500 from int().
+        from vivarium_workbench.lib.backends.records import refusal
+
+        return refusal(rid, f"run {rid} is not an SMS simulation id; this operation exists only for SMS simulations",
+                       reason="not-sms", phase="not-sms")
     return None
+
+
+def opaque_run_id(value: object) -> str:
+    """A run id from a query string, as the opaque string every route passes on (the run's record decides what it
+    is, never its form). An integer spelling is normalised the way the old ``int`` query parameter parsed it
+    (``" 12 "``, ``"+12"`` -> ``"12"``), so an SMS simulation id behaves exactly as before; ``0`` / blank -> ``""``
+    (no id). Anything else (``"simulation-E9Ec819"``, ``"compose-7"``) is returned stripped, unchanged."""
+    text = str(value if value is not None else "").strip()
+    try:
+        number = int(text)
+    except ValueError:
+        return text
+    if number == 0:
+        return ""
+    return str(number) if number > 0 else text
 
 
 def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:

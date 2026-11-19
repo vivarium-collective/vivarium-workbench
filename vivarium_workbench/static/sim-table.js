@@ -513,6 +513,9 @@
       (where.study ? "&study=" + encodeURIComponent(where.study) : "");
   }
 
+  // Opaque run ids (docs/backend-adapters.md §2.5): a remote run's id is sent as the string the row carries, never
+  // coerced with Number() -- a compose-api / viva-core id would become NaN -> null. The server routes it by the run's
+  // record and refuses a non-SMS run with 409 `not-sms`; an SMS integer id ("12") is read exactly as 12 was.
   function _landRemote(runId, simId, btn) {
     if (!runId || simId == null || simId === "") return;
     var orig = btn ? btn.textContent : "";
@@ -520,7 +523,7 @@
     function _reset() { if (btn) { btn.disabled = false; btn.textContent = orig || "⬇ Land"; } }
     fetch("/api/remote-run-land-artifacts", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(Object.assign({ simulation_id: Number(simId), run_id: runId }, _rowWhere(btn))),
+      body: JSON.stringify(Object.assign({ simulation_id: String(simId), run_id: runId }, _rowWhere(btn))),
     }).then(function (r) {
       return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
         .catch(function () { return { ok: r.ok, status: r.status, body: {} }; });
@@ -606,7 +609,7 @@
     if (btn) { btn.disabled = true; btn.textContent = "… landing"; }
     fetch("/api/remote-run-land-artifacts", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(Object.assign({ simulation_id: Number(simId), run_id: runId }, _rowWhere(btn))),
+      body: JSON.stringify(Object.assign({ simulation_id: String(simId), run_id: runId }, _rowWhere(btn))),
     }).then(function (r) {
       return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
         .catch(function () { return { ok: r.ok, status: r.status, body: {} }; });
@@ -757,7 +760,7 @@
     fetch("/api/remote-run-analysis", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ simulation_id: Number(simulationId), study: studySlug || "",
+      body: JSON.stringify({ simulation_id: String(simulationId), study: studySlug || "",
                              deployment: _rowWhere(btnEl).deployment }),
     }).then(function (r) {
       return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
