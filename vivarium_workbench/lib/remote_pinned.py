@@ -95,22 +95,14 @@ def resolve_run_target(ws_root: Path) -> str:
     composite PREVIEW needs a concrete ``simulator_id`` stamp, which a bare
     deployment-wide pin doesn't provide) and must not be affected by this
     broader run-DISPATCH resolution.
+
+    Step 1b: the decision lives in :func:`backends.active` (session build, then pin, then the named backend, then
+    the refusal of a named backend that cannot be reached). This wrapper keeps the name every run entrypoint calls
+    and tests patch.
     """
-    from vivarium_workbench.lib.run_core import run_target_for
+    from vivarium_workbench.lib import backends
 
-    if run_target_for(Path(ws_root)) == "deployment":
-        return "deployment"
-    if is_pinned_enabled():
-        return "deployment"
-    if uses_named_backend_dispatch(ws_root):
-        return "deployment"
-    # Not a backend that runs documents. If the operator NAMED one that cannot be asked, "local" would start on
-    # this machine what they said to run elsewhere: refuse (APIError 502). A named backend that answers and
-    # offers only a legacy surface stays "local" (tests/test_backend_dispatch_viva_v1.py pins that).
-    from vivarium_workbench.lib.server_capabilities import require_named_backend_reachable
-
-    require_named_backend_reachable()
-    return "local"
+    return "deployment" if backends.active(ws_root) is not None else "local"
 
 
 def uses_viva_v1_dispatch(ws_root: Path) -> bool:
@@ -122,12 +114,9 @@ def uses_viva_v1_dispatch(ws_root: Path) -> bool:
     those keep their behaviour. No named backend, or one that does not advertise
     the surface: False with no network call at all.
     """
-    from vivarium_workbench.lib.run_core import run_target_for
-    from vivarium_workbench.lib.server_capabilities import viva_v1_dispatch_active
+    from vivarium_workbench.lib import backends  # step 1b: the decision lives in backends.select
 
-    if run_target_for(Path(ws_root)) == "deployment" or is_pinned_enabled():
-        return False
-    return viva_v1_dispatch_active()
+    return backends.select(ws_root) is backends.VIVA_CORE
 
 
 def uses_compose_dispatch(ws_root: Path) -> bool:
@@ -136,18 +125,18 @@ def uses_compose_dispatch(ws_root: Path) -> bool:
     The same guards as :func:`uses_viva_v1_dispatch`: only for an operator who NAMED a backend, and only when
     no session build or pinned config chose the simulator-keyed path. No named backend: False, no network call.
     """
-    from vivarium_workbench.lib.run_core import run_target_for
-    from vivarium_workbench.lib.server_capabilities import compose_dispatch_active
+    from vivarium_workbench.lib import backends  # step 1b: the decision lives in backends.select
 
-    if run_target_for(Path(ws_root)) == "deployment" or is_pinned_enabled():
-        return False
-    return compose_dispatch_active()
+    return backends.select(ws_root) is backends.COMPOSE
 
 
 def uses_named_backend_dispatch(ws_root: Path) -> bool:
     """Whether a study run of ``ws_root`` goes to the backend the operator named, as a document: viva-v1's
     ``/viva/v1/composites`` or compose-api's ``/simulation/run`` (``remote_run_views.remote_run_submit`` picks)."""
-    return uses_compose_dispatch(ws_root) or uses_viva_v1_dispatch(ws_root)
+    from vivarium_workbench.lib import backends  # step 1b: the decision lives in backends.select
+
+    chosen = backends.select(ws_root)
+    return chosen is backends.COMPOSE or chosen is backends.VIVA_CORE
 
 
 def resolved_from_session_build(ws_root: Path) -> dict | None:

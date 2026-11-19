@@ -301,3 +301,100 @@ def test_for_run_owner_is_unique(run_id, owner):
     assert len(owners) <= 1, owners
     found = backends.for_run(run_id)
     assert (found.name if found else None) == owner
+
+
+# --- submit (step 1b) --------------------------------------------------------------------------------------------
+
+@pytest.fixture
+def submit_world(monkeypatch, tmp_path):
+    """Its own setup: a named backend comes from a stubbed profile, not from the ``calls`` fixture's patches."""
+    from vivarium_workbench.lib import server_capabilities as sc
+    from vivarium_workbench.lib.sms_api_client import BACKEND_BASE_ENV_VARS
+
+    for v in BACKEND_BASE_ENV_VARS:
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: False)
+    sc._PROFILE_CACHE.clear()
+    rec: list = []
+    for mod, tag in ((remote_run_compose, "compose"), (remote_run_viva_v1, "viva")):
+        monkeypatch.setattr(mod, "submit", lambda ws, body, _t=tag: rec.append((_t, "submit")) or ({"via": _t}, 202))
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def run_simulation(self, **kw):
+            rec.append(("sms", "run_simulation"))
+            return {"database_id": 77}
+
+    monkeypatch.setattr(rrv, "SmsApiClient", FakeClient)
+    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(rrv, "_run_auth_ok", lambda: True)
+    spec_file = tmp_path / "study.yaml"
+    spec_file.write_text("baseline: [{composite: c}]\n")
+    monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
+    monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
+    monkeypatch.setattr(rrv.study_spec, "collect_study_observables", lambda spec: [])
+    monkeypatch.setattr(rrv, "load_spec", lambda p: {"baseline": [{"composite": "c"}]})
+
+    def name(kind):
+        profiles = {
+            "compose": {"reachable": True, "dispatch": sc.DISPATCH_COMPOSE, "error": None},
+            "viva": {"reachable": True, "dispatch": sc.DISPATCH_DOCUMENT, "error": None},
+            "legacy": {"reachable": True, "dispatch": sc.DISPATCH_LEGACY, "error": None},
+            "unreachable": {"reachable": False, "dispatch": sc.DISPATCH_LEGACY, "error": "down"},
+        }
+        monkeypatch.setenv(BACKEND_BASE_ENV_VARS[0], f"http://{kind}.test")
+        monkeypatch.setattr(sc, "backend_profile", lambda client: {"version": "t", "capabilities": [],
+                                                                   "services": {}, **profiles[kind]})
+
+    yield rec, name, tmp_path
+    sc._PROFILE_CACHE.clear()
+
+
+SMS_BODY = {"study": "s", "simulator_id": 5, "num_generations": 1, "num_seeds": 1}
+
+
+@pytest.mark.parametrize("kind", ["compose", "viva"])
+def test_submit_without_simulator_goes_to_the_named_backend(submit_world, kind):
+    rec, name, ws = submit_world
+    name(kind)
+    assert rrv.remote_run_submit(ws, {"study": "s"}) == ({"via": kind}, 202)
+    assert rec == [(kind, "submit")]
+
+
+@pytest.mark.parametrize("kind", [None, "legacy"])
+def test_submit_without_simulator_and_no_document_backend_is_sms_400(submit_world, kind):
+    rec, name, ws = submit_world
+    if kind:
+        name(kind)
+    body, status = rrv.remote_run_submit(ws, {"study": "s"})
+    assert status == 400 and "simulator_id" in body["error"] and rec == []
+
+
+def test_submit_without_simulator_on_an_unreachable_named_backend_raises_502(submit_world):
+    from vivarium_workbench.lib.errors import APIError
+
+    rec, name, ws = submit_world
+    name("unreachable")
+    with pytest.raises(APIError) as e:
+        rrv.remote_run_submit(ws, {"study": "s"})
+    assert e.value.status_code == 502 and rec == []
+
+
+@pytest.mark.parametrize("kind", [None, "compose", "viva", "unreachable"])
+def test_submit_with_simulator_is_sms_whatever_is_named(submit_world, kind):
+    rec, name, ws = submit_world
+    if kind:
+        name(kind)
+    body, status = rrv.remote_run_submit(ws, dict(SMS_BODY))
+    assert (status, body["simulation_id"]) == (202, 77)
+    assert rec == [("sms", "run_simulation")]
+
+
+def test_submit_pinned_without_simulator_is_sms_even_with_compose_named(submit_world, monkeypatch):
+    rec, name, ws = submit_world
+    name("compose")
+    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: True)
+    body, status = rrv.remote_run_submit(ws, {"study": "s"})
+    assert status == 400 and rec == []

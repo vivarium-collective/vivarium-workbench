@@ -19,6 +19,9 @@ class VivaCoreRuns:
         # remote_run_viva_v1.is_run_id also matches compose-api ids; ownership is exclusive.
         return remote_run_viva_v1.is_run_id(run_id) and not remote_run_compose.is_run_id(run_id)
 
+    def submit(self, ws_root: Path, body: dict) -> tuple[dict, int]:
+        return remote_run_viva_v1.submit(ws_root, body)
+
     def land(self, ws_root: Path, body: dict) -> tuple[dict, int]:
         return remote_run_viva_v1.land(ws_root, body)
 

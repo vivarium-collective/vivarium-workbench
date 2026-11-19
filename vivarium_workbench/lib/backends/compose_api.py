@@ -18,6 +18,9 @@ class ComposeApiRuns:
     def owns(self, run_id: object) -> bool:
         return remote_run_compose.is_run_id(run_id)
 
+    def submit(self, ws_root: Path, body: dict) -> tuple[dict, int]:
+        return remote_run_compose.submit(ws_root, body)
+
     def land(self, ws_root: Path, body: dict) -> tuple[dict, int]:
         return remote_run_compose.land(ws_root, body)
 

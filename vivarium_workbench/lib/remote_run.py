@@ -321,11 +321,12 @@ def run_remote(
     # Only an operator who NAMED a backend (``serve --backend-base-url``) that runs
     # documents via /viva/v1/composites takes that route; a caller-supplied client
     # (CLI ``run-remote``, tests) and every other deployment keep /compose/v1.
-    from vivarium_workbench.lib.remote_pinned import uses_compose_dispatch, uses_viva_v1_dispatch
+    from vivarium_workbench.lib import backends
 
     if dest is None:
         dest = ws_root / ".pbg" / "remote-results"
-    if client is None and uses_compose_dispatch(ws_root):
+    chosen = backends.select(ws_root) if client is None else None
+    if chosen is backends.COMPOSE:
         from vivarium_workbench.lib import remote_run_compose
 
         if analysis_options:
@@ -335,7 +336,7 @@ def run_remote(
         return remote_run_compose.run_composite(
             ws_root, composite_id, dest=Path(dest), n_steps=n_steps, overrides=overrides, emit_paths=emit_paths,
             poll_interval=poll_interval, poll_timeout=poll_timeout)
-    via_viva_v1 = client is None and uses_viva_v1_dispatch(ws_root)
+    via_viva_v1 = chosen is backends.VIVA_CORE
     if client is None:
         client = _SmsApiClient(_sms_api_base())
 

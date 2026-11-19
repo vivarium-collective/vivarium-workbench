@@ -20,7 +20,7 @@ real network / git / auth service.  ``_sms_api_base`` is REUSED from
 from __future__ import annotations
 
 import subprocess
-import time
+import time  # noqa: F401 -- tests patch rrv.time.sleep; the shared module reaches backends.sms_legacy
 import warnings
 from pathlib import Path
 
@@ -345,127 +345,13 @@ def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:
         # "simulator_id is required", and it never asks that backend for a pinned or session build. A submit that
         # carries a simulator id is the SMS host's and does not wait on the named backend.
         remote_pinned.resolve_run_target(ws_root)
-    if not body.get("simulator_id") and remote_pinned.uses_compose_dispatch(ws_root):
-        # The operator named compose-api: the composite runs in the environment its registry lists for this
-        # workspace (remote_run_compose), so there is no simulator id to ask for here either.
-        return remote_run_compose.submit(ws_root, body)
-    if not body.get("simulator_id") and remote_pinned.uses_viva_v1_dispatch(ws_root):
-        # The operator named a backend that runs documents (serve --backend-base-url):
-        # the declaration authorizes the dispatch, and no simulator id exists to ask for.
-        return remote_run_viva_v1.submit(ws_root, body)
-    if not _run_auth_ok():
-        return {"error": "not authenticated"}, 401
-    study = (body.get("study") or "").strip()
-    if not study:
-        return {"error": "study is required"}, 400
-    sim_id = body.get("simulator_id")
-    if not sim_id:
-        return {"error": "simulator_id is required"}, 400
-    # num_generations/num_seeds directly size a real AWS Batch job -- unlike
-    # ordinary composite params, an unset value must never be silently
-    # defaulted to 1 (matching the client-side guard in
-    # study-detail.js:_dispatchRemotePinned, which blocks the dispatch before
-    # this route is ever called; this is the defense-in-depth twin for any
-    # OTHER caller of this route). No default applies to these two fields.
-    num_generations = body.get("num_generations")
-    if not num_generations:
-        return {"error": "num_generations is required"}, 400
-    num_seeds = body.get("num_seeds")
-    if not num_seeds:
-        return {"error": "num_seeds is required"}, 400
-    spec_path = study_spec.study_spec_path(ws_root, study)
-    if spec_path is None or not spec_path.is_file():
-        return {"error": f"study {study!r} not found"}, 404
-    spec = load_spec(spec_path)
-    observables = study_spec.collect_study_observables(spec)
-    # spec.analyses (the same source study_run_post.run_study_analyses reads
-    # for the LOCAL post-run pipeline) was never threaded into the remote
-    # dispatch payload — every remote-dispatched run's analysis_options came
-    # out empty regardless of what a study configured. build_analysis_options
-    # translates it into v2ecoli's {scale: {name: params}} shape.
-    from vivarium_workbench.lib.study_run_post import build_analysis_options
-
-    analysis_options, analysis_errors = build_analysis_options(
-        spec.get("analyses") or [], ws_root
-    )
-    for err in analysis_errors:
-        warnings.warn(
-            f"remote_run_submit: {study!r} analysis config: {err.get('error')}"
-        )
-    client = SmsApiClient(_sms_api_base())
-    try:
-        sim = client.run_simulation(
-            simulator_id=int(sim_id),
-            num_generations=int(num_generations),
-            num_seeds=int(num_seeds),
-            run_parca=bool(body.get("run_parca", True)),
-            observables=observables,
-            config_filename=(body.get("config_filename") or "").strip() or None,
-            analysis_options=analysis_options or None,
-            extra_params=body.get("extra_params") or None,
-        )
-    except SmsApiError as e:
-        # backlog item 51: this call used to be left unguarded, so ANY
-        # SmsApiError (a real timeout, a 5xx, a dropped connection) fell
-        # through to api/app.py's generic Exception handler, which replaces
-        # the real message with a bare "internal server error" 500 -- hiding
-        # exactly the information that distinguishes "sms-api is genuinely
-        # down" from "sms-api is fine, this one call just failed" (the
-        # observed incident: viva-api's chain-dispatch submission loop kept
-        # running server-side to completion after this client gave up, but
-        # the opaque 500 gave the UI no hint of that, inviting a duplicate
-        # retry of a real, expensive campaign). Mirrors the SAME
-        # except-SmsApiError -> 502 pattern already used by
-        # remote_run_pinned_build_start / remote_run_analysis in this file,
-        # so the caller gets the actual upstream error message instead of a
-        # generic crash, on this path too.
-        return {"error": str(e), "reachable": False}, 502
-    # item 84: land_remote_run is the ONLY place a runs_meta row has ever been
-    # written for a remote run -- confirmed by reading the real code, not
-    # assumed -- so a UI-dispatched campaign was completely invisible in the
-    # Runs tab from dispatch until someone explicitly clicked "Land Results",
-    # which could be hours later or never. Write a lightweight pending-dispatch
-    # placeholder here, at the moment we actually have a real simulation_id,
-    # so the Runs tab shows it immediately. Its run_id (`remote-pending-<id>`)
-    # is deliberately NOT generate_run_id's own scheme -- that hash embeds the
-    # CALL-TIME timestamp, so it can never be reproduced later at land time to
-    # target the same row; a stable, simulation_id-derived id is what makes
-    # land_remote_run's own cleanup below possible. Best-effort: a Runs-tab
-    # visibility row must never block or fail a real, already-dispatched,
-    # real-money AWS Batch campaign.
-    try:
-        from vivarium_workbench.lib import composite_runs as cr
-        _baseline = spec.get("baseline") or []
-        _spec_id = (_baseline[0].get("composite") if _baseline else None) or study
-        _deployment = remote_pinned.remote_deployment_name()
-        conn = cr.connect(study_spec.study_dir(ws_root, study) / "runs.db")
-        try:
-            cr.save_metadata(
-                conn,
-                spec_id=_spec_id,
-                run_id=f"remote-pending-{sim['database_id']}",
-                params={
-                    "source": _deployment,
-                    "simulation_id": sim["database_id"],
-                    "backend": "ray",
-                },
-                label=f"Remote dispatch ({_deployment}) — in progress",
-                started_at=time.time(),
-                n_steps=0,
-                workspace=ws_root,
-            )
-        finally:
-            conn.close()
-    except Exception:  # noqa: BLE001 — see docstring above; never block the real dispatch
-        pass
-    response = {"simulation_id": sim["database_id"], "phase": "running"}
-    if analysis_errors:
-        # backlog item 39: surface which requested analyses couldn't be
-        # resolved (e.g. a stale workspace PVC missing a newer v2ecoli
-        # analysis) instead of silently dropping them from analysis_options
-        # -- the dispatch itself still proceeds, this is informational.
-        response["analysis_errors"] = analysis_errors
-    return response, 202
+        # The operator named a backend that runs documents: compose-api (the composite runs in the environment its
+        # registry lists for this workspace) or viva-core (serve --backend-base-url; the declaration authorizes the
+        # dispatch). Either way there is no simulator id to ask for. A session build or pin selects SMS instead.
+        chosen = backends.select(ws_root)
+        if chosen is backends.COMPOSE or chosen is backends.VIVA_CORE:
+            return chosen.runs.submit(ws_root, body)
+    return sms_legacy.submit_tail(ws_root, body)
 
 
 def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
