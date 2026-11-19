@@ -14,7 +14,7 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | 1b | `backends.named/select/active`: one place picks the backend for a new run; the six predicates become wrappers; submit goes through the adapter | wb#1653 | **done**, merged 2026-11-19 |
 | 1c-1 | One remote backend per process (startup refusal); every remote run records where it went (`params.remote`); `backends.records.resolve_existing` | wb#1654 | **done**, merged 2026-11-19 |
 | 1c-2 | Views, routes, reconciler and figures route existing runs by their record (`resolve_existing`); the Runs tab sends its row's deployment | wb#1655 | **done**, merged 2026-11-19 |
-| — | Plan rewritten for the narrower scope (SMS as a plugin) | this PR | in review (2026-11-19) |
+| — | Plan rewritten for the narrower scope (SMS as a plugin) | wb#1657 | in review (2026-11-19) |
 | P1a | Core seams that need no provider (`lib/backend_config.py`, `Backend.identity`); no behaviour change | — | not started |
 | P1b | Pure move: whole SMS modules into `vivarium_workbench_sms` (same distribution), every import and patch target re-pointed, lazy registry imports; import-linter contract whose ignore list is the ratchet | — | not started |
 | P1c | `Provider` and `SmsProvider`; registry, session build/pin and capability probe through the provider; no behaviour change | — | not started |
