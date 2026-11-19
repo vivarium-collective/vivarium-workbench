@@ -58,7 +58,7 @@ RUN_ENTRYPOINT_METHODS = frozenset({"run_study"})
 
 
 def is_run_entrypoint(method: str) -> bool:
-    """Whether ``remote_pinned.resolve_run_target`` governs this method."""
+    """Whether ``backends.resolve_run_target`` governs this method."""
     return method in RUN_ENTRYPOINT_METHODS
 
 

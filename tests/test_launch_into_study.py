@@ -43,7 +43,7 @@ def test_launch_into_study_explicit_inputs_and_manifest(tmp_path, monkeypatch):
     assert "studies/s1/runs.db" in seen["db_path"].replace("\\", "/")
     assert seen["spec_id"] == "some.composite" and seen["config"].get("seed") == 3
     # item 18: launch_into_study now resolves + threads the target explicitly
-    # (remote_pinned.resolve_run_target) rather than leaving invoke_run to
+    # (backends.resolve_run_target) rather than leaving invoke_run to
     # fall back to its own .viv-build.json-only check — a plain tmp_path
     # workspace (no .viv-build.json, pinned mode off) resolves "local".
     assert seen["target"] == "local"

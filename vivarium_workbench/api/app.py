@@ -7104,7 +7104,7 @@ def create_app() -> FastAPI:
         Mirrors the stdlib ``POST /api/study-run-baseline``.  Body:
         ``{"study", "composite"?, "steps"?}`` — resolves the study, then
         resolves the execution target the SAME way every dashboard run
-        entrypoint does (``lib.remote_pinned.resolve_run_target`` — item 18):
+        entrypoint does (``lib.backends.resolve_run_target`` — item 18):
         a plain local workspace builds/runs the baseline composite as a local
         subprocess; a remote-build workspace or a remote-pinned deployment
         currently REFUSES (409) rather than silently running on this pod —
@@ -7478,19 +7478,19 @@ def create_app() -> FastAPI:
         ``VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH=1``.
         Returns ``{target, ok, reason, message, actions?, ...}``; a local
         workspace is always ok (no push needed)."""
-        from vivarium_workbench_sms.remote_pinned import resolve_run_target
+        from vivarium_workbench.lib import backends as _backends
         from vivarium_workbench.lib import remote_run as _remote_run
         from vivarium_workbench.lib import composite_test_run_views as _ctr
+        # One decision: backends.active (which backends.resolve_run_target also reads). Patching
+        # backends.resolve_run_target does not steer this preflight; patch backends.active / backends.select.
         try:
-            target = resolve_run_target(ws)
+            _chosen = _backends.active(ws)
         except APIError as e:
             # A backend the operator named that cannot be asked: the preflight's own dead end, never "runs locally".
             return JSONResponse(content={**e.to_body(), "target": "deployment", "ok": False, "message": e.message})
-        if target != "deployment":
-            return JSONResponse(content={"target": target, "ok": True, "reason": "local",
+        if _chosen is None:
+            return JSONResponse(content={"target": "local", "ok": True, "reason": "local",
                                          "message": "This workspace runs locally — no push needed."})
-        from vivarium_workbench.lib import backends as _backends
-        _chosen = _backends.select(ws)
         if _chosen is _backends.COMPOSE:
             # compose-api runs the composite in the environment its registry lists for this
             # workspace: ready exactly when one resolves (nothing is shipped from git).

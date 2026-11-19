@@ -251,7 +251,7 @@ class WorkerPool:
             logger.warning(
                 "%s runs in this context's env worker, which is sized for "
                 "interaction. Work at deployment scale should dispatch to viva-api "
-                "instead (see remote_pinned.resolve_run_target / "
+                "instead (see backends.resolve_run_target / "
                 "remote_run_views.remote_run_submit); the scale precheck that would "
                 "decide automatically is REFACTOR-PLAN §2A.8 workstream 8 step 2.",
                 method)

@@ -24,7 +24,8 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | — | Route dependencies (`get_workspace`, ...) moved to `api/deps.py`, so a plugin router can use them without importing `api/app.py` | wb#1663 | **done**, merged 2026-11-19 |
 | — | Test isolation: the conftest reset forgets the cached GitHub session and every backend-URL cache | wb#1664 | **done**, merged 2026-11-19 |
 | — | Untrack 57 generated fixture artifacts committed by accident in wb#1661 (`3f52a96e`); ignore their four directories | wb#1666 | **done**, merged 2026-11-19 |
-| P1c | `Provider` (`backends`, `select`, `recognise`) and `SmsProvider`; the registry (one core→plugin edge) with inert sentinels when providers are off; capability probe split; 409 `backend-not-installed`; no behaviour change with providers on | wb#1667 | in review (2026-11-19) |
+| P1c | `Provider` (`backends`, `select`, `recognise`) and `SmsProvider`; the registry (one core→plugin edge) with inert sentinels when providers are off; capability probe split; 409 `backend-not-installed`; no behaviour change with providers on | wb#1667 | **done**, merged 2026-11-19 |
+| P2 (target predicates) | `backends.resolve_run_target` replaces `remote_pinned.resolve_run_target`; the three `uses_*_dispatch` wrappers deleted (no production caller); the preflight and `remote_run_submit` decide once (`backends.active`); ratchet 35 → 31; no behaviour change with providers on | wb#1669 | in review (2026-11-19) |
 | P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, facet routes stay core, SMS-only routes into the plugin's router | — | not started |
 | P3 | Opaque string run ids end to end; the UI shows the nine SMS-today features (§2.5) by declared feature; launch panel quarantined (`sms-launch.js`); core tests run without the plugin | — | not started |
 | P4 | `vivarium_workbench_sms` moves into the viva-api repository as its own distribution, found by entry point; the Stanford image installs it | — | not started |
@@ -307,7 +308,7 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 - Routes that reach SMS code and are not yet classified: `simulation-run-download`, `composite-run/{id}/artifact`, `composite-run/{id}` and `/state`, `investigation-run-unblocked-status`, `investigation-run-redrive`. P2's Routes area classifies them.
 - `ai_tools.py` hard-codes SMS route paths, `_run_auth_ok` reads the SMS pin, and `app.py` clears the listing module's private caches. These belong to P2's areas.
 
-**The plugin set.** Whole modules move in P1b. The SMS parts of mixed modules are split out in P2, one area per PR. Until then their calls into the plugin are the contract's `ignore_imports`.
+**The plugin set.** Whole modules move in P1b. The SMS parts of mixed modules are split out in P2, one area per PR. Until then their calls into the plugin are the contract's `ignore_imports`. The hosted env-worker pod ships the core without the plugin, so worker-reachable core modules must import without it; `tests/test_core_imports_without_plugin.py` pins the shrinking list.
 
 | Area | Whole modules (P1b) | SMS parts of mixed modules (P2) | Core sees it through |
 |---|---|---|---|
@@ -316,11 +317,11 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 | Builds and pinning | `remote_pinned`, `remote_build_source`, `source_build_views`, `comparison_pinning` | build-source half of `workspace_deps_views`, the vEcoli dispatch in `study_runs`, discovery in `composite_test_run_views` | `builds`, `Provider.select` |
 | Remote tab and store | `remote_simulations`, `remote_reconcile` | `simulations_index._append_remote_simulations`, `resolve_or_fetch_store`; `investigations_index`'s `list_remote_simulations_swr` | `listing`, `artifacts` |
 | Analyses and figures | `remote_analysis_figures` | — | `artifacts`, `analyses`; the routes stay core and dispatch by facet (§2.2) |
-| Routes | — | `api/app.py`: 7 import statements over 6 plugin-set modules, inline `SmsApiClient(...)` at the figure routes, `_sms_only`, `resolve_run_target`; its read-only allowlist names SMS routes | facet routes stay core and dispatch by facet; SMS-only routes go to the plugin's `router()` (§2.2) |
+| Routes | — | `api/app.py`: imports of 4 plugin modules (`source_build_views`, `remote_run_jobs`, `remote_analysis_figures`, `remote_simulations`), inline `SmsApiClient(...)` at the figure routes, `_sms_only`; its read-only allowlist names SMS routes | facet routes stay core and dispatch by facet; SMS-only routes go to the plugin's `router()` (§2.2) |
 | Workers | — | `ProxyWorkerLauncher`, `RemoteWorkerLauncher` in `env_worker_launcher`; the viva-api proxy assumptions in `env_worker_pool` (its hints), `env_worker_dialback` and `env_worker_client` | `Provider.worker_launcher` |
 | CLI and startup | — | `run-remote` in `cli.py`; startup checks in `cli`, `startup`, `api/__main__` | `Provider.cli`, `check_config` |
 | Models and bundle | — | sms-api status + remote-provenance models in `models.py` (feed `generate_ts`); `publish.py`'s `smsApiBase` | P3 decides |
-| Target predicates | — | `investigation_steps`, `investigation_run_views`, `composite_run_views` | `backends.select` |
+| Target predicates (P2, this area's PR) | — | none. `remote_pinned`'s four predicates were core wrappers: `resolve_run_target` moved to `backends`, the three `uses_*_dispatch` were deleted (no production caller). Callers: `investigation_steps`, `investigation_run_views`, `investigation_run_one_views`, `study_runs`, `composite_test_run_views`, `remote_run_views`, `api/app.py` | `backends.resolve_run_target` / `backends.active`; the SMS half is `Provider.select` (P1c) |
 | To check in P2's plans | — | the vEcoli/ParCa case keyed on `.viv-build.json` in `readouts_views`; the `SMS_API_BASE` hint in `run_runner`; vEcoli knobs (`n_seeds`, `n_generations`) in `preflight.py`, `env_worker.py` | — |
 
 **Features that are SMS-only today (P3).**
@@ -482,8 +483,8 @@ Every remote run answers two independent questions:
    - viva-core (`POST /viva/v1/composites`);
    - compose-api (`POST /simulation/run`).
 
-The code answers both with the same predicates: `remote_pinned.resolve_run_target`, `uses_viva_v1_dispatch`,
-`uses_compose_dispatch` and `server_capabilities.explicit_backend_profile`. In practice:
+The code answers both with the same predicates: `backends.resolve_run_target`, `backends.select` (formerly
+`remote_pinned.uses_viva_v1_dispatch` / `uses_compose_dispatch`) and `server_capabilities.explicit_backend_profile`. In practice:
 
 - A pinned or session build **always** takes the SMS API, even on a backend that serves `/viva/v1/composites`.
 - The document routes are used **only** when the operator names a backend with `--backend-base-url`.

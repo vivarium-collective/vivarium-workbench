@@ -285,7 +285,6 @@ source_modules = ["vivarium_workbench"]
 forbidden_modules = ["vivarium_workbench_sms"]
 ignore_imports = [
     "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_analysis_figures",
-    "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_pinned",
     "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_run_jobs",
     "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_simulations",
     "vivarium_workbench.api.app -> vivarium_workbench_sms.source_build_views",
@@ -297,9 +296,6 @@ ignore_imports = [
     "vivarium_workbench.lib.composite_test_run_views -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.env_worker_launcher -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.git_status -> vivarium_workbench_sms.source_build_views",
-    "vivarium_workbench.lib.investigation_run_one_views -> vivarium_workbench_sms.remote_pinned",
-    "vivarium_workbench.lib.investigation_run_views -> vivarium_workbench_sms.remote_pinned",
-    "vivarium_workbench.lib.investigation_steps -> vivarium_workbench_sms.remote_pinned",
     "vivarium_workbench.lib.investigations_index -> vivarium_workbench_sms.remote_simulations",
     "vivarium_workbench.lib.remote_run -> vivarium_workbench_sms.remote_pinned",
     "vivarium_workbench.lib.remote_run -> vivarium_workbench_sms.sms_api_client",

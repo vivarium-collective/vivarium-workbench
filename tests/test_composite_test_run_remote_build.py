@@ -243,6 +243,7 @@ def test_composite_test_run_pinned_workspace_dispatches_image(tmp_path, monkeypa
     from vivarium_workbench.lib import run_registry, remote_run
     from vivarium_workbench_sms import remote_pinned
     from vivarium_workbench_sms import sms_api_client as sac
+    from vivarium_workbench.lib import backends
 
     (tmp_path / ".pbg").mkdir()
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
@@ -250,7 +251,7 @@ def test_composite_test_run_pinned_workspace_dispatches_image(tmp_path, monkeypa
     monkeypatch.setattr(run_registry, "spawn_detached",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no compose spawn")))
     # Pinned to build 124 (resolve_run_target → deployment; session build resolves).
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws: "deployment")
+    monkeypatch.setattr(backends, "resolve_run_target", lambda ws: "deployment")
     monkeypatch.setattr(remote_pinned, "resolved_from_session_build",
                         lambda ws: {"simulator_id": 124, "repo_url": "r", "commit": "c", "branch": "b"})
     # The compose preflight must never be consulted when a pinned build resolves.

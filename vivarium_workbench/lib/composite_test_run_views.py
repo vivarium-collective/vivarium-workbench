@@ -262,6 +262,7 @@ def resolve_cloud_target(
     workspace where no build resolves, and the frozen-``PinnedConfig`` ``.get``
     ``AttributeError`` — into one decision with an explicit outcome.
     """
+    from vivarium_workbench.lib import backends
     from vivarium_workbench_sms import remote_pinned
 
     build = body.get("build") or {}
@@ -279,7 +280,7 @@ def resolve_cloud_target(
     # (2) No explicit Cloud request: the workspace's own resolved target decides.
     #     A pinned/materialized workspace resolves to "deployment" WITHOUT the
     #     loom sending run_target (it only sends it when the scope is toggled).
-    if remote_pinned.resolve_run_target(ws_root) != "deployment":
+    if backends.resolve_run_target(ws_root) != "deployment":
         return None  # local run — unchanged
 
     # (3) Deployment workspace: dispatch the resolved build's image. Session build

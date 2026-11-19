@@ -192,3 +192,57 @@ def test_with_providers_off_an_sms_record_is_refused_backend_not_installed(provi
     body, code = res.refusal
     assert (code, body["reason"], body["terminal"]) == (409, "backend-not-installed", True)
     assert "sms-legacy" in body["error"]
+
+
+# --- the run target with providers off (step P2, target predicates) --------------------------------------------------
+
+@pytest.mark.parametrize("case, expected", [
+    ("session-build", "local"),
+    ("pin", "local"),
+    ("named-compose", "deployment"),
+    ("named-document", "local"),
+    ("named-unreachable", "raise"),
+])
+def test_with_providers_off_the_run_target_ignores_sms(providers_off, tmp_path, monkeypatch, inproc_client,
+                                                       case, expected):
+    """With providers off nothing claims a session build or a pin, and a document profile is not a backend (viva-core
+    is the plugin's), so those run locally; a named compose-api is still the deployment, and a named backend that
+    cannot be reached is still refused. The preflight answers the same target."""
+    from vivarium_workbench.lib import remote_run_compose as _rc
+    from vivarium_workbench.lib import server_capabilities as sc
+    from vivarium_workbench.lib.errors import APIError
+    from vivarium_workbench_sms import remote_pinned
+
+    ws = tmp_path
+    (ws / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    if case == "session-build":
+        (ws / ".viv-build.json").write_text('{"simulator_id": 66}')
+    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: case == "pin")
+    profile = {
+        "named-compose": {"reachable": True, "dispatch": sc.DISPATCH_COMPOSE, "error": None},
+        "named-document": {"reachable": True, "dispatch": sc.DISPATCH_DOCUMENT, "error": None},
+        "named-unreachable": {"reachable": False, "dispatch": sc.DISPATCH_LEGACY, "error": "connection refused"},
+    }.get(case)
+    if case == "named-unreachable":
+        monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "http://dead.test")
+    monkeypatch.setattr(sc, "explicit_backend_profile", lambda: profile)
+    # compose-api's preflight would otherwise ask its registry for this workspace's environment.
+    monkeypatch.setattr(_rc, "dispatch_preflight",
+                        lambda ws_root: {"target": "deployment", "ok": True, "dispatch": "compose"})
+
+    if expected == "raise":
+        with pytest.raises(APIError) as e:
+            backends.resolve_run_target(ws)
+        assert e.value.status_code == 502
+    else:
+        assert backends.resolve_run_target(ws) == expected
+
+    body = inproc_client(ws).get("/api/remote-dispatch-preflight").json()
+    if expected == "raise":
+        assert (body["target"], body["ok"], body["phase"]) == ("deployment", False, "unreachable")
+    else:
+        assert body["target"] == expected
+        if expected == "local":
+            assert body["ok"] is True
+        else:
+            assert body["dispatch"] == "compose"

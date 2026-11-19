@@ -1,9 +1,11 @@
 """Where a workspace's run goes, pinned as a decision table (docs/backend-adapters.md §4 step 1b).
 
-Six predicates answer it today: ``remote_pinned.resolve_run_target`` / ``uses_viva_v1_dispatch`` /
+Six predicates answered it before step 1b: ``remote_pinned.resolve_run_target`` / ``uses_viva_v1_dispatch`` /
 ``uses_compose_dispatch`` / ``uses_named_backend_dispatch`` and ``server_capabilities.compose_dispatch_active`` /
-``viva_v1_dispatch_active``. Step 1b moves the decision into ``backends.named/select/active`` and keeps the six as
-wrappers. The predicate half of this file was written and run against the code before that move.
+``viva_v1_dispatch_active``. Step 1b moved the decision into ``backends.named/select/active``; step P2 (target
+predicates) moved ``resolve_run_target`` into ``backends`` and deleted the three ``uses_*_dispatch`` wrappers (no
+production caller), so their rows below are the ``backends.select`` expressions callers write instead. The predicate
+half of this file was written and run against the code before step 1b; the tables are unchanged since.
 
 Each case also counts profile reads (``server_capabilities.explicit_backend_profile``) and network probes
 (``server_capabilities.backend_profile``). The refactor may read the cached profile fewer times than today, never
@@ -14,6 +16,7 @@ from __future__ import annotations
 import pytest
 
 from vivarium_workbench_sms import remote_pinned
+from vivarium_workbench.lib import backends
 from vivarium_workbench.lib import server_capabilities as sc
 from vivarium_workbench.lib.errors import APIError
 from vivarium_workbench_sms.sms_api_client import BACKEND_BASE_ENV_VARS
@@ -77,12 +80,17 @@ def world(monkeypatch, tmp_path):
     sc._PROFILE_CACHE.clear()
 
 
+def _uses_named(ws):
+    chosen = backends.select(ws)
+    return chosen is backends.COMPOSE or chosen is backends.VIVA_CORE
+
+
 def _predicates(ws):
     return {
-        "resolve": lambda: remote_pinned.resolve_run_target(ws),
-        "uses_viva": lambda: remote_pinned.uses_viva_v1_dispatch(ws),
-        "uses_compose": lambda: remote_pinned.uses_compose_dispatch(ws),
-        "uses_named": lambda: remote_pinned.uses_named_backend_dispatch(ws),
+        "resolve": lambda: backends.resolve_run_target(ws),
+        "uses_viva": lambda: backends.select(ws) is backends.VIVA_CORE,
+        "uses_compose": lambda: backends.select(ws) is backends.COMPOSE,
+        "uses_named": lambda: _uses_named(ws),
         "compose_active": sc.compose_dispatch_active,
         "viva_active": sc.viva_v1_dispatch_active,
     }
@@ -219,3 +227,155 @@ def test_backend_functions_with_build_or_pin_select_sms(world, named, build):
     assert _name(lambda: backends.active(ws)) == "sms-legacy"
     assert counts["reads"] == 0 and counts["probes"] == 0
     assert _name(backends.named) == DIRECT[named][0]  # the profile alone ignores the workspace
+
+
+# --- backends.resolve_run_target (item 18): the ONE local-vs-deployment resolution -------------------------------
+#
+# Every run entrypoint (composite_test_run, run_study_baseline, run_study_variant, the investigation runs) calls it,
+# so none of them can drift apart again. Moved from test_remote_run_pinned.py when it moved into backends (step P2).
+
+@pytest.fixture
+def no_named_backend(monkeypatch):
+    for v in BACKEND_BASE_ENV_VARS:
+        monkeypatch.delenv(v, raising=False)
+    sc._PROFILE_CACHE.clear()
+    yield
+    sc._PROFILE_CACHE.clear()
+
+
+def test_resolve_run_target_local_when_neither_condition_holds(tmp_path, monkeypatch, no_named_backend):
+    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: False)
+    assert backends.resolve_run_target(tmp_path) == "local"
+
+
+def test_resolve_run_target_deployment_when_pinned_with_no_session_build(tmp_path, monkeypatch, no_named_backend):
+    """The exact item-18 bug condition: pinned deployment, but this workspace has no .viv-build.json
+    (composite_test_run's own inline check already got this right; run_study_baseline/run_study_variant didn't)."""
+    assert not (tmp_path / ".viv-build.json").exists()
+    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: True)
+    assert backends.resolve_run_target(tmp_path) == "deployment"
+
+
+def test_resolve_run_target_deployment_when_session_build_with_pin_off(tmp_path, monkeypatch, no_named_backend):
+    """A materialized session build (.viv-build.json) alone is sufficient -- unchanged from
+    run_core.run_target_for's pre-existing behavior."""
+    (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
+    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: False)
+    assert backends.resolve_run_target(tmp_path) == "deployment"
+
+
+def test_resolve_run_target_deployment_when_both_conditions_hold(tmp_path, monkeypatch, no_named_backend):
+    """Session build AND deployment pin both present -- still resolves cleanly to "deployment"."""
+    (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
+    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: True)
+    assert backends.resolve_run_target(tmp_path) == "deployment"
+
+
+def test_resolve_run_target_short_circuits_before_checking_pin(tmp_path, monkeypatch, no_named_backend):
+    """A materialized session build resolves "deployment" WITHOUT calling is_pinned_enabled()."""
+    (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
+
+    def _boom():
+        raise AssertionError("is_pinned_enabled must not be called here")
+
+    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", _boom)
+    assert backends.resolve_run_target(tmp_path) == "deployment"
+
+
+@pytest.mark.parametrize("name", ["resolve_run_target", "uses_viva_v1_dispatch", "uses_compose_dispatch",
+                                  "uses_named_backend_dispatch"])
+def test_the_old_target_predicates_are_gone_from_remote_pinned(name):
+    """No alias may come back: a test patching ``remote_pinned.<name>`` would then be a silent no-op, because every
+    caller reads ``backends.resolve_run_target`` / ``backends.select``."""
+    assert not hasattr(remote_pinned, name)
+
+
+# --- one decision: the composite card and GET /api/remote-dispatch-preflight agree ---------------------------------
+
+class _CardStop(Exception):
+    pass
+
+
+def _card_branch(ws, monkeypatch):
+    """Which branch ``composite_test_run`` takes for a card body with no ``run_target`` and no ``build``: the
+    dispatch ends are patched, so nothing runs and nothing is asked over the network."""
+    from vivarium_workbench.lib import composite_test_run_views as ctr
+    from vivarium_workbench.lib import remote_run, remote_run_compose, run_core
+
+    seen = {}
+    monkeypatch.setattr(remote_run_compose, "checked_steps", lambda steps: steps)
+    monkeypatch.setattr(remote_run, "remote_dispatch_preflight", lambda ws_root: {"ok": True})
+
+    def image(simulator_id, *a, **k):
+        seen["image"] = simulator_id
+        raise _CardStop
+
+    def invoke(ws_root, **k):
+        seen["target"] = k.get("target")
+        raise _CardStop
+
+    monkeypatch.setattr(ctr, "_dispatch_build_image_run", image)
+    monkeypatch.setattr(run_core, "invoke_run", invoke)
+    try:
+        body, status = ctr.composite_test_run(ws, {"id": "c"})
+    except _CardStop:
+        pass
+    except APIError as e:
+        return ("unreachable", e.status_code)
+    else:
+        return ("refused", status, body.get("reason"))
+    if "image" in seen:
+        return ("image",)
+    chosen = backends.select(ws)
+    if seen["target"] == "deployment" and chosen is backends.COMPOSE:
+        return ("compose",)
+    if seen["target"] == "deployment" and chosen is backends.VIVA_CORE:
+        return ("document",)
+    return (seen["target"],)
+
+
+def _preflight_branch(body):
+    if body.get("phase") == "unreachable":
+        return ("unreachable", 502)
+    if body["target"] == "local":
+        return ("local",)
+    if body.get("dispatch") == "compose":
+        return ("compose",)
+    if body.get("dispatch") == "viva-v1-document":
+        return ("document",)
+    if body.get("dispatch") == "image":
+        return ("image",)
+    assert body["ok"] is False
+    return ("refused", 409, body.get("reason"))
+
+
+@pytest.mark.parametrize("named", list(EXPECTED))
+@pytest.mark.parametrize("build", ["none", "session", "pinned"])
+def test_preflight_and_card_take_the_same_decision(world, monkeypatch, inproc_client, named, build):
+    """The preflight decides once (``backends.active``); the card decides with ``backends.select`` and then
+    ``resolve_cloud_target`` (``backends.resolve_run_target``). They read the same select and the same cached
+    profile, so they agree -- this pins it, so a later step cannot split them. Only which branch each side takes is
+    compared: the preflight answers HTTP 200 with ``ok: False`` bodies where the card raises 502 or returns 409."""
+    from vivarium_workbench.lib import remote_run_compose
+
+    configure, _ = world
+    ws = configure(named, session=build == "session", pinned=build == "pinned")
+    (ws / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    (ws / ".pbg").mkdir(exist_ok=True)
+    # The SMS half: a session build resolves to an image; a pin with no build is the no-build dead end.
+    monkeypatch.setattr(remote_pinned, "resolved_from_session_build",
+                        lambda ws_root: {"simulator_id": 7, "repo_url": "r", "commit": "c"}
+                        if (ws_root / ".viv-build.json").exists() else None)
+    monkeypatch.setattr(remote_pinned, "resolve_pinned_simulator_id", lambda client, ws_root: None)
+    monkeypatch.setattr(remote_run_compose, "dispatch_preflight",
+                        lambda ws_root: {"target": "deployment", "ok": True, "dispatch": "compose"})
+
+    preflight = _preflight_branch(inproc_client(ws).get("/api/remote-dispatch-preflight").json())
+    card = _card_branch(ws, monkeypatch)
+    assert preflight == card
+    expected = {
+        "session": ("image",),
+        "pinned": ("refused", 409, "no-build"),
+    }.get(build) or {"none": ("local",), "compose": ("compose",), "viva": ("document",), "legacy": ("local",),
+                     "unreachable": ("unreachable", 502)}[named]
+    assert card == expected

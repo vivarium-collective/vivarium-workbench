@@ -2,7 +2,7 @@
 
 Used only when the operator named a backend (``serve --backend-base-url``) that is compose-api
 (:func:`server_capabilities.compose_dispatch_active`) and neither a session build nor the pinned config chose
-the simulator-keyed path (:func:`remote_pinned.uses_compose_dispatch`). Every function answers the shape the
+the simulator-keyed path (``backends.select(ws) is backends.COMPOSE``). Every function answers the shape the
 legacy ``remote_run_views`` route answers, so the panel and poll code are unchanged.
 
 The workspace's code is not shipped: it runs in an environment compose-api builds or already has. When the

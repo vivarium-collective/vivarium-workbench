@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+from vivarium_workbench.lib import backends
 from vivarium_workbench.lib import composite_test_run_views as v
 from vivarium_workbench_sms import remote_pinned
 
@@ -54,12 +55,12 @@ def test_explicit_deployment_no_build_returns_409(tmp_path):
 
 def test_local_workspace_returns_none(tmp_path, monkeypatch):
     # No explicit Cloud request and the workspace resolves to local.
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws: "local")
+    monkeypatch.setattr(backends, "resolve_run_target", lambda ws: "local")
     assert v.resolve_cloud_target(tmp_path, {}) is None
 
 
 def test_session_build_resolves_to_cloud_target(tmp_path, monkeypatch):
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws: "deployment")
+    monkeypatch.setattr(backends, "resolve_run_target", lambda ws: "deployment")
     monkeypatch.setattr(
         remote_pinned, "resolved_from_session_build",
         lambda ws: {"simulator_id": 124, "repo_url": "r", "commit": "c", "branch": "b"})
@@ -95,7 +96,7 @@ def test_pinned_workspace_resolves_to_cloud_target_frozen_dataclass(tmp_path, mo
 
 def test_pinned_workspace_no_build_returns_409_not_500(tmp_path, monkeypatch):
     """Pinned mode ON but NO build exists → the actionable 409, never a 500."""
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws: "deployment")
+    monkeypatch.setattr(backends, "resolve_run_target", lambda ws: "deployment")
     monkeypatch.setattr(remote_pinned, "resolved_from_session_build", lambda ws: None)
     monkeypatch.setattr(remote_pinned, "resolve_pinned_simulator_id",
                         lambda client, ws: None)
@@ -129,7 +130,7 @@ def test_pinned_no_build_end_to_end_is_409_not_500(tmp_path, monkeypatch):
     spawned = []
     monkeypatch.setattr(run_registry, "spawn_detached",
                         lambda *a, **k: (spawned.append(1), 1)[1])
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws: "deployment")
+    monkeypatch.setattr(backends, "resolve_run_target", lambda ws: "deployment")
     monkeypatch.setattr(remote_pinned, "resolved_from_session_build", lambda ws: None)
     monkeypatch.setattr(remote_pinned, "resolve_pinned_simulator_id",
                         lambda client, ws: None)

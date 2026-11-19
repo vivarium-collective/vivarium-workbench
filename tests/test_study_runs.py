@@ -50,7 +50,7 @@ def test_study_run_baseline_pinned_deployment_409_over_real_http(
     POST /api/study-run-baseline with a real 409 JSON response, not silently
     run the composite locally and return 200 -- exercising the real FastAPI
     route (api/app.py), the real CSRF/origin guard, and the real
-    lib.remote_pinned.resolve_run_target env-var resolution together, not just
+    lib.backends.resolve_run_target env-var resolution together, not just
     the lib function called directly."""
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -132,8 +132,9 @@ def test_study_run_baseline_on_deployment_delegates_to_remote_run_submit(tmp_pat
     from vivarium_workbench.lib import study_runs
     from vivarium_workbench_sms import remote_pinned
     from vivarium_workbench.lib import remote_run_views
+    from vivarium_workbench.lib import backends
 
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws_root: "deployment")
+    monkeypatch.setattr(backends, "resolve_run_target", lambda ws_root: "deployment")
     monkeypatch.setattr(remote_pinned, "resolve_pinned_simulator_id", lambda client, ws_root: 75)
 
     captured = {}
@@ -170,8 +171,9 @@ def test_study_run_baseline_on_deployment_forwards_extra_composite_params(tmp_pa
     from vivarium_workbench.lib import study_runs
     from vivarium_workbench_sms import remote_pinned
     from vivarium_workbench.lib import remote_run_views
+    from vivarium_workbench.lib import backends
 
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws_root: "deployment")
+    monkeypatch.setattr(backends, "resolve_run_target", lambda ws_root: "deployment")
     monkeypatch.setattr(remote_pinned, "resolve_pinned_simulator_id", lambda client, ws_root: 75)
 
     captured = {}
@@ -204,10 +206,10 @@ def test_study_run_baseline_explicit_composite_on_deployment_still_409s(tmp_path
     NOT silently delegate (which would run the wrong composite); it keeps
     the existing, honest 409 instead."""
     from vivarium_workbench.lib import study_runs
-    from vivarium_workbench_sms import remote_pinned
     from vivarium_workbench.lib import remote_run_views
+    from vivarium_workbench.lib import backends
 
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws_root: "deployment")
+    monkeypatch.setattr(backends, "resolve_run_target", lambda ws_root: "deployment")
 
     def fail_if_called(*a, **k):
         raise AssertionError("remote_run_submit must not be called for a non-default composite")
@@ -234,8 +236,9 @@ def test_study_run_baseline_deployment_no_resolvable_build_409s_cleanly(tmp_path
     (unreachable-in-tests) sms-api boundary."""
     from vivarium_workbench.lib import study_runs
     from vivarium_workbench_sms import remote_pinned
+    from vivarium_workbench.lib import backends
 
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws_root: "deployment")
+    monkeypatch.setattr(backends, "resolve_run_target", lambda ws_root: "deployment")
     monkeypatch.setattr(remote_pinned, "resolve_pinned_simulator_id", lambda client, ws_root: None)
 
     sd = tmp_path / "studies" / "demo"
