@@ -2,7 +2,7 @@
 (_runComposite's inline pcard Run bar, _ceTestRun's Composite Explorer Test Run
 panel) must fetch the server-resolved remote-run-config and require explicit
 confirmation before a remote-pinned deployment dispatches to AWS Batch —
-mirrors study-detail.js's already-shipped _dispatchRemotePinned pattern
+mirrors sms-launch.js's already-shipped _dispatchRemotePinned pattern
 (fetch fresh, show repo/branch/commit/simulator_id, block on cancel).
 
 Structural (text) assertions against the served JS source, matching this

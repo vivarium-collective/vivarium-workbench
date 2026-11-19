@@ -354,7 +354,7 @@ def test_submit_missing_simulator_id_400(monkeypatch, tmp_path):
 
 # ---------------------------------------------------------------------------
 # num_generations/num_seeds: no silent default (mirrors the client-side guard
-# in study-detail.js:_dispatchRemotePinned -- these two size a real AWS Batch
+# in sms-launch.js:_dispatchRemotePinned -- these two size a real AWS Batch
 # job, so an unset value must 400 here rather than quietly becoming 1x1).
 # ---------------------------------------------------------------------------
 

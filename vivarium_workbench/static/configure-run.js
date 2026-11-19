@@ -233,7 +233,7 @@
     };
   }
 
-  // item 20a: mirrors study-detail.js's _dispatchRemotePinned — before a
+  // item 20a: mirrors sms-launch.js's _dispatchRemotePinned — before a
   // remote-pinned deployment dispatches to AWS Batch, fetch the server-
   // resolved repo/branch/commit/simulator_id and require explicit
   // confirmation, so a workspace-identity mismatch is caught here, before

@@ -37,7 +37,7 @@ def _strip_line_comments(js: str) -> str:
 
 
 def test_dispatch_remote_pinned_has_no_native_dialogs():
-    js = _js("study-detail.js")
+    js = _js("sms-launch.js")  # the quarantined SMS launch UI
     fn = _strip_line_comments(_function_body(js, "_dispatchRemotePinned"))
     # A real call, not a mention in a comment -- never preceded by "_" (our
     # own _confirmModal/_alertModal).
