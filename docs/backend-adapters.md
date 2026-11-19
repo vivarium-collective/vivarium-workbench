@@ -26,7 +26,8 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | — | Untrack 57 generated fixture artifacts committed by accident in wb#1661 (`3f52a96e`); ignore their four directories | wb#1666 | **done**, merged 2026-11-19 |
 | P1c | `Provider` (`backends`, `select`, `recognise`) and `SmsProvider`; the registry (one core→plugin edge) with inert sentinels when providers are off; capability probe split; 409 `backend-not-installed`; no behaviour change with providers on | wb#1667 | **done**, merged 2026-11-19 |
 | P2 (target predicates) | `backends.resolve_run_target` replaces `remote_pinned.resolve_run_target`; the three `uses_*_dispatch` wrappers deleted (no production caller); the preflight and `remote_run_submit` decide once (`backends.active`); ratchet 35 → 31; no behaviour change with providers on | wb#1669 | **done**, merged 2026-11-19 |
-| P2 (cleanup) | `comparison_pinning` + `smsApiBase` deleted (no reader); `_normalize_repo_url` to core (`git_status.normalize_repo_url`); ratchet −1 | wb#1670 | in review (2026-11-19) |
+| P2 (cleanup) | `comparison_pinning` + `smsApiBase` deleted (no reader); `_normalize_repo_url` to core (`git_status.normalize_repo_url`); ratchet −1 | wb#1670 | **done**, merged 2026-11-19 |
+| P2 Workers | Hosted env-worker launchers (proxy, dial-back) and the `.viv-build.json` read move to `vivarium_workbench_sms/env_workers.py`; `Provider.worker_launcher`; the core refuses hosted workers no provider supplies (startup exit 2, `BackendConfigError` at launch, never Local); generator discovery inside an env worker runs in-process (no nested worker); ratchet 35→34 | wb#1668 | in review (2026-11-19) |
 | P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, facet routes stay core, SMS-only routes into the plugin's router | — | not started |
 | P3 | Opaque string run ids end to end; the UI shows the nine SMS-today features (§2.5) by declared feature; launch panel quarantined (`sms-launch.js`); core tests run without the plugin | — | not started |
 | P4 | `vivarium_workbench_sms` moves into the viva-api repository as its own distribution, found by entry point; the Stanford image installs it | — | not started |
@@ -143,7 +144,10 @@ class Provider(Protocol):
     def features(self) -> frozenset[str]: ...                  # what the UI may show (P3)
     def router(self) -> APIRouter | None: ...                  # routes only this provider serves
     def cli(self) -> Iterable[Command]: ...                    # its subcommands (`run-remote`)
-    def worker_launcher(self) -> WorkerLauncher | None: ...    # hosted env workers (/viva/v1/workers)
+    # P2 Workers (lib/backends/provider.py):
+    def worker_launcher(self) -> WorkerLauncher | None: ...    # hosted env workers: viva-api's env-worker surface,
+                                                               #   /env-worker/v1, sent as /viva/v1/workers when the
+                                                               #   server advertises viva-v1-workers
 ```
 
 - **The core owns:**
@@ -178,7 +182,9 @@ class Provider(Protocol):
     - `/api/composite-run/{id}/status` and `/stop` branch on `remote-sim-<int>` ids (`composite_run_views`, `composite_stop_views`; Loom polls them). They should go through `for_existing`.
   - The plugin router is mounted before the app's read-only filter and before the SPA catch-all route. The provider declares which of its routes are read-only-safe.
 - **CLI.** `run-remote` is wholly SMS (`--sms-api-url`, `SmsApiClient`). It becomes the provider's `cli()`.
-- **Hosted env workers.** `env_worker_launcher.default_launcher()` asks the active provider for a launcher. The core keeps `LocalWorkerLauncher`. The proxy and remote launchers move to the plugin.
+- **Hosted env workers (P2 Workers, done).** `env_worker_launcher.default_launcher()` asks the providers, in order, for a launcher (`Provider.worker_launcher()`). The core keeps the `WorkerLauncher` protocol and `LocalWorkerLauncher`; the proxy and dial-back launchers are the SMS plugin's (`vivarium_workbench_sms/env_workers.py`).
+  - **The refusal rule.** The core knows only the names by which a deployment asks for hosted workers, `env_worker_launcher.HOSTED_WORKER_ENV` (`ENV_WORKER_PROXY_BASE`, `ENV_WORKER_ADVERTISE_HOST`, under either env prefix), and keeps them only to refuse, as P4 refuses an alias. When one is set and no provider supplies a launcher (providers off, plugin absent), the workbench refuses: `serve`, `api/__main__` and the commands in `cli.BACKEND_COMMANDS` exit 2 at startup, and a pool call raises `BackendConfigError` (never cached, never `EnvWorkerUnavailable`, logged at ERROR once per pool). It never falls back to a local subprocess.
+  - **Inside an env worker** generator discovery runs in-process (`composite_lookup.IN_WORKER_DISCOVER`, set by the worker's `main`): the worker is the environment, and a hosted worker pod has no plugin to launch a nested one with.
 
 ### 2.3 Existing runs are routed by their record
 
@@ -297,7 +303,7 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 | records (P1a, done) | `records.py` uses `SmsApiClient` (`/viva/v1/health`), `_canonical_url`, `remote_pinned._DEFAULT_REMOTE_DEPLOYMENT`; `configured_url` / `_deployment_names_now` use `sms_api_base` and `BACKEND_BASE_ENV_VARS` | `Backend.identity` (viva-core and sms-legacy: `viva_core.viva_health_identity`; compose-api: `compose_api.compose_health_identity`, `deployment_id` on `GET /health`, compose-api#543). `records` asks the identity function of the record's own kind, and keys its caches by (identity family, URL), so a compose-api record never picks up viva-core's identity at a shared URL. URL canonicaliser, deployment name and configured URL come from `backend_config.py` |
 | registry (P1c, done) | `backends/__init__.py` imports `SmsLegacyRuns`, `VivaCoreRuns` at load | `lib/backends/provider.providers()` imports `vivarium_workbench_sms.provider` (the one registry edge; P4: an entry point); `VIVA_CORE` / `SMS_LEGACY` / `_ALL` resolve through it, the same objects every time. `VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none` turns providers off: the attributes become inert sentinels (they own no run; `is` comparisons stay false) that no lookup returns. "Providers off" is not "plugin absent": the core cannot be imported without the package until P2 finishes. With providers off, a reachable named viva-api reads as a legacy backend and runs locally, by the existing "reachable legacy stays local" rule (P3 may add a startup warning) |
 | deployment name (P1a, done) | `remote_pinned.remote_deployment_name()` (default `"smsvpctest"`) | `backend_config.deployment_name()`; `remote_pinned`'s function is a call-time wrapper. The default stays `"smsvpctest"` until P3 (moved from P1c), then neutral, with the provider supplying its own |
-| session build and pin (P1c, done: `SmsProvider.select`) | `run_core.run_target_for` (`.viv-build.json`) and `remote_pinned.is_pinned_enabled()`, used by `backends.select`; `.viv-build.json` is also read by `report.py`, `provenance_manifest.py`, `composite_resolve`, `env_worker_launcher`, `readouts_views` and `run_core` | `SmsProvider.select`; the other readers ask the provider (P2 plans each) |
+| session build and pin (P1c, done: `SmsProvider.select`) | `run_core.run_target_for` (`.viv-build.json`) and `remote_pinned.is_pinned_enabled()`, used by `backends.select`; `.viv-build.json` is also read by `report.py`, `provenance_manifest.py`, `composite_resolve`, `env_worker_launcher` (moved to the plugin's `env_workers` by P2 Workers: the plugin is the stamp's only writer), `readouts_views` and `run_core` | `SmsProvider.select`; the other readers ask the provider (P2 plans each) |
 | generic helpers in SMS modules | `remote_simulations._read_build_meta` (used by `composite_resolve`, `composite_state_views`), ~~`source_build_views._normalize_repo_url` (used by `git_status`)~~ moved to the core as `git_status.normalize_repo_url` (P2 cleanup) | move to a core module, or behind `builds` if SMS-only |
 
 `remote_run_landing` is mixed. Its archive landing (`land_composite_results`, `fold_analyses`, `land_ptools_tsvs`, §3) is core, and compose-api and the plugin both call it. `land_remote_run` (which hardcodes the `"sms-legacy"` record and imports `remote_pinned` and `sms_api_base`) and `land_remote_simulation_artifacts` (`download_data`) are SMS: they go in P2's Runs area.
@@ -319,7 +325,7 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 | Remote tab and store | `remote_simulations`, `remote_reconcile` | `simulations_index._append_remote_simulations`, `resolve_or_fetch_store`; `investigations_index`'s `list_remote_simulations_swr` | `listing`, `artifacts` |
 | Analyses and figures | `remote_analysis_figures` | — | `artifacts`, `analyses`; the routes stay core and dispatch by facet (§2.2) |
 | Routes | — | `api/app.py`: imports of 4 plugin modules (`source_build_views`, `remote_run_jobs`, `remote_analysis_figures`, `remote_simulations`), inline `SmsApiClient(...)` at the figure routes, `_sms_only`; its read-only allowlist names SMS routes | facet routes stay core and dispatch by facet; SMS-only routes go to the plugin's `router()` (§2.2) |
-| Workers | — | `ProxyWorkerLauncher`, `RemoteWorkerLauncher` in `env_worker_launcher`; the viva-api proxy assumptions in `env_worker_pool` (its hints), `env_worker_dialback` and `env_worker_client` | `Provider.worker_launcher` |
+| Workers (P2, wb#1668) | — | the launchers and the stamp read move whole (`ProxyWorkerLauncher`, `RemoteWorkerLauncher`, their workers, `.viv-build.json`'s `commit`) to `vivarium_workbench_sms/env_workers.py`; `env_worker_pool`, `env_worker_dialback`, `env_worker_client`: wording only | `Provider.worker_launcher` |
 | CLI and startup | — | `run-remote` in `cli.py`; startup checks in `cli`, `startup`, `api/__main__` | `Provider.cli`, `check_config` |
 | Models and bundle | — | sms-api status + remote-provenance models in `models.py` (feed `generate_ts`) | P3 decides |
 | Target predicates (P2, this area's PR) | — | none. `remote_pinned`'s four predicates were core wrappers: `resolve_run_target` moved to `backends`, the three `uses_*_dispatch` were deleted (no production caller). Callers: `investigation_steps`, `investigation_run_views`, `investigation_run_one_views`, `study_runs`, `composite_test_run_views`, `remote_run_views`, `api/app.py` | `backends.resolve_run_target` / `backends.active`; the SMS half is `Provider.select` (P1c) |
@@ -556,13 +562,16 @@ Verified against viva-api **code** on `main` (1c8b27ae; re-checked at a38cfde6),
 | `run_analysis`, `analysis_status`, `list_analyses` | `remote_run_views`, `remote_analysis_figures` | analyses requested **at submit** already travel as `analysis_options` in the params. Re-running analyses on a finished run has no core route | Eran (Q2) |
 | **Direct S3 reads, outside any API**: `remote_analysis_figures` reads analysis figures with boto3 (GovCloud credentials) from the `s3://` `result_uri` that `list_analyses` returns | `api/app.py` (3 routes) | `/composites/{id}/datasets` (or an artifact route) so the backend owns storage access | Q2. The workbench must not hold object-store credentials for a backend |
 | `composite_resolve` (`/core/v1/simulator/{id}/composite-resolve`) | `composite_resolve` | none; the route has never existed (verified above) | nothing: deleted in step 0 |
-| env workers (`/env-worker/v1/*`, already rewritten to `/viva/v1/workers`) | `env_worker_launcher` | already core | — |
+| env workers (`/env-worker/v1/*`, sent as `/viva/v1/workers` when the server advertises `viva-v1-workers`) | `vivarium_workbench_sms.env_workers` | the SMS plugin (`env_workers`), P2 Workers | — |
 
 #### A.3.1 What depends on hosted env workers
 
 Hosted workers matter in one situation: a **hosted** workbench, which has no local venv, such as the Stanford pod.
-There, `env_worker_launcher.default_launcher()` picks `ProxyWorkerLauncher` (when `ENV_WORKER_PROXY_BASE` is set)
-or `RemoteWorkerLauncher` (when `ENV_WORKER_ADVERTISE_HOST` is set); both go through viva-core's `/viva/v1/workers`.
+There, `env_worker_launcher.default_launcher()` gets `ProxyWorkerLauncher` (when `ENV_WORKER_PROXY_BASE` is set; it
+wins over `ENV_WORKER_ADVERTISE_HOST`) or `RemoteWorkerLauncher` (when only `ENV_WORKER_ADVERTISE_HOST` is set) from
+the SMS provider. Both call viva-api's env-worker surface, which the client spells `/env-worker/v1` and sends as
+`/viva/v1/workers` when the server advertises `viva-v1-workers` (both Stanford sites do, so prod requests
+`/viva/v1/workers`).
 Everywhere else it picks `LocalWorkerLauncher`. All 37 methods `env_worker.py` dispatches go through the one choke
 point `WorkerPool.call`; `env_worker_routing.py` classifies some of them (`JOB_CLASS_METHODS` is `run_study`,
 `run_study_analyses` and `run_investigation_analysis`). Grouped by what could replace a hosted worker:
@@ -671,8 +680,8 @@ be done on its own:
   manifest, the Run facet or plain file access (§A.3.1), and the facet is removed if SMS turns out not to need it. A
   fully remote workbench with live probes is a later, separate design.
   - ~~My earlier recommendation, a workbench-side Kubernetes launcher running the registry image, is withdrawn.~~
-  - Jim, 2026-11-18: SMS needs no hosted env workers beyond the workbench. The CLI exposes them for convenience,
-    but production doesn't use them. So the `workers` facet, and viva-api's `/viva/v1/workers`, exist only for
+  - Jim, 2026-11-18: SMS's simulation pipeline needs no hosted env workers; only the hosted workbench uses them
+    (both Stanford sites proxy them through `http://api:8000`). So the `workers` facet, and viva-api's `/viva/v1/workers`, exist only for
     the hosted workbench, and they can be retired once §A.3.1's remaining uses (probes, generator discovery, viz
     previews) have another home or are judged not worth hosting.
 - **Q5, Jim's position 2026-11-18: yes, if it is backwards compatible.** viva-core's `POST /composites` should

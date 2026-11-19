@@ -43,6 +43,11 @@ SMS_METHODS = frozenset({
     "run_analysis", "analysis_status", "list_analyses",
     # /compose/v1, rewritten to the interim /viva/v1/compose
     "compose_submit", "compose_status", "compose_status_batch", "download_compose_results",
+    # /env-worker/v1 (rewritten to /viva/v1/workers): viva-api's hosted env workers (step P2 Workers moved the
+    # launchers into the plugin, so no core module calls these)
+    "start_env_worker", "env_worker_status", "stop_env_worker",
+    "start_relayed_env_worker", "call_relayed_env_worker", "stop_relayed_env_worker",
+    "submit_env_worker_task", "get_env_worker_task",
 })
 
 #: (module, receiver) pairs that are NOT an ``SmsApiClient`` although they share a method name. Pinned to the
@@ -87,9 +92,10 @@ ROUTE_LITERALS: dict[str, frozenset[str]] = {
     "lib.composite_test_run_views": frozenset({"/api/v1/simulations/discovery"}),
 }
 
-#: The SMS-specific prefixes. ``/viva/v1/compose`` is the interim home of ``/compose/v1``; the rest of
-#: ``/viva/v1`` (and the hosted-worker routes) is viva-core, which the design keeps.
-_ROUTE = re.compile(r"^/(api/v1|core/v1|compose/v1|viva/v1/compose)(/|$)")
+#: The SMS-specific prefixes. ``/viva/v1/compose`` is the interim home of ``/compose/v1``; ``/env-worker/v1`` is
+#: viva-api's hosted env-worker surface, spelled ``/viva/v1/workers`` when the server advertises ``viva-v1-workers``
+#: (step P2 Workers). The rest of ``/viva/v1`` is viva-core, which the design keeps.
+_ROUTE = re.compile(r"^/(api/v1|core/v1|compose/v1|viva/v1/compose|env-worker/v1|viva/v1/workers)(/|$)")
 
 
 def _modules():

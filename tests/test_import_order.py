@@ -24,6 +24,7 @@ CORE = [
     "vivarium_workbench.lib.remote_run_compose",
     "vivarium_workbench.lib.remote_run_views",
     "vivarium_workbench.lib.workspace_deps_views",
+    "vivarium_workbench.lib.env_worker_launcher",
     "vivarium_workbench.api.app",
 ]
 

@@ -48,7 +48,7 @@ def _int_env(name: str, default: int) -> int:
 class _TaskCapable(Protocol):
     """A worker whose transport can record a call as a durable task.
 
-    Only the proxy qualifies: viva-api owns the socket there, so it can keep
+    Only the proxy qualifies: the backend owns the socket there, so it can keep
     working after the client stops waiting and can write down what happened. A
     local subprocess and a dial-back worker are both held by THIS process, so a
     task record would have nowhere to survive.
@@ -104,6 +104,7 @@ class WorkerPool:
         self._launcher: WorkerLauncher | None = launcher
         self._deployment_launcher: WorkerLauncher | None = None
         self._warned: set[tuple[str, str]] = set()
+        self._launcher_error_logged = False
         # K and T_idle (seconds), config-overridable (plan §G).
         self.max_workers = max_workers if max_workers is not None else _int_env("ENV_WORKER_POOL_MAX", 8)
         self.idle_ttl = idle_ttl if idle_ttl is not None else _int_env("ENV_WORKER_IDLE_TTL", 900)
@@ -144,7 +145,7 @@ class WorkerPool:
         # Plan §E option (e), step 5. A job-class method runs a study to
         # completion; holding a socket open for that is what the double-run bug
         # was made of. Where the transport can record the call durably -- only
-        # the proxy can, because only there does viva-api own the socket -- run
+        # the proxy can, because only there does the backend own the socket -- run
         # it as a TASK instead: the caller still waits, but on short status
         # reads rather than one socket held for hours, so the timeout that used
         # to fire mid-study has nothing to fire on.
@@ -229,7 +230,7 @@ class WorkerPool:
 
         What genuinely does not belong in a worker is work too large for one --
         1000 seeds x 10 generations. That is a question about SCALE, not about
-        method identity or transport, and it dispatches to viva-api rather than
+        method identity or transport, and it dispatches to the run's backend rather than
         choosing a different launcher. `is_job_class` marks the candidates for that
         precheck (step 2); until it exists this warns once per (method, workspace)
         so the gap stays discoverable.
@@ -237,8 +238,19 @@ class WorkerPool:
         if self._launcher is not None:
             return self._launcher
         if self._deployment_launcher is None:
+            # Imported HERE, from the module, at call time: tests patch
+            # env_worker_launcher.default_launcher, which a module-level import would bypass.
             from vivarium_workbench.lib.env_worker_launcher import default_launcher
-            self._deployment_launcher = default_launcher()
+            try:
+                self._deployment_launcher = default_launcher()
+            except Exception as e:
+                # A refusal (hosted workers asked for, no provider supplies them) or a
+                # broken provider. Not cached, so every call refuses again and nothing
+                # degrades to Local; logged once per pool because some callers swallow it.
+                if not self._launcher_error_logged:
+                    self._launcher_error_logged = True
+                    logger.error("env workers: no launcher: %s", e)
+                raise
         launcher = self._deployment_launcher
         # Warn only where the budget is real. "Sized for interaction" is a property
         # of a hosted worker POD (1 CPU / 2 GiB); a laptop subprocess has no such
@@ -250,10 +262,9 @@ class WorkerPool:
             self._warned.add((method, ws))
             logger.warning(
                 "%s runs in this context's env worker, which is sized for "
-                "interaction. Work at deployment scale should dispatch to viva-api "
-                "instead (see backends.resolve_run_target / "
-                "remote_run_views.remote_run_submit); the scale precheck that would "
-                "decide automatically is REFACTOR-PLAN §2A.8 workstream 8 step 2.",
+                "interaction. Work at deployment scale should dispatch to the run's "
+                "backend instead (the provider's run dispatch); the scale precheck that "
+                "would decide automatically is REFACTOR-PLAN §2A.8 workstream 8 step 2.",
                 method)
         return launcher
 

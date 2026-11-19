@@ -3,7 +3,8 @@
 * ``backends()``: ``viva-core`` (``/viva/v1`` document and composite runs) and ``sms-legacy`` (``/api/v1`` integer
   simulations), one viva-api server -- they share ``viva_health_identity``;
 * ``select()``: a run of the session's own build (``.viv-build.json``) or of a pinned deployment is SMS's;
-* ``recognise()``: the viva-core half of the capability probe (``server_capabilities.backend_profile``).
+* ``recognise()``: the viva-core half of the capability probe (``server_capabilities.backend_profile``);
+* ``worker_launcher()``: viva-api's hosted env-worker launcher (proxy or dial-back), when the deployment asks for one.
 
 The core finds this module by importing it (until step P4's entry point) and reads ``PROVIDER``.
 """
@@ -18,6 +19,7 @@ from vivarium_workbench.lib.backends.provider import Recognised
 
 if TYPE_CHECKING:
     from vivarium_workbench.lib.backends import Backend
+    from vivarium_workbench.lib.env_worker_launcher import WorkerLauncher
 
 
 class SmsProvider:
@@ -77,6 +79,13 @@ class SmsProvider:
         if caps.supports(sc.CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS):
             out["dispatch"] = sc.DISPATCH_DOCUMENT
         return Recognised(out, has_composites=True, stop=False)
+
+    def worker_launcher(self) -> "Optional[WorkerLauncher]":
+        """viva-api's hosted launcher for this deployment (``ENV_WORKER_PROXY_BASE``, else
+        ``ENV_WORKER_ADVERTISE_HOST``), or ``None`` (step P2). No network call."""
+        from vivarium_workbench_sms.env_workers import hosted_launcher  # lazy, like backends()
+
+        return hosted_launcher()
 
 
 PROVIDER = SmsProvider()

@@ -85,6 +85,20 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
+    # Hosted env workers asked for (ENV_WORKER_PROXY_BASE / _ADVERTISE_HOST) but no backend provider supplies them:
+    # refuse to start rather than run them as local subprocesses (docs/backend-adapters.md step P2). After
+    # basicConfig, so the launcher's "env workers: PROXY ..." line is logged. No network call.
+    from vivarium_workbench.lib.env_worker_launcher import check_worker_config
+
+    try:
+        check_worker_config()
+    except BackendConfigError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
+        print(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+
     # Surface stale framework deps at startup. A stale process-bigraph (no
     # `artifacts`) or viva-superpowers (no test_audit/loop_state) otherwise fails
     # opaquely — the server subprocess crashes on boot, or the Assurance
