@@ -321,9 +321,8 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 | Routes | — | `api/app.py`: imports of 4 plugin modules (`source_build_views`, `remote_run_jobs`, `remote_analysis_figures`, `remote_simulations`), inline `SmsApiClient(...)` at the figure routes, `_sms_only`; its read-only allowlist names SMS routes | facet routes stay core and dispatch by facet; SMS-only routes go to the plugin's `router()` (§2.2) |
 | Workers | — | `ProxyWorkerLauncher`, `RemoteWorkerLauncher` in `env_worker_launcher`; the viva-api proxy assumptions in `env_worker_pool` (its hints), `env_worker_dialback` and `env_worker_client` | `Provider.worker_launcher` |
 | CLI and startup | — | `run-remote` in `cli.py`; startup checks in `cli`, `startup`, `api/__main__` | `Provider.cli`, `check_config` |
-| Models and bundle | — | sms-api status + remote-provenance models in `models.py` (feed `generate_ts`); `publish.py`'s `smsApiBase` | P3 decides |
+| Models and bundle | — | sms-api status + remote-provenance models in `models.py` (feed `generate_ts`) | P3 decides |
 | Target predicates (P2, this area's PR) | — | none. `remote_pinned`'s four predicates were core wrappers: `resolve_run_target` moved to `backends`, the three `uses_*_dispatch` were deleted (no production caller). Callers: `investigation_steps`, `investigation_run_views`, `investigation_run_one_views`, `study_runs`, `composite_test_run_views`, `remote_run_views`, `api/app.py` | `backends.resolve_run_target` / `backends.active`; the SMS half is `Provider.select` (P1c) |
-| P2 (cleanup) | `comparison_pinning` + `smsApiBase` deleted (no reader); `_normalize_repo_url` to core (`git_status.normalize_repo_url`); ratchet −1 | wb#1670 | in review (2026-11-19) |
 | To check in P2's plans | — | the vEcoli/ParCa case keyed on `.viv-build.json` in `readouts_views`; the `SMS_API_BASE` hint in `run_runner`; vEcoli knobs (`n_seeds`, `n_generations`) in `preflight.py`, `env_worker.py` | — |
 
 **Features that are SMS-only today (P3).**
