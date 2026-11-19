@@ -615,6 +615,7 @@ _RUN_PROVENANCE_KEYS = frozenset({
     "source", "simulation_id", "experiment_id", "backend", "s3_uri", "store_path",
     "viva_v1",  # a landed /viva/v1 run's record of itself (remote_run_viva_v1.land)
     "compose",  # a landed compose-api run's record of itself (remote_run_compose.land)
+    "remote",  # where any remote run went (lib/backends/records.py, step 1c); never sent to the UI as config
 })
 
 

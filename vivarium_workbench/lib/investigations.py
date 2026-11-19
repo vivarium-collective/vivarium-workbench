@@ -1111,6 +1111,8 @@ def gather_results(spec: dict, db_path: Path) -> dict:
         for row in meta_rows:
             try:
                 params = json.loads(row["params_json"] or "{}")
+                if isinstance(params, dict):
+                    params.pop("remote", None)  # where a remote run went: internal, not a result input
             except json.JSONDecodeError:
                 params = {}
             run_meta[row["run_id"]] = {
@@ -1268,6 +1270,8 @@ def gather_emitter_outputs(db_path: Path, *, run_id: str | None = None,
         for r in meta_rows:
             try:
                 params = json.loads(r["params_json"] or "{}")
+                if isinstance(params, dict):
+                    params.pop("remote", None)  # where a remote run went: internal, not a result input
             except json.JSONDecodeError:
                 params = {}
             run_meta[r["run_id"]] = {

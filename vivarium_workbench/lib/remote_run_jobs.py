@@ -209,7 +209,7 @@ def run_remote_pipeline(job: RemoteRunJob, ctx: PipelineCtx) -> None:
             run_id = ctx.land(
                 ctx.study_dir, spec_id=ctx.spec_id, simulation_id=simulation_id,
                 experiment_id=experiment_id, commit=commit, tar_path=tar_path,
-                s3_uri=s3_uri,
+                s3_uri=s3_uri, base_url=getattr(ctx.client, "base_url", None),
             )
         job.run_id = run_id
         job.set_step("land", "done", run_id)

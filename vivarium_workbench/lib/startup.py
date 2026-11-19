@@ -67,6 +67,16 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     """
     workspace = Path(workspace).resolve()
 
+    # One remote backend per process (docs/backend-adapters.md step 1c). cli.main and cmd_serve check first; this
+    # covers a caller that set the environment directly and boots the app without them.
+    from vivarium_workbench.lib.sms_api_client import BackendConfigError, check_single_backend
+
+    try:
+        check_single_backend()
+    except BackendConfigError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
     # Configure structured logging so the access-log middleware actually emits.
     # basicConfig is a no-op if the root logger is already configured.
     import logging
@@ -100,8 +110,6 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     if backend_configured():
         # A backend named with --backend-base-url: say which dispatch route its
         # capabilities give this workspace (best-effort; never blocks or raises).
-        # First, because reading the profile is also how a named compose-api becomes known as one, and
-        # sms_api_base() (the health check below, every SMS call after it) leaves it out of the SMS flows.
         try:
             from vivarium_workbench.lib.server_capabilities import explicit_backend_profile
             _p = explicit_backend_profile()

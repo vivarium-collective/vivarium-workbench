@@ -67,6 +67,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
             print(f"ERROR: --backend-base-url: {e}", file=sys.stderr)
             return 2
 
+    from vivarium_workbench.lib.sms_api_client import BackendConfigError, check_single_backend
+    try:
+        check_single_backend(getattr(args, "backend_base_url", None))
+    except BackendConfigError as e:  # before detaching, so the operator sees why
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
     if getattr(args, "detach", False):
         return _serve_detached(workspace, args)
 
@@ -1449,7 +1456,19 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
     return 0 if ok == len(jobs) else 1
 
 
-def main(argv: list[str] | None = None) -> int:
+#: Subcommands that can dispatch to, or look runs up on, a remote backend: they refuse a process configured for two
+#: (``sms_api_client.check_single_backend``). The others do not dispatch or look up runs (a few may still read the
+#: configured URL for a hosted env worker, unchanged), so a stale alias in the shell must not stop them. ``tests/test_backends_startup.py`` requires every subcommand to be in exactly one set.
+BACKEND_COMMANDS = frozenset({"serve", "server-restart", "run", "rerun", "run-composite", "run-remote"})
+NO_BACKEND_COMMANDS = frozenset({
+    "add-dashboard", "audit", "catalog-add", "compose-entry", "doctor", "gen-readme", "logs", "migrate-artifacts",
+    "migrate-fields", "migrate-investigations", "migrate-studies", "prepare-investigation", "render-loom",
+    "render-viz", "runs", "scaffold-investigation", "scaffold-workspace", "server-open", "server-status",
+    "server-stop", "smoke", "status", "sync", "warm-catalog", "workspace-trust",
+})
+
+
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="vivarium-workbench")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -1926,8 +1945,22 @@ def main(argv: list[str] | None = None) -> int:
                                     "Normally set per study via `loom: {style: minimal}`.")
     p_render_loom.set_defaults(func=cmd_render_loom)
 
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
     args = parser.parse_args(argv)
     from vivarium_workbench.lib.errors import APIError
+    from vivarium_workbench.lib.sms_api_client import BackendConfigError, check_single_backend
+
+    if args.cmd in BACKEND_COMMANDS:
+        try:
+            # serve's --backend-base-url replaces the named env var for that process, so it is the one compared
+            check_single_backend(getattr(args, "backend_base_url", None))
+        except BackendConfigError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
 
     try:
         return args.func(args)

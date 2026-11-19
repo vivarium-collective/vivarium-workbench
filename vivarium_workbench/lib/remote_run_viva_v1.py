@@ -16,6 +16,7 @@ import time
 import warnings
 import zipfile
 from pathlib import Path
+from typing import Any
 
 from vivarium_workbench.lib import remote_pinned, study_spec
 from vivarium_workbench.lib.investigations import load_spec
@@ -94,7 +95,7 @@ def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
         if refused is not None:
             return refused
         return {"error": str(e), "reachable": False}, 502
-    _record_pending(ws_root, study, composite_id, run["id"])
+    _record_pending(ws_root, study, composite_id, run["id"], _sms_api_base())
     out = {"run_id": run["id"], "phase": "running", "backend": "viva-v1"}
     if steps != n_steps:
         out["warning"] = (f"n_steps clamped from {n_steps} to {steps}: this workbench sends at most 1000 "
@@ -169,6 +170,8 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
         if found is not None:
             return {"run_id": found[0], "already_landed": True}, 200
     landed = cr.generate_run_id(spec_id, params=provenance)
+    # step 1c: where the run went, kept out of the id's hash (added after it is derived)
+    provenance["remote"] = _remote_record("viva-core", run_id, _sms_api_base())
     try:
         with tempfile.TemporaryDirectory() as td:
             archive = client.download_compose_results(simulation_id, Path(td), timeout=DOWNLOAD_TIMEOUT)
@@ -208,7 +211,14 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
     return {"run_id": landed}, 200
 
 
-def _record_pending(ws_root: Path, study: str, spec_id: str, run_id: str) -> None:
+def _remote_record(kind: str, remote_id: Any, base_url: str) -> dict:
+    """``params["remote"]`` for a run of this backend (lazy import: lib.backends imports this module)."""
+    from vivarium_workbench.lib.backends.records import remote_record
+
+    return remote_record(kind, remote_id, base_url)
+
+
+def _record_pending(ws_root: Path, study: str, spec_id: str, run_id: str, base_url: str) -> None:
     """A Runs-tab placeholder from the moment the backend accepted the run (best-effort: a
     visibility row must never fail an already-dispatched run). Same id scheme as the legacy
     route -- ``remote-pending-<id>`` -- so landing can find and replace it."""
@@ -220,7 +230,8 @@ def _record_pending(ws_root: Path, study: str, spec_id: str, run_id: str) -> Non
         try:
             cr.save_metadata(
                 conn, spec_id=spec_id, run_id=f"remote-pending-{run_id}",
-                params={"source": deployment, "simulation_id": run_id, "backend": "viva-v1"},
+                params={"source": deployment, "simulation_id": run_id, "backend": "viva-v1",
+                        "remote": _remote_record("viva-core", run_id, base_url)},
                 label=f"Remote dispatch ({deployment}) — in progress",
                 started_at=time.time(), n_steps=0, workspace=ws_root,
             )

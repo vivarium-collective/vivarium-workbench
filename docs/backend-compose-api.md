@@ -121,9 +121,8 @@ simulation ids, so the compose check runs before them.
   404 alone cannot say this, because it also means "SLURM has no job yet".
 
 **Not on compose-api:** the SMS-only flows (pinned and switched builds, `/api/v1/analyses`, chain campaigns). A
-compose-api named beside an `SMS_API_BASE` / `VIVA_API_BASE` alias is left out of them: once the profile has read the
-named URL as compose-api, `sms_api_base()` returns the alias (a subprocess, which starts without that, still gets the
-named URL).
+workbench talks to one remote backend: naming compose-api beside an `SMS_API_BASE` / `VIVA_API_BASE` alias that points
+elsewhere is refused at startup (`sms_api_client.check_single_backend`; docs/backend-adapters.md step 1c).
 
 ## Onboarding a workspace
 

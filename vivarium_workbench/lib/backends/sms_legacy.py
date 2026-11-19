@@ -19,6 +19,7 @@ import warnings
 from pathlib import Path
 
 from vivarium_workbench.lib import remote_pinned, study_spec
+from vivarium_workbench.lib.backends.records import remote_record as _remote_record
 from vivarium_workbench.lib.sms_api_client import DOWNLOAD_TIMEOUT, SmsApiClient, SmsApiError
 
 
@@ -161,6 +162,7 @@ def land_tail(ws_root: Path, body: dict) -> tuple[dict, int]:
             image=exec_prov["image"],
             merged_config_hash=exec_prov["merged_config_hash"],
             expected_seeds=int(expected_seeds) if expected_seeds else None,
+            base_url=getattr(client, "base_url", None),
         )
     response: dict = {"run_id": run_id}
     if analysis_errors:
@@ -435,6 +437,9 @@ def submit_tail(ws_root: Path, body: dict) -> tuple[dict, int]:
                     "source": _deployment,
                     "simulation_id": sim["database_id"],
                     "backend": "ray",
+                    # step 1c: where this run went, for every later operation on it (lib/backends/records.py)
+                    "remote": _remote_record("sms-legacy", sim["database_id"],
+                                             getattr(client, "base_url", None) or _sms_api_base()),
                 },
                 label=f"Remote dispatch ({_deployment}) — in progress",
                 started_at=time.time(),

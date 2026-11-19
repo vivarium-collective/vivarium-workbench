@@ -371,6 +371,7 @@ def land_remote_run(
     merged_config_hash: str | None = None,
     n_steps: int | None = None,
     expected_seeds: int | None = None,
+    base_url: str | None = None,
 ) -> str:
     """Extract tar_path, place the native store(s) in study_dir, record runs_meta; return run_id.
 
@@ -429,6 +430,12 @@ def land_remote_run(
         "s3_uri": s3_uri,
     }
     run_id = cr.generate_run_id(spec_id, params=provenance)
+    # step 1c: where the run went (lib/backends/records.py), kept out of the id's hash (added after it is
+    # derived). ``base_url`` is the client's; a caller that does not say is landing from the configured backend.
+    from vivarium_workbench.lib.backends.records import remote_record
+    from vivarium_workbench.lib.sms_api_client import sms_api_base
+
+    provenance["remote"] = remote_record("sms-legacy", simulation_id, base_url or sms_api_base())
 
     with tempfile.TemporaryDirectory() as td:
         extract_root = Path(td)

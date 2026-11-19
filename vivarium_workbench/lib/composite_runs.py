@@ -371,7 +371,8 @@ def build_run_manifest(*, spec_id, params, n_steps, emitter, emit_paths,
     return {
         "version": 2,
         "spec_id": spec_id,
-        "params": dict(params or {}),
+        # ``remote`` (where a remote run went, step 1c) is the row's routing record, not a reproduction input
+        "params": {k: v for k, v in (params or {}).items() if k != "remote"},
         "n_steps": int(n_steps) if n_steps is not None else None,
         "emitter": emitter,
         "emit_paths": list(emit_paths or []),

@@ -171,7 +171,11 @@ def test_the_study_routes_recorded_provenance_is_unchanged(ws, finished, dashboa
               "compose": {"run_id": RUN_ID, "simulation_id": SIM_ID, "experiment_id": "exp-1", "image": IMAGE,
                           "environment_version": f"{PILOT}@{VERSION}", "slurm_job_id": SLURM_JOB}}
     manifest = study["manifest"]
-    assert study["params"] == record
+    # step 1c: the row also records where the run went (lib/backends/records.py); the manifest leaves it out
+    params = dict(study["params"])
+    remote = params.pop("remote")
+    assert (remote["kind"], remote["id"], remote["base_url"]) == ("compose-api", RUN_ID, finished.url.rstrip("/"))
+    assert params == record
     assert manifest["params"] == record
     assert manifest["code_version"] == {"git_sha": None, "package": None, "repo": None, "remote_url": None,
                                         "image": IMAGE}
