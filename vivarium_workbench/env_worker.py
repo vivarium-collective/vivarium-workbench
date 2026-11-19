@@ -4581,8 +4581,13 @@ def main(argv=None) -> int:
     # (composites_full -> composite_lookup.composites_data) runs here, in-process,
     # never through the pool -- which would launch a NESTED worker (and in a hosted
     # pod, which has no backend plugin, could not launch one at all).
-    from vivarium_workbench.lib import composite_lookup
-    composite_lookup.IN_WORKER_DISCOVER = _discover_composites
+    # Guarded like every other workbench import here: the worker must still start in an interpreter that cannot
+    # import vivarium_workbench.lib (or PyYAML); only composites_full needs the hook.
+    try:
+        from vivarium_workbench.lib import composite_lookup
+        composite_lookup.IN_WORKER_DISCOVER = _discover_composites
+    except ImportError:
+        pass
 
     # A workspace that does not exist is not a workspace. Without this the worker
     # starts happily and _list_generators() falls through to discover_generators()

@@ -95,6 +95,9 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     except BackendConfigError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
+    except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
+        print(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
 
     # Surface stale framework deps at startup. A stale process-bigraph (no
     # `artifacts`) or viva-superpowers (no test_audit/loop_state) otherwise fails

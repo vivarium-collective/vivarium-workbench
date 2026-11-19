@@ -170,6 +170,29 @@ def test_cli_serve_detach_refuses_before_detaching(hosted_but_off, monkeypatch, 
     assert "ENV_WORKER_PROXY_BASE" in capsys.readouterr().err
 
 
+def test_cli_foreground_serve_refuses_before_rendering_or_writing_server_info(hosted_but_off, monkeypatch, capsys):
+    from vivarium_workbench import cli
+    from vivarium_workbench.lib import report
+
+    monkeypatch.setattr(report, "render_dashboard", _must_not_run)
+    assert cli.main(["serve", "--workspace", str(hosted_but_off)]) == 2
+    assert "ENV_WORKER_PROXY_BASE" in capsys.readouterr().err
+    assert not (hosted_but_off / ".pbg" / "server" / "server-info").exists()
+
+
+def test_a_broken_plugin_is_an_error_line_not_a_traceback(monkeypatch, tmp_path, capsys):
+    from vivarium_workbench import cli
+    from vivarium_workbench.lib import env_worker_launcher
+
+    def broken():
+        raise ModuleNotFoundError("No module named 'some_dep_of_the_plugin'", name="some_dep_of_the_plugin")
+
+    monkeypatch.setattr(env_worker_launcher, "check_worker_config", broken)
+    monkeypatch.setattr(cli, "cmd_run_composite", _must_not_run)
+    assert cli.main(["run-composite", "--request", str(tmp_path / "req.json")]) == 2
+    assert "backend plugin failed to load" in capsys.readouterr().err
+
+
 def test_cli_backend_commands_refuse_before_running(hosted_but_off, monkeypatch, capsys):
     from vivarium_workbench import cli
 

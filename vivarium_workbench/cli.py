@@ -68,21 +68,21 @@ def cmd_serve(args: argparse.Namespace) -> int:
             return 2
 
     from vivarium_workbench.lib.backend_config import BackendConfigError, check_single_backend
+    from vivarium_workbench.lib.env_worker_launcher import check_worker_config
     try:
         check_single_backend(getattr(args, "backend_base_url", None))
-    except BackendConfigError as e:  # before detaching, so the operator sees why
+        # Hosted env workers asked for but no provider supplies them: refuse BEFORE the render, the server-info
+        # write and detaching, so the operator sees why and nothing is left behind. serve_fastapi checks again
+        # (direct callers; the "env workers: PROXY ..." log line once logging is configured). No network call.
+        check_worker_config()
+    except BackendConfigError as e:
         print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
+        print(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
 
     if getattr(args, "detach", False):
-        # Refuse a hosted-worker config no provider supplies BEFORE detaching, so the operator sees why. The
-        # detached child (and a foreground serve) checks in serve_fastapi, once logging is configured.
-        from vivarium_workbench.lib.env_worker_launcher import check_worker_config
-        try:
-            check_worker_config()
-        except BackendConfigError as e:
-            print(f"ERROR: {e}", file=sys.stderr)
-            return 2
         return _serve_detached(workspace, args)
 
     # Make the workspace's own package importable for the render step
@@ -1973,6 +1973,9 @@ def main(argv: list[str] | None = None) -> int:
                 check_worker_config()
         except BackendConfigError as e:
             print(f"ERROR: {e}", file=sys.stderr)
+            return 2
+        except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
+            print(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}", file=sys.stderr)
             return 2
 
     try:
