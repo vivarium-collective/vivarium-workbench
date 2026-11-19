@@ -232,31 +232,90 @@ _UPSTREAM_FAILED = frozenset({"failed", "cancelled", "out_of_memory", "timeout"}
 
 
 def refresh_submitted(job, client=None) -> None:
-    """Resolve a job's ``submitted`` items against viva-api, in ONE call.
+    """Resolve a job's ``submitted`` items against the backend that ran each one.
 
-    ``submitted`` means the work was dispatched to Batch and viva-api holds the
-    truth about it, keyed by ``simulation_id``. This asks for all of them at once
-    (``GET /compose/v1/simulations/status/batch``) rather than per item, and runs
-    on **status read** rather than from a polling thread — so nothing is held
-    open on the workbench side while Batch works.
+    ``submitted`` means the work was dispatched to a remote backend, which holds
+    the truth about it, keyed by the item's ``simulation_id`` (the dispatch's
+    handle). SMS simulations (integer ids) are asked of viva-api all at once
+    (``GET /compose/v1/simulations/status/batch``) rather than per item; a
+    viva-core (``simulation-…``) or compose-api (``compose-<n>``) run is asked of
+    that backend's own status route. This runs on **status read** rather than
+    from a polling thread — so nothing is held open on the workbench side while
+    the backend works.
 
     Uses only the job's PUBLIC surface (``items`` + ``update_item``), because
     jobs here are duck-typed: the suite drives workers with a minimal stand-in
     that has neither ``_lock`` nor job-level status, and the status route calls
     this on whatever the manager returns.
 
-    Total by design — it never raises. If viva-api is unreachable the items stay
+    Total by design — it never raises. If a backend is unreachable its items stay
     ``submitted``, which is what they are. Losing the poll must not turn a
     running campaign into a failed one, nor 500 a status page.
     """
-    # Step 1c-2 (docs/backend-adapters.md): the ids here were dispatched by this process to its one configured
-    # backend, so they are asked of it directly rather than looked up in run records.
+    # Step 1c-2 (docs/backend-adapters.md §2.3): each item is asked of the backend that ran it. The worker stores
+    # whatever handle the dispatch answered with -- an SMS integer simulation id, a viva-core run id
+    # (``simulation-…``) or a compose-api one (``compose-<n>``). The adapters' id forms do not overlap, and the job
+    # lives only as long as this process, whose one backend dispatched every item, so the id's form names the
+    # backend (``backends.for_run``) without a run-record lookup. Caveat: a backend URL re-pointed while the job
+    # lives (a tunnel) is asked anyway, where ``for_existing`` would refuse -- the exposure the SMS path always had.
+    # SMS ids still go in ONE batch call; the other backends have no batch route and are asked per item through
+    # their adapter's ``runs.status``.
     try:
         items = list(getattr(job, "items", None) or [])
         pending = [(i, it.get("simulation_id")) for i, it in enumerate(items)
                    if it.get("status") == "submitted" and it.get("simulation_id")]
         if not pending:
             return
+        from vivarium_workbench.lib import backends
+
+        sms_pending = []
+        down: set = set()  # backends that did not answer this refresh: their other items are not asked again
+        for idx, sid in pending:
+            owner = backends.for_run(sid)
+            if owner is None or owner is backends.SMS_LEGACY:
+                sms_pending.append((idx, sid))
+            elif owner.name not in down and not _refresh_one(job, idx, sid, owner):
+                down.add(owner.name)
+        if sms_pending:
+            _refresh_sms(job, sms_pending, client)
+        _settle_if_complete(job)
+    except Exception:  # noqa: BLE001 — a poll must never fail a running job
+        return
+
+
+def _refresh_one(job, idx: int, run_id, backend) -> bool:
+    """Resolve one item against a document backend (viva-core / compose-api). Total: an unanswered or failed poll
+    leaves the item ``submitted``, as on the SMS path.
+
+    Returns ``False`` when the backend itself did not answer (an exception or a 5xx), so the caller skips that
+    backend's remaining items for this refresh: each ask is a synchronous request inside a status GET, and one
+    hung host must not stall the page once per item. A 4xx is an answer about this run only."""
+    try:
+        body, code = backend.runs.status(str(run_id).strip())
+    except Exception:  # noqa: BLE001 — one backend failing must not stop the others
+        return False
+    if code != 200 or not isinstance(body, dict):
+        # The viva-core adapter answers every client error as 502 "unreachable" but keeps the server's own HTTP
+        # status in the body: a 404 for this one run (deleted, or a reset server) is an answer about this run, not
+        # a backend that is down -- otherwise one stale run would stop every other viva-core item from settling.
+        upstream = body.get("status") if isinstance(body, dict) else None
+        if isinstance(upstream, int) and upstream < 500:
+            return True
+        return code < 500
+    phase = str(body.get("phase") or "")
+    raw = str(body.get("raw_status") or "").lower()
+    if phase == "done":
+        job.update_item(idx, status="done")
+    elif phase == "failed":
+        job.update_item(idx, status="failed", error=body.get("error") or f"upstream: {raw or 'failed'}")
+    else:
+        job.update_item(idx, phase=raw or phase or "running")
+    return True
+
+
+def _refresh_sms(job, pending: list, client=None) -> None:
+    """Resolve SMS items against viva-api in ONE ``compose_status_batch`` call. Total, like its caller."""
+    try:
         if client is None:
             from vivarium_workbench_sms.sms_api_client import SmsApiClient
             from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
@@ -275,7 +334,6 @@ def refresh_submitted(job, client=None) -> None:
                                 error=row.get("error_message") or f"upstream: {upstream}")
             else:
                 job.update_item(idx, phase=upstream or "running")
-        _settle_if_complete(job)
     except Exception:  # noqa: BLE001 — a poll must never fail a running job
         return
 

@@ -1,0 +1,289 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Simularium Viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0e14; color: #d5dae2;
+    font: 13px/1.5 -apple-system, system-ui, sans-serif; }
+  #bar { padding: 8px 14px; background: #131722; border-bottom: 1px solid #232a39;
+    display: flex; gap: 14px; align-items: center; }
+  #bar b { color: #fff; } #bar .muted { color: #7d8798; }
+  #viewer { position: absolute; top: 42px; bottom: 0; left: 0; right: 0; }
+  #msg { padding: 24px; max-width: 720px; }
+  a { color: #6ab0ff; }
+  code { background: #1c2230; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <b>Simularium</b>
+  <span id="title" class="muted"></span>
+  <span style="flex:1"></span>
+  <a id="sim" class="muted" target="_blank" rel="noopener" hidden>open in Simularium ↗</a>
+  <a id="dl" class="muted" download>download .simularium</a>
+</div>
+<div id="viewer"></div>
+<div id="msg" hidden></div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+<script>
+// Lightweight, dependency-light Simularium player: parses the SIMULARIUMBINARY
+// v3 container (or JSON) itself and renders point agents as instanced spheres in
+// three.js. Enough to preview a particle trajectory; not the full Allen viewer.
+(function () {
+  var q = new URLSearchParams(location.search);
+  var traj = q.get("traj");
+  var titleEl = document.getElementById("title");
+  var dl = document.getElementById("dl");
+  var msg = document.getElementById("msg");
+  if (traj) { dl.href = traj; titleEl.textContent = traj.split("/").pop(); }
+  function fail(html) { document.getElementById("viewer").hidden = true;
+    msg.hidden = false; msg.innerHTML = html; }
+  if (!traj) { return fail("No <code>?traj=</code> trajectory URL given."); }
+
+  // Resolve an absolute (/workspace/...) trajectory path relative to THIS page's
+  // own directory, so it works both live (served at /simularium-viewer.html) and
+  // in a read-only bundle hosted under a sub-path (e.g. /viva-smoldyn/…).
+  var trajUrl = traj;
+  if (traj.charAt(0) === "/") {
+    var dir = location.pathname.replace(/[^/]*$/, "").replace(/\/$/, "");
+    trajUrl = dir + traj;
+  }
+  dl.href = trajUrl;
+
+  // Hand off to the full Allen Simularium viewer, which loads a trajectory from a
+  // public URL (?trajUrl=...). Only possible when the file is reachable from the
+  // open internet — a localhost dev server is not fetchable by allencell.org.
+  var sim = document.getElementById("sim");
+  var allenUrl = null;
+  try {
+    var absUrl = new URL(trajUrl, location.href).href;
+    var h = new URL(absUrl).hostname;
+    var local = /^(localhost|127\.|0\.0\.0\.0|\[?::1\]?|.*\.local)$/i.test(h) ||
+      /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
+    if (/^https?:$/.test(new URL(absUrl).protocol) && !local) {
+      allenUrl = "https://simularium.allencell.org/viewer?trajUrl=" +
+        encodeURIComponent(absUrl);
+      sim.href = allenUrl;
+      sim.hidden = false;
+    }
+  } catch (e) { /* leave the Simularium link hidden */ }
+
+  // When the trajectory is publicly reachable, open it in the FULL Allen
+  // Simularium viewer by default (robust parsing, true 3D, playback controls)
+  // rather than the lightweight in-page preview. Pass ?inline=1 to force the
+  // in-page preview instead.
+  if (allenUrl && q.get("inline") == null) {
+    document.getElementById("viewer").hidden = true;
+    msg.hidden = false;
+    var fname = traj.split("/").pop();
+    var inlineHref = "?traj=" + encodeURIComponent(traj) + "&inline=1";
+    msg.innerHTML = "Opening <b>" + fname + "</b> in the " +
+      "<a href='" + allenUrl + "'>Simularium viewer</a>…<br><br>" +
+      "Not redirected? <a href='" + allenUrl + "'>Open in Simularium ↗</a>" +
+      " &nbsp;·&nbsp; <a href='" + inlineHref + "'>preview inline instead</a>";
+    location.replace(allenUrl);
+    return;
+  }
+
+  fetch(trajUrl).then(function (r) {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.arrayBuffer();
+  }).then(function (buf) {
+    var data = parseSimularium(buf);
+    render(data);
+  }).catch(function (e) {
+    var openLink = sim.hidden
+      ? "open it at <a href='https://simularium.allencell.org/viewer' target='_blank'>simularium.allencell.org</a>"
+      : "<a href='" + sim.href + "' target='_blank' rel='noopener'>open it in the Simularium viewer ↗</a>";
+    fail("Could not preview trajectory inline: <code>" + e.message + "</code><br><br>" +
+      "You can <a href='" + trajUrl + "' download>download the file</a>, or " +
+      openLink + ".");
+  });
+
+  function parseSimularium(buf) {
+    var u8 = new Uint8Array(buf);
+    var magic = new TextDecoder().decode(u8.slice(0, 16));
+    if (magic === "SIMULARIUMBINARY") return parseBinary(buf);
+    // JSON fallback
+    var doc = JSON.parse(new TextDecoder().decode(u8));
+    return fromJson(doc);
+  }
+
+  function parseBinary(buf) {
+    // SIMULARIUMBINARY header: 16b magic, then u32 headerLen, u32 headerVersion,
+    // u32 nBlocks, then nBlocks*(u32 offset, u32 type, u32 length). Each block:
+    // u32 type, u32 length, payload. (This inline preview covers the common
+    // JSON-bundle .simularium; for the full binary stream, the "Open in
+    // Simularium" button hands off to the Allen viewer, which parses both.)
+    var dv = new DataView(buf); var o = 16;
+    var headerLen = dv.getUint32(o, true); o += 4;
+    var headerVersion = dv.getUint32(o, true); o += 4;
+    var nBlocks = dv.getUint32(o, true); o += 4;
+    var blocks = [];
+    for (var i = 0; i < nBlocks; i++) {
+      blocks.push({ offset: dv.getUint32(o, true),
+        type: dv.getUint32(o + 4, true), length: dv.getUint32(o + 8, true) });
+      o += 12;
+    }
+    var info = null, spatial = null;
+    blocks.forEach(function (b) {
+      var btype = dv.getUint32(b.offset, true);
+      var payloadOff = b.offset + 8, payloadLen = b.length - 8;
+      if (btype === 1) { // trajectory info JSON
+        var s = new TextDecoder().decode(new Uint8Array(buf, payloadOff, payloadLen)).replace(/\0+$/, "");
+        info = JSON.parse(s);
+      } else if (btype === 3) { // spatial data binary
+        spatial = parseSpatialBinary(buf, payloadOff, payloadLen);
+      }
+    });
+    return buildFrames(info, spatial);
+  }
+
+  function parseSpatialBinary(buf, off, len) {
+    var dv = new DataView(buf); var p = off;
+    // spatial binary: u32 version, u32 nFrames, then per-frame u32 offset, then
+    // per-frame u32 frameNo, f32 time, u32 nFloats, floats...
+    p += 4; var nFrames = dv.getUint32(p, true); p += 4;
+    p += nFrames * 4; // frame offsets table
+    var frames = [];
+    for (var f = 0; f < nFrames; f++) {
+      /* frameNo */ dv.getUint32(p, true); p += 4;
+      var time = dv.getFloat32(p, true); p += 4;
+      var nFloats = dv.getUint32(p, true); p += 4;
+      var arr = new Float32Array(buf, p, nFloats); p += nFloats * 4;
+      frames.push({ time: time, data: arr });
+    }
+    return frames;
+  }
+
+  function fromJson(doc) {
+    var frames = (doc.spatialData.bundleData || []).map(function (f) {
+      return { time: f.time, data: Float32Array.from(f.data) };
+    });
+    return buildFrames(doc.trajectoryInfo, frames);
+  }
+
+  // Each agent in the v3 stream: [visType, uid, typeId, x,y,z, rx,ry,rz,
+  // radius, nSubpoints]. We render x,y,z with radius.
+  function buildFrames(info, spatialFrames) {
+    var size = (info && info.size) || { x: 100, y: 100, z: 100 };
+    var typeMapping = (info && info.typeMapping) || {};
+    var colorByType = {};
+    Object.keys(typeMapping).forEach(function (k, i) {
+      colorByType[k] = 0;
+    });
+    var frames = spatialFrames.map(function (fr) {
+      var a = fr.data, agents = [], i = 0;
+      while (i + 11 <= a.length) {
+        var typeId = a[i + 2];
+        var x = a[i + 3], y = a[i + 4], z = a[i + 5], radius = a[i + 9];
+        var nsub = a[i + 10];
+        agents.push({ typeId: typeId, x: x, y: y, z: z, r: radius });
+        i += 11 + nsub;
+      }
+      return { time: fr.time, agents: agents };
+    });
+    return { size: size, frames: frames, typeMapping: typeMapping };
+  }
+
+  function render(model) {
+    var host = document.getElementById("viewer");
+    var W = host.clientWidth, H = host.clientHeight;
+    var scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0e14);
+    var cam = new THREE.PerspectiveCamera(50, W / H, 0.1, 5000);
+    var S = model.size, maxd = Math.max(S.x, S.y, S.z);
+    cam.position.set(S.x / 2, S.y / 2, maxd * 2.2);
+    cam.lookAt(S.x / 2, S.y / 2, S.z / 2);
+    var rend = new THREE.WebGLRenderer({ antialias: true });
+    rend.setSize(W, H); rend.setPixelRatio(devicePixelRatio); host.appendChild(rend.domElement);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    var dir = new THREE.DirectionalLight(0xffffff, 0.8); dir.position.set(1, 1, 2); scene.add(dir);
+    // box
+    var box = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(S.x, S.y, S.z)),
+      new THREE.LineBasicMaterial({ color: 0x2a3346 }));
+    box.position.set(S.x / 2, S.y / 2, S.z / 2); scene.add(box);
+
+    var PALETTE = [0xff5500, 0x0088ff, 0x33cc66, 0xffcc00, 0xcc55ff, 0xff4488];
+    var geom = new THREE.SphereGeometry(1, 12, 12);
+    var meshByType = {};
+    // Prefer the trajectory's own per-type colour (typeMapping[id].geometry.color,
+    // set from the study's display: params); fall back to the palette by index.
+    function colorFor(typeId) {
+      var tm = model.typeMapping && model.typeMapping[typeId];
+      var c = tm && tm.geometry && tm.geometry.color;
+      if (c !== undefined && c !== null && c !== "") {
+        if (typeof c === "number") return c;
+        var s = String(c).trim().replace(/^#/, "");
+        var n = parseInt(s, 16);
+        if (!isNaN(n)) return n;
+      }
+      return PALETTE[typeId % PALETTE.length];
+    }
+    function meshFor(typeId, count) {
+      if (!meshByType[typeId]) {
+        var m = new THREE.InstancedMesh(geom,
+          new THREE.MeshLambertMaterial({ color: colorFor(typeId) }),
+          Math.max(count, 1));
+        m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(m); meshByType[typeId] = m;
+      }
+      return meshByType[typeId];
+    }
+    var dummy = new THREE.Object3D();
+    var fi = 0;
+    function draw(frame) {
+      var byType = {};
+      frame.agents.forEach(function (a) { (byType[a.typeId] = byType[a.typeId] || []).push(a); });
+      Object.values(meshByType).forEach(function (m) { m.count = 0; });
+      Object.keys(byType).forEach(function (t) {
+        var list = byType[t], m = meshFor(t, list.length);
+        if (m.instanceMatrix.count < list.length) { /* grow */
+          var nm = new THREE.InstancedMesh(geom, m.material, list.length);
+          nm.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.remove(m); scene.add(nm); meshByType[t] = m = nm;
+        }
+        m.count = list.length;
+        list.forEach(function (a, k) {
+          dummy.position.set(a.x, a.y, a.z);
+          var r = a.r || 1; dummy.scale.set(r, r, r); dummy.updateMatrix();
+          m.setMatrixAt(k, dummy.matrix);
+        });
+        m.instanceMatrix.needsUpdate = true;
+      });
+    }
+    var tEl = document.getElementById("title");
+    var base = tEl.textContent;
+    function tick() {
+      if (model.frames.length) {
+        var fr = model.frames[fi % model.frames.length];
+        draw(fr);
+        tEl.textContent = base + "  ·  frame " + (fi % model.frames.length + 1) +
+          "/" + model.frames.length + "  ·  t=" + fr.time.toFixed(1);
+        fi++;
+      }
+      box.rotation.y += 0.0; // static
+      rend.render(scene, cam);
+    }
+    setInterval(tick, 120);
+    // simple drag-orbit
+    var down = false, lx = 0, ly = 0, ry = 0, rx = 0;
+    host.addEventListener("mousedown", function (e) { down = true; lx = e.clientX; ly = e.clientY; });
+    window.addEventListener("mouseup", function () { down = false; });
+    window.addEventListener("mousemove", function (e) {
+      if (!down) return; ry += (e.clientX - lx) * 0.008; rx += (e.clientY - ly) * 0.008;
+      lx = e.clientX; ly = e.clientY;
+      var rad = maxd * 2.2;
+      cam.position.x = S.x / 2 + rad * Math.sin(ry) * Math.cos(rx);
+      cam.position.z = S.z / 2 + rad * Math.cos(ry) * Math.cos(rx);
+      cam.position.y = S.y / 2 + rad * Math.sin(rx);
+      cam.lookAt(S.x / 2, S.y / 2, S.z / 2);
+    });
+    window.addEventListener("resize", function () {
+      var w = host.clientWidth, h = host.clientHeight;
+      cam.aspect = w / h; cam.updateProjectionMatrix(); rend.setSize(w, h);
+    });
+  }
+})();
+</script>
+</body>
+</html>

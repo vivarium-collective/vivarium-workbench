@@ -209,3 +209,156 @@ def test_worker_keeps_a_viva_v1_dispatchs_run_id_as_the_handle(tmp_path, monkeyp
     worker(job)
     item = job.to_dict()["items"][0]
     assert (item["status"], item["simulation_id"]) == ("submitted", "simulation-cDA421C")
+
+
+# --- items dispatched to a document backend (viva-core / compose-api) ---------
+#
+# A named backend that runs documents answers a study run with 202 + its own run id (``simulation-...`` from
+# viva-core, ``compose-<n>`` from compose-api) and no integer simulation id. Those items used to be asked of the SMS
+# host's integer-only batch route, which raised on the string id, so they stayed ``submitted`` forever.
+
+class _NoSms:
+    """An SMS client that must not be asked: the items are not SMS simulations."""
+
+    def __init__(self):
+        self.calls = []
+
+    def compose_status_batch(self, ids):
+        self.calls.append(list(ids))
+        raise AssertionError(f"asked the SMS host about {ids}")
+
+
+def _patch_status(monkeypatch, module, answers):
+    asked = []
+
+    def _status(run_id):
+        asked.append(run_id)
+        return answers[run_id]
+
+    monkeypatch.setattr(module, "status", _status)
+    return asked
+
+
+def test_viva_core_and_compose_items_settle_against_their_own_backend(monkeypatch):
+    from vivarium_workbench.lib import remote_run_compose
+    from vivarium_workbench_sms import remote_run_viva_v1
+
+    viva = _patch_status(monkeypatch, remote_run_viva_v1, {
+        "simulation-cDA421C": ({"kind": "run", "phase": "done", "raw_status": "completed", "error": None,
+                                "run_id": "simulation-cDA421C"}, 200)})
+    comp = _patch_status(monkeypatch, remote_run_compose, {
+        "compose-4706": ({"kind": "run", "phase": "failed", "raw_status": "out_of_memory", "error": "OOMKilled",
+                          "run_id": "compose-4706"}, 200)})
+    sms = _NoSms()
+    job = _job({"status": "submitted", "simulation_id": "simulation-cDA421C"},
+               {"status": "submitted", "simulation_id": "compose-4706"})
+    run_jobs.refresh_submitted(job, client=sms)
+
+    d = job.to_dict()
+    assert d["items"][0]["status"] == "done"
+    assert (d["items"][1]["status"], d["items"][1]["error"]) == ("failed", "OOMKilled")
+    assert d["status"] == "failed" and d["completed_at"] is not None
+    assert (viva, comp, sms.calls) == (["simulation-cDA421C"], ["compose-4706"], [])
+
+
+def test_a_failed_document_run_without_a_message_names_its_upstream_state(monkeypatch):
+    from vivarium_workbench_sms import remote_run_viva_v1
+
+    _patch_status(monkeypatch, remote_run_viva_v1, {
+        "simulation-X": ({"kind": "run", "phase": "failed", "raw_status": "cancelled", "error": None,
+                          "run_id": "simulation-X"}, 200)})
+    job = _job({"status": "submitted", "simulation_id": "simulation-X"})
+    run_jobs.refresh_submitted(job, client=_NoSms())
+    item = job.to_dict()["items"][0]
+    assert (item["status"], item["error"]) == ("failed", "upstream: cancelled")
+
+
+def test_a_running_document_run_stays_submitted_with_its_phase(monkeypatch):
+    from vivarium_workbench.lib import remote_run_compose
+
+    _patch_status(monkeypatch, remote_run_compose, {
+        "compose-9": ({"kind": "run", "phase": "queued", "raw_status": "submitting", "error": None,
+                       "run_id": "compose-9"}, 200)})
+    job = _job({"status": "submitted", "simulation_id": "compose-9"})
+    run_jobs.refresh_submitted(job, client=_NoSms())
+    item = job.to_dict()["items"][0]
+    assert (item["status"], item["phase"]) == ("submitted", "submitting")
+    assert job.to_dict()["status"] != "done"
+
+
+@pytest.mark.parametrize("answer", [
+    ({"error": "unreachable", "reachable": False, "run_id": "simulation-Y"}, 502),
+    ({"phase": "not_found", "error": "no such run", "run_id": "simulation-Y"}, 404),
+])
+def test_a_document_backend_that_does_not_answer_leaves_the_item_submitted(monkeypatch, answer):
+    """Losing the poll must not turn a running run into a failed one -- on any backend."""
+    from vivarium_workbench_sms import remote_run_viva_v1
+
+    _patch_status(monkeypatch, remote_run_viva_v1, {"simulation-Y": answer})
+    job = _job({"status": "submitted", "simulation_id": "simulation-Y"})
+    run_jobs.refresh_submitted(job, client=_NoSms())
+    assert job.to_dict()["items"][0]["status"] == "submitted"
+
+
+def test_a_raising_backend_does_not_stop_the_others(monkeypatch):
+    from vivarium_workbench.lib import remote_run_compose
+    from vivarium_workbench_sms import remote_run_viva_v1
+
+    def _boom(run_id):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(remote_run_viva_v1, "status", _boom)
+    _patch_status(monkeypatch, remote_run_compose, {
+        "compose-1": ({"kind": "run", "phase": "done", "raw_status": "completed", "error": None,
+                       "run_id": "compose-1"}, 200)})
+    client = _Client([{"sim_id": 5, "status": "completed"}])
+    job = _job({"status": "submitted", "simulation_id": "simulation-Z"},
+               {"status": "submitted", "simulation_id": "compose-1"},
+               {"status": "submitted", "simulation_id": 5})
+    run_jobs.refresh_submitted(job, client=client)
+    items = job.to_dict()["items"]
+    assert [it["status"] for it in items] == ["submitted", "done", "done"]
+    assert client.calls == [[5]], "the SMS batch call carries only the SMS ids, as before"
+
+
+def test_an_unreachable_backend_is_asked_once_per_refresh(monkeypatch):
+    """Each ask is a synchronous request inside the status GET: a down host is not asked again for every item."""
+    from vivarium_workbench.lib import remote_run_compose
+
+    asked = _patch_status(monkeypatch, remote_run_compose, {
+        f"compose-{n}": ({"error": "unreachable", "reachable": False}, 502) for n in (1, 2, 3)})
+    job = _job(*({"status": "submitted", "simulation_id": f"compose-{n}"} for n in (1, 2, 3)))
+    run_jobs.refresh_submitted(job, client=_NoSms())
+    assert asked == ["compose-1"]
+    assert all(it["status"] == "submitted" for it in job.to_dict()["items"])
+
+
+def test_one_stale_viva_core_run_does_not_block_the_others(monkeypatch):
+    """Review of #1661: viva-core's adapter answers a 404 for an unknown run as 502 "unreachable", carrying the
+    server's own status. A deleted run (or a reset server) answers about that run only; the backend is not down,
+    so the next item is still asked and settles."""
+    from vivarium_workbench_sms import remote_run_viva_v1
+
+    asked = _patch_status(monkeypatch, remote_run_viva_v1, {
+        "simulation-GONE": ({"phase": "unreachable", "reachable": False, "reason": "backend unreachable",
+                             "status": 404, "error": "GET .../simulation-GONE/status -> 404"}, 502),
+        "simulation-OK": ({"kind": "run", "phase": "done", "raw_status": "completed", "error": None,
+                           "run_id": "simulation-OK"}, 200)})
+    job = _job({"status": "submitted", "simulation_id": "simulation-GONE"},
+               {"status": "submitted", "simulation_id": "simulation-OK"})
+    run_jobs.refresh_submitted(job, client=_NoSms())
+    items = job.to_dict()["items"]
+    assert asked == ["simulation-GONE", "simulation-OK"]
+    assert (items[0]["status"], items[1]["status"]) == ("submitted", "done")
+
+
+def test_a_viva_core_server_error_still_skips_the_backend(monkeypatch):
+    """A real 5xx (or no HTTP status at all: a refused connection) still means the backend did not answer."""
+    from vivarium_workbench_sms import remote_run_viva_v1
+
+    asked = _patch_status(monkeypatch, remote_run_viva_v1, {
+        f"simulation-{n}": ({"phase": "unreachable", "reachable": False, "status": s, "error": "x"}, 502)
+        for n, s in ((1, 503), (2, None))})
+    job = _job(*({"status": "submitted", "simulation_id": f"simulation-{n}"} for n in (1, 2)))
+    run_jobs.refresh_submitted(job, client=_NoSms())
+    assert asked == ["simulation-1"]

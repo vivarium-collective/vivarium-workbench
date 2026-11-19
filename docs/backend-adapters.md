@@ -201,7 +201,8 @@ This section is unchanged from step 1c. From P1c, the record kinds come from the
     - `composite_run_views` passes this process's own deployment; its `remote-sim-<id>` runs are its own dispatches.
   - viva-core land refuses with **409 `no-backend`** when no backend is named, as compose-api always has.
   - **Known gap.** Placeholder rows are `remote-pending-<id>`, not namespaced by deployment. If two deployments produce runs with the same id in one study, those runs share a placeholder row. A future fix is `remote-pending-<deployment>-<id>`.
-  - **Exempt** (the code says why): the in-memory batch jobs (`run_jobs.refresh_submitted`, `remote_run_jobs`). Their ids were just dispatched by this process to its one backend.
+  - **Not by record, by id form** (the code says why): the investigation batch job's `run_jobs.refresh_submitted`. The job lives only as long as this process, whose one backend dispatched every item, and the adapters' id forms do not overlap, so `backends.for_run` names the backend that ran each item: SMS integer ids go in one `compose_status_batch` call, viva-core and compose-api runs through their adapter's `runs.status` (a backend that does not answer is skipped for the rest of that refresh). Caveat: a backend URL re-pointed while the job lives is asked anyway, where `for_existing` would refuse; the SMS path always had that exposure. (Before this, every item was asked of SMS, whose integer-only batch route raised on a viva-core or compose-api id, so such an item never settled.)
+  - **Exempt** (the code says why): `remote_run_jobs.run_remote_pipeline`, an SMS-only pipeline that polls the same client it dispatched with, inside the same call.
 - **One remote backend per process (Jim, 2026-11-19).**
   - A named backend beside an alias (`VIVA_API_BASE` / `SMS_API_BASE`) that points elsewhere is refused at startup, by `sms_api_client.check_single_backend` for `cli.BACKEND_COMMANDS`.
   - In P1a the rule moves to `lib/backend_config.py`; in P1c the SMS aliases become the plugin's `check_config`.
@@ -304,7 +305,7 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 | Area | Whole modules (P1b) | SMS parts of mixed modules (P2) | Core sees it through |
 |---|---|---|---|
 | Client | `sms_api_client` (less the config split out) | viva-core half of `server_capabilities` | — |
-| Runs | `backends/sms_legacy`, `backends/viva_core`, `remote_run_viva_v1`, `remote_trace`, `remote_run_jobs` | `remote_run.run_remote` (called by `run_runner`), SMS parts of `remote_run_views`, `remote_run_landing.land_remote_run` and `land_remote_simulation_artifacts`, `run_jobs.refresh_submitted` (`compose_status_batch`, interim `/viva/v1/compose`) | `runs` |
+| Runs | `backends/sms_legacy`, `backends/viva_core`, `remote_run_viva_v1`, `remote_trace`, `remote_run_jobs` | `remote_run.run_remote` (called by `run_runner`), SMS parts of `remote_run_views`, `remote_run_landing.land_remote_run` and `land_remote_simulation_artifacts`, `run_jobs.refresh_submitted`'s SMS half (`compose_status_batch`, interim `/viva/v1/compose`) | `runs` |
 | Builds and pinning | `remote_pinned`, `remote_build_source`, `source_build_views`, `comparison_pinning` | build-source half of `workspace_deps_views`, the vEcoli dispatch in `study_runs`, discovery in `composite_test_run_views` | `builds`, `Provider.select` |
 | Remote tab and store | `remote_simulations`, `remote_reconcile` | `simulations_index._append_remote_simulations`, `resolve_or_fetch_store`; `investigations_index`'s `list_remote_simulations_swr` | `listing`, `artifacts` |
 | Analyses and figures | `remote_analysis_figures` | — | `artifacts`, `analyses`; the routes stay core and dispatch by facet (§2.2) |

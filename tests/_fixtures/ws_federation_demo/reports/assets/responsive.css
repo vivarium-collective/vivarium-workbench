@@ -1,0 +1,366 @@
+/* ============================================================================
+ * responsive.css — phone/small-screen layer for the vivarium-workbench SPA.
+ *
+ * Loaded LAST (after style.css/chat.css/snapshot-readonly.css/progress-track.css)
+ * so its @media rules win on specificity ties. It ships to BOTH the live server
+ * and every published read-only bundle, because publish.py copies all of
+ * static/ into the bundle's assets/ and the template links it relatively.
+ *
+ * Strategy: a single phone breakpoint at <=640px (covers every phone in
+ * portrait and most in landscape; tablets keep the desktop layout).
+ *   - The fixed 240px left rail becomes an OFF-CANVAS DRAWER, toggled by a
+ *     hamburger in a slim mobile topbar (both injected by mobile-nav.js, which
+ *     flips body.viv-mobile-rail-open). The drawer and topbar are display:none
+ *     above the breakpoint, so the desktop experience is untouched.
+ *   - Content gutters tighten; modals and fixed multi-column grids collapse to
+ *     a single column so nothing overflows a 375px (or 320px) viewport.
+ *
+ * Scope note: validated against the read-only viewing flows (browse Studies,
+ * read Reports/Analysis, view Composites). Authoring surfaces get a no-break
+ * pass here; a later pass can refine them.
+ * ========================================================================== */
+
+/* Mobile-only chrome is created by mobile-nav.js / mobile-panels.js but stays
+ * hidden until the phone breakpoint (and so is inert / absent on desktop). */
+.viv-mobile-topbar,
+.viv-mobile-backdrop,
+.viv-mobile-panelbar { display: none; }
+
+/* The short snapshot-banner message is phone-only (see the breakpoint below). */
+#snapshot-banner .snap-msg-short { display: none; }
+
+@media (max-width: 640px) {
+
+  /* ---- Study header: reclaim the vertical space it eats on a phone -------- *
+   * The title wraps to 3 lines, the action buttons overflow sideways, and the
+   * six-gate readiness ladder stacks into a tall block. Shrink the title, let
+   * the actions wrap, and collapse the ladder to just the CURRENT stage chip
+   * (the full ladder stays one tap away in the expandable "status" panel). */
+  .study-header > div:first-child { flex-wrap: wrap; gap: 6px 10px; }
+  .study-title { font-size: 1.28em; line-height: 1.2; }
+  .study-header-actions { flex-wrap: wrap; row-gap: 6px; }
+  .study-status-row { gap: 8px; row-gap: 6px; }
+  /* Inline stepper → show only the "you are here" stage; rest in the details body. */
+  .study-status-row .status-stepper .status-step { display: none; }
+  .study-status-row .status-stepper .status-step.gate-current { display: inline-flex; }
+
+  /* ---- Read-only snapshot banner: compact so it stops eating the viewport --- *
+   * The full sentence wraps to ~5 lines on a phone; show a terse version at a
+   * smaller size, and let the "Get it on GitHub" link wrap rather than force a
+   * narrow column. */
+  body.snapshot #snapshot-banner {
+    gap: 8px;
+    padding: 5px 12px;
+    font-size: 0.72em;
+    line-height: 1.35;
+    flex-wrap: wrap;
+  }
+  #snapshot-banner .snap-msg-full { display: none; }
+  #snapshot-banner .snap-msg-short { display: inline; font-weight: 600; }
+  body.snapshot #snapshot-banner a { white-space: normal; }
+
+  /* ---- Market / Registry controls: keep them to one scrollable row each, so
+   * the toolbar doesn't stack into a tall block that squashes the cards. ---- */
+  /* The column-count slider is meaningless on a phone (always one column). */
+  .cols-ctl-slot { display: none !important; }
+  /* Facet tabs (Repositories / Processes / …) scroll sideways, not wrap. */
+  .market-facets {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 16px;
+    margin: 6px 0 10px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .market-facets::-webkit-scrollbar { display: none; }
+  .market-facet { white-space: nowrap; }
+  /* Source/provenance chips: one scrollable row, tighter margins. */
+  .market-facets-row { margin-bottom: 6px; overflow-x: auto; scrollbar-width: none; }
+  .market-facets-row::-webkit-scrollbar { display: none; }
+  .market-origin-filter { flex-wrap: nowrap; }
+  .market-origin-chip { white-space: nowrap; }
+  /* Trim the card toolbars' vertical footprint. */
+  .market-toolbar,
+  .registry-view-toolbar,
+  .card-browse-toolbar { gap: 8px; margin-bottom: 6px; }
+
+  /* ---- Slim mobile topbar (hamburger + context title) ------------------- */
+  .viv-mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+    height: 48px;
+    padding: 0 12px;
+    background: var(--panel, #fff);
+    border-bottom: 1px solid #e5e7eb;
+    position: sticky;
+    top: 0;
+    z-index: 40;
+  }
+  .viv-mobile-menu-btn {
+    width: 38px;
+    height: 38px;
+    flex: 0 0 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    line-height: 1;
+    background: transparent;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    color: #1f2937;
+    cursor: pointer;
+  }
+  .viv-mobile-menu-btn:active { background: #f3f4f6; }
+  .viv-mobile-title {
+    font-weight: 600;
+    font-size: 15px;
+    color: #1f2937;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  :root[data-theme="dark"] .viv-mobile-topbar { background: var(--card, #1f2937); border-color: var(--border, #374151); }
+  :root[data-theme="dark"] .viv-mobile-menu-btn,
+  :root[data-theme="dark"] .viv-mobile-title { color: var(--text, #e5e7eb); }
+  :root[data-theme="dark"] .viv-mobile-menu-btn { border-color: var(--border, #374151); }
+
+  /* ---- Left rail -> off-canvas drawer ----------------------------------- */
+  .viv-rail {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    /* A comfortable drawer, but never wider than the screen. Overrides the
+       desktop --rail-w token and any resized/collapsed inline width. */
+    width: min(86vw, 320px) !important;
+    flex-basis: min(86vw, 320px) !important;
+    max-width: 320px;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: 2px 0 18px rgba(0, 0, 0, 0.18);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  body.viv-mobile-rail-open .viv-rail { transform: translateX(0); }
+  /* A collapsed-on-desktop rail must still open as a full drawer on a phone. */
+  /* A desktop session may have left the rail collapsed (icon-only, its label
+     spans set to display:none). In drawer mode the rail is full-width, so fully
+     UN-collapse it — otherwise the open drawer shows only icons with no
+     "Resources"/"Registry"/... text. Re-show the nav labels, section headers,
+     workspace name, badges, and the studies list; !important beats the equal-
+     specificity collapsed rules in style.css. */
+  .viv-rail.viv-rail-collapsed { width: min(86vw, 320px) !important; }
+  .viv-rail.viv-rail-collapsed .viv-rail-link-label,
+  .viv-rail.viv-rail-collapsed .viv-rail-section-label,
+  .viv-rail.viv-rail-collapsed .viv-ws-text,
+  .viv-rail.viv-rail-collapsed .viv-rail-link-badge,
+  .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-name,
+  .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-count,
+  .viv-rail.viv-rail-collapsed .viv-rail-footer-text { display: revert !important; }
+  .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-items,
+  .viv-rail.viv-rail-collapsed .viv-rail-section:has(#viv-rail-investigations),
+  .viv-rail.viv-rail-collapsed #viv-rail-investigations { display: block !important; }
+  /* Left-align the bits the collapsed rail centered. */
+  .viv-rail.viv-rail-collapsed .viv-workspace-name,
+  .viv-rail.viv-rail-collapsed .viv-rail-footer,
+  .viv-rail.viv-rail-collapsed .viv-rail-investigations-group-header { justify-content: flex-start !important; }
+  /* The right-edge drag-resize handle is meaningless for a mobile drawer. */
+  .viv-rail-resize-handle { display: none; }
+
+  /* Dim the page behind the open drawer; tap it to dismiss (mobile-nav.js). */
+  .viv-mobile-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    background: rgba(0, 0, 0, 0.38);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  body.viv-mobile-rail-open .viv-mobile-backdrop {
+    display: block;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  /* Prevent the page scrolling under the open drawer. */
+  body.viv-mobile-rail-open { overflow: hidden; }
+
+  /* ---- Content gutters -------------------------------------------------- */
+  .viv-content { padding: 14px 12px; }
+  .viv-content:has(> #page-investigations.active) { padding: 8px 12px !important; }
+
+  /* ---- Modals never exceed the viewport --------------------------------- */
+  .modal-box {
+    min-width: 0 !important;
+    max-width: 94vw;
+    width: 94vw;
+    padding: 18px 16px;
+  }
+
+  /* ---- Fixed multi-column grids collapse to one column ------------------ *
+   * These use hardcoded/large column tracks that overflow a phone. The
+   * auto-fit/auto-fill card grids mostly reflow on their own, but the ones
+   * with a >=300px (or 420px) minimum are forced here too so a 320px device
+   * never overflows. !important is used because several of the originals set
+   * their columns with !important or high-specificity selectors. */
+  .mrow-grid,
+  .ccc-grid,
+  .narrative-grid,
+  .study-overview .narrative-grid,
+  .loom-runnable .loom-row,
+  .inv-comparative-grid,
+  .inv-at-a-glance,
+  .module-grid,
+  .market-grid,
+  .ccard-grid,
+  .loom-cfg-fields,
+  #investigations-grid,
+  #page-studies.active > #investigations-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Label-over-value for the 210px-label config rows. */
+  .cfg-list .cfg-row {
+    grid-template-columns: 1fr;
+    row-gap: 2px;
+  }
+
+  /* ---- Wide data tables: contain horizontal scroll, don't blow out width - *
+   * The runs table (#sim-table, min-width:760px) already sits in an
+   * overflow-x:auto wrapper; add momentum scrolling and make sure any stray
+   * wide table is swipeable rather than stretching the page. */
+  #sim-table { font-size: 12px; }
+  .viv-content table { max-width: 100%; }
+
+  /* Figures / embedded iframes fill the column instead of forcing a min width. */
+  .viv-content img,
+  .viv-content iframe { max-width: 100%; }
+
+  /* Keep the AI chat dock from covering the whole screen if it's open. */
+  .chat-dock, #chat-dock { max-width: 100vw; }
+
+  /* ---- Dockable side panels → full-screen overlay sheets ----------------- *
+   * On a phone there is no room to dock/split: a docked Studies / Chat / Code /
+   * Graph panel would crush the content to nothing. So docking is off here —
+   * each panel instead opens as a full-screen sheet OVER the content, between the
+   * mobile topbar (so the hamburger stays reachable) and the panel-switcher bar
+   * (so the switcher stays reachable to swap/dismiss). Its own × closes it.
+   * Edge-resize, dock-to-a-side and pop-out are all hidden (meaningless at this
+   * width). The desktop docking experience above 640px is untouched. */
+  #viv-ai-panel:not([hidden]),
+  #viv-code-rail:not([hidden]),
+  #viv-graph-panel:not([hidden]),
+  #viv-studies-panel:not([hidden]),
+  #viv-registry-panel:not([hidden]) {
+    position: fixed !important;
+    /* top:48px clears the topbar; bottom clears the switcher bar (+ its safe area). */
+    inset: 48px 0 calc(56px + env(safe-area-inset-bottom)) 0 !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    flex: none !important;
+    z-index: 600 !important;        /* over content + topbar(40); under the rail drawer(1000) + its backdrop(900) */
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: auto !important;
+  }
+  /* Panel inners fill the sheet. */
+  #viv-code-rail .viv-code-panel,
+  #viv-graph-panel .viv-graph-panel-inner,
+  #viv-studies-panel .viv-studies-panel-inner,
+  #viv-registry-panel .viv-registry-panel-inner { height: 100% !important; }
+
+  /* Hide docking / pop-out / edge-resize affordances on a phone. */
+  .vp-resize,
+  #viv-ai-resize,
+  #viv-code-resize-handle,
+  #viv-graph-resize-handle,
+  #viv-studies-resize-handle,
+  #viv-registry-resize-handle,
+  .vp-dock-menu,
+  .vp-icon[data-act="dock"],
+  #aig-dock-panel-btn,
+  #aig-dock-ctl { display: none !important; }
+
+  /* ---- Panel-switcher bar (mobile-panels.js) ---------------------------- *
+   * A single persistent bottom bar that is both launcher and switcher for the
+   * dockable panels. Shown only while at least one panel is relevant to the
+   * current page (mobile-panels.js toggles body.viv-has-panelbar + bar[hidden]).
+   * Sits ABOVE the full-screen sheets (z 600) so you can always swap/dismiss a
+   * panel, and BELOW the rail drawer (1000) + its backdrop (900). */
+  .viv-mobile-panelbar {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 650;
+    height: 56px;
+    /* Reserve the iOS home-indicator inset below the 56px of tappable height. */
+    padding: 0 4px env(safe-area-inset-bottom);
+    box-sizing: content-box;
+    align-items: stretch;
+    gap: 2px;
+    background: var(--panel, #fff);
+    border-top: 1px solid #e5e7eb;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
+  }
+  .viv-mobile-panelbar::-webkit-scrollbar { display: none; }
+  .viv-mobile-panelbar[hidden] { display: none; }
+  :root[data-theme="dark"] .viv-mobile-panelbar {
+    background: var(--card, #1f2937);
+    border-color: var(--border, #374151);
+  }
+
+  .vpb-btn {
+    flex: 1 1 0;
+    min-width: 56px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 4px 2px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: #6b7280;
+    font: 600 10.5px/1 inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .vpb-btn .vpb-ico { display: inline-flex; width: 22px; height: 22px; }
+  .vpb-btn .vpb-ico svg { width: 22px; height: 22px; }
+  .vpb-btn .vpb-lab {
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .vpb-btn:active { background: #f3f4f6; }
+  .vpb-btn.active {
+    color: var(--accent, #2563eb);
+    background: var(--accent-soft, rgba(37, 99, 235, 0.1));
+  }
+  :root[data-theme="dark"] .vpb-btn { color: var(--muted, #9ca3af); }
+  :root[data-theme="dark"] .vpb-btn:active { background: rgba(255, 255, 255, 0.06); }
+  :root[data-theme="dark"] .vpb-btn.active {
+    color: var(--accent, #60a5fa);
+    background: rgba(96, 165, 250, 0.16);
+  }
+
+  /* When the bar is present, keep page content from hiding behind it. */
+  body.viv-has-panelbar .viv-content {
+    padding-bottom: calc(56px + env(safe-area-inset-bottom) + 14px);
+  }
+}
