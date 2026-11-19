@@ -140,21 +140,20 @@ class TestRemoteRepoUrl:
         assert gs.remote_repo_url(tmp_path) is None
 
     def test_success_normalizes_url(self, monkeypatch, tmp_path: Path) -> None:
-        # The .git suffix is stripped by the reused lib _normalize_repo_url.
+        # The .git suffix is stripped by normalize_repo_url.
         monkeypatch.setattr(
             gs.subprocess, "run",
             lambda *a, **k: _cp(returncode=0, stdout="https://github.com/x/y.git\n"),
         )
         assert gs.remote_repo_url(tmp_path) == "https://github.com/x/y"
 
-    def test_uses_lib_normalize_not_a_new_copy(self, monkeypatch, tmp_path: Path) -> None:
-        """remote_repo_url routes through lib.source_build_views._normalize_repo_url."""
-        from vivarium_workbench_sms import source_build_views as sbv
+    def test_uses_normalize_repo_url(self, monkeypatch, tmp_path: Path) -> None:
+        """remote_repo_url routes through git_status.normalize_repo_url."""
         monkeypatch.setattr(
             gs.subprocess, "run",
             lambda *a, **k: _cp(returncode=0, stdout="ssh://git@host/r.git"),
         )
-        monkeypatch.setattr(sbv, "_normalize_repo_url", lambda u: "SENTINEL")
+        monkeypatch.setattr(gs, "normalize_repo_url", lambda u: "SENTINEL")
         assert gs.remote_repo_url(tmp_path) == "SENTINEL"
 
 

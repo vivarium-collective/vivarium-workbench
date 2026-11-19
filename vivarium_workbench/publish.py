@@ -1625,7 +1625,6 @@ def _do_build(
     commit, remote, branch = _git_info(ws_root)
     config = {
         "mode":               "snapshot",
-        "smsApiBase":         "",
         "repo":               remote or ws_root.name,
         "commit":             commit,
         "generated_from_ref": branch,

@@ -654,8 +654,7 @@ class SmsApiClient:
     def list_branch_builds(self, repo_url: str, branch: str) -> dict:
         """The builds registered for ``repo_url``@``branch``, as
         ``{"versions": [SimulatorVersion-shaped]}`` -- what a branch lookup
-        (``resolve_pinned_build``, ``comparison_pinning`` for a branch ref)
-        filters and picks the newest of.
+        (``resolve_pinned_build``) filters and picks the newest of.
 
         With ``viva-v1-environments-filters``: ``GET /viva/v1/environments
         ?repo_url=&branch=`` (the pair), converted by

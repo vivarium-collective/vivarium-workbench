@@ -99,16 +99,30 @@ def diagnose_push_error(err: str) -> dict | None:
     return None
 
 
+def normalize_repo_url(url: str) -> str:
+    """Normalize a git remote URL: strip surrounding whitespace and a trailing ``.git``.
+
+    sms-api's ``/core/v1/simulator/upload`` 500s on a ``.git``-suffixed URL
+    (it builds an image tag / repo path from the URL), which is why the SMS
+    plugin's source-build routes use this too.
+
+    Not to be confused with ``cli._normalize_repo_url``, which expands an
+    ``org/repo`` shorthand into a cloneable URL and keeps a ``.git`` suffix.
+    """
+    url = url.strip()
+    if url.endswith(".git"):
+        url = url[: -len(".git")]
+    return url
+
+
 def remote_repo_url(ws_root: Path) -> str | None:
     """Return origin's normalized remote URL, or ``None`` when unresolved.
 
     Mirrors ``server._remote_repo_url`` parameterised on ``ws_root``: runs
     ``git remote get-url origin`` in ``cwd=ws_root``, returns ``None`` on a
     non-zero exit or empty URL, else the URL normalized via
-    :func:`lib.source_build_views._normalize_repo_url` (reused, not re-copied).
+    :func:`normalize_repo_url`.
     """
-    from vivarium_workbench_sms.source_build_views import _normalize_repo_url
-
     r = subprocess.run(
         ["git", "remote", "get-url", "origin"], cwd=ws_root,
         capture_output=True, text=True, timeout=5,
@@ -116,7 +130,7 @@ def remote_repo_url(ws_root: Path) -> str | None:
     if r.returncode != 0:
         return None
     raw = r.stdout.strip()
-    return _normalize_repo_url(raw) if raw else None
+    return normalize_repo_url(raw) if raw else None
 
 
 def remote_push_and_sha(ws_root: Path) -> str:

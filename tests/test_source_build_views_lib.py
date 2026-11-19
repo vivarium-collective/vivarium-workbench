@@ -98,7 +98,7 @@ def test_build_remote_happy_normalizes_repo(monkeypatch):
     assert body == {
         "ok": True,
         "simulator_id": 77,
-        "repo": "https://github.com/x/y",  # _normalize_repo_url stripped .git + whitespace
+        "repo": "https://github.com/x/y",  # normalize_repo_url stripped .git + whitespace
         "branch": "main",
         "commit": "abcdef123",
     }
