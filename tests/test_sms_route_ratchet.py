@@ -57,10 +57,10 @@ NOT_SMS_RECEIVERS = frozenset({
 
 #: Today's callers. Shrink this as steps 1-6 land; never grow it.
 ALLOWED: dict[str, frozenset[str]] = {
-    # The frozen SMS path (step 1a moved these here verbatim from lib.remote_run_views: a move, not growth).
+    # The frozen SMS path (steps 1a and 1b moved these here verbatim from lib.remote_run_views: a move, not growth).
     "lib.backends.sms_legacy": frozenset({"analysis_status", "cancel_simulation", "download_data", "get_simulation",
-                                          "run_analysis", "simulation_chain_progress", "simulation_status",
-                                          "simulator_commit", "simulator_status"}),
+                                          "run_analysis", "run_simulation", "simulation_chain_progress",
+                                          "simulation_status", "simulator_commit", "simulator_status"}),
     "lib.comparison_pinning": frozenset({"list_branch_builds", "list_simulators", "simulator_status"}),
     "lib.composite_test_run_views": frozenset({"run_simulation"}),
     "lib.remote_analysis_figures": frozenset({"get_simulation", "list_analyses"}),
@@ -73,7 +73,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "lib.remote_run_jobs": frozenset({"download_data", "run_simulation", "simulation_status", "simulator_status",
                                       "upload_simulator"}),
     "lib.remote_run_landing": frozenset({"download_data"}),
-    "lib.remote_run_views": frozenset({"run_analysis", "run_simulation", "upload_simulator"}),
+    "lib.remote_run_views": frozenset({"run_analysis", "upload_simulator"}),
     # The viva-core adapter still lands results through the interim compose route; viva-core 0.1.10's
     # /composites/{id}/results replaces it.
     "lib.remote_run_viva_v1": frozenset({"download_compose_results"}),

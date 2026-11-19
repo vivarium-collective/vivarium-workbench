@@ -43,6 +43,15 @@ from vivarium_workbench.lib.errors import APIError
 from vivarium_workbench.lib.study_crud_mutations import _study_name_from_body
 
 
+def _named_backend_runs_documents(ws_root) -> bool:
+    """A study run goes to the backend the operator named, as a document: compose-api or viva-core (step 1b:
+    ``backends.select``; what ``remote_pinned.uses_named_backend_dispatch`` answers)."""
+    from vivarium_workbench.lib import backends
+
+    chosen = backends.select(ws_root)
+    return chosen is backends.COMPOSE or chosen is backends.VIVA_CORE
+
+
 def _study_runtime_emitter(runtime_cfg):
     """Resolve a study's own emitter override from its ``runtime:`` block.
 
@@ -758,7 +767,7 @@ def run_study_baseline(ws_root, body):
     # A backend the operator NAMED (serve --backend-base-url) that runs documents (POST
     # /viva/v1/composites, or compose-api's POST /simulation/run): ANY baseline composite runs there, keyed by the workspace's
     # composite (no simulator id exists to pin, and none is needed).
-    if not dry_run and remote_pinned.uses_named_backend_dispatch(ws_root):
+    if not dry_run and _named_backend_runs_documents(ws_root):
         from vivarium_workbench.lib.remote_run_views import remote_run_submit
         return remote_run_submit(ws_root, {
             "study": name, "composite": spec_id,
@@ -1044,7 +1053,7 @@ def run_study_variant(ws_root, body):
             return {"error": str(e)}, 409
         # Remote-build guard — same as the baseline path above (SP-D2/G1, item 18).
         if plan.target == "deployment":
-            if remote_pinned.uses_named_backend_dispatch(ws_root):
+            if _named_backend_runs_documents(ws_root):
                 from vivarium_workbench.lib.remote_run_views import remote_run_submit
                 return remote_run_submit(ws_root, {
                     "study": name, "composite": spec_id,

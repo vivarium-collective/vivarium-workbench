@@ -81,9 +81,9 @@ def trace_support(client: SmsApiClient) -> "tuple[dict, int]":
     reachable but does not serve traces.
     """
     viewer = perfetto_ui.viewer_config().as_dict()
-    from vivarium_workbench.lib.server_capabilities import compose_dispatch_active
+    from vivarium_workbench.lib import backends
 
-    if compose_dispatch_active():
+    if backends.named() is backends.COMPOSE:
         # compose-api serves every run's trace (get-simulation-trace-chrome); it has no capabilities route
         return ({"supported": True, "reason": None, "capability": "get-simulation-trace-chrome",
                  "viewer": viewer}, 200)

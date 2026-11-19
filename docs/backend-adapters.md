@@ -11,8 +11,8 @@ viva-api#1055. "Q2" means §5's Q2 (analyses), which is Question 1 in viva-api#1
 | Step | What | PR | State (date) |
 |---|---|---|---|
 | 0 | SMS-call ratchet; drop the dead `composite_resolve` fallback | wb#1646 | **done**, merged 2026-11-19 |
-| 1a | `lib/backends/`: the three adapters, `Backend`, `for_run`; SMS code moved to `sms_legacy.py`; routing unchanged | wb#1652 | in review (2026-11-19) |
-| 1b | `active()`: selection for submit and the 9 modules that call the dispatch predicates | — | not started; plan after 1a |
+| 1a | `lib/backends/`: the three adapters, `Backend`, `for_run`; SMS code moved to `sms_legacy.py`; routing unchanged | wb#1652 | **done**, merged 2026-11-19 |
+| 1b | `backends.named/select/active`: one place picks the backend for a new run; the six predicates become wrappers; submit goes through the adapter | (this PR) | in review (2026-11-19) |
 | 1c | Route every view through `for_run` (a deliberate behaviour change; edits `test_backends_routing.py` on purpose) | — | not started |
 | 2 | `EnvironmentRef`; new pinned runs on `ecoli-simulation` | — | blocked only on landing: ask E, or the job-owner interim (§4 step 2). Both sites advertise the capabilities and define `ecoli-simulation` (checked 2026-11-18) |
 | 3 | Composites tab off `/viva/v1/compose` | — | not started; composites that carry data files wait on ask C |
@@ -177,6 +177,10 @@ backends.active() -> Backend | None   # from the named URL, or else the alias; r
 backends.for_run(run_id) -> Backend   # the adapter whose runs.owns(run_id) is true
 ```
 
+- Step 1b added `named()` (the named backend's profile alone), `select(ws)` (session build, then pin, then `named()`; never
+  raises) and `active(ws)` (`select` plus wb#1630's refusal). The six predicates stay as wrappers and primitives because
+  tests patch `resolve_run_target` at its call sites; callers of the `uses_*` predicates now ask `backends` directly.
+  Like today, `active()` reads only the named URL; the aliases do not count.
 - `active()` replaces `resolve_run_target`, `uses_viva_v1_dispatch`, `uses_compose_dispatch`,
   `uses_named_backend_dispatch`, `compose_dispatch_active` and `viva_v1_dispatch_active`. Every call site asks one
   question: `active()`, then `.runs.submit(...)`.

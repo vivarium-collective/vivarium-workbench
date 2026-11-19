@@ -6,6 +6,10 @@ Step 1a names the adapters that already exist informally and routes the remote-r
 * :data:`VIVA_CORE` -- viva-core's ``/viva/v1`` run surface (:mod:`remote_run_viva_v1`), string run ids;
 * :data:`SMS_LEGACY` -- the frozen SMS ``/api/v1`` path (:mod:`.sms_legacy`), integer simulation ids.
 
+Step 1b puts the choice of backend for a workspace's NEW run in one place: :func:`named`, :func:`select` and
+:func:`active` (§2.3). The six older predicates (``remote_pinned.resolve_run_target`` / ``uses_*_dispatch``,
+``server_capabilities.*_dispatch_active``) remain, as wrappers or primitives, because tests patch them.
+
 The views still choose an adapter with their own per-key rules (pinned by ``tests/test_backends_routing.py``);
 :func:`for_run` states the id-form rule those rules approximate. Making every view route through it is a later,
 deliberate behaviour change.
@@ -29,6 +33,7 @@ class RunFacet(Protocol):
     name: str
 
     def owns(self, run_id: object) -> bool: ...
+    def submit(self, ws_root: Path, body: dict) -> tuple[dict, int]: ...
     def land(self, ws_root: Path, body: dict) -> tuple[dict, int]: ...
     def status(self, run_id: str) -> tuple[dict, int]: ...
     def progress(self, run_id: str) -> tuple[dict, int]: ...
@@ -57,3 +62,50 @@ def for_run(run_id: object) -> "Backend | None":
         if backend.runs.owns(run_id):
             return backend
     return None
+
+
+# --- which backend runs a workspace's new run (step 1b) ---------------------------------------------------------
+#
+# Every primitive is read through its module at call time (tests patch them there), and the imports are lazy:
+# remote_pinned and server_capabilities sit below this package and must not import it at load time.
+
+
+def named() -> "Backend | None":
+    """The backend the operator NAMED (``serve --backend-base-url``), if its profile runs documents: compose-api
+    or viva-core. ``None`` when none is named, or the named one is unreachable or offers only the legacy surface.
+    Never raises; reads the cached profile once."""
+    from vivarium_workbench.lib import server_capabilities as sc
+
+    profile = sc.explicit_backend_profile()
+    if not profile:
+        return None
+    if profile["dispatch"] == sc.DISPATCH_COMPOSE:
+        return COMPOSE
+    if profile["dispatch"] == sc.DISPATCH_DOCUMENT:
+        return VIVA_CORE
+    return None
+
+
+def select(ws_root: "Path | str") -> "Backend | None":
+    """Where a new run of ``ws_root`` goes, without refusing anything. ``None`` means "run locally".
+
+    1. The session's own build (``.viv-build.json``) or the deployment's pinned config: SMS, with no network call.
+       The session build is checked first and short-circuits the pin.
+    2. Otherwise the named backend, when it runs documents (:func:`named`).
+    """
+    from vivarium_workbench.lib import remote_pinned, run_core
+
+    if run_core.run_target_for(Path(ws_root)) == "deployment" or remote_pinned.is_pinned_enabled():
+        return SMS_LEGACY
+    return named()
+
+
+def active(ws_root: "Path | str") -> "Backend | None":
+    """:func:`select`, plus the wb#1630 rule: a backend the operator named that cannot be reached is refused
+    (``APIError`` 502), never replaced by a local run. ``None`` still means "run locally"."""
+    from vivarium_workbench.lib import server_capabilities as sc
+
+    chosen = select(ws_root)
+    if chosen is None:
+        sc.require_named_backend_reachable()
+    return chosen

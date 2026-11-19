@@ -7521,13 +7521,14 @@ def create_app() -> FastAPI:
         if target != "deployment":
             return JSONResponse(content={"target": target, "ok": True, "reason": "local",
                                          "message": "This workspace runs locally — no push needed."})
-        from vivarium_workbench.lib import remote_pinned as _rp
-        if _rp.uses_compose_dispatch(ws):
+        from vivarium_workbench.lib import backends as _backends
+        _chosen = _backends.select(ws)
+        if _chosen is _backends.COMPOSE:
             # compose-api runs the composite in the environment its registry lists for this
             # workspace: ready exactly when one resolves (nothing is shipped from git).
             from vivarium_workbench.lib import remote_run_compose as _rc
             return JSONResponse(content=_rc.dispatch_preflight(ws))
-        if _rp.uses_viva_v1_dispatch(ws):
+        if _chosen is _backends.VIVA_CORE:
             # The named backend runs the workspace's composites as documents: there is no
             # cloud image to resolve, but a named-environment run ships the workspace from git.
             pf = _remote_run.remote_dispatch_preflight(ws)
