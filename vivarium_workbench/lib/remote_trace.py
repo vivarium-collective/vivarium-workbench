@@ -121,11 +121,11 @@ def fetch_trace(client: SmsApiClient, *, simulation_id: object = None,
     capability absent, 404 no such run / no trace yet (passed through from
     viva-api), 502 viva-api unreachable or failed.
     """
-    from vivarium_workbench.lib import remote_run_compose
+    from vivarium_workbench.lib import backends, remote_run_compose
 
     for given in (simulation_id, composite_run_id):  # a compose-api run (the UI sends its id as either)
         if remote_run_compose.is_run_id(given):
-            return remote_run_compose.trace(str(given).strip())
+            return backends.COMPOSE.runs.trace(str(given).strip())
     sim = _positive_int(simulation_id)
     compose = _positive_int(compose_id)
     run = str(composite_run_id).strip() if composite_run_id not in (None, "") else None
