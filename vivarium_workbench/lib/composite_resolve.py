@@ -534,7 +534,7 @@ def resolve_composite_for_request(
         # generated OpenAPI spec on any branch has one; no .py on any branch defines it).
         # The client method was added on the workbench side in 536fa2eb (SP-D1) with the
         # server endpoint left as a follow-on that was never built. A hosted resolution
-        # would need a live worker, which is viva-core-only (docs/backend-adapters.md §3.1). A
+        # would need a live worker, which is viva-core-only (docs/backend-adapters.md §A.3.1). A
         # preview is a convenience -- dispatch reads the composite ref directly -- so
         # degrade to the honest-unavailable shape every other resolve failure uses.
         return _degraded_result(

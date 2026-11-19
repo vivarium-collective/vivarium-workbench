@@ -7,7 +7,7 @@ Step 1a names the adapters that already exist informally and routes the remote-r
 * :data:`SMS_LEGACY` -- the frozen SMS ``/api/v1`` path (:mod:`.sms_legacy`), integer simulation ids.
 
 Step 1b puts the choice of backend for a workspace's NEW run in one place: :func:`named`, :func:`select` and
-:func:`active` (§2.3). The six older predicates (``remote_pinned.resolve_run_target`` / ``uses_*_dispatch``,
+:func:`active` (§1; from P1c they consult the provider, §2.2). The six older predicates (``remote_pinned.resolve_run_target`` / ``uses_*_dispatch``,
 ``server_capabilities.*_dispatch_active``) remain, as wrappers or primitives, because tests patch them.
 
 An existing run is routed by its stored record (:func:`for_existing`, step 1c-2); :func:`for_run`'s id-form rule
