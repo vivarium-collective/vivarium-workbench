@@ -5,17 +5,16 @@ single record of it.
 
 ## Progress
 
-Every PR that advances this plan updates this table in the same PR (wb#1650 predates the table, so it is
-recorded here). Steps are defined in §4; asks are on viva-api#1055. "Q2" means §5's Q2 (analyses), which is
-Question 1 in viva-api#1055.
+Every PR that advances this plan updates this table in the same PR. Steps are defined in §4; asks are on
+viva-api#1055. "Q2" means §5's Q2 (analyses), which is Question 1 in viva-api#1055.
 
 | Step | What | PR | State (date) |
 |---|---|---|---|
-| 0 | SMS-call ratchet; drop the dead `composite_resolve` fallback | wb#1646 | in review (2026-11-18) |
+| 0 | SMS-call ratchet; drop the dead `composite_resolve` fallback | wb#1646 | **done**, merged 2026-11-19 |
 | 1 | `lib/backends/` interface; existing paths as adapters | — | not started; unblocked by wb#1630 (merged 2026-11-19) |
 | 2 | `EnvironmentRef`; new pinned runs on `ecoli-simulation` | — | blocked only on landing: ask E, or the job-owner interim (§4 step 2). Both sites advertise the capabilities and define `ecoli-simulation` (checked 2026-11-18) |
 | 3 | Composites tab off `/viva/v1/compose` | — | not started; composites that carry data files wait on ask C |
-| 4 | Reads off `/api/v1` | wb#1650 (analysis figures and PTools files, taken early) | wb#1650 in review (2026-11-19); its S3 fallback stays until prod's registry covers its analyses (prod question below). Remaining: the Remote-tab run listing, `/source`, trace, other data downloads |
+| 4 | Reads off `/api/v1` | wb#1650 (analysis figures and PTools files, taken early) | figures and PTools files **done**, wb#1650 merged 2026-11-19; its S3 fallback stays until prod's registry covers its analyses (prod question below). Remaining: the Remote-tab run listing, `/source`, trace, other data downloads |
 | 5 | Old runs carry the run id | — | waits on ask A |
 | 6 | Analyses as a core job kind; delete `sms_legacy.py` | — | waits on viva-api building the analysis job kind (Q2, decided; no ask filed yet) |
 | W-a | Post-run analyses off the hosted worker | — | waits on step 1 and Q2 |
@@ -293,6 +292,12 @@ package, along with absolute URLs in `static/` and `templates/`:
 
 Each step is one PR and leaves `main` working at Stanford.
 
+**Review, from step 1 on (Jim, 2026-11-19).** Each step gets two independent reviews by a reviewer with fresh
+context, given the material rather than the author's conclusions: one of the step's plan before implementation
+starts (checked against the code and against the contracts below), and one of the implementation before it is
+committed. Rounds repeat until they find nothing new; the PR description says what each review found and what
+changed.
+
 **Contracts every step must keep: PTools.** Pathway Tools reads simulation output in two places, and neither may
 break:
 
@@ -311,7 +316,7 @@ break:
 0. **Ratchet and dead code.** Add `tests/test_sms_route_ratchet.py`, which pins today's callers of SMS-route client
    methods and SMS route literals. It fails on a new call, and on a removed call that is still listed, so the list
    shrinks in the PR that removes the call. Delete the `composite_resolve` remote fallback. No behaviour change.
-   (wb#1646.)
+   (Done: wb#1646.)
 1. **Extract the interface.** Create `lib/backends/` with the Protocols, `active()` and `for_run()`.
    - Wrap `remote_run_viva_v1` and `remote_run_compose` as adapters; their logic doesn't change.
    - Move the inline SMS code from `remote_run_views` into `sms_legacy.py`.
@@ -338,7 +343,7 @@ break:
      accept that a new run cannot re-run analyses. Decide before step 2 ships.
 3. **Composites tab off `/viva/v1/compose`.** Composites-tab runs use the viva-core document route.
 4. **Reads off `/api/v1`.** Remote-tab listing, datasets, `/source` and trace for new runs. The analysis figures and PTools
-   files are in wb#1650, in review: it lists by `source=simulation:<id>`, so it needs no run id. Drop the `/core/v1`
+   files went first (wb#1650, merged 2026-11-19): it lists by `source=simulation:<id>`, so it needs no run id. Drop the `/core/v1`
    build fallbacks once both sites advertise the environments capabilities.
 5. **Old runs.** Once viva-api exposes the run id of a legacy simulation, add it to stored records on first read,
    **keeping the integer id beside it**: run reads go by the run id, and `sms_legacy` still needs the integer for
