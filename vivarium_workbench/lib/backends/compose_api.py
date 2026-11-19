@@ -67,10 +67,10 @@ def compose_health_identity(base_url: str) -> Optional[str]:
         _mark(lk.mark_up)
         raise
     except NetworkError as e:
-        # Only a failed CONNECTION marks the link down (the client says "could not connect ... known not sent"). A
+        # Only a failed CONNECTION marks the link down (the client says "cannot reach <url>: could not connect ..."). A
         # server that is merely slow to answer /health is not down: marking it so would make the capability
         # profile refuse new runs (require_named_backend_reachable) until the breaker's half-open retry.
-        if "could not connect" in str(e):
+        if str(e).startswith("cannot reach"):
             _mark(lk.mark_down, str(e))
         raise
     _mark(lk.mark_up)
