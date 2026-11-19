@@ -66,8 +66,12 @@ def compose_health_identity(base_url: str) -> Optional[str]:
         # the breaker's own probe counts any HTTP status (and remote_run_compose._backend_error reads these).
         _mark(lk.mark_up)
         raise
-    except NetworkError as e:  # nothing came back: the breaker learns of it, as from any other call
-        _mark(lk.mark_down, str(e))
+    except NetworkError as e:
+        # Only a failed CONNECTION marks the link down (the client says "could not connect ... known not sent"). A
+        # server that is merely slow to answer /health is not down: marking it so would make the capability
+        # profile refuse new runs (require_named_backend_reachable) until the breaker's half-open retry.
+        if "could not connect" in str(e):
+            _mark(lk.mark_down, str(e))
         raise
     _mark(lk.mark_up)
     value = health.get(IDENTITY_FIELD) if isinstance(health, dict) else None

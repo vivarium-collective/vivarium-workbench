@@ -681,3 +681,78 @@ def test_a_down_server_is_not_asked_by_every_lookup(ws, stanford, monkeypatch):
     for _ in range(5):
         records.resolve_existing(ws, "12")
     assert len(asked) == 1
+
+
+# --- compose_health_identity through the REAL compose-api client (review of wb#1665) --------------------------------
+
+def _stub_compose(body, *, delay=0.0):
+    """A local HTTP server answering GET /health like compose-api (compose_api/api/main.py check_health)."""
+    import json as _json
+    import threading
+    import time as _time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if delay:
+                _time.sleep(delay)
+            data = _json.dumps(body).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
+
+
+def test_compose_health_identity_reads_deployment_id_with_the_real_client():
+    from vivarium_workbench.lib.backends import compose_api
+
+    srv, url = _stub_compose({"docs": "x/docs", "version": "0.7.93", "deployment_id": " dep-1 "})
+    try:
+        assert compose_api.compose_health_identity(url) == "dep-1"
+    finally:
+        srv.shutdown()
+    srv, url = _stub_compose({"docs": "x/docs", "version": "0.7.91"})  # a compose-api from before the field
+    try:
+        assert compose_api.compose_health_identity(url) is None
+    finally:
+        srv.shutdown()
+
+
+def test_a_slow_compose_health_does_not_mark_the_link_down(monkeypatch):
+    """A /health that does not answer in time raises (so records remembers the failure) but leaves the breaker
+    alone: a slow server is not a down one, and a down link would refuse new runs."""
+    from vivarium_workbench.lib import backend_config
+    from vivarium_workbench.lib.backends import compose_api
+
+    monkeypatch.setattr(compose_api, "IDENTITY_TIMEOUT", 0.2)
+    srv, url = _stub_compose({"deployment_id": "late"}, delay=1.0)
+    try:
+        with pytest.raises(Exception):
+            compose_api.compose_health_identity(url)
+        assert backend_config.link(url).state != backend_config.STATE_DOWN
+    finally:
+        srv.shutdown()
+
+
+def test_a_refused_compose_connection_marks_the_link_down():
+    import socket
+
+    from vivarium_workbench.lib import backend_config
+    from vivarium_workbench.lib.backends import compose_api
+
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()  # nothing listens here now
+    url = f"http://127.0.0.1:{port}"
+    with pytest.raises(Exception):
+        compose_api.compose_health_identity(url)
+    assert backend_config.link(url).state == backend_config.STATE_DOWN

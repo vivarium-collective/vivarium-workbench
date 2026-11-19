@@ -18,11 +18,11 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | P1a | Core seams that need no provider (`lib/backend_config.py`, `Backend.identity`); no behaviour change | wb#1658 | **done**, merged 2026-11-19 |
 | P3-ids | Opaque run ids end to end, pulled forward from P3 (runs in parallel with P1, Jim 2026-11-19) | wb#1660 | **done**, merged 2026-11-19 |
 | P3-launch | The vEcoli launch panel quarantined in `static/sms-launch.js`, pulled forward from P3 (parallel) | wb#1659 | **done**, merged 2026-11-19 |
-| — | compose-api server identity (`COMPOSE.identity` = `compose_api.compose_health_identity`, `deployment_id` on `GET /health`); identity caches keyed by (identity family, URL) | compose-api#543 (compose-api PR #545); wb#1665 | in review (2026-11-20) |
-| P1b | Pure move: whole SMS modules into `vivarium_workbench_sms` (same distribution), every import and patch target re-pointed, lazy registry imports; import-linter contract whose ignore list is the ratchet | wb#1662 | **done**, merged 2026-11-20 |
-| — | `refresh_submitted`: batch-job items settle against the backend that ran them (viva-core / compose-api items never settled before) | wb#1661 | **done**, merged 2026-11-20 |
-| — | Route dependencies (`get_workspace`, ...) moved to `api/deps.py`, so a plugin router can use them without importing `api/app.py` | wb#1663 | **done**, merged 2026-11-20 |
-| — | Test isolation: the conftest reset forgets the cached GitHub session and every backend-URL cache | wb#1664 | in review (2026-11-20) |
+| — | compose-api server identity (`COMPOSE.identity` = `compose_api.compose_health_identity`, `deployment_id` on `GET /health`); identity caches keyed by (identity family, URL) | compose-api#543 (compose-api PR #545); wb#1665 | in review (2026-11-19) |
+| P1b | Pure move: whole SMS modules into `vivarium_workbench_sms` (same distribution), every import and patch target re-pointed, lazy registry imports; import-linter contract whose ignore list is the ratchet | wb#1662 | **done**, merged 2026-11-19 |
+| — | `refresh_submitted`: batch-job items settle against the backend that ran them (viva-core / compose-api items never settled before) | wb#1661 | **done**, merged 2026-11-19 |
+| — | Route dependencies (`get_workspace`, ...) moved to `api/deps.py`, so a plugin router can use them without importing `api/app.py` | wb#1663 | **done**, merged 2026-11-19 |
+| — | Test isolation: the conftest reset forgets the cached GitHub session and every backend-URL cache | wb#1664 | in review (2026-11-19) |
 | P1c | `Provider` and `SmsProvider`; registry, session build/pin and capability probe through the provider; no behaviour change | — | not started |
 | P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, facet routes stay core, SMS-only routes into the plugin's router | — | not started |
 | P3 | Opaque string run ids end to end; the UI shows the nine SMS-today features (§2.5) by declared feature; launch panel quarantined (`sms-launch.js`); core tests run without the plugin | — | not started |
