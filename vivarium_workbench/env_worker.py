@@ -4577,6 +4577,13 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     _workspace = args.workspace
 
+    # This process IS the env worker: generator discovery reached from inside it
+    # (composites_full -> composite_lookup.composites_data) runs here, in-process,
+    # never through the pool -- which would launch a NESTED worker (and in a hosted
+    # pod, which has no backend plugin, could not launch one at all).
+    from vivarium_workbench.lib import composite_lookup
+    composite_lookup.IN_WORKER_DISCOVER = _discover_composites
+
     # A workspace that does not exist is not a workspace. Without this the worker
     # starts happily and _list_generators() falls through to discover_generators()
     # -- a GLOBAL scan of everything installed in the image -- so a mistyped or

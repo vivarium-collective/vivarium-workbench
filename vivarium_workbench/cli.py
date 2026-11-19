@@ -75,6 +75,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
         return 2
 
     if getattr(args, "detach", False):
+        # Refuse a hosted-worker config no provider supplies BEFORE detaching, so the operator sees why. The
+        # detached child (and a foreground serve) checks in serve_fastapi, once logging is configured.
+        from vivarium_workbench.lib.env_worker_launcher import check_worker_config
+        try:
+            check_worker_config()
+        except BackendConfigError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
         return _serve_detached(workspace, args)
 
     # Make the workspace's own package importable for the render step
@@ -1958,6 +1966,11 @@ def main(argv: list[str] | None = None) -> int:
         try:
             # serve's --backend-base-url replaces the named env var for that process, so it is the one compared
             check_single_backend(getattr(args, "backend_base_url", None))
+            # Hosted env workers asked for but no provider supplies them (step P2): refuse, never run Local. serve
+            # checks in cmd_serve / serve_fastapi instead, once per process (after logging is set up).
+            if args.cmd != "serve":
+                from vivarium_workbench.lib.env_worker_launcher import check_worker_config
+                check_worker_config()
         except BackendConfigError as e:
             print(f"ERROR: {e}", file=sys.stderr)
             return 2

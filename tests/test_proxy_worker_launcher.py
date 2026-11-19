@@ -15,12 +15,11 @@ import json
 import pytest
 
 from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
-from vivarium_workbench.lib.env_worker_launcher import (
-    LocalWorkerLauncher,
+from vivarium_workbench.lib.env_worker_launcher import LocalWorkerLauncher, default_launcher
+from vivarium_workbench_sms.env_workers import (
     ProxyEnvWorker,
     ProxyWorkerLauncher,
     RemoteWorkerLauncher,
-    default_launcher,
 )
 
 

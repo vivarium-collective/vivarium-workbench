@@ -14,11 +14,8 @@ from pathlib import Path
 import pytest
 
 from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
-from vivarium_workbench.lib.env_worker_launcher import (
-    LocalWorkerLauncher,
-    RemoteWorkerLauncher,
-    default_launcher,
-)
+from vivarium_workbench.lib.env_worker_launcher import LocalWorkerLauncher, default_launcher
+from vivarium_workbench_sms.env_workers import RemoteWorkerLauncher
 
 
 class _FakeClient:
@@ -127,7 +124,7 @@ def test_worker_that_never_dials_back_is_cleaned_up_and_reports_its_logs(tmp_pat
     """A pod that fails to start would otherwise linger until TTL, and the
     timeout alone says nothing about why."""
     monkeypatch.setattr(
-        "vivarium_workbench.lib.env_worker_launcher.REMOTE_START_TIMEOUT", 0.4)
+        "vivarium_workbench_sms.env_workers.REMOTE_START_TIMEOUT", 0.4)
     client = _FakeClient(dial=False, logs="unrecognized arguments: --connect-to")
     launcher = RemoteWorkerLauncher(client, advertise_host="10.0.0.7", bind_host="127.0.0.1")
     with pytest.raises(EnvWorkerUnavailable, match="did not connect") as exc:

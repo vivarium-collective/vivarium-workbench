@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 
 from vivarium_workbench.lib.env_worker_client import EnvWorkerError, EnvWorkerUnavailable
-from vivarium_workbench.lib.env_worker_launcher import ProxyEnvWorker
+from vivarium_workbench_sms.env_workers import ProxyEnvWorker
 from vivarium_workbench.lib.env_worker_pool import WorkerPool
 
 

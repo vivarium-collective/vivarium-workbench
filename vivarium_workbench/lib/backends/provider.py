@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Optional, Protocol
 
 if TYPE_CHECKING:
     from vivarium_workbench.lib.backends import Backend
+    from vivarium_workbench.lib.env_worker_launcher import WorkerLauncher
 
 #: Set to ``none`` to turn every provider off (step P3's core-only CI job).
 PROVIDERS_ENV = "VIVARIUM_WORKBENCH_BACKEND_PROVIDERS"
@@ -56,6 +57,12 @@ class Provider(Protocol):
 
     def recognise(self, client: object) -> Recognised:
         """Its half of the capability probe of the backend ``client`` talks to. Never raises."""
+        ...
+
+    # -- P2 Workers --
+    def worker_launcher(self) -> "Optional[WorkerLauncher]":
+        """The launcher for this deployment's hosted env workers, read from the provider's own deployment config, or
+        ``None`` when this deployment configures none. Called once per pool (the pool caches it); no network call."""
         ...
 
 

@@ -229,11 +229,22 @@ def _derive_module_from_spec_id(spec_id: str) -> str:
     return spec_id
 
 
+#: Set by the env worker's ``main`` (``env_worker.py``) to its own ``discover_composites`` method: THIS process IS
+#: an env worker, so generator discovery runs here, in-process, and never asks the pool for a (nested) worker. A
+#: hosted worker pod has no backend plugin to launch one with, and a nested local subprocess inside a 1 CPU / 2 GiB
+#: pod is not an environment either -- the worker already is the environment. ``None`` everywhere else.
+IN_WORKER_DISCOVER: Optional[Callable[[], dict]] = None
+
+
 def _discover_generators_via_worker(ws_root: Path) -> dict:
     """``{gid: entry}`` generator composites from the workspace's env worker
     (so the HTTP process never imports ``@composite_generator`` modules). Soft-
     degrades to ``{}`` when the worker is unavailable — the same spec-only fallback
-    as when pbg-superpowers isn't importable."""
+    as when pbg-superpowers isn't importable. Inside an env worker
+    (:data:`IN_WORKER_DISCOVER`), the same discovery runs in-process."""
+    if IN_WORKER_DISCOVER is not None:
+        r = IN_WORKER_DISCOVER()
+        return r.get("generators", {}) if isinstance(r, dict) else {}
     from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
     from vivarium_workbench.lib.env_worker_pool import get_pool
     try:

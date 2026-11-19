@@ -45,9 +45,11 @@ def main() -> None:
     print(f"  ReDoc      : {base}/redoc")
     print(f"  OpenAPI    : {base}/openapi.json")
     from vivarium_workbench.lib.backend_config import BackendConfigError, check_single_backend
+    from vivarium_workbench.lib.env_worker_launcher import check_worker_config
 
     try:
         check_single_backend()  # one remote backend per process (docs/backend-adapters.md step 1c)
+        check_worker_config()  # hosted env workers asked for, but no provider supplies them (step P2)
     except BackendConfigError as e:
         raise SystemExit(f"ERROR: {e}") from e
     # Import string (not the app object) so --reload works.
