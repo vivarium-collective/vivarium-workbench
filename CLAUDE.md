@@ -100,7 +100,10 @@ serve` → `cli.py` → `lib/startup.serve_fastapi` → `uvicorn.run(app, ...)`.
 defined in `api/app.py` via `@app.get`/`@app.post` decorators; each backs onto a
 `lib/` function. Non-GET routes are guarded by the CSRF/origin middleware (see
 below). When adding an endpoint: add the route in `api/app.py`, put the real logic
-in a `lib/` module, and return a pydantic model where possible.
+in a `lib/` module, and return a pydantic model where possible. The route
+dependencies (`get_workspace`, `get_workspace_context`, `session_key_of`) live in
+`api/deps.py` (re-exported by `api/app.py` as the same objects), so a separate
+router module can declare routes without importing `api/app.py`.
 
 The old stdlib `BaseHTTPRequestHandler` (`server.py`, ~9.6k lines) has been
 **deleted**. All of its real logic was relocated to `lib/`, and the dashboard's

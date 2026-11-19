@@ -48,7 +48,13 @@ from vivarium_workbench.lib.request_logging import install_request_logging
 
 from vivarium_workbench.lib import session_env
 from vivarium_workbench.lib import session_registry
-from vivarium_workbench.lib.workspace_context import WorkspaceContext
+# Route dependencies live in api/deps.py so router modules can declare routes without importing this
+# module; re-exported here as the same objects (tests key dependency_overrides on them).
+from vivarium_workbench.api.deps import (
+    get_workspace as get_workspace,
+    get_workspace_context as get_workspace_context,
+    session_key_of as _session_key_of,
+)
 from vivarium_workbench.lib import csrf as _csrf
 from vivarium_workbench.lib import path_safety as _path_safety
 from vivarium_workbench.lib import source_switch_views as _source_switch_views
@@ -407,44 +413,6 @@ from vivarium_workbench.lib.visualization_classes import list_visualization_clas
 from vivarium_workbench.lib.study_charts import build_study_charts_payload
 
 WORKSPACE_ENV = "VIVARIUM_WORKBENCH_WORKSPACE"
-
-
-def get_workspace_context(request: Request = None) -> "WorkspaceContext":
-    """Resolve the per-request ``WorkspaceContext`` — the single seam a request
-    operates through (session → its workspace + ports).
-
-    ``request`` is FastAPI-injected when used as a dependency; a direct call
-    (unit tests) passes ``None`` → an unbound session → the process default
-    workspace. So cookie-less clients (curl, the CLI, the urllib test harness)
-    and unbound browser sessions are byte-identical to before this seam existed.
-    See ``lib/workspace_context.py`` and ``docs/session-registry.md``.
-    """
-    from vivarium_workbench.lib import workspace_context
-    key = _session_key_of(request)
-    return workspace_context.resolve(key)
-
-
-def _session_key_of(request: "Request | None") -> "str | None":
-    """The request's session key — the middleware-stashed value (available even
-    on a first request), falling back to the raw ``X-VW-Session`` header then the
-    cookie, or ``None`` for a direct/identity-less call."""
-    if request is None:
-        return None
-    key = getattr(request.state, "session_key", None)
-    return (key
-            or request.headers.get(session_registry.SESSION_HEADER)
-            or request.cookies.get(session_registry.SESSION_COOKIE))
-
-
-def get_workspace(request: Request = None) -> Path:
-    """Resolve the workspace root for a request (overridable in tests via
-    dependency_overrides). Thin shim over :func:`get_workspace_context` — the
-    routing now flows through the per-session context, but a bound session
-    resolves to its bound path and an unbound one to the process default (the
-    prior ``active_workspace`` root, else the ``VIVARIUM_WORKBENCH_WORKSPACE``
-    env var / cwd), so existing behavior is preserved.
-    """
-    return get_workspace_context(request).ws_root
 
 
 async def _plain_identifiers(request: Request) -> None:
