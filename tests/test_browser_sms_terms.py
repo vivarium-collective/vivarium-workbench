@@ -3,9 +3,10 @@
 The UI of a workbench without the SMS plugin must not speak SMS. Step P3 replaced the SMS nouns in ``static/*.js`` and
 ``templates/*`` with neutral text (Jim, 2026-11-20: wording B) and gates SMS-only controls by declared feature. This
 began as a ``<=`` ratchet (F0) and is a ban since Z: no file may hold any of the terms, except ``static/sms-launch.js``
-(the quarantined SMS launch UI, wb#1659), which only the SMS plugin's ``sms-launch`` feature mounts.
+(the quarantined SMS launch UI, wb#1659), which only the SMS plugin's ``sms-launch`` feature mounts, and even there
+only what it holds today (``EXEMPT_FILES``: one ``sms-api``).
 
-Counted case-insensitively, comments included. Exempt: ``static/sms-launch.js`` and the
+Counted case-insensitively, comments included. Exempt: the counts in ``EXEMPT_FILES`` and the
 ``<script src=".../sms-launch.js">`` tag that loads it.
 """
 from __future__ import annotations
@@ -17,8 +18,8 @@ ROOT = Path(__file__).resolve().parent.parent / "vivarium_workbench"
 
 TERMS = ("sms-api", "GovCloud", "SMS_API_BASE", "smsvpctest", "sms-launch")
 
-#: The only file allowed to name SMS terms: the quarantined SMS launch UI.
-EXEMPT_FILES = frozenset({"static/sms-launch.js"})
+#: The only file allowed to name SMS terms, and the most it may hold of each: the quarantined SMS launch UI.
+EXEMPT_FILES = {"static/sms-launch.js": {"sms-api": 1}}
 
 _SMS_LAUNCH_TAG = re.compile(r'<script[^>]*\bsrc="[^"]*sms-launch\.js[^"]*"[^>]*>\s*</script>')
 
@@ -43,10 +44,10 @@ def test_no_sms_terms_in_browser_code_outside_sms_launch():
     found = {}
     for path in _files():
         rel = path.relative_to(ROOT).as_posix()
-        if rel in EXEMPT_FILES:
-            continue
+        allowed = EXEMPT_FILES.get(rel, {})
         for term, n in counts(path).items():
-            found[f"{rel}: {term}"] = n
+            if n > allowed.get(term, 0):
+                found[f"{rel}: {term}"] = n
     assert not found, (
         "SMS terms in browser code (use neutral words such as 'remote backend', or move SMS-only UI into "
         f"static/sms-launch.js behind the plugin's declared feature; docs/backend-adapters.md §2.5): {found}")

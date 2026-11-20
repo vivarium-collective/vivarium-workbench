@@ -5,8 +5,7 @@ summaries and error texts use neutral words ("remote backend"). Step P3 C2 made 
 B) behind a ``<=`` ratchet; step Z made it a ban.
 
 Counted case-insensitively over the string constants the AST holds (f-string parts included) in
-``vivarium_workbench/**/*.py``. Not counted: docstrings and comments, ``lib/backends/`` (the provider seam, which may
-name what it adapts), and the alias names in ``backend_config.BACKEND_BASE_ENV_VARS``, which the core keeps only to warn
+``vivarium_workbench/**/*.py``. Not counted: docstrings and comments, and the alias names in ``backend_config.BACKEND_BASE_ENV_VARS``, which the core keeps only to warn
 that a set alias is ignored while no provider is active. Docstrings are not all invisible, though: a route function's
 or a pydantic model's docstring becomes an OpenAPI description, so ``test_the_core_openapi_schema_names_no_sms_terms``
 checks the core's whole OpenAPI schema (providers off) as well. The browser's twin is ``tests/test_browser_sms_terms.py``.
@@ -23,9 +22,6 @@ TERMS = ("sms-api", "GovCloud", "SMS_API_BASE", "smsvpctest")
 
 #: Not counted: (file, name of the module-level assignment whose value holds the constants).
 EXEMPT_ASSIGNMENTS = {("lib/backend_config.py", "BACKEND_BASE_ENV_VARS")}
-
-#: Not counted: the provider seam (path prefix relative to ``vivarium_workbench/``).
-EXEMPT_DIRS = ("lib/backends/",)
 
 
 def _docstring_ids(tree: ast.AST) -> set[int]:
@@ -63,8 +59,7 @@ def counts_in(source: str, rel: str) -> dict[str, int]:
 
 
 def _files() -> list[Path]:
-    return sorted(p for p in ROOT.rglob("*.py")
-                  if not p.relative_to(ROOT).as_posix().startswith(EXEMPT_DIRS))
+    return sorted(ROOT.rglob("*.py"))
 
 
 def test_no_sms_terms_in_core_string_constants():
@@ -78,10 +73,11 @@ def test_no_sms_terms_in_core_string_constants():
         f"owns its own wording; docs/backend-adapters.md §2.5): {found}")
 
 
-def test_the_scan_covers_the_core_but_not_the_seam():
+def test_the_scan_covers_the_whole_core_including_the_seam():
+    # lib/backends/ is scanned too (review of wb#1710; 79ccf2e9 dropped its ratchet exemption): its refusal texts
+    # reach users through error bodies.
     rels = {p.relative_to(ROOT).as_posix() for p in _files()}
-    assert "lib/backend_config.py" in rels and "api/app.py" in rels
-    assert not any(r.startswith("lib/backends/") for r in rels)
+    assert {"lib/backend_config.py", "api/app.py", "lib/backends/records.py", "lib/backends/config.py"} <= rels
 
 
 def test_the_counter_skips_docstrings_and_the_exempt_aliases_only():
