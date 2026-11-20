@@ -306,6 +306,8 @@ def test_compose_runs_detached_with_no_preflight(card):
     req = card.request(resp)
     assert (req["target"], req["build_ref"]) == ("deployment", None)
     assert card.seen["preflight"] == 0 and card.seen["run_simulation"] == []
+    from vivarium_workbench.lib import remote_run_compose
+    assert card.seen["compose_sessions"] == [{"timeout": remote_run_compose.CHECK_TIMEOUT}]
 
 
 def test_compose_refuses_an_unknown_environment_with_no_run(card):

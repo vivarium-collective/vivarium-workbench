@@ -60,9 +60,11 @@ ARCHIVE_SUFFIX = "-results.zip"
 #: A session's timeout in seconds for each request: long enough for an upload or a slow answer from a run.
 SESSION_TIMEOUT = 120.0
 #: The timeout for the environment check the composite card makes before it launches (:func:`check_environment`),
-#: which runs inside the launch request: two small listings (environments, registry entries) that a reachable
-#: compose-api answers at once, so a hung one refuses the launch in seconds rather than holding the request for
-#: :data:`SESSION_TIMEOUT`. The readiness check (:func:`dispatch_preflight`) keeps the session's own timeout.
+#: which runs inside the launch request: two small listings (environments, registry entries). The client caps each
+#: read at ``min(timeout, 60)`` and adds a 5 s connect, so the card waits at most about 40 s for a hung compose-api
+#: (two GETs), where the readiness check (:func:`dispatch_preflight`, the session's own timeout) waits up to 60 s per
+#: read. A compose-api slower than 15 s but under 60 s can therefore show a ready badge while the card refuses with
+#: 502 "backend unreachable"; accepted (a launch must not hold the request for a minute).
 CHECK_TIMEOUT = 15.0
 
 _TERMINAL_OK = {"completed"}
