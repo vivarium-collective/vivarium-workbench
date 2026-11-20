@@ -43,12 +43,20 @@ from vivarium_workbench.lib.study_crud_mutations import _study_name_from_body
 
 
 def _named_backend_runs_documents(ws_root) -> bool:
-    """A study run goes to the backend the operator named, as a document: compose-api or viva-core (step 1b:
-    ``backends.select``)."""
+    """A study run goes to the selected backend as a document (step 1b: ``backends.select``): compose-api or
+    viva-core today.
+
+    Step P2 Routes Rt3: decided by facet, never by which backend it is. A backend that runs the workspace as its own
+    build (``builds``: sms-legacy) is asked first and is not a document run (the baseline reaches it through
+    ``builds.run_study`` in :func:`run_study_baseline`); any other selected backend runs documents; nothing selected
+    is a local run. The coupling with ``run_study_baseline``'s ``chosen.builds is not None`` branch is deliberate:
+    exactly one of the two applies to a selected backend."""
     from vivarium_workbench.lib import backends
 
     chosen = backends.select(ws_root)
-    return chosen is backends.COMPOSE or chosen is backends.VIVA_CORE
+    if chosen is None or chosen.builds is not None:
+        return False
+    return True
 
 
 def _study_runtime_emitter(runtime_cfg):
