@@ -1778,7 +1778,10 @@
         if (modelSection.style.display === 'none') { _openPicker(); }
         else { modelSection.style.display = 'none'; _editToggleLabel(false); }
       });
-      mount.appendChild(_editToggle);
+      // Only a brand-new placeholder study needs the model picker surfaced here
+      // ("Choose a model", auto-opened below). A real study's "Change model" button
+      // is removed — the Model Definition panel is the model view.
+      if (_isPlaceholder) mount.appendChild(_editToggle);
       // Surface the picker immediately when there is no real model yet, so a
       // newly-created study lands on "Choose a model" without hunting (#1618).
       if (_isPlaceholder) _openPicker();
@@ -1834,13 +1837,14 @@
         var lc = String(l || '').toLowerCase();
         return lc && lc !== _studySlug && lc !== _shortId.toLowerCase() && lc !== 'baseline';
       });
-      var _armHdr = '<div class="model-arm-head" style="display:flex;gap:7px;align-items:baseline;margin:0 0 5px 2px">' +
-        '<span style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted,#8a94a0)">Composite</span>' +
-        '<code style="font-size:0.86em;font-weight:600">' + esc(_shortId) + '</code>' +
-        (_armExtra.length ? '<span class="muted" style="font-size:0.8em">· ' + _armExtra.map(esc).join(' · ') + '</span>' : '') +
-        '</div>';
+      // The Model Definition panel already names the composite, so the bare
+      // "COMPOSITE <name>" header is dropped; show a compact header only when a
+      // VARIANT label adds information beyond the baseline.
+      var _armHdr = _armExtra.length ? ('<div class="model-arm-head" style="display:flex;gap:7px;align-items:baseline;margin:6px 0 5px 2px">' +
+        '<span style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted,#8a94a0)">Variant</span>' +
+        '<code style="font-size:0.86em;font-weight:600">' + esc(_armExtra.map(String).join(' · ')) + '</code>' +
+        '</div>') : '';
       wrap.innerHTML = _armHdr +
-        _cfgUsedHtml +
         '<p class="muted" style="font-size:0.85em;margin:0">Resolving composite…</p>';
       mount.appendChild(wrap);
       // Expand a config-file reference (the vecoli arm's whole_config, or a
@@ -1920,16 +1924,27 @@
           } catch (e) { /* seeding is best-effort — bare loom still works */ }
           // The model file — each process's config formatted (for viva-smoldyn:
           // species / reactions / bounds) — shown ABOVE the loom explorer.
-          var cfgHost = document.createElement('div');
-          _renderCompositeSource(cfgHost, body.state, esc);
-          if (cfgHost.firstChild) {
-            var head = document.createElement('div');
-            head.style.cssText = 'margin:8px 0 4px 2px';
-            head.innerHTML =
-              '<div class="muted" style="font-size:0.78em;font-weight:600;text-transform:uppercase;letter-spacing:0.02em">Model configuration</div>' +
-              '<div class="muted" style="font-size:0.76em;font-weight:400;opacity:0.82;margin-top:1px">The fully resolved composite — each process’s complete config (what the run parameters above expand into).</div>';
-            wrap.insertBefore(cfgHost, cardEl);
-            wrap.insertBefore(head, cfgHost);
+          // The Model Definition panel above renders each process's config cleanly,
+          // so the raw "Model configuration" dump is gone. Collapse the composite
+          // card (loom + code) behind an "Explore composite" toggle so the Model tab
+          // stays card-like until the user opens the diagram — and the heavy loom is
+          // only mounted on demand (it is lazy, so this also avoids load failures for
+          // users who never open it).
+          if (cardEl && cardEl.parentNode === wrap) {
+            cardEl.style.display = 'none';
+            var _expl = document.createElement('button');
+            _expl.type = 'button';
+            _expl.className = 'mdef-explore-btn';
+            var _explLbl = function (open) {
+              _expl.textContent = (open ? '▾ ' : '▸ ') + 'Explore composite — diagram, config & code';
+            };
+            _explLbl(false);
+            _expl.addEventListener('click', function () {
+              var open = cardEl.style.display === 'none';
+              cardEl.style.display = open ? '' : 'none';
+              _explLbl(open);
+            });
+            wrap.insertBefore(_expl, cardEl);
           }
         })
         .catch(function () {
