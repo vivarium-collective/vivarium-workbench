@@ -96,6 +96,12 @@ So an arbitrary workspace composite cannot be dispatched by id. The general rout
     legacy `/compose/v1`, including the server's `compose_allow_list`; a named environment **refuses**
     `num_nodes` / `analysis_options`; for an environment id `analysis_options` is sent and no pip deps.
   * A named-environment dispatch requires a clean, pushed workspace (`remote_dispatch_preflight`).
+  * An environment id (`id:<env id>`) runs its prebuilt image and **ships nothing from the workspace's git tree**:
+    the card, the study page and the detached run (`deployment_run`, which skips `git_pip_url` and the pinned deps
+    for it) never need a clean or pushed tree. `/api/remote-dispatch-preflight` answers `ok: true` for it; when the
+    tree is dirty or unpushed it adds a non-blocking `warnings` list ("uncommitted changes are not used by this
+    environment ..."), which the composite card's run-target badge shows as an ⓘ on `Runs: Cloud` with the note in
+    its tooltip, without blocking a Run (step P2 Builds B2b, Finding F).
 * `legacy`: any other backend that answers (no capabilities route, or a run surface without documents) —
   unchanged `/compose/v1` + `/api/v1/simulations`. A named backend that does not answer is not `legacy`: see
   "When the named backend cannot be reached" below.
@@ -122,7 +128,7 @@ cached 30 s). A session build (`.viv-build.json`) or the pinned-build config kee
 | `GET /api/remote-run-poll?run_id=` or `?simulation_id=<run id>` | `/composites/{id}/status` |
 | `GET /api/remote-run-chain-progress?run_id=` | `/composites/{id}/progress` (`simulation` jobs = seeds) |
 | `POST /api/remote-run-cancel {simulation_id: <run id>}` | `DELETE /composites/{id}` |
-| `GET /api/remote-dispatch-preflight` | clean+pushed check; `dispatch: viva-v1-document` |
+| `GET /api/remote-dispatch-preflight` | clean+pushed check for a named environment; an `id:` environment is always `ok`, with `warnings` for a dirty/unpushed tree; `dispatch: viva-v1-document` |
 
 Not yet wired to `/viva/v1` (still legacy, or unsupported against a viva-core-only backend):
 analyses (`/api/v1/analyses*`), build/branch pickers, `/composites/{id}/{jobs,datasets,log,events}`
