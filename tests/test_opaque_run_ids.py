@@ -23,17 +23,20 @@ FIGURE_ROUTES = ("/api/remote-analysis-figures?simulation_id={id}&study=s",
 
 @pytest.fixture
 def no_sms(monkeypatch):
-    """The SMS figure libraries must not be reached."""
+    """The SMS figure libraries must not be reached (without the plugin there are none to reach)."""
     rrv._FACET_MEMO.clear()
-    raf = _raf()
+    try:
+        raf = _raf()
+    except ImportError:   # the core-only job
+        return
     monkeypatch.setattr(raf, "list_remote_analysis_figures", lambda *a, **k: pytest.fail("asked SMS for figures"))
     monkeypatch.setattr(raf, "fetch_by_analysis", lambda *a, **k: pytest.fail("asked SMS for a figure"))
 
 
 @pytest.mark.parametrize("url", FIGURE_ROUTES)
-@pytest.mark.parametrize("rid, kind", [("simulation-X", None), ("simulation-V", "viva-core"),
+@pytest.mark.parametrize("rid, kind", [pytest.param("simulation-X", None, marks=pytest.mark.plugin),
+                                       pytest.param("simulation-V", "viva-core", marks=pytest.mark.plugin),
                                        ("compose-7", None)])
-@pytest.mark.plugin
 def test_the_figure_routes_refuse_a_string_id_with_409_not_422(ws, asked, no_sms, inproc_client, url, rid, kind):
     """A compose-api / viva-core run is refused by its record (or, with none, its form) -- never a 422."""
     if kind:
@@ -45,7 +48,6 @@ def test_the_figure_routes_refuse_a_string_id_with_409_not_422(ws, asked, no_sms
     assert asked == []
 
 
-@pytest.mark.plugin
 @pytest.mark.parametrize("url", FIGURE_ROUTES)
 @pytest.mark.parametrize("given", ["0", "", "%20"])
 def test_the_figure_routes_answer_no_id_with_the_old_400(ws, asked, no_sms, inproc_client, url, given):
@@ -80,7 +82,6 @@ def test_an_sms_record_whose_id_is_not_an_integer_is_refused(ws, asked):
     assert asked == []
 
 
-@pytest.mark.plugin
 @pytest.mark.parametrize("rid", ["simulation-X", "compose-7"])
 def test_land_artifacts_and_reanalysis_refuse_a_string_id_of_another_backend(ws, asked, rid):
     assert rrv.remote_run_land_artifacts(ws, {"simulation_id": rid, "run_id": "r1"})[1] == 409
@@ -128,7 +129,6 @@ def test_composite_run_status_keeps_an_sms_integer(ws, asked):
     assert body["simulation_id"] == 9 and type(body["simulation_id"]) is int
 
 
-@pytest.mark.plugin
 def test_composite_run_status_without_an_id_is_still_404(ws, asked):
     assert composite_run_views.build_composite_run_status(ws, "remote-sim-")[1] == 404 and asked == []
 

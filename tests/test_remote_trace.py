@@ -79,9 +79,13 @@ class FakeClient:
 def use(monkeypatch):
     """The client viva-api's half gets (step P2, Runs b2: ``sms_trace.make_client``, the plugin's builder). The lib
     tests call the CORE functions, so each assertion covers the whole chain: core routing, the SMS unrouted facet,
-    ``sms_trace``. A test using it needs the plugin (marked ``plugin``)."""
+    ``sms_trace``. A test reaching the client needs the plugin (marked ``plugin``); without the plugin there is no
+    client to hand out, so a core test using it asserts the request never got that far."""
     slot = {"client": FakeClient()}
-    monkeypatch.setattr(_sms_trace(), "make_client", lambda: slot["client"])
+    try:
+        monkeypatch.setattr(_sms_trace(), "make_client", lambda: slot["client"])
+    except ImportError:   # the core-only job
+        pass
 
     def _use(client):
         slot["client"] = client
@@ -166,11 +170,10 @@ def test_fetch_compose_id_without_correlation_is_404(use):
 @pytest.mark.parametrize("kwargs", [
     {},
     {"simulation_id": 1, "composite_run_id": "r"},
-    {"simulation_id": "abc"},
-    {"simulation_id": 0},
-    {"compose_id": -3},
+    pytest.param({"simulation_id": "abc"}, marks=pytest.mark.plugin),
+    pytest.param({"simulation_id": 0}, marks=pytest.mark.plugin),
+    pytest.param({"compose_id": -3}, marks=pytest.mark.plugin),
 ])
-@pytest.mark.plugin
 def test_fetch_rejects_bad_or_ambiguous_ids(kwargs, use):
     client = use(FakeClient())
     body, status, _ = remote_trace.fetch_trace(**kwargs, ws_root=_WS)
@@ -212,7 +215,10 @@ def rc(monkeypatch, tmp_path):
     from vivarium_workbench.api.app import create_app, get_workspace
 
     state = {"client": FakeClient()}
-    monkeypatch.setattr(_sms_trace(), "make_client", lambda: state["client"])
+    try:
+        monkeypatch.setattr(_sms_trace(), "make_client", lambda: state["client"])
+    except ImportError:   # the core-only job: no client to hand out (the core tests never reach one)
+        pass
     monkeypatch.setenv("VIVARIUM_WORKBENCH_PERFETTO_UI", "off")
     app = create_app()
     app.dependency_overrides[get_workspace] = lambda: tmp_path
@@ -246,7 +252,6 @@ def test_route_trace_capability_gate(rc):
     assert "viva-v1-trace" in r.json()["error"]
 
 
-@pytest.mark.plugin
 def test_route_trace_bad_request(rc):
     assert rc.get("/api/remote-run-trace").status_code == 400
 

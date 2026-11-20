@@ -19,7 +19,7 @@ class _PluginModule:
     only the ``plugin``-marked tests touch it. Read-only -- monkeypatch the real module (``_PluginModule.load()``)."""
 
     def __init__(self, name):
-        self._name = name
+        object.__setattr__(self, "_name", name)
 
     def load(self):
         import importlib
@@ -27,6 +27,13 @@ class _PluginModule:
 
     def __getattr__(self, attr):
         return getattr(self.load(), attr)
+
+    def __setattr__(self, attr, value):
+        # A monkeypatch on the proxy would patch nothing the code under test reads; refuse it loudly.
+        raise AttributeError(f"{self._name} proxy is read-only: patch {self._name} itself (.load()), not the proxy")
+
+    def __delattr__(self, attr):
+        raise AttributeError(f"{self._name} proxy is read-only: patch {self._name} itself (.load()), not the proxy")
 
 
 remote_reconcile = _PluginModule("vivarium_workbench_sms.remote_reconcile")

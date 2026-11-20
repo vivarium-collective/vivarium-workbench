@@ -111,12 +111,16 @@ def test_the_declared_ordering_record_before_login(ws, asked, monkeypatch):
     assert asked == []
 
 
-@pytest.mark.plugin
 @pytest.mark.parametrize("run_id", ["../x", "a/b", "..", "/abs"])
 def test_the_core_refuses_a_landing_folder_that_is_a_path(ws, asked, monkeypatch, run_id):
     """DECLARED: ``run_id`` becomes ``.pbg/runs/<run_id>``; the view refuses a path itself (the app-wide guard covers
-    only requests that come through a route)."""
-    monkeypatch.setattr(_sms_landing(), "land_remote_simulation_artifacts", lambda *a, **k: pytest.fail("landed"))
+    only requests that come through a route). Core: without the plugin there is no landing to trip."""
+    try:
+        landing = _sms_landing()
+    except ImportError:   # the core-only job
+        pass
+    else:
+        monkeypatch.setattr(landing, "land_remote_simulation_artifacts", lambda *a, **k: pytest.fail("landed"))
     assert rrv.remote_run_land_artifacts(ws, {"simulation_id": 12, "run_id": run_id}) == (
         {"error": "invalid run_id: it must be a plain name, not a path"}, 400)
     assert asked == []
