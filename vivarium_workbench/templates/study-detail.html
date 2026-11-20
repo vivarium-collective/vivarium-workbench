@@ -16,8 +16,16 @@
 </head>
 <body>
 <main class="study-page">
+{# Promoted question headline (v3 purpose.question or legacy top-level question),
+   now folded INTO the header as a compact second line directly under the title
+   (was a separate full-width band above the tabs). Shown only when it ADDS
+   something — i.e. differs from the title — so an auto-titled study doesn't
+   repeat its heading. Clamped to 2 lines; full text lives in Overview →
+   Background → Question. #}
+{% set _q = (study.purpose.question if study.purpose else none) or study.question %}
 <header class="study-header">
-  <div style="display:flex; align-items:center; gap:14px; justify-content:space-between;">
+  <div style="display:flex; align-items:flex-start; gap:14px; justify-content:space-between;">
+  <div class="study-head-main" style="min-width:0; flex:1 1 auto">
   <div style="display:flex; align-items:center; gap:12px; min-width:0; flex-wrap:wrap">
   <h1 class="study-title" style="margin:0">
     {% if name_chip %}<span class="study-num-chip" style="font-size:0.5em; font-weight:700; color:#64748b; background:#f1f5f9; padding:3px 9px; border-radius:9999px; vertical-align:middle; margin-right:8px">{{ name_chip }}</span>{% endif %}<span class="study-name" id="study-name" data-slug="{{ name }}" data-study-kind="{{ study.kind }}" title="{{ name }}" data-edit-kind="study" data-edit-field="title" data-edit-value="{{ study.title or '' }}" data-edit-label="Title">{{ display_name }}</span>
@@ -31,6 +39,8 @@
        lined up inline with the title (filled by _renderStudyAxisMarkers in
        study-detail.js) so they don't take a separate row above the content. #}
     <span id="study-axis-markers" data-slug="{{ name }}" style="display:inline-flex; gap:8px; align-items:center; flex-wrap:wrap"></span>
+  </div>
+  {% if _q and (_q | trim) != (display_name | trim) %}<p id="study-question-headline" class="study-question-headline" title="{{ _q }}"><span class="q-glyph">Q</span> <span class="study-question-headline-text" data-edit-kind="study" data-edit-field="question" data-edit-value="{{ study.question }}" data-edit-multiline data-edit-label="Question">{{ _q }}</span></p>{% endif %}
   </div>
   <span class="study-header-actions" style="display:inline-flex; gap:6px; flex-shrink:0; align-items:center;">
     {# Export (figures / notebook) moved OUT of the header into the Overview
@@ -89,15 +99,8 @@
                 or study.follow_up_studies is defined
                 or study.conclusion_logic is defined %}
 
-{# Task 4: promoted question headline — the study's purpose.question (v3) or
-   legacy top-level question, surfaced directly above the tab nav so it reads
-   as the study's second line, not buried in an Overview panel. Replaces the
-   removed "Spine at a glance" (#spine-summary) table below. #}
-{% set _q = (study.purpose.question if study.purpose else none) or study.question %}
-{# Show the Q line only when it ADDS something — i.e. the question differs from
-   the title. For an auto-titled study (title == question) it would just repeat
-   the heading and waste vertical space, so it's hidden there. #}
-{% if _q and (_q | trim) != (display_name | trim) %}<p id="study-question-headline" class="study-question-headline"><span class="q-glyph">Q</span> <span class="study-question-headline-text" data-edit-kind="study" data-edit-field="question" data-edit-value="{{ study.question }}" data-edit-multiline data-edit-label="Question">{{ _q }}</span></p>{% endif %}
+{# (The promoted question headline moved UP into the <header> above, as a
+   compact second line under the title — see #study-question-headline there.) #}
 
 <nav class="study-tabs" aria-label="Study sections">
   {# 5-tab study layout (Phase 1 + mockup refinement): one centered row of
@@ -136,20 +139,20 @@
      panel). Same handlers + outside-click dropdown as before (wired by
      _wireStudyExportMenu). Styled to match the investigation-level ↓ Export. #}
   <span class="study-dl study-export-wrap" style="margin-left:auto; align-self:center; position:relative; display:inline-flex">
-    <button type="button" id="study-export-btn" class="btn-mini" aria-haspopup="true" aria-expanded="false" title="Export — open in the browser or download (report, notebook, figures)">↓ Export ▾</button>
+    <button type="button" id="study-export-btn" class="btn-mini" aria-haspopup="true" aria-expanded="false" title="Shortcuts — open in the browser or download (report, notebook, figures)">Shortcuts ▾</button>
     {# Mirrors the investigation ↓ Export: each artifact offers open-in-browser
        AND download. Report → the self-contained single-study report; Notebook →
        the runnable .ipynb; Figures → the study's Visualizations tab / outputs zip. #}
-    <div id="study-export-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:200px;padding:4px">
+    <div id="study-export-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:190px;padding:4px">
       <div class="study-export-sec">Report</div>
-      <button type="button" id="study-report-open" role="menuitem" class="study-jump-item" onclick="window._vivStudyReportOpen(event, '{{ study.name }}')">Open in browser</button>
-      <button type="button" id="study-report-dl" role="menuitem" class="study-jump-item" onclick="window._vivStudyReportDownload(event, '{{ study.name }}')">Download HTML</button>
+      <button type="button" id="study-report-open" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyReportOpen(event, '{{ study.name }}')">Open in browser</button>
+      <button type="button" id="study-report-dl" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyReportDownload(event, '{{ study.name }}')">Download HTML</button>
       <div class="study-export-sec">Notebook</div>
-      <button type="button" id="study-nb-open" role="menuitem" class="study-jump-item" onclick="window._vivStudyNotebookOpen(event, '{{ study.name }}')">Open in browser</button>
-      <button type="button" id="study-dl-notebook" role="menuitem" class="study-jump-item" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')">Download .ipynb</button>
+      <button type="button" id="study-nb-open" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyNotebookOpen(event, '{{ study.name }}')">Open in browser</button>
+      <button type="button" id="study-dl-notebook" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')">Download .ipynb</button>
       <div class="study-export-sec">Figures</div>
-      <button type="button" id="study-fig-open" role="menuitem" class="study-jump-item" onclick="window._vivStudyFiguresOpen(event, '{{ study.name }}')">Open in browser</button>
-      <button type="button" id="study-dl-figures" role="menuitem" class="study-jump-item" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')">Download (zip)</button>
+      <button type="button" id="study-fig-open" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyFiguresOpen(event, '{{ study.name }}')">Open in browser</button>
+      <button type="button" id="study-dl-figures" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')">Download (zip)</button>
     </div>
   </span>
 </nav>
@@ -162,10 +165,13 @@
 .study-kind-tag.study-kind-biological{background:#ecfdf5;color:#065f46}
 .study-kind-tag.study-kind-computational{background:#eff6ff;color:#1e40af}
 .study-kind-tag.study-kind-theoretical{background:#faf5ff;color:#6b21a8}
-.study-question-headline{margin:3px 0 0 0;font-size:0.92em;line-height:1.4;color:#1e293b;font-family:Georgia,"Times New Roman",serif}
+.study-question-headline{margin:2px 0 0 0;font-size:0.85em;line-height:1.35;color:#475569;font-family:Georgia,"Times New Roman",serif;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .study-question-headline .q-glyph{display:inline-block;font-size:0.78em;font-weight:700;font-family:ui-monospace,monospace;color:#64748b;background:#f1f5f9;padding:1px 7px;border-radius:4px;margin-right:6px;vertical-align:middle}
-/* Section label inside the study Export menu (groups the Open / Download items). */
-.study-export-sec{padding:6px 8px 2px;font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#94a3b8}
+/* Study Export menu — styled to match the investigation-level ↓ Export menu
+   exactly: grey uppercase section labels + full-width, left-aligned, stacked
+   text-link items (not inline pills). Mirrors walkthrough.js `_sec` + `_mi`. */
+.study-export-sec{padding:6px 8px 2px;font-size:0.72em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#94a3b8}
+.study-export-item{display:block;width:100%;text-align:left;border:none;background:transparent}
 .status-detail-panel{margin:0;padding:2px 0;background:transparent;border:none;border-radius:0;font-size:0.92em}
 .status-detail-row{display:flex;align-items:center;gap:8px;padding:3px 0}
 .status-detail-axis{min-width:140px;color:#475569;font-size:0.9em}
