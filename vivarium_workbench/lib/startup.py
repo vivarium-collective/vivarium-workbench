@@ -160,8 +160,8 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
             print(f"warning: remote backend health check failed: {e}", file=sys.stderr)
 
         # Start the RemoteLink circuit-breaker probe so a wedged tunnel is
-        # detected in the background (~3s probe every 30s) and every sms-api call
-        # site fails fast instead of burning its 91.5s timeout budget. Opt-in:
+        # detected in the background (~3s probe every 30s) and every remote-backend
+        # call site fails fast instead of burning its 91.5s timeout budget. Opt-in:
         # only when the remote endpoint is configured (this branch), so tests and
         # the CLI never spawn the thread. Best-effort; never blocks/raises.
         # The breaker and its target are core config (step P2): the configured URL, the one it always probed.

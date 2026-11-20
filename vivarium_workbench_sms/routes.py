@@ -205,8 +205,8 @@ def build_router() -> APIRouter:
           - 200  ``{ok, simulator_id, repo, branch, commit}``
 
         The CSRF middleware already guards this POST.  Library-backed via
-        ``lib.source_build_views.build_remote`` (a network route — sms-api is
-        reached through the lib client).
+        ``vivarium_workbench_sms.source_build_views.build_remote`` (a network
+        route — sms-api is reached through the lib client).
         """
         body, status = _source_build_views.build_remote(req.model_dump())
         if status != 200:

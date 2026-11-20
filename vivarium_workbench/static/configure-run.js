@@ -233,7 +233,7 @@
     };
   }
 
-  // item 20a: mirrors the launch panel's _dispatchRemotePinned — before a
+  // item 20a: mirrors _dispatchRemotePinned in the launch plugin script — before a
   // remote-pinned deployment dispatches to AWS Batch, fetch the server-
   // resolved repo/branch/commit/simulator_id and require explicit
   // confirmation, so a workspace-identity mismatch is caught here, before
