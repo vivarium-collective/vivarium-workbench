@@ -903,12 +903,20 @@
      load, so their JS hooks bind unchanged). #}
   <div class="model-subtabs" role="tablist" aria-label="Model sections">
     <button type="button" class="model-subtab active" data-modelsub="composition" role="tab" aria-selected="true" onclick="_setModelSubtab('composition')">Composition</button>
+    <button type="button" class="model-subtab" data-modelsub="loom" role="tab" aria-selected="false" onclick="_setModelSubtab('loom')">Loom</button>
     <button type="button" class="model-subtab" data-modelsub="variants" role="tab" aria-selected="false" onclick="_setModelSubtab('variants')">Variants{% if study.variants %} <span class="model-subtab-count">{{ study.variants | length }}</span>{% endif %}</button>
     <button type="button" class="model-subtab" data-modelsub="interventions" role="tab" aria-selected="false" onclick="_setModelSubtab('interventions')">Interventions{% if study.interventions %} <span class="model-subtab-count">{{ study.interventions | length }}</span>{% endif %}</button>
     <button type="button" class="model-subtab" data-modelsub="readouts" role="tab" aria-selected="false" onclick="_setModelSubtab('readouts')">Readouts</button>
-    {# Download the runnable notebook for this study (composite + exposed
-       parameters + figures). Right-aligned on the tab row via margin-left:auto. #}
-    <button type="button" class="btn-mini model-subtabs-action" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')" title="Download a runnable Jupyter notebook for THIS study — its composite + editable parameters + figures">↓ notebook</button>
+  </div>
+
+  {# Loom subpane — the interactive bigraph, mounted directly (no "Explore
+     composite" click, no scrolling to the composite card). Lazy: the iframe
+     is heavy, so _mountModelLoom() builds it only when this tab is first
+     opened (from _setModelSubtab in study-detail.js). #}
+  <div class="model-subpanel" data-modelsubpanel="loom" hidden>
+    <div id="model-loom-mount" class="model-loom-mount">
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading the interactive bigraph…</span></div>
+    </div>
   </div>
 
   <div class="model-subpanel active" data-modelsubpanel="composition">

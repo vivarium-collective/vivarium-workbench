@@ -181,9 +181,45 @@
       p.classList.toggle('active', on);
       p.hidden = !on;
     });
+    if (sub === 'loom') _mountModelLoom();
     if (window._autoGrowTextareas) window._autoGrowTextareas();
   }
   window._setModelSubtab = _setModelSubtab;
+
+  // Mount the interactive bigraph-loom for the study's composite directly into
+  // the Loom sub-tab. Lazy (iframes are heavy, so only on first open) and
+  // idempotent. Resolves the composite id the same way the Model Definition
+  // panel does — the composite card's resolved full address, else the short
+  // ref, else the study's first baseline composite.
+  function _mountModelLoom() {
+    var host = document.getElementById('model-loom-mount');
+    if (!host || host.dataset.mounted) return;
+    var cardMount = document.getElementById('model-composite-cards');
+    var byAddr = cardMount && cardMount.querySelector('[data-address]');
+    var byRef = cardMount && cardMount.querySelector('[data-model-composite]');
+    var id = (byAddr && byAddr.getAttribute('data-address'))
+          || (byRef && byRef.getAttribute('data-model-composite'))
+          || ((window._study && window._study.baseline && window._study.baseline[0])
+                ? window._study.baseline[0].composite : '');
+    if (!id) {
+      // the composite card may not have resolved its address yet — retry briefly
+      _mountModelLoom._tries = (_mountModelLoom._tries || 0) + 1;
+      if (_mountModelLoom._tries < 25) return void setTimeout(_mountModelLoom, 150);
+      host.innerHTML = '<p class="empty-message">No composite to show in the loom.</p>';
+      return;
+    }
+    var apiUrl = (window.DataSource && window.DataSource.apiUrl)
+      ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
+    var frame = document.createElement('iframe');
+    frame.className = 'model-loom-frame';
+    frame.src = apiUrl('/bigraph-loom/index.html') + '?id=' + encodeURIComponent(id) + '&graph=open';
+    frame.setAttribute('title', 'Interactive bigraph — ' + id);
+    frame.setAttribute('loading', 'lazy');
+    host.innerHTML = '';
+    host.appendChild(frame);
+    host.dataset.mounted = '1';
+  }
+  window._mountModelLoom = _mountModelLoom;
 
   // Cross-tab link helper (Fable §6 #15, Task C1): a link on any tab can
   // point at an anchor that lives inside a DIFFERENT, currently-hidden tab
@@ -1696,8 +1732,6 @@
       '<div class="mdef-hd"><span class="overview-label" style="margin:0">Model definition</span>' +
         (d.name ? '<code class="mdef-name">' + _esc(d.name) + '</code>' : '') +
         (d.kind ? '<span class="mdef-kind">' + _esc(d.kind) + '</span>' : '') +
-        (d.id ? '<a class="mdef-dl-btn" href="/api/composite-loom-standalone?id=' + encodeURIComponent(d.id) +
-          '" download title="Download a self-contained single-file HTML of this composite\'s loom — opens anywhere, no server, no install">⬇ Portable loom</a>' : '') +
         '</div>' +
       (d.description ? '<p class="mdef-desc">' + _esc(d.description) + '</p>' : '') +
       (procHtml ? '<div class="mdef-sect"><div class="mdef-sect-lbl">Processes · ' + procNames.length + '</div>' + procHtml + '</div>' : '') +
