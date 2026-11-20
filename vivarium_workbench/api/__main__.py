@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 
-from vivarium_workbench.api.app import WORKSPACE_ENV
+# Not from api.app: importing it builds the app (and asks the providers) before the checks below can report a
+# broken plugin. The same name (``api.app.WORKSPACE_ENV``).
+from vivarium_workbench.lib.env_compat import WORKSPACE_ENV
 
 
 def main() -> None:
@@ -44,14 +47,19 @@ def main() -> None:
     print(f"  Swagger UI : {base}/docs")
     print(f"  ReDoc      : {base}/redoc")
     print(f"  OpenAPI    : {base}/openapi.json")
-    from vivarium_workbench.lib.backend_config import BackendConfigError, check_single_backend
+    from vivarium_workbench.lib.backend_config import BackendConfigError
+    from vivarium_workbench.lib.backends import config as backend_cfg
     from vivarium_workbench.lib.env_worker_launcher import check_worker_config
 
     try:
-        check_single_backend()  # one remote backend per process (docs/backend-adapters.md step 1c)
+        backend_cfg.check_config()  # one remote backend per process (docs/backend-adapters.md step 1c)
         check_worker_config()  # hosted env workers asked for, but no provider supplies them (step P2)
     except BackendConfigError as e:
         raise SystemExit(f"ERROR: {e}") from e
+    except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
+        raise SystemExit(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}") from e
+    for var in backend_cfg.stray_backend_env():  # ignored with providers off (step P3 C1; P4 refuses it)
+        print(f"warning: {var} is set but no backend provider is active; it is ignored", file=sys.stderr)
     # Import string (not the app object) so --reload works.
     uvicorn.run("vivarium_workbench.api.app:app", host=args.host, port=args.port, reload=args.reload)
 

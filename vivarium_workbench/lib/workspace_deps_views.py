@@ -23,17 +23,25 @@ import psutil
 # ---------------------------------------------------------------------------
 
 def remote_health() -> dict:
-    """Reachability + config status of the remote sms-api endpoint (``SMS_API_BASE``).
+    """Reachability + config status of the configured remote backend (``backends.config.configured_base_url``).
 
     Powers the Source panel's health indicator and the startup log: tells a fresh
     operator (or Chris) whether the remote endpoint is even configured and whether
     it answers. Best-effort — never raises; returns
-    ``{configured, base_url, reachable, version, error}``.
+    ``{configured, base_url, reachable, version, error}``. With no URL to ask (no backend named and no active
+    provider supplies one: providers off, or the plugin absent) it asks nothing: ``base_url`` is ``None``.
     """
     from vivarium_workbench.lib import backend_config
+    from vivarium_workbench.lib.backends import config
 
-    base = backend_config.configured_base_url()
-    configured = backend_config.backend_configured()
+    try:
+        base = config.configured_base_url()
+        configured = config.backend_configured()
+    except Exception as exc:  # noqa: BLE001 — a broken provider: still an answer, never a 500
+        return {"configured": False, "base_url": None, "reachable": False, "version": None, "error": str(exc)}
+    if base is None:
+        return {"configured": configured, "base_url": None, "reachable": False, "version": None,
+                "error": "no remote backend is configured"}
     try:
         version = backend_config.ping(base)
         return {"configured": configured, "base_url": base, "reachable": True,

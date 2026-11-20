@@ -168,6 +168,28 @@ class Provider(Protocol):
         run goes reads them. No network call; never raises."""
         ...
 
+    # -- P3 C1 (read through lib/backends/config.py) --
+    def check_config(self, named: Optional[str]) -> None:
+        """Its half of the one-backend rule: refuse (``backend_config.BackendConfigError``) its own settings when they
+        name another backend than ``named`` (the URL the operator named, already validated; ``None``: none named).
+        Reads the environment only; no network call."""
+        ...
+
+    def base_url(self) -> Optional[str]:
+        """The URL its backends are asked at: the named one, else its own setting or default, or ``None`` when it
+        has none. Reads the environment only; no network call; never raises."""
+        ...
+
+    def configured(self) -> bool:
+        """Whether one of its own settings names a backend (the operator opted in), as opposed to its default URL.
+        Reads the environment only."""
+        ...
+
+    def deployment_default(self) -> Optional[str]:
+        """Its deployment name when no name is configured and no backend is named (``backend_config.deployment_name``),
+        or ``None``. No network call."""
+        ...
+
 
 _lock = threading.RLock()
 _providers: "Optional[tuple[Provider, ...]]" = None

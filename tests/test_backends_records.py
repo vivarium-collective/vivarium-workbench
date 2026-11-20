@@ -17,7 +17,7 @@ from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib import study_spec
 from vivarium_workbench_sms import remote_pinned
 from vivarium_workbench.lib.backends import records
-from vivarium_workbench_sms.sms_api_client import BACKEND_BASE_ENV_VARS
+from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
 
 NAMED, VIVA, SMS = BACKEND_BASE_ENV_VARS
 

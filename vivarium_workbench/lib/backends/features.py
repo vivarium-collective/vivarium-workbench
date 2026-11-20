@@ -33,7 +33,7 @@ def process_features() -> frozenset[str]:
     from vivarium_workbench.lib import backends
     from vivarium_workbench.lib.backends import provider as _provider
 
-    found = {f for f in FACET_FEATURES if backends.offering(f)}
+    found: set[str] = {f for f in FACET_FEATURES if backends.offering(f)}
     for p in _provider.providers():
         found.update(p.features())
     return frozenset(found)

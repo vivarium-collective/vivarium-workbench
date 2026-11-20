@@ -13,6 +13,9 @@
 * ``router()``: the routes only SMS serves (the legacy pipeline, the thin client's build phase and the source builds,
   ``vivarium_workbench_sms/routes.py``).
 * ``payload_types()``: its wire models, for the core's TypeScript generator (``vivarium_workbench_sms/models.py``).
+* ``check_config()`` / ``base_url()`` / ``configured()`` / ``deployment_default()``: its configuration (step P3 C1):
+  the ``VIVA_API_BASE`` / ``SMS_API_BASE`` aliases, the SSM tunnel default and the ``smsvpctest`` deployment name
+  (``sms_api_client``, ``remote_pinned``).
 
 The core finds this module by importing it (until step P4's entry point) and reads ``PROVIDER``.
 """
@@ -124,6 +127,32 @@ class SmsProvider:
     def features(self) -> frozenset[str]:
         """``sms-launch``: the vEcoli launch panel (``static/sms-launch.js``), which no facet implies (step P3 F0)."""
         return frozenset({"sms-launch"})
+
+    def check_config(self, named: "Optional[str]") -> None:
+        """Every alias that is set must equal the named backend (``sms_api_client.check_aliases``, the alias half of
+        the one-backend rule, moved from the core in step P3 C1). Read through the module at call time."""
+        from vivarium_workbench_sms import sms_api_client
+
+        sms_api_client.check_aliases(named)
+
+    def base_url(self) -> str:
+        """``sms_api_client.sms_api_base()``: the named backend, else an alias, else the SSM tunnel. Read through the
+        module at call time (tests patch it)."""
+        from vivarium_workbench_sms import sms_api_client
+
+        return sms_api_client.sms_api_base()
+
+    def configured(self) -> bool:
+        """An alias is set (``sms_api_client.alias_configured``); the tunnel default alone is not configuration."""
+        from vivarium_workbench_sms import sms_api_client
+
+        return sms_api_client.alias_configured()
+
+    def deployment_default(self) -> str:
+        """``smsvpctest`` (``remote_pinned._DEFAULT_REMOTE_DEPLOYMENT``), the historical deployment name."""
+        from vivarium_workbench_sms import remote_pinned
+
+        return remote_pinned._DEFAULT_REMOTE_DEPLOYMENT
 
     def router(self) -> ProviderRouter:
         """``remote-run-start``, ``-status``, ``-build`` and ``-pinned-build`` (``vivarium_workbench_sms/routes.py``,

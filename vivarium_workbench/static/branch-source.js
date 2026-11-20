@@ -261,11 +261,11 @@
       color = "#5d6b7e"; txt = "SMS_API_BASE not set — remote disabled";
     } else if (h.reachable) {
       color = "#41d886";
-      txt = h.base_url + (h.version ? "  ·  sms-api v" + h.version : "") + "  ·  reachable ✓";
+      txt = (h.base_url || "") + (h.version ? "  ·  sms-api v" + h.version : "") + "  ·  reachable ✓";
       dot.style.boxShadow = "0 0 6px " + color;
     } else {
       color = "#ff5d6c";
-      txt = h.base_url + " — unreachable ✗ (is the tunnel up?)";
+      txt = (h.base_url || "remote backend") + " — unreachable ✗ (is the tunnel up?)";
       if (h.error) row.title = h.error;
     }
     dot.style.background = color;

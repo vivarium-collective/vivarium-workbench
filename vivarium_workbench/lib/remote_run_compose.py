@@ -32,7 +32,7 @@ import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from vivarium_workbench.lib import backend_config, study_spec
+from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib.investigations import load_spec
 
 if TYPE_CHECKING:
@@ -70,6 +70,14 @@ CHECK_TIMEOUT = 15.0
 _TERMINAL_OK = {"completed"}
 _TERMINAL_BAD = {"failed", "cancelled", "out_of_memory", "timeout"}
 _QUEUED = {"submitting", "waiting", "queued", "pending"}
+
+
+def _deployment_name() -> str:
+    """The configured deployment name (``backends.config.deployment_name``), read at call time. Imported lazily:
+    ``lib.backends`` imports this module (compose-api's adapter)."""
+    from vivarium_workbench.lib.backends import config
+
+    return config.deployment_name()
 
 
 class ComposeDispatchError(Exception):
@@ -721,7 +729,7 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
                 if not zipfile.is_zipfile(archive):
                     return {"error": f"simulation {simulation_id} served something other than a results archive",
                             "run_id": run_id}, 422
-                deployment = backend_config.deployment_name()
+                deployment = _deployment_name()
                 landed = cr.generate_run_id(spec_id, params=provenance)
                 # step 1c: where the run went, kept out of the id's hash (added after it is derived)
                 provenance["remote"] = _remote_record("compose-api", run_id, _named_base())
@@ -766,7 +774,7 @@ def _provenance(session: "ComposeSession", simulation_id: int, run_id: str, stat
     version = _version_of(detail)
     image = _image_of(session, version, _text(detail.simulator))
     return {
-        "source": backend_config.deployment_name(), "backend": BACKEND,
+        "source": _deployment_name(), "backend": BACKEND,
         "compose": {"run_id": run_id, "simulation_id": simulation_id,
                     "experiment_id": detail.experiment_id, "image": image,
                     "environment_version": f"{version[0]}@{version[1]}" if version else None,
@@ -850,7 +858,7 @@ def _record_pending(ws_root: Path, study: str, spec_id: str, run_id: str, base_u
     try:
         from vivarium_workbench.lib import composite_runs as cr
 
-        deployment = backend_config.deployment_name()
+        deployment = _deployment_name()
         conn = cr.connect(study_spec.study_dir(ws_root, study) / "runs.db")
         try:
             cr.save_metadata(

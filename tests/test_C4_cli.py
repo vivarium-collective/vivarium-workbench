@@ -268,9 +268,10 @@ class _Recorder:
 def _handler(monkeypatch, tmp_path):
     """The real handler with the plugin's ``deployment_run.run`` stubbed, its calls and the client's base URL
     recorded."""
+    from vivarium_workbench.lib import backend_config
     from vivarium_workbench_sms import sms_api_client as sac
 
-    for var in sac.BACKEND_BASE_ENV_VARS:
+    for var in backend_config.BACKEND_BASE_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
         monkeypatch.delenv(var.replace("VIVARIUM_WORKBENCH_", "VIVARIUM_DASHBOARD_"), raising=False)
     rec = _Recorder()

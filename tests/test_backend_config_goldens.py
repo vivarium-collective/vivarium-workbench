@@ -58,25 +58,26 @@ def env(monkeypatch):
 # --- the entry points (what the core calls) --------------------------------------------------------------------------
 
 def _check() -> str:
-    from vivarium_workbench.lib.backend_config import BackendConfigError, check_single_backend
+    from vivarium_workbench.lib.backend_config import BackendConfigError
+    from vivarium_workbench.lib.backends import config
 
     try:
-        check_single_backend()
+        config.check_config()
     except BackendConfigError as e:
         return f"refused: {e}"
     return "ok"
 
 
 def _url():
-    from vivarium_workbench.lib import backend_config
+    from vivarium_workbench.lib.backends import config
 
-    return backend_config.configured_base_url()
+    return config.configured_base_url()
 
 
 def _deployment() -> str:
-    from vivarium_workbench.lib import backend_config
+    from vivarium_workbench.lib.backends import config
 
-    return backend_config.deployment_name()
+    return config.deployment_name()
 
 
 # --- the matrix ------------------------------------------------------------------------------------------------------
@@ -104,7 +105,22 @@ ON = {
     "dashboard-named": ("ok", "http://localhost:8080", "smsvpctest"),
     "dashboard-deployment": ("ok", "http://localhost:8080", "olddep"),
 }
-OFF = dict(ON)
+# DECLARED (P3 C1), providers off: an alias is ignored (no URL, no refusal beside a named backend), there is no
+# tunnel default, and the deployment default is the core's neutral one.
+OFF = {
+    "nothing": ("ok", None, "default"),
+    "named": ("ok", "http://compose.test", "compose.test"),
+    "sms-alias": ("ok", None, "default"),
+    "viva-alias": ("ok", None, "default"),
+    "both-aliases": ("ok", None, "default"),
+    "named+same-alias": ("ok", "http://API:8000/", "api"),
+    "named+other-alias": ("ok", "http://compose.test", "compose.test"),
+    "named+bad-alias": ("ok", "http://compose.test", "compose.test"),
+    "bad-named": (REFUSED_BAD_NAMED, "not a url", "default"),
+    "deployment+alias": ("ok", None, "smscdk"),
+    "dashboard-named": ("ok", None, "default"),
+    "dashboard-deployment": ("ok", None, "olddep"),
+}
 
 
 @pytest.mark.parametrize("mode", ["on", "off"])
@@ -129,7 +145,17 @@ HEALTH_ON = {
     "both-aliases": (_health_ok("http://a.test"), ["http://a.test"]),
     "dashboard-named": ({**_health_ok("http://localhost:8080"), "configured": False}, ["http://localhost:8080"]),
 }
-HEALTH_OFF = dict(HEALTH_ON)
+# DECLARED (P3 C1), providers off: with no backend named there is no URL to ask: nothing is pinged.
+_NONE = {"configured": False, "base_url": None, "reachable": False, "version": None,
+         "error": "no remote backend is configured"}
+HEALTH_OFF = {
+    "nothing": (_NONE, []),
+    "named": HEALTH_ON["named"],
+    "sms-alias": (_NONE, []),
+    "viva-alias": (_NONE, []),
+    "both-aliases": (_NONE, []),
+    "dashboard-named": (_NONE, []),
+}
 
 
 @pytest.mark.parametrize("mode", ["on", "off"])
@@ -195,7 +221,29 @@ SERVE_ON = {
     "dashboard-named": (None, "", "", []),
     "dashboard-deployment": (None, "", "", []),
 }
-SERVE_OFF = dict(SERVE_ON)
+# DECLARED (P3 C1), providers off: an alias is ignored with a warning (no probe, no breaker thread, no refusal
+# beside a named backend); the named backend is served as with providers on.
+_STRAY = "warning: {} is set but no backend provider is active; it is ignored\n"
+
+
+def _with_err(row, err):
+    return row[:2] + (err,) + row[3:]
+
+
+SERVE_OFF = {
+    "nothing": (None, "", "", []),
+    "named": SERVE_ON["named"],
+    "sms-alias": (None, "", _STRAY.format(SMS), []),
+    "viva-alias": (None, "", _STRAY.format(VIVA), []),
+    "both-aliases": (None, "", _STRAY.format(VIVA) + _STRAY.format(SMS), []),
+    "named+same-alias": _with_err(SERVE_ON["named+same-alias"], _STRAY.format(SMS)),
+    "named+other-alias": _with_err(SERVE_ON["named"], _STRAY.format(SMS)),
+    "named+bad-alias": _with_err(SERVE_ON["named"], _STRAY.format(VIVA)),
+    "bad-named": SERVE_ON["bad-named"],
+    "deployment+alias": (None, "", _STRAY.format(SMS), []),
+    "dashboard-named": (None, "", "", []),
+    "dashboard-deployment": (None, "", "", []),
+}
 
 
 @pytest.mark.parametrize("mode", ["on", "off"])
@@ -208,9 +256,9 @@ def test_serve_startup_lines(env, case, mode, monkeypatch, tmp_path, capsys):
 # --- the deployment names a pre-record row may carry (records' legacy guard) ----------------------------------------
 
 def _names_now() -> set:
-    from vivarium_workbench.lib.backends import records
+    from vivarium_workbench.lib.backends import config
 
-    return records._deployment_names_now()
+    return config.deployment_names_now()
 
 
 # case -> the names the current configuration could have written on a row before step 1c
@@ -225,7 +273,18 @@ NAMES_ON = {
     "dashboard-named": {"smsvpctest"},
     "dashboard-deployment": {"olddep", "smsvpctest"},  # the old prefix names the deployment, but is not "set" here
 }
-NAMES_OFF = dict(NAMES_ON)
+# DECLARED (P3 C1), providers off: no alias host and no provider default.
+NAMES_OFF = {
+    "nothing": {"default"},
+    "named": {"compose.test"},
+    "sms-alias": {"default"},
+    "viva-alias": {"default"},
+    "both-aliases": {"default"},
+    "named+same-alias": {"api"},
+    "deployment+alias": {"smscdk"},
+    "dashboard-named": {"default"},
+    "dashboard-deployment": {"olddep"},
+}
 
 
 @pytest.mark.parametrize("mode", ["on", "off"])

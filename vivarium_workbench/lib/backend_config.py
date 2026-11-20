@@ -25,11 +25,12 @@ from urllib.request import Request, urlopen
 from vivarium_workbench.lib.env_compat import get_env
 
 
-#: Env vars naming the backend, highest precedence first. ``serve --backend-base-url``
-#: sets the first; the other two are the pre-existing names, kept as aliases.
-BACKEND_BASE_ENV_VARS = ("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "VIVA_API_BASE", "SMS_API_BASE")
-DEFAULT_BACKEND_BASE = "http://localhost:8080"
-
+#: The env var naming the backend (``serve --backend-base-url`` sets it), then the alias names a backend provider
+#: reads (the SMS plugin: ``VIVA_API_BASE``, ``SMS_API_BASE``). The core reads only the first; the alias names are
+#: kept here only so the core can warn about an alias that no active provider claims (``backends.config``; P4
+#: refuses it). The aliases' precedence, their one-backend check and their default URL are the provider's.
+BACKEND_BASE_ENV = "VIVARIUM_WORKBENCH_BACKEND_BASE_URL"
+BACKEND_BASE_ENV_VARS = (BACKEND_BASE_ENV, "VIVA_API_BASE", "SMS_API_BASE")
 
 
 def normalize_backend_base_url(url: str) -> str:
@@ -63,92 +64,61 @@ def canonical_url(url: str) -> str:
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, "", ""))
 
 
-def check_single_backend(named: "str | None" = None) -> None:
-    """Refuse a process configured for more than one remote backend.
+def named_backend(named: "str | None" = None) -> "str | None":
+    """The core half of the one-backend rule: the backend named with ``--backend-base-url`` /
+    ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL`` (or ``named``, the flag's value before it reaches the environment) must be
+    a valid URL. Returns it (as given), or ``None`` when none is named. Raises :class:`BackendConfigError`.
 
-    One workbench process talks to one remote backend (Jim, 2026-11-19). A backend named with
-    ``--backend-base-url`` / ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL`` (or ``named``, the flag's value before it
-    reaches the environment) must therefore equal every alias that is also set (``VIVA_API_BASE``,
-    ``SMS_API_BASE``), compared after normalising. With no backend named, the aliases are left alone: they
-    are the one backend. Reads the environment only; no network call. Raises :class:`BackendConfigError`.
-
-    Called at process entry (``cli.main``, ``serve``), never from :func:`configured_base_url`, which must not fail.
+    One workbench process talks to one remote backend (Jim, 2026-11-19): each provider checks its own settings
+    against the named URL (``Provider.check_config``); ``backends.config.check_config`` runs both halves, at process
+    entry (``cli.main``, ``serve``), never from :func:`configured_base_url`, which must not fail. Reads the
+    environment only; no network call.
     """
-    named = named or os.environ.get(BACKEND_BASE_ENV_VARS[0])
+    named = named or os.environ.get(BACKEND_BASE_ENV)
     if not named:
-        return
+        return None
     try:
-        want = canonical_url(named)
+        canonical_url(named)
     except ValueError as e:
-        raise BackendConfigError(f"{BACKEND_BASE_ENV_VARS[0]}: {e}") from e
-    for var in BACKEND_BASE_ENV_VARS[1:]:
-        value = os.environ.get(var)
-        if not value:
-            continue
-        try:
-            got = canonical_url(value)
-        except ValueError as e:
-            raise BackendConfigError(f"{var}: {e} (a backend is also named: {named})") from e
-        if got != want:
-            raise BackendConfigError(
-                f"two remote backends are configured: the named backend {named} and {var}={value}. "
-                f"A workbench talks to one backend; unset {var} or name the same URL.")
-
-
-def backend_configured() -> bool:
-    """Whether the operator named a backend at all (flag or any env alias)."""
-    return any(os.environ.get(v) for v in BACKEND_BASE_ENV_VARS)
+        raise BackendConfigError(f"{BACKEND_BASE_ENV}: {e}") from e
+    return named
 
 
 def explicit_backend_base_url() -> "str | None":
     """The backend the operator NAMED for this process (flag / new env), else ``None``.
 
-    Distinct from :func:`configured_base_url`, which also honours the legacy aliases and a
-    localhost default: only an explicit name opts a process into running studies on
-    the backend through ``/viva/v1/composites``.
+    Only an explicit name opts a process into running studies on the backend through ``/viva/v1/composites``;
+    a provider's own settings (``backends.config.configured_base_url``) do not.
     """
-    return os.environ.get(BACKEND_BASE_ENV_VARS[0]) or None
+    return os.environ.get(BACKEND_BASE_ENV) or None
 
 
-def configured_base_url() -> str:
-    """Base URL of the backend (viva-api / viva-core; nee sms-api).
+def configured_base_url() -> "str | None":
+    """The core's half of the configured URL: the named backend (:func:`explicit_backend_base_url`), else ``None``.
 
-    Precedence: ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL`` (what ``serve
-    --backend-base-url`` sets) > ``VIVA_API_BASE`` > ``SMS_API_BASE`` (the
-    legacy alias, since the backend repo was renamed sms-api -> viva-api) >
-    ``http://localhost:8080`` (the SSM tunnel). The single source of truth for
-    this lookup — the plugin's ``sms_api_client.sms_api_base`` (and ``remote_simulations`` and ``sms_legacy``,
-    under their ``_sms_api_base`` name) read it at call time.
-
-    Exactly one backend is configured per process (:func:`check_single_backend`, at process entry), so a named
-    backend and an alias, when both are set, are the same URL. This reads the environment only: no network call,
-    and it cannot fail.
+    ``backends.config.configured_base_url`` adds the providers' own settings and defaults (this module may not ask
+    providers). Reads the environment only: no network call, and it cannot fail.
     """
-    named = os.environ.get(BACKEND_BASE_ENV_VARS[0])
-    alias = next((v for v in (os.environ.get(n) for n in BACKEND_BASE_ENV_VARS[1:]) if v), None)
-    return named or alias or DEFAULT_BACKEND_BASE
+    return explicit_backend_base_url()
 
 
-# Default when VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT is unset — the historical
-# hardcoded value, kept only as the fallback so existing deployments don't change
-# behavior on upgrade. New deployments set the env explicitly (e.g. "smscdk").
-_DEFAULT_DEPLOYMENT = "smsvpctest"
+#: The deployment name when ``VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT`` is unset, no backend is named and no provider
+#: supplies its own (``Provider.deployment_default``, read by ``backends.config.deployment_name``).
+_DEFAULT_DEPLOYMENT = "default"
 
 
-def deployment_name() -> str:
+def deployment_name(default: "str | None" = None) -> str:
     """The deployment namespace a remote run targets (the run's truthful Origin).
 
-    Config-derived via ``VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT`` (same env-driven
-    pattern as ``remote_pinned.pinned_config``), replacing the hardcoded ``"smsvpctest"`` so
-    a run's recorded Origin reflects the deployment it actually ran on. Unset, a
-    backend the operator named (``serve --backend-base-url``) is that deployment:
-    its host. ``"smsvpctest"`` only when neither says.
+    ``VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT`` when set; unset, a backend the operator named (``serve
+    --backend-base-url``) is that deployment: its host; else ``default`` (a provider's own default, passed by
+    ``backends.config.deployment_name``), else the neutral :data:`_DEFAULT_DEPLOYMENT`.
     """
     from urllib.parse import urlsplit
 
     named = explicit_backend_base_url()
-    default = (urlsplit(named).hostname if named else None) or _DEFAULT_DEPLOYMENT
-    return (get_env("REMOTE_DEPLOYMENT", default) or default).strip() or default
+    fallback = (urlsplit(named).hostname if named else None) or default or _DEFAULT_DEPLOYMENT
+    return (get_env("REMOTE_DEPLOYMENT", fallback) or fallback).strip() or fallback
 
 
 # --- errors and the caller's identity ---------------------------------------------------------------------------

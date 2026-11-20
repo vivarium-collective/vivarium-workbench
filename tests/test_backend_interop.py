@@ -29,6 +29,7 @@ import pytest
 import yaml
 
 from vivarium_workbench.lib import server_capabilities as sc
+from vivarium_workbench.lib.backends import config as backend_cfg
 from vivarium_workbench_sms import sms_api_client as sac
 
 HERE = Path(__file__).parent
@@ -502,14 +503,14 @@ def test_compose_api_named_beside_the_stanford_alias_is_refused_at_startup(backe
     monkeypatch.setenv(NAMED, backend)
     _stanford_env(monkeypatch, sms_host)
     with pytest.raises(sac.BackendConfigError):
-        sac.check_single_backend()
+        backend_cfg.check_config()
     assert cli.main(["serve", "--workspace", str(FIXTURE_WS)]) == 2
 
 
 def test_the_named_backend_alone_is_the_sms_base(backend, monkeypatch):
     monkeypatch.setenv(NAMED, backend)
     assert sac.sms_api_base() == backend
-    sac.check_single_backend()
+    backend_cfg.check_config()
 
 
 # --- a backend that cannot say what it is --------------------------------------------------------------------

@@ -351,7 +351,7 @@ def _sms_record_ws(tmp_path, monkeypatch, sim_id="12"):
     """A workspace whose study ``s`` holds an sms-legacy record for ``sim_id`` on the configured SMS host."""
     from vivarium_workbench.lib import composite_runs as cr
     from vivarium_workbench.lib.backends import records
-    from vivarium_workbench_sms.sms_api_client import BACKEND_BASE_ENV_VARS
+    from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
 
     for v in BACKEND_BASE_ENV_VARS + ("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT",):
         monkeypatch.delenv(v, raising=False)
