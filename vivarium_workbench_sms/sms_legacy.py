@@ -523,6 +523,17 @@ class SmsLegacyRuns:
     def trace(self, run_id: str) -> "tuple[bytes | dict, int, str]":
         raise NotImplementedError("SMS simulation traces are served by remote_trace.fetch_trace")
 
+    def run_composite(self, ws_root: Path, composite_id: str, *, dest: Path, n_steps: float,
+                      overrides: "dict | None", emit_paths: "list[str] | None",
+                      analysis_options: "dict | None", build_ref: "dict | None",
+                      poll_interval: float, poll_timeout: float) -> Path:
+        """The SMS deployment run on ``/compose/v1`` (:func:`deployment_run.run`; step P2, Runs b)."""
+        from vivarium_workbench_sms import deployment_run  # lazy: loading the registry (env workers) skips it
+
+        return deployment_run.run(ws_root, composite_id, dest=dest, n_steps=n_steps, overrides=overrides,
+                                  poll_interval=poll_interval, poll_timeout=poll_timeout,
+                                  analysis_options=analysis_options, build_ref=build_ref, emit_paths=emit_paths)
+
 
 class SmsLegacyUnrouted:
     """The ``unrouted`` facet (step P2, Runs a1): the tails above for the lifecycle requests the core cannot route by
@@ -542,3 +553,15 @@ class SmsLegacyUnrouted:
 
     def cancel(self, params: dict) -> tuple[dict, int]:
         return cancel_tail(params)
+
+    def run_composite(self, ws_root: Path, composite_id: str, *, dest: Path, n_steps: float,
+                      overrides: "dict | None", emit_paths: "list[str] | None",
+                      analysis_options: "dict | None", build_ref: "dict | None",
+                      poll_interval: float, poll_timeout: float) -> Path:
+        """A deployment run no backend selected (the opt-in compose path): SMS's ``/compose/v1``, as before
+        step P2 (Runs b)."""
+        from vivarium_workbench_sms import deployment_run  # lazy: loading the registry (env workers) skips it
+
+        return deployment_run.run(ws_root, composite_id, dest=dest, n_steps=n_steps, overrides=overrides,
+                                  poll_interval=poll_interval, poll_timeout=poll_timeout,
+                                  analysis_options=analysis_options, build_ref=build_ref, emit_paths=emit_paths)

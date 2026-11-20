@@ -28,7 +28,9 @@ from vivarium_workbench.lib.backends.compose_api import ComposeApiRuns, compose_
 
 
 class RunFacet(Protocol):
-    """A backend's run lifecycle, in the views' existing ``(body, status)`` shapes."""
+    """A backend's run lifecycle, in the views' existing ``(body, status)`` shapes -- except :meth:`run_composite`,
+    the detached deployment runner's blocking call, which keeps the shape of the code it replaced (step P2, Runs b).
+    """
 
     name: str
 
@@ -39,6 +41,18 @@ class RunFacet(Protocol):
     def progress(self, run_id: str) -> tuple[dict, int]: ...
     def cancel(self, run_id: str) -> tuple[dict, int]: ...
     def trace(self, run_id: str) -> "tuple[Union[bytes, dict], int, str]": ...
+    def run_composite(self, ws_root: Path, composite_id: str, *, dest: Path, n_steps: float,
+                      overrides: "dict | None", emit_paths: "list[str] | None",
+                      analysis_options: "dict | None", build_ref: "dict | None",
+                      poll_interval: float, poll_timeout: float) -> Path:
+        """Run a workspace composite on this backend to completion and save its results archive in ``dest`` (the
+        detached deployment runner, ``run_runner._execute_remote``, through :func:`remote_run.run_remote`).
+        Blocking. Returns the archive: a ``.zip`` of emitter history, or a ``.tar.gz`` the runner folds (analyses,
+        PTools files). Raises ``RuntimeError`` naming why, ``TimeoutError`` past ``poll_timeout`` (the run may still
+        be going). ``analysis_options`` (declared analyses, for a backend that runs them server-side) and
+        ``build_ref`` (a build the backend's own builds named) are carried unread by the core; a backend that has no
+        use for them ignores them."""
+        ...
 
 
 class UnroutedFacet(Protocol):
@@ -53,6 +67,13 @@ class UnroutedFacet(Protocol):
     def status(self, params: dict) -> tuple[dict, int]: ...
     def progress(self, params: dict) -> tuple[dict, int]: ...
     def cancel(self, params: dict) -> tuple[dict, int]: ...
+    def run_composite(self, ws_root: Path, composite_id: str, *, dest: Path, n_steps: float,
+                      overrides: "dict | None", emit_paths: "list[str] | None",
+                      analysis_options: "dict | None", build_ref: "dict | None",
+                      poll_interval: float, poll_timeout: float) -> Path:
+        """:meth:`RunFacet.run_composite` for a deployment run no backend selected (step P2, Runs b): the opt-in
+        compose path (``VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH``) with no session build, pin or named backend."""
+        ...
 
 
 class BatchStatus(Protocol):
@@ -113,7 +134,7 @@ class _Inert:
     def _refuse(self, *a: object, **k: object) -> "tuple[dict, int]":
         raise RuntimeError(f"the {self.name} backend's provider is not active")
 
-    submit = land = status = progress = cancel = trace = _refuse  # type: ignore[assignment]
+    submit = land = status = progress = cancel = trace = run_composite = _refuse  # type: ignore[assignment]
 
 
 _SENTINELS = {kind: Backend(kind, _Inert(kind)) for kind in _ATTRS}  # type: ignore[arg-type]

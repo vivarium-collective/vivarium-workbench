@@ -15,8 +15,8 @@ signed-in caller, and checks the classes itself. The composite is exported with 
 the workspace that the composite names, such as a mesh, is sent with it (:func:`workspace_files`).
 
 Run ids are ``compose-<simulation id>``: compose-api's ids are integers, which the other routes read as legacy
-simulation ids. The Composites-tab remote run (``remote_run.run_remote``) takes the same dispatch through
-:func:`run_composite`.
+simulation ids. The Composites-tab remote run (``remote_run.run_remote`` -> ``ComposeApiRuns.run_composite``) takes the
+same dispatch through :func:`run_composite`.
 """
 
 from __future__ import annotations
@@ -616,7 +616,7 @@ def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
 
 def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: float, overrides: "dict | None",
                   emit_paths: "list[str] | None", poll_interval: float, poll_timeout: float) -> Path:
-    """The Composites-tab remote run on compose-api (``remote_run.run_remote``'s branch): dispatch the composite,
+    """The Composites-tab remote run on compose-api (``ComposeApiRuns.run_composite``): dispatch the composite,
     wait for it, and save its results archive in ``dest``. Raises ``RuntimeError`` naming why a run could not be
     sent or did not complete, and ``TimeoutError`` past ``poll_timeout`` (the run may still be going)."""
     from compose_api_client.ext import ApiTimeout, CliError
