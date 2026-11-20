@@ -15270,6 +15270,13 @@
     var ms = document.querySelectorAll('.inv-row-shortcuts-menu');
     for (var i = 0; i < ms.length; i++) {
       ms[i].style.display = 'none';
+      // Restore the markup defaults so a reopened menu starts from a clean
+      // absolute/right-aligned anchor (the open path lifts it to fixed).
+      ms[i].style.position = 'absolute';
+      ms[i].style.left = 'auto';
+      ms[i].style.right = '0';
+      ms[i].style.top = '100%';
+      ms[i].style.marginTop = '4px';
       var b = ms[i].previousElementSibling;
       if (b && b.setAttribute) b.setAttribute('aria-expanded', 'false');
     }
@@ -15284,9 +15291,27 @@
     if (!menu) return;
     var isOpen = menu.style.display !== 'none' && menu.style.display !== '';
     window._closeRowShortcuts();          // close any other open menu first
-    menu.style.display = isOpen ? 'none' : 'block';
     btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
     if (!isOpen) {
+      // Lift the menu to position:fixed so it escapes the list table's
+      // overflow-x:auto / overflow:hidden clipping (last-row menus were cut
+      // off at the panel bottom). Anchor it to the button's viewport rect,
+      // right-aligned, and flip it above the button when it would spill past
+      // the bottom edge.
+      menu.style.display = 'block';
+      menu.style.position = 'fixed';
+      menu.style.right = 'auto';
+      menu.style.marginTop = '0';
+      var r = btn.getBoundingClientRect();
+      var left = r.right - menu.offsetWidth;
+      if (left < 8) left = 8;
+      var top = r.bottom + 4;
+      if (top + menu.offsetHeight > window.innerHeight - 8) {
+        top = r.top - menu.offsetHeight - 4;   // open upward
+      }
+      if (top < 8) top = 8;
+      menu.style.left = left + 'px';
+      menu.style.top = top + 'px';
       setTimeout(function () {
         document.addEventListener('click', window._closeRowShortcuts, { once: true, capture: true });
       }, 0);
