@@ -336,3 +336,11 @@ def test_build_figures_gallery_page_none_without_figures(tmp_path):
     _write(tmp_path / "investigations" / "empty" / "investigation.yaml",
            __import__("yaml").safe_dump(inv))
     assert figs.build_figures_gallery_page(tmp_path, "empty") is None
+
+
+def test_gallery_has_download_html_button(tmp_path):
+    """The standalone gallery carries a top download-HTML control, so the page
+    can be saved without hunting for an Export menu."""
+    html = figs.build_figures_gallery_page(_make_ws(tmp_path), "inv")
+    assert html is not None
+    assert 'id="dl-html-btn"' in html and "__dlPageHtml" in html

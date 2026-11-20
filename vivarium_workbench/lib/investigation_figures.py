@@ -311,6 +311,12 @@ _GALLERY_CSS = (
 )
 
 
+# A fixed top-right "download this page as .html" control for the standalone
+# gallery — so the HTML can be saved without hunting for an Export menu. Prefers
+# the current URL's served bytes; falls back to serializing the live DOM.
+_GALLERY_DL_BTN = r"""<button id="dl-html-btn" onclick="__dlPageHtml()" title="Download this figure gallery as a self-contained .html file" style="position:fixed;top:14px;right:16px;z-index:50;font:inherit;font-size:12.5px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--soft);border-radius:8px;padding:7px 11px;box-shadow:0 2px 8px rgba(0,0,0,0.08);white-space:nowrap">&#8595; HTML</button><script>function __dlPageHtml(){var name=(document.title||'figures').replace(/[^\w.-]+/g,'_')||'figures';try{var html='<!doctype html>\n'+document.documentElement.outerHTML;var b=new Blob([html],{type:'text/html'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name+'.html';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},4000);}catch(e){}}</script>"""
+
+
 def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[str], list[tuple[str, str, bool]]]]) -> str:
     """One navigable ``index.html`` for a figures export. ``groups`` is an ordered
     list of ``(heading, subtitle_or_None, [(arcname, label, is_html), …])``. Each
@@ -345,7 +351,8 @@ def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[s
             f'<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel=stylesheet>'
             f'<style>{_GALLERY_CSS}</style></head><body><div class="wrap">'
             f'<nav><h1>Figures</h1><p class="sub">{n_fig} figures &middot; {len(groups)} studies</p>'
-            + "".join(nav) + '</nav><main>' + hdr + "".join(body) + '</main></div></body></html>')
+            + "".join(nav) + '</nav><main>' + hdr + "".join(body) + '</main></div>'
+            + _GALLERY_DL_BTN + '</body></html>')
 
 
 def build_figures_gallery_page(ws_root, name: str) -> Optional[str]:
