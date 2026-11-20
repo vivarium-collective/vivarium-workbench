@@ -124,7 +124,7 @@ dependencies = [
     # `discovery_engine` (see root_packages + import-linter below). Pinned to a
     # PyPI semver range, not git branch=main, so installs are coherent and bumps
     # are visible Renovate PRs rather than silent commit drift.
-    "viva-discovery-engine>=0.3,<0.7",
+    "viva-discovery-engine>=0.3,<0.8",
     # viva-superpowers requires viva-basic-processes, which is not yet on
     # PyPI. Declare it BARE here and supply the git URL via [tool.uv.sources]
     # below — NOT as an inline `pkg @ git+...` direct reference. A baked-in
@@ -192,7 +192,11 @@ vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 # the URL OUT of the published metadata so it never conflicts with the bare
 # requirement from pbg-superpowers.
 [tool.uv.sources]
-# viva-discovery-engine: resolves from PyPI (>=0.3,<0.7 -> 0.6.0). The AI-drivable
+# viva-discovery-engine: resolves from PyPI (>=0.3,<0.8 -> 0.7.x). Ceiling raised
+# 0.7->0.8 so the workbench resolves alongside viva-superpowers>=0.27 (which floors
+# DE at >=0.7); DE 0.7 is purely additive over 0.6 for every API the workbench
+# imports (phases/study/reporting/projection/investigation/discover), so pin-only.
+# The AI-drivable
 # generation contract (emit/apply/runner), the consistent_with_zero evidence
 # grading (DE #43), and the 0.4-0.6 additions (generative cycle, engine-native
 # CLI verbs, linkage_index relocation, versioned EvidenceSnapshot) are published
