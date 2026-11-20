@@ -48,6 +48,20 @@ class Recognised:
 
 
 @dataclass(frozen=True)
+class SessionBuild:
+    """This workspace is a backend's build, checked out for this session (``Provider.session_build``, step P2 Builds).
+
+    The fields are what the build's record says, raw (``None`` where it says nothing); ``readable`` is False when the
+    record exists but cannot be read, and then every other field is ``None``."""
+
+    readable: bool
+    id: "int | str | None"  # the backend's build id, as recorded (SMS: the simulator id)
+    repo_url: "str | None"
+    commit: "str | None"
+    branch: "str | None"
+
+
+@dataclass(frozen=True)
 class Command:
     """A subcommand a provider adds to ``vivarium-workbench`` (``Provider.cli``). The core owns argparse: it adds the
     subparser, ``configure`` fills in its arguments and ``run`` is its handler (exit code). ``uses_backend`` puts it
@@ -98,6 +112,12 @@ class Provider(Protocol):
     def probe_client(self, base_url: str) -> "OpenApiProbe":
         """The client its ``recognise`` reads ``base_url`` with. It must also answer ``openapi_operations()`` (the
         core's compose-api detection runs on the same client, after ``recognise``). No network call."""
+        ...
+
+    # -- P2 Builds --
+    def session_build(self, ws_root: Path) -> "Optional[SessionBuild]":
+        """The build ``ws_root`` is a checkout of, when this provider made it, else ``None``. No network call; never
+        raises (an unreadable record is ``SessionBuild(readable=False, ...)``)."""
         ...
 
     # -- P2 CLI --
