@@ -159,6 +159,7 @@ from vivarium_workbench.lib.composite_resolve import resolve_composite_for_reque
 from vivarium_workbench.lib import composite_config_adapt as _composite_config_adapt
 from vivarium_workbench.lib.composites_query import composites_via_subprocess
 from vivarium_workbench.lib.models import (
+    BackendFeatures,
     BibEntry,
     CatalogPayload,
     CompositeRecord,
@@ -4018,6 +4019,21 @@ def create_app() -> FastAPI:
         Always HTTP 200; never raises. Library-backed via
         ``lib.workspace_deps_views.remote_health``."""
         return RemoteHealth.model_validate(_workspace_deps.remote_health())
+
+    @app.get(
+        "/api/backend/features",
+        response_model=BackendFeatures,
+        tags=["Workspaces & sources"],
+        summary="Features the active backends declare (optional UI controls only)",
+    )
+    def backend_features_route() -> BackendFeatures:
+        """The features this process's active backends declare (step P3 F0, ``lib.backends.features``): the
+        optional facets some active backend has (``listing``, ``artifacts``, ``analyses``, ``builds``) and each
+        provider's own UI features, sorted. Empty with providers off or the plugin absent. A registry read: no
+        network call, no profile, no run record (#1106). Features only hide optional controls in the browser
+        (``static/backend-features.js``); no dispatch or run-target decision reads them."""
+        import vivarium_workbench.lib.backends.features as _features
+        return BackendFeatures(features=sorted(_features.process_features()))
 
     @app.get(
         "/api/source/manifest",

@@ -10,6 +10,11 @@ export interface RemoteOrigin {
   experiment_id: string | null;
   backend: string | null;
   s3_uri: string | null;
+  features: string[];
+}
+
+export interface BackendFeatures {
+  features: string[];
 }
 
 export interface StudyRef {

@@ -121,6 +121,10 @@ class SmsProvider:
 
         return _cli.commands()
 
+    def features(self) -> frozenset[str]:
+        """``sms-launch``: the vEcoli launch panel (``static/sms-launch.js``), which no facet implies (step P3 F0)."""
+        return frozenset({"sms-launch"})
+
     def router(self) -> ProviderRouter:
         """``remote-run-start``, ``-status``, ``-build`` and ``-pinned-build`` (``vivarium_workbench_sms/routes.py``,
         step P2 Runs a2), and ``/api/source/builds``, ``build-remote`` and ``switch-build`` (Builds B3), built fresh

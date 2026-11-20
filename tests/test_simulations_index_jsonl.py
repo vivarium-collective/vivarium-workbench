@@ -91,5 +91,7 @@ def test_jsonl_genuine_remote_origin_is_preserved(tmp_path: Path):
 
     data = simulations_index.build_simulations_data(ws)
     row = {r["run_id"]: r for r in data["simulations"]}["remote-run"]
-    assert row["remote_origin"] == origin
+    # The raw mapping, plus the run's features (step P3 F0, additive).
+    assert {k: v for k, v in row["remote_origin"].items() if k != "features"} == origin
+    assert isinstance(row["remote_origin"]["features"], list)
     SimRow.model_validate(row)
