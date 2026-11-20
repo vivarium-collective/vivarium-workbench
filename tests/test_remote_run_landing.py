@@ -3,10 +3,10 @@ import sqlite3
 import tarfile
 from pathlib import Path
 
-from vivarium_workbench.lib.remote_run_landing import (
+from vivarium_workbench.lib.remote_run_landing import land_ptools_tsvs
+from vivarium_workbench_sms.sms_landing import (
     RemoteRunSeedCountMismatch,
     _count_parquet_rows,
-    land_ptools_tsvs,
     land_remote_run,
 )
 
@@ -676,3 +676,197 @@ def test_land_without_ws_root_does_not_land_ptools_anywhere(tmp_path: Path):
     )
 
     assert not list(study.glob("**/ptools"))
+
+
+# ---------------------------------------------------------------------------
+# Golden pins (step P2, Runs c1). ``land_remote_run`` moved verbatim from core
+# ``remote_run_landing`` into the plugin's ``sms_landing``; these pin what it writes
+# -- the PTools layout pbg-ptools globs (``<study>/**/ptools/*.tsv``), the bytes,
+# ``analyses.json`` and the run id -- against values computed on the commit BEFORE
+# the move (main @ 4a275cbe) and pasted in. A change here is a PTools-contract
+# change or a run-id change (re-landing would make a duplicate row): never re-paste
+# without saying why.
+# ---------------------------------------------------------------------------
+
+_GOLDEN_NOW = 1_700_000_000.0
+
+
+def _make_golden_tar(tmp_path: Path) -> Path:
+    """seed_00 zarr store + two analyses whose PTools TSVs sit in nested dirs + an analysis.json."""
+    staging = tmp_path / "staging_golden"
+    part = staging / "seed_00" / "store.zarr" / "experiment_id=exp-gold"
+    part.mkdir(parents=True)
+    (part / ".zgroup").write_text('{"zarr_format":2}')
+    a = staging / "analyses" / "analysis-gold-a"
+    (a / "ptools").mkdir(parents=True)
+    (a / "ptools" / "ptools_rna__all.tsv").write_text("id\tt0\tt1\nb0001\t1.0\t2.5\nb0002\t0.0\t3.0\n")
+    (a / "analysis.json").write_text(json.dumps({
+        "multivariant": {"ptools_rna": {"all": {"n": 2}}, "ptools_proteins": {"all": {"error": "boom"}}},
+        "status": "OK",
+        "summary": {"multivariant": {"ptools_rna": "ok", "ptools_proteins": "error"}},
+        "errors": [],
+    }, sort_keys=True))
+    nested = staging / "analyses" / "analysis-gold-b" / "out" / "ptools"
+    nested.mkdir(parents=True)
+    (nested / "ptools_proteins__all.tsv").write_text("id\tt0\nP0001\t7\n")
+    tar_path = tmp_path / "golden.tar.gz"
+    with tarfile.open(tar_path, "w:gz") as tar:
+        tar.add(staging, arcname=".")
+    return tar_path
+
+
+def _golden_env(monkeypatch) -> None:
+    from vivarium_workbench.lib import composite_runs as cr
+    from vivarium_workbench.lib.backends import records
+
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT", "golden-deploy")
+    monkeypatch.delenv("VIVARIUM_DASHBOARD_REMOTE_DEPLOYMENT", raising=False)
+    monkeypatch.setattr(cr.time, "time", lambda: _GOLDEN_NOW)
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: None)  # no network
+
+
+def _sha_tree(root: Path, base: Path) -> list[tuple[str, str]]:
+    import hashlib
+
+    return sorted((p.relative_to(base).as_posix(), hashlib.sha256(p.read_bytes()).hexdigest())
+                  for p in root.glob("**/ptools/*.tsv"))
+
+
+def _golden_land_via_tail(tmp_path: Path, monkeypatch, experiment_id: str) -> tuple[str, Path]:
+    """End to end through ``sms_legacy.land_tail`` (the route's SMS half) with a fake client."""
+    from vivarium_workbench_sms import sms_legacy
+
+    _golden_env(monkeypatch)
+    ws_root = tmp_path / "workspace"
+    study = ws_root / "studies" / "gold"
+    study.mkdir(parents=True)
+    (study / "study.yaml").write_text("baseline: [{composite: gold-spec}]\n")
+    tar = _make_golden_tar(tmp_path)
+
+    class _Client:
+        base_url = "http://golden.test"
+
+        def __init__(self, *a, **k):
+            pass
+
+        def get_simulation(self, sid):
+            return {"simulator_id": 3, "num_seeds": 1, "config": {"k": 1}}
+
+        def simulator_commit(self, simulator_id):
+            return "abc1234"
+
+        def download_data(self, sid, dest, timeout=None):
+            import shutil as _sh
+
+            out = Path(dest) / "d.tar.gz"
+            _sh.copy(tar, out)
+            return out
+
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _Client)
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
+    monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [{"composite": "gold-spec"}]})
+    body, code = sms_legacy.land_tail(ws_root, {"study": "gold", "simulation_id": 4242,
+                                                "experiment_id": experiment_id})
+    assert code == 200, body
+    return body["run_id"], ws_root
+
+
+_GOLDEN_RUN_ID = "gold-spec__1700000000__123cb1"
+_GOLDEN_STUDY_TSVS = [
+    ("sim-4242-gold/ptools/ptools_proteins__all.tsv", "73acd0c071d6b9785f57c67ee4ca667605f217e7a270e948c21a954a17f0c79c"),
+    ("sim-4242-gold/ptools/ptools_rna__all.tsv", "8a0fdf3f5f87e81579ee719c84bff50d8dc2be50b608b3deb689dfd85521672a"),
+]
+_GOLDEN_RUN_TSVS = [
+    ("ptools/ptools_proteins__all.tsv", "73acd0c071d6b9785f57c67ee4ca667605f217e7a270e948c21a954a17f0c79c"),
+    ("ptools/ptools_rna__all.tsv", "8a0fdf3f5f87e81579ee719c84bff50d8dc2be50b608b3deb689dfd85521672a"),
+]
+_GOLDEN_ANALYSES_SHA = "59cefd7c7606ffa6e379372889651fc19d60cfe109a3fb442f2d6ff281138df6"
+
+
+def test_golden_sms_landing_keeps_the_ptools_layout_bytes_and_run_id(tmp_path: Path, monkeypatch):
+    import hashlib
+
+    run_id, ws_root = _golden_land_via_tail(tmp_path, monkeypatch, "sim-4242-gold")
+    study = ws_root / "studies" / "gold"
+    run_dir = ws_root / ".pbg" / "runs" / run_id
+    assert run_id == _GOLDEN_RUN_ID
+    assert _sha_tree(study, study) == _GOLDEN_STUDY_TSVS
+    assert _sha_tree(run_dir, run_dir) == _GOLDEN_RUN_TSVS
+    assert hashlib.sha256((run_dir / "analyses.json").read_bytes()).hexdigest() == _GOLDEN_ANALYSES_SHA
+
+
+def test_golden_sms_landing_with_an_unplain_experiment_id_makes_no_study_copy(tmp_path: Path, monkeypatch):
+    run_id, ws_root = _golden_land_via_tail(tmp_path, monkeypatch, "../escape")
+    study = ws_root / "studies" / "gold"
+    run_dir = ws_root / ".pbg" / "runs" / run_id
+    assert _sha_tree(study, study) == []
+    assert not list(ws_root.glob("**/escape"))
+    assert _sha_tree(run_dir, run_dir) == _GOLDEN_RUN_TSVS
+
+
+_GOLDEN_DIRECT_RUN_ID = "gold-spec__1700000000__a1e41e"
+
+
+def test_golden_land_remote_run_id_is_stable_for_fixed_provenance(tmp_path: Path, monkeypatch):
+    """The run id hashes the provenance VALUES (``cr.generate_run_id``: sorted-keys JSON + the landing second).
+    Any edit to a provenance value -- ``backend``, ``source``, a renamed key -- changes it."""
+    _golden_env(monkeypatch)
+    study = tmp_path / "study"
+    run_id = land_remote_run(
+        study, spec_id="gold-spec", simulation_id=77, experiment_id="exp-77", commit="c0ffee",
+        tar_path=_make_golden_tar(tmp_path), image="img", merged_config_hash="h", s3_uri="s3://b/k",
+    )
+    assert run_id == _GOLDEN_DIRECT_RUN_ID
+
+
+# ---------------------------------------------------------------------------
+# One binding per moved name (step P2, Runs c1). The SMS landing lives only in
+# ``vivarium_workbench_sms.sms_landing``; a stale ``monkeypatch.setattr`` on the
+# core module, ``sms_legacy`` or ``remote_run_views`` then raises instead of
+# silently patching a dead copy.
+# ---------------------------------------------------------------------------
+
+_MOVED_TO_SMS_LANDING = (
+    "land_remote_run", "land_remote_simulation_artifacts", "RemoteRunSeedCountMismatch",
+    "_detect_and_locate_all", "_merge_zarr_tree", "_count_parquet_rows",
+)
+
+
+def test_core_landing_binds_no_sms_seam():
+    from vivarium_workbench.lib import remote_run_landing
+    from vivarium_workbench.lib import remote_run_views as rrv
+    from vivarium_workbench_sms import sms_landing, sms_legacy
+
+    gone = _MOVED_TO_SMS_LANDING + ("tarfile", "tempfile", "_time", "is_plain_name")
+    assert [n for n in gone if hasattr(remote_run_landing, n)] == []
+    assert [n for n in _MOVED_TO_SMS_LANDING if not hasattr(sms_landing, n)] == []
+    assert not hasattr(sms_legacy, "land_remote_run")
+    assert not hasattr(rrv, "land_remote_run")
+    for kept in ("land_composite_results", "fold_analyses", "land_ptools_tsvs"):
+        assert hasattr(remote_run_landing, kept) and not hasattr(sms_landing, kept)
+
+
+def test_plugin_reads_core_landing_through_the_module():
+    """No plugin module binds a core landing helper at import time (``from ...remote_run_landing import x`` at
+    module level), and none binds an ``sms_landing`` name at all: each is read as ``<module>.<name>`` at call
+    time, so a patch on the owning module steers every caller. Function-local from-imports run at call time, so
+    they are allowed for the core module."""
+    import ast
+
+    import vivarium_workbench_sms
+
+    bad = []
+    for path in sorted(Path(vivarium_workbench_sms.__path__[0]).glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        top = set()
+        for node in tree.body:
+            top.update(id(n) for n in ast.walk(node)
+                       if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.module == "vivarium_workbench.lib.remote_run_landing" and id(node) in top:
+                bad.append(f"{path.name}:{node.lineno} module-level from-import of remote_run_landing")
+            if (node.module, node.level) in (("vivarium_workbench_sms.sms_landing", 0), ("sms_landing", 1)):
+                bad.append(f"{path.name}:{node.lineno} binds an sms_landing name")
+    assert bad == []

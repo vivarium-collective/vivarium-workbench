@@ -1054,7 +1054,7 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
     compose-results-land-p0 T5c: once ``run_remote`` returns a landed
     tar.gz path, extract it and fold any analysis manifest into
     ``analyses.json`` via ``remote_run_landing.fold_analyses`` directly —
-    deliberately NOT via ``land_remote_run``, which is study-shaped and mints
+    deliberately NOT via the plugin's ``sms_landing.land_remote_run``, which is study-shaped and mints
     its OWN ``run_id`` (would fork a second, disconnected run row vs
     ``req.run_id`` and break the browser's status polling). This call is
     unconditional (no separate ``auto_results`` check — the send-side gate in

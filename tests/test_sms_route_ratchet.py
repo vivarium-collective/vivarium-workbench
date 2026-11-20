@@ -61,7 +61,6 @@ NOT_SMS_RECEIVERS = frozenset({
 #: of calls). Shrink this as step P2 lands; never grow it.
 ALLOWED: dict[str, frozenset[str]] = {
     "lib.composite_test_run_views": frozenset({"run_simulation"}),
-    "lib.remote_run_landing": frozenset({"download_data"}),
     "lib.remote_run_views": frozenset({"run_analysis", "upload_simulator"}),
     "lib.remote_trace": frozenset({"compose_status", "simulation_trace"}),
     "lib.simulations_index": frozenset({"download_data"}),
@@ -195,8 +194,9 @@ def test_no_new_sms_method_calls():
 #: (module, method) pairs in ALLOWED: 42 as of step 1a; 13 after step P1b moved the plugin's own modules out of
 #: the core (a move, not 28 removed calls); 12 after step P2 Client moved the capability contract into the plugin;
 #: 11 after step P2 Runs c2 moved run_jobs' batch status into the plugin; 7 after step P2 Runs b moved the SMS
-#: deployment run (remote_run.run_remote's SMS half) into the plugin. Only removals lower it.
-PINNED_PAIRS = 7
+#: deployment run (remote_run.run_remote's SMS half) into the plugin; 6 after step P2 Runs c1 moved the SMS landing
+#: (``download_data``) into the plugin. Only removals lower it.
+PINNED_PAIRS = 6
 
 
 def test_allowed_methods_never_grow():

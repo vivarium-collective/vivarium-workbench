@@ -130,6 +130,43 @@ def test_run_target_answers_without_the_plugin(monkeypatch):
     assert "@@RESULT@@local" in proc.stdout, proc.stderr[-2000:]
 
 
+_LANDING_PROBE = textwrap.dedent('''
+    import json, sys, tempfile
+    from pathlib import Path
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import remote_run_landing
+
+    root = Path(tempfile.mkdtemp())
+    tree, ws = root / "x", root / "ws"
+    a = tree / "analyses" / "a"
+    (a / "ptools").mkdir(parents=True)
+    (a / "ptools" / "ptools_rna__all.tsv").write_text("id t0")
+    (a / "analysis.json").write_text(json.dumps({"summary": {"m": {"ptools_rna": "ok"}}}))
+    remote_run_landing.fold_analyses(tree, ws, "r1")
+    n = remote_run_landing.land_ptools_tsvs(tree, ws, "r1", study_dest=root / "study" / "e")
+    ok = ((ws / ".pbg" / "runs" / "r1" / "analyses.json").is_file()
+          and (root / "study" / "e" / "ptools" / "ptools_rna__all.tsv").is_file())
+    plugin = [m for m in sys.modules if m.startswith("vivarium_workbench_sms")]
+    print("@@RESULT@@" + json.dumps({"n": n, "ok": ok, "plugin": plugin}))
+''')
+
+
+def test_the_archive_landing_runs_without_the_plugin():
+    """Step P2 Runs c1: the archive landing the core keeps (``fold_analyses``, ``land_ptools_tsvs``: the PTools
+    writer) runs with the plugin absent and never reaches for it."""
+    proc = subprocess.run([sys.executable, "-c", _LANDING_PROBE], capture_output=True, text=True, timeout=300)
+    marker = [ln for ln in proc.stdout.splitlines() if ln.startswith("@@RESULT@@")]
+    assert marker, proc.stderr[-2000:]
+    assert json.loads(marker[-1][len("@@RESULT@@"):]) == {"n": 1, "ok": True, "plugin": []}
+
+
 _CLI_PROBE = textwrap.dedent('''
     import argparse, sys
 

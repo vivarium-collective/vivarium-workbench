@@ -22,6 +22,7 @@ CORE = [
     "vivarium_workbench.lib.backends.compose_api",
     "vivarium_workbench.lib.server_capabilities",
     "vivarium_workbench.lib.remote_run_compose",
+    "vivarium_workbench.lib.remote_run_landing",
     "vivarium_workbench.lib.remote_run_views",
     "vivarium_workbench.lib.run_jobs",
     "vivarium_workbench.lib.workspace_deps_views",

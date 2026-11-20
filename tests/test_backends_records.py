@@ -305,7 +305,7 @@ def test_the_document_backends_placeholders_record_where_the_run_went(ws, monkey
 def test_land_remote_run_records_the_run_and_keeps_its_id(tmp_path, monkeypatch):
     """The record is kept out of the run id's hash: the same landing with a different record gets the same id."""
     _make_remote_zarr_tar_with_analysis = _sibling("test_remote_run_landing")._make_remote_zarr_tar_with_analysis
-    from vivarium_workbench.lib.remote_run_landing import land_remote_run
+    from vivarium_workbench_sms.sms_landing import land_remote_run
 
     monkeypatch.setattr(cr.time, "time", lambda: 1_700_000_000.0)  # the id embeds the second it was made
     ws_root = tmp_path / "workspace"
@@ -520,7 +520,7 @@ def test_the_same_deployment_behind_another_url_is_accepted_by_identity(ws, stan
 
 def test_sms_submit_and_land_record_the_clients_url(monkeypatch, tmp_path):
     from vivarium_workbench.lib import remote_run_views as rrv
-    from vivarium_workbench_sms import sms_legacy
+    from vivarium_workbench_sms import sms_landing, sms_legacy
 
     monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: None)
     seen = {}
@@ -551,7 +551,7 @@ def test_sms_submit_and_land_record_the_clients_url(monkeypatch, tmp_path):
     monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec)
     monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
     monkeypatch.setattr(rrv.study_spec, "collect_study_observables", lambda s: [])
-    monkeypatch.setattr(sms_legacy, "land_remote_run", lambda *a, **k: seen.update(k) or "r1")
+    monkeypatch.setattr(sms_landing, "land_remote_run", lambda *a, **k: seen.update(k) or "r1")
 
     assert sms_legacy.submit_tail(tmp_path, {"study": "s", "simulator_id": 1, "num_generations": 1,
                                              "num_seeds": 1})[1] == 202

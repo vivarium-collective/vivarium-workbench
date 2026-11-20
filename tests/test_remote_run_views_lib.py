@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from vivarium_workbench.lib import remote_run_views as rrv
-from vivarium_workbench_sms import sms_legacy
+from vivarium_workbench_sms import sms_landing, sms_legacy
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +255,7 @@ def _wire_thin(monkeypatch, tmp_path, *, authed=True, study_exists=True):
     )
     monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
     captured = {"land": None}
-    monkeypatch.setattr(sms_legacy, "land_remote_run",
+    monkeypatch.setattr(sms_landing, "land_remote_run",
                         lambda study_dir, **kw: captured.__setitem__("land", (study_dir, kw)) or "run-xyz")
     return captured
 
