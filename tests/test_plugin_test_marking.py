@@ -1,8 +1,8 @@
 """Test modules that need the SMS plugin say so (docs/backend-adapters.md step P3, K1).
 
 The ``core-only`` CI job runs the suite with ``vivarium_workbench_sms`` removed. There, ``tests/conftest.py`` ignores
-every test module that imports the plugin at module level (it cannot be collected) and strict-xfails every test marked
-``plugin``. A module ignored that way silently drops any core tests it holds, so a module that imports the plugin at
+every test module that imports the plugin at module level (it cannot be collected) or is marked ``plugin`` whole, and
+strict-xfails every other test marked ``plugin``. A module ignored that way silently drops any core tests it holds, so a module that imports the plugin at
 module level must be a pure-plugin module and say so with ``pytestmark = pytest.mark.plugin``.
 
 ``UNMARKED_PLUGIN_IMPORTERS`` is a ratchet: the modules that imported the plugin at module level without the mark when
@@ -14,12 +14,18 @@ This guard runs in the normal suite (it needs the plugin present to mean anythin
 """
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 
 import pytest
 
-from conftest import PLUGIN_PACKAGE, _test_modules, module_imports_plugin, plugin_imports_at_module_level
+from conftest import (
+    PLUGIN_PACKAGE,
+    _test_modules,
+    declares_plugin_mark,
+    module_imports_plugin,
+    module_needs_plugin_to_collect,
+    plugin_imports_at_module_level,
+)
 
 TESTS = Path(__file__).parent
 
@@ -79,22 +85,14 @@ UNMARKED_PLUGIN_IMPORTERS: frozenset[str] = frozenset({
     "test_viva_v1_client_contract.py",
 })
 
+#: The ratchet's ceiling: UNMARKED_PLUGIN_IMPORTERS's size when the core-only job arrived (K1). Each K2 PR that
+#: shrinks the set lowers this to the new size in the same PR; NEVER raise it -- a new module-level importer gets the
+#: mark instead.
+UNMARKED_PLUGIN_IMPORTERS_CEILING = 53
+
 
 def _name(path: Path) -> str:
     return path.relative_to(TESTS).as_posix()
-
-
-def _declares_plugin_mark(source: str) -> bool:
-    """A top-level ``pytestmark = ...`` whose value names the ``plugin`` mark (alone or in a list)."""
-    for stmt in ast.parse(source).body:
-        targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target] if isinstance(
-            stmt, ast.AnnAssign) else []
-        if any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in targets) and stmt.value is not None:
-            for node in ast.walk(stmt.value):
-                if isinstance(node, ast.Attribute) and node.attr == "plugin" and isinstance(
-                        node.value, ast.Attribute) and node.value.attr == "mark":
-                    return True
-    return False
 
 
 def _scan() -> tuple[set[str], set[str]]:
@@ -102,12 +100,18 @@ def _scan() -> tuple[set[str], set[str]]:
     unmarked, hollow = set(), set()
     for path in _test_modules():
         source = path.read_text(encoding="utf-8")
-        marked = _declares_plugin_mark(source)
+        marked = declares_plugin_mark(source)
         if module_imports_plugin(path) and not marked:
             unmarked.add(_name(path))
         if marked and PLUGIN_PACKAGE not in source and not module_imports_plugin(path):
             hollow.add(_name(path))
     return unmarked, hollow
+
+
+def test_the_ratchet_only_shrinks():
+    assert len(UNMARKED_PLUGIN_IMPORTERS) <= UNMARKED_PLUGIN_IMPORTERS_CEILING, (
+        f"UNMARKED_PLUGIN_IMPORTERS grew to {len(UNMARKED_PLUGIN_IMPORTERS)} (ceiling "
+        f"{UNMARKED_PLUGIN_IMPORTERS_CEILING}); mark the new module-level plugin importer instead of listing it")
 
 
 def test_module_level_plugin_importers_are_marked():
@@ -164,6 +168,9 @@ def test_the_detector(source, expected):
     assert plugin_imports_at_module_level(source) == expected
 
 
+_P = "def _p():\n    import vivarium_workbench_sms\n    return []\n"
+
+
 @pytest.mark.parametrize(("source", "expected"), [
     # a sibling test module that needs the plugin brings it in transitively
     ("from test_needs import ws\n", [1]),
@@ -177,6 +184,24 @@ def test_the_detector(source, expected):
     # defined but not called at import time
     ("def _mods():\n    import vivarium_workbench_sms\n", []),
     ("def _mods():\n    import vivarium_workbench_sms\nF = lambda: _mods()\n", []),
+    # import-time positions other than assignments: decorators (incl. parametrize ids), defaults, class headers,
+    # compound-statement headers, assert / raise
+    (_P + "@pytest.mark.parametrize('x', [1], ids=_p())\ndef test_x(x):\n    pass\n", [4]),
+    (_P + "@pytest.mark.parametrize('x', _p())\ndef test_x(x):\n    pass\n", [4]),
+    (_P + "def test_x(a=_p()):\n    pass\n", [4]),
+    (_P + "def test_x(*, a=_p()):\n    pass\n", [4]),
+    (_P + "@_p()\nclass T:\n    pass\n", [4]),
+    (_P + "class T(*_p()):\n    pass\n", [4]),
+    (_P + "class T:\n    @pytest.mark.parametrize('x', _p())\n    def test_x(self, x):\n        pass\n", [5]),
+    (_P + "if _p():\n    pass\n", [4]),
+    (_P + "while _p():\n    pass\n", [4]),
+    (_P + "for x in _p():\n    pass\n", [4]),
+    (_P + "with _p():\n    pass\n", [4]),
+    (_P + "assert _p() == []\n", [4]),
+    (_P + "match _p():\n    case _:\n        pass\n", [4]),
+    # ... but not when only the body (run at call time) or a lambda uses it
+    (_P + "def test_x(a=lambda: _p()):\n    pass\n", []),
+    (_P + "@pytest.mark.parametrize('x', [1])\ndef test_x(x):\n    _p()\n", []),
 ])
 def test_the_detector_follows_local_modules_and_calls(source, expected):
     assert plugin_imports_at_module_level(source, lambda name: name == "test_needs") == expected
@@ -203,8 +228,20 @@ def test_module_imports_plugin_follows_sibling_modules_and_survives_cycles(tmp_p
     }
 
 
+def test_a_whole_module_mark_is_enough_to_skip_collection(tmp_path):
+    """Marking a pure-plugin module whole is always a valid fix, even for a plugin use the detector cannot see."""
+    (tmp_path / "test_marked.py").write_text(
+        "import pytest\npytestmark = pytest.mark.plugin\nX = __import__('vivarium_workbench_sms')\n")
+    (tmp_path / "test_uses_marked.py").write_text("from test_marked import X\n")
+    (tmp_path / "test_plain.py").write_text("import os\n")
+    assert not module_imports_plugin(tmp_path / "test_marked.py")      # the detector does not see __import__
+    assert module_needs_plugin_to_collect(tmp_path / "test_marked.py")
+    assert module_needs_plugin_to_collect(tmp_path / "test_uses_marked.py")
+    assert not module_needs_plugin_to_collect(tmp_path / "test_plain.py")
+
+
 def test_the_mark_check():
-    assert _declares_plugin_mark("import pytest\npytestmark = pytest.mark.plugin\n")
-    assert _declares_plugin_mark("import pytest\npytestmark = [pytest.mark.slow, pytest.mark.plugin]\n")
-    assert not _declares_plugin_mark("import pytest\npytestmark = pytest.mark.slow\n")
-    assert not _declares_plugin_mark("import pytest\ndef f():\n    pytestmark = pytest.mark.plugin\n")
+    assert declares_plugin_mark("import pytest\npytestmark = pytest.mark.plugin\n")
+    assert declares_plugin_mark("import pytest\npytestmark = [pytest.mark.slow, pytest.mark.plugin]\n")
+    assert not declares_plugin_mark("import pytest\npytestmark = pytest.mark.slow\n")
+    assert not declares_plugin_mark("import pytest\ndef f():\n    pytestmark = pytest.mark.plugin\n")

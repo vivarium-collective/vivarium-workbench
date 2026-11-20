@@ -12,7 +12,8 @@
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export VIVARIUM_WORKBENCH_TEST_NO_PLUGIN=1
+# The project venv (uv run --project), not whatever `python` is first on PATH; pytest args stay relative to the cwd.
 if [[ $# -gt 0 ]]; then
-  exec python -m pytest -q "$@"
+  exec uv run --project "${repo_root}" python -m pytest -q "$@"
 fi
-exec bash "${repo_root}/scripts/pytest_gate.sh"
+exec uv run --project "${repo_root}" bash "${repo_root}/scripts/pytest_gate.sh"

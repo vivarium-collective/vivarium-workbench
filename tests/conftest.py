@@ -35,9 +35,10 @@ for fixture_ws in _FIXTURES.iterdir() if _FIXTURES.is_dir() else []:
 #   "off"     the plugin is installed but VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none turns providers off;
 #   None      the normal suite.
 #
-# Absent: a test module whose top-level runtime statements import the plugin cannot be collected and is ignored;
-# a test marked `plugin` becomes xfail(strict=True) -- a setup error or failure counts as xfailed, a pass is a strict
-# XPASS (a failure: the mark is stale). Off: a `plugin` test is skipped.
+# Absent: a test module whose top-level runtime statements import the plugin cannot be collected and is ignored, as
+# is a module marked `plugin` whole (module_needs_plugin_to_collect); any other test marked `plugin` becomes
+# xfail(strict=True) -- a setup error or failure counts as xfailed, a pass is a strict XPASS (a failure: the mark is
+# stale). Off: a `plugin` test is skipped.
 
 PLUGIN_PACKAGE = "vivarium_workbench_sms"
 NO_PLUGIN_ENV = "VIVARIUM_WORKBENCH_TEST_NO_PLUGIN"
@@ -99,7 +100,10 @@ def plugin_imports_at_module_level(source: str, local_needs_plugin=None) -> list
     """The line numbers of the plugin imports a module runs when it is imported (so: when pytest collects it).
 
     Counted, in the module body and in the bodies of top-level ``if`` / ``with`` / ``try`` / ``for`` / ``while`` /
-    ``class`` statements:
+    ``match`` / ``class`` statements, and in every expression those run at import time -- simple statements (assign,
+    expression, ``assert``, ``raise``, ...), compound-statement headers (``if`` / ``while`` tests, ``for`` iterables,
+    ``with`` items, ``match`` subjects), function and class decorators (``@pytest.mark.parametrize(..., _ids())``),
+    default arguments, and class bases / keywords:
     - ``import`` / ``from ... import`` of the plugin, and ``importlib.import_module("<plugin>...")``;
     - an import of a sibling test-tree module (``from test_backends_existing import ws``) for which
       ``local_needs_plugin(name)`` is true -- the plugin arrives transitively;
@@ -161,6 +165,13 @@ def plugin_imports_at_module_level(source: str, local_needs_plugin=None) -> list
             todo.extend(ast.iter_child_nodes(n))
         return False
 
+    def check(*exprs) -> None:
+        """The expressions a statement evaluates at import time (its body aside): count the first that imports."""
+        for e in exprs:
+            if e is not None and _runs_plugin_import(e):
+                lines.append(e.lineno)
+                return
+
     def visit(body) -> None:
         for stmt in body:
             if isinstance(stmt, ast.Import):
@@ -170,10 +181,14 @@ def plugin_imports_at_module_level(source: str, local_needs_plugin=None) -> list
                 if stmt.level == 0 and _needs(stmt.module):
                     lines.append(stmt.lineno)
             elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
+                # The body runs when called; the decorators and defaults run now. (Annotations are skipped: the
+                # test tree uses `from __future__ import annotations`.)
+                check(*stmt.decorator_list, *stmt.args.defaults, *stmt.args.kw_defaults)
             elif isinstance(stmt, ast.ClassDef):
+                check(*stmt.decorator_list, *stmt.bases, *(k.value for k in stmt.keywords))
                 visit(stmt.body)
             elif isinstance(stmt, ast.If):
+                check(stmt.test)
                 if not _is_type_checking(stmt.test):
                     visit(stmt.body)
                 visit(stmt.orelse)
@@ -185,24 +200,50 @@ def plugin_imports_at_module_level(source: str, local_needs_plugin=None) -> list
                 visit(stmt.orelse)
                 visit(stmt.finalbody)
             elif isinstance(stmt, (ast.With, ast.AsyncWith, ast.For, ast.AsyncFor, ast.While)):
+                if isinstance(stmt, (ast.With, ast.AsyncWith)):
+                    check(*(item.context_expr for item in stmt.items))
+                elif isinstance(stmt, ast.While):
+                    check(stmt.test)
+                else:
+                    check(stmt.iter)
                 visit(stmt.body)
                 visit(getattr(stmt, "orelse", []))
-            elif isinstance(stmt, (ast.Expr, ast.Assign, ast.AnnAssign, ast.AugAssign)):
-                if _runs_plugin_import(stmt):
-                    lines.append(stmt.lineno)
+            elif isinstance(stmt, ast.Match):
+                check(stmt.subject, *(c.guard for c in stmt.cases))
+                for case in stmt.cases:
+                    visit(case.body)
+            elif _runs_plugin_import(stmt):
+                # Any other simple statement (assign, expression, assert, raise, del, ...) runs whole at import.
+                lines.append(stmt.lineno)
 
     visit(tree.body)
     return sorted(lines)
 
 
-_PLUGIN_IMPORT_CACHE: dict[tuple[str, int], bool] = {}
+def declares_plugin_mark(source: str) -> bool:
+    """A top-level ``pytestmark = ...`` whose value names the ``plugin`` mark (alone or in a list)."""
+    for stmt in ast.parse(source).body:
+        targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target] if isinstance(
+            stmt, ast.AnnAssign) else []
+        if any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in targets) and stmt.value is not None:
+            for node in ast.walk(stmt.value):
+                if isinstance(node, ast.Attribute) and node.attr == "plugin" and isinstance(
+                        node.value, ast.Attribute) and node.value.attr == "mark":
+                    return True
+    return False
 
 
-def module_imports_plugin(path: Path, _visiting: frozenset[str] = frozenset()) -> bool:
+_PLUGIN_IMPORT_CACHE: dict[tuple[str, int, bool], bool] = {}
+
+
+def module_imports_plugin(path: Path, _visiting: frozenset[str] = frozenset(), *, count_marked: bool = False) -> bool:
     """Whether importing this test-tree module imports the plugin, directly or through a sibling module it imports
-    (``from test_backends_existing import ws``). AST only; cached by path and mtime; an import cycle counts as no."""
+    (``from test_backends_existing import ws``). AST only; cached by path and mtime; an import cycle counts as no.
+
+    ``count_marked=True`` (what collection uses: ``module_needs_plugin_to_collect``) also counts a module that declares
+    a whole-module ``pytestmark`` naming ``plugin``, and a module importing such a sibling."""
     try:
-        key = (str(path), path.stat().st_mtime_ns)
+        key = (str(path), path.stat().st_mtime_ns, count_marked)
     except OSError:
         return False
     if key in _PLUGIN_IMPORT_CACHE:
@@ -213,15 +254,30 @@ def module_imports_plugin(path: Path, _visiting: frozenset[str] = frozenset()) -
 
     def _sibling_needs_plugin(name: str) -> bool:
         sibling = path.parent / f"{name}.py"
-        return sibling != path and sibling.is_file() and module_imports_plugin(sibling, visiting)
+        return sibling != path and sibling.is_file() and module_imports_plugin(
+            sibling, visiting, count_marked=count_marked)
 
     try:
-        result = bool(plugin_imports_at_module_level(path.read_text(encoding="utf-8"), _sibling_needs_plugin))
+        source = path.read_text(encoding="utf-8")
+        result = (count_marked and declares_plugin_mark(source)) or bool(
+            plugin_imports_at_module_level(source, _sibling_needs_plugin))
     except (SyntaxError, UnicodeDecodeError, OSError):
         result = False      # let pytest report it
     if result or not _visiting:     # inside a cycle a "no" may be provisional; a "yes" is always final
         _PLUGIN_IMPORT_CACHE[key] = result
     return result
+
+
+def module_needs_plugin_to_collect(path: Path) -> bool:
+    """Whether the core-only run ignores this module: it imports the plugin at module level (as far as the AST
+    detector sees), OR it declares a whole-module ``pytestmark = pytest.mark.plugin`` (or imports such a sibling).
+
+    The second clause makes marking a pure-plugin module whole ALWAYS a valid fix, even for an import-time plugin use
+    the detector misses. Trade-off: such a module's tests are not collected in the core-only run at all, so they are
+    never strict-xfailed there -- a stale whole-module mark (a module that no longer needs the plugin) is not caught
+    by an XPASS. tests/test_plugin_test_marking.py's hollow-mark check (the module must reference the plugin) is the
+    guard for that instead."""
+    return module_imports_plugin(path, count_marked=True)
 
 
 def _test_modules() -> list[Path]:
@@ -240,7 +296,7 @@ def pytest_ignore_collect(collection_path, config):
     if CORE_MODE != "absent":
         return None
     if collection_path.suffix == ".py" and collection_path.name.startswith("test_") \
-            and module_imports_plugin(collection_path):
+            and module_needs_plugin_to_collect(collection_path):
         return True
     return None
 
@@ -277,7 +333,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     if CORE_MODE is None or hasattr(config, "workerinput"):
         return
     state = _CORE_ONLY_COUNTS
-    ignored = [p.name for p in _test_modules() if module_imports_plugin(p)] if CORE_MODE == "absent" else []
+    ignored = [p.name for p in _test_modules() if module_needs_plugin_to_collect(p)] if CORE_MODE == "absent" else []
     collect_errors = sorted({r.nodeid or str(getattr(r, "fspath", "?")) for r in terminalreporter.stats.get("error", [])
                              if getattr(r, "when", None) == "collect"})
     lines = [f"### Core-only mode: plugin {CORE_MODE}", ""]
@@ -291,7 +347,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
             "",
         ]
     lines += [
-        f"- test modules ignored (import the plugin at module level): **{len(ignored)}**",
+        f"- test modules ignored (import the plugin at module level, or marked `plugin` whole): **{len(ignored)}**",
         f"- `plugin`-marked tests run in this job: **{len(state['plugin_items'])}**",
         f"- of those xfailed: **{len(state['xfailed'])}**; strict XPASS (stale mark): **{len(state['xpassed'])}**",
     ]

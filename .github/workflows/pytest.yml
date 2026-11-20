@@ -18,6 +18,12 @@ on:
   push:
     branches: [main]
 
+# A newer push to the same PR branch supersedes the running suite (each run is 8+ shard jobs). On `main` every push
+# gets its own complete run: a cancelled main run would leave that commit without a `suite` / `core-only` result.
+concurrency:
+  group: pytest-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   suite:
     # 4 shards x 4 cores each = ~16-way parallelism. Two levels, because each
@@ -159,7 +165,9 @@ jobs:
     #
     # It reads the shards' real conclusions from the API rather than `needs.core-only.result`: with job-level
     # continue-on-error, `needs.<job>.result` is `success` even when every shard failed, so the K1 check would be
-    # green while it enforces nothing. Non-blocking itself (continue-on-error) until step Z (K3) removes both.
+    # green while it enforces nothing. It reports red until step P3's K2 PRs finish converting the tests, but it
+    # does not gate merges until branch protection requires it (end of P3, step Z / K3, which also removes the
+    # continue-on-error here and on the shards).
     name: core-only
     needs: core-only
     if: always()
