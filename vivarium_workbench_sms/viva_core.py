@@ -54,13 +54,22 @@ class VivaCoreRuns:
                                   analysis_options=analysis_options, build_ref=build_ref, emit_paths=emit_paths, via_viva_v1=True)
 
     def dispatch_preflight(self, ws_root: Path) -> dict:
-        """The named backend runs the workspace's composites as documents: there is no cloud image to resolve, but a
-        named-environment run ships the workspace from git. Moved verbatim from ``/api/remote-dispatch-preflight``
-        (step P2 Builds B2): the git preflight always runs (Finding F: the card skips it for an ``id:``
-        environment)."""
+        """The named backend runs the workspace's composites as documents: there is no cloud image to resolve. A
+        named environment (``name:``) ships the workspace from git, so the clean+pushed git preflight decides. An
+        environment id (``id:``) runs its prebuilt image and ships nothing from git, so it is always ready -- the
+        card launches it without the check too; a dirty or unpushed tree only adds a non-blocking ``warnings``
+        entry, since those changes will not be in the run (step P2 Builds B2b, Finding F)."""
         from vivarium_workbench.lib import remote_run
 
+        environment = remote_run_viva_v1.backend_environment()
         pf = remote_run.remote_dispatch_preflight(ws_root)
+        if "id" in environment:
+            warning = _id_environment_warning(environment["id"], pf)
+            pf = {**pf, "ok": True, "reason": "ok",
+                  "message": f"Environment id:{environment['id']} runs its prebuilt image -- nothing is shipped "
+                             "from the workspace's git tree, so nothing needs to be committed or pushed first."}
+            if warning:
+                pf["warnings"] = [warning]
         pf["target"] = "deployment"
         pf["dispatch"] = "viva-v1-document"
         return pf
@@ -78,6 +87,20 @@ class VivaCoreRuns:
             return {"error": pf.get("message", "workspace not ready to run remotely"),
                     "reason": pf.get("reason"), "preflight": pf, "run_target": "deployment"}, 409
         return Detached()
+
+
+def _id_environment_warning(env_id: str, pf: dict) -> "str | None":
+    """The non-blocking note for an ``id:`` environment whose workspace tree is dirty or unpushed: those changes are
+    not in the prebuilt image the run uses. ``None`` for a clean+pushed tree, and for a tree the git check cannot
+    read or with no remote (an ``id:`` run never needs either)."""
+    reason = pf.get("reason")
+    if reason == "dirty":
+        return (f"uncommitted changes are not used by this environment (id:{env_id} runs its prebuilt image); "
+                "a run uses the code already in that image")
+    if reason == "unpushed":
+        return (f"unpushed commits are not used by this environment (id:{env_id} runs its prebuilt image); "
+                "a run uses the code already in that image")
+    return None
 
 
 def viva_health_identity(base_url: str) -> "str | None":

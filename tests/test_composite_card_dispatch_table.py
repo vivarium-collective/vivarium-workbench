@@ -350,13 +350,26 @@ def test_preflight_opt_in(card, inproc_client):
                     "requires the repo to be on sms-api's compose allow-list.")}
 
 
-@pytest.mark.parametrize("environment", ["runtime", "id:env-1"])
-def test_preflight_viva_always_runs_the_git_check(card, inproc_client, environment):
-    """Today's behaviour, kept by B2 (Finding F: the card skips the check for an ``id:`` environment)."""
+def test_preflight_viva_named_environment_runs_the_git_check(card, inproc_client):
+    """A named environment ships the workspace from git: the git preflight decides (unchanged by B2b)."""
     card.name("viva")
-    card.env(environment)
+    card.env("runtime")
     card.state["preflight"] = NOT_PUSHED
     assert _preflight(card, inproc_client) == {**NOT_PUSHED, "target": "deployment", "dispatch": "viva-v1-document"}
+
+
+def test_preflight_viva_environment_id_is_ready_with_a_warning(card, inproc_client):
+    """An environment id runs its prebuilt image (Builds B2b, Finding F): ready like the card, and an unpushed tree
+    is only a non-blocking warning. (Before B2b this row answered the git preflight's refusal.)"""
+    card.name("viva")
+    card.env("id:env-1")
+    card.state["preflight"] = NOT_PUSHED
+    assert _preflight(card, inproc_client) == {
+        **NOT_PUSHED, "ok": True, "reason": "ok", "target": "deployment", "dispatch": "viva-v1-document",
+        "message": ("Environment id:env-1 runs its prebuilt image -- nothing is shipped from the workspace's git "
+                    "tree, so nothing needs to be committed or pushed first."),
+        "warnings": ["unpushed commits are not used by this environment (id:env-1 runs its prebuilt image); "
+                     "a run uses the code already in that image"]}
 
 
 def test_preflight_compose(card, inproc_client, monkeypatch):

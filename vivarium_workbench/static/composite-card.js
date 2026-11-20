@@ -1001,8 +1001,13 @@
     var known = !!(pf && pf.target);
     var cloud = known && pf.target === 'deployment';
     if (!known) return { label: 'Runs: —', bg: '#eef1f4', fg: '#8a97a4', tip: 'Could not determine where a Run will execute.' };
-    if (cloud) return { label: 'Runs: Cloud', bg: '#e6f0fb', fg: '#1e5fa4',
-      tip: pf.message || 'This workspace runs on the Cloud (GovCloud) deployment — ▶ Run dispatches remotely.' };
+    // Non-blocking notes (e.g. a viva-core `id:` environment with uncommitted changes:
+    // the run uses its prebuilt image, so local edits won't apply) — an ⓘ on the
+    // label and the note in the tooltip; the badge keeps its ready (blue) styling.
+    var notes = (pf.warnings && pf.warnings.length) ? pf.warnings : null;
+    if (cloud) return { label: 'Runs: Cloud' + (notes ? ' ⓘ' : ''), bg: '#e6f0fb', fg: '#1e5fa4',
+      tip: (pf.message || 'This workspace runs on the Cloud (GovCloud) deployment — ▶ Run dispatches remotely.') +
+        (notes ? ' Note (does not block a Run): ' + notes.join('; ') + '.' : '') };
     return { label: 'Runs: Local', bg: '#eef1f4', fg: '#667085',
       tip: (pf.message || 'This workspace runs locally.') +
         ' Switch the Environment scope to Cloud (with a build selected) to dispatch a Run remotely instead.' };

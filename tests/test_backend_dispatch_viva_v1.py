@@ -395,6 +395,84 @@ def test_run_remote_runs_a_document_and_lands_the_compose_results(ws, stub, clea
     assert str(SIM_ID) in lookup.query["ids"]
 
 
+@pytest.mark.parametrize("environment", ["id:env-1", "runtime"])
+def test_run_remote_ships_from_git_only_for_a_named_environment(ws, stub, clean_backend_env, monkeypatch, tmp_path,
+                                                                 environment):
+    """Builds B2b (Finding F): an ``id:`` environment runs its prebuilt image, so the detached run never asks
+    ``git_pip_url`` (whose clean+pushed check a dirty tree fails) or the pinned deps; it submits the same document
+    body otherwise. A named environment still ships the workspace from git."""
+    from vivarium_workbench.lib import remote_run
+
+    _remote_ready(stub, monkeypatch)
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT", environment)
+    asked = []
+
+    def git_pip_url(ws_root):
+        asked.append("git_pip_url")
+        if environment.startswith("id:"):
+            raise RuntimeError("workspace has uncommitted changes")  # what a dirty tree answers
+        return "git+https://github.com/o/r.git@abc"
+
+    def pinned_deps(ws_root):
+        asked.append("workspace_pinned_deps")
+        return []
+
+    monkeypatch.setattr(remote_run, "git_pip_url", git_pip_url)
+    monkeypatch.setattr(remote_run, "workspace_pinned_deps", pinned_deps)
+    _serve_results(stub, [_hpcrun(SIM_ID, 38, RUN_ID)])
+    out = remote_run.run_remote(ws, COMPOSITE, dest=tmp_path / "out", n_steps=5, poll_interval=0.01)
+
+    (call,) = stub.calls_to("viva-create-composite-run")
+    assert out.is_file()
+    assert call.body["label"] == f"workbench: {COMPOSITE}"
+    assert call.body["document"]
+    if environment.startswith("id:"):
+        assert asked == []
+        assert call.body["environment"] == {"id": "env-1"}
+        assert call.body["execution"]["options"] == {"interval_time": 5.0}
+    else:
+        assert asked == ["git_pip_url", "workspace_pinned_deps"]
+        assert call.body["environment"] == {"name": "runtime"}
+        assert call.body["execution"]["options"] == {
+            "interval_time": 5.0, "extra_pip_deps": ["git+https://github.com/o/r.git@abc"]}
+
+
+_DIRTY = {"ok": False, "reason": "dirty", "sha": "abc", "dirty_files": " M x.py", "remote": "",
+          "message": "This workspace has uncommitted changes"}
+_CLEAN = {"ok": True, "reason": "ok", "sha": "abc", "dirty_files": "", "remote": "git@github.com:o/r.git",
+          "message": "Workspace is clean and pushed — ready to run remotely."}
+
+
+@pytest.mark.parametrize("environment, tree, ok, warns", [
+    ("id:env-1", "dirty", True, True),
+    ("id:env-1", "clean", True, False),
+    ("runtime", "dirty", False, False),
+    ("runtime", "clean", True, False),
+])
+def test_the_dispatch_preflight_needs_a_clean_tree_only_for_a_named_environment(
+        ws, stub, clean_backend_env, inproc_client, monkeypatch, environment, tree, ok, warns):
+    """Builds B2b (Finding F, rule A plus a non-blocking warning): an ``id:`` environment is ready whatever the
+    tree; a dirty tree only adds ``warnings``. A named environment's refusal is unchanged."""
+    from vivarium_workbench.lib import remote_run
+
+    _name_backend(monkeypatch, stub.url, environment)
+    git = _DIRTY if tree == "dirty" else _CLEAN
+    monkeypatch.setattr(remote_run, "remote_dispatch_preflight", lambda ws_root: dict(git))
+    body = inproc_client(ws).get("/api/remote-dispatch-preflight").json()
+
+    assert body["ok"] is ok
+    assert body["target"] == "deployment" and body["dispatch"] == "viva-v1-document"
+    if environment == "runtime":
+        assert body == {**git, "target": "deployment", "dispatch": "viva-v1-document"}  # unchanged
+    elif warns:
+        assert body["warnings"] == [
+            "uncommitted changes are not used by this environment (id:env-1 runs its prebuilt image); "
+            "a run uses the code already in that image"]
+        assert body["reason"] == "ok" and body["dirty_files"] == " M x.py"
+    else:
+        assert "warnings" not in body
+
+
 def test_run_remote_refuses_to_guess_when_the_backend_does_not_know_the_run(ws, stub, clean_backend_env, monkeypatch,
                                                                             tmp_path):
     from vivarium_workbench.lib import remote_run
