@@ -203,8 +203,30 @@ def federated_studies(ws_root: Path) -> list[dict]:
     return out
 
 
+def _federation_exclude(ws_root: Path) -> set[str]:
+    """Host-declared allow-list of federated content to hide, from the host
+    ``workspace.yaml`` ``dashboard.federation.exclude`` (a list of strings).
+
+    Each entry matches a federated investigation by its slug/``name``
+    (e.g. ``composite-gallery``), its ``repo::name`` id, or its ``origin_repo``
+    (hiding every federated investigation from that module). This lets a host
+    keep a module as a composite/process dependency while dropping its shipped
+    investigations from the host dashboard. Best-effort: a missing/malformed
+    config yields no exclusions.
+    """
+    try:
+        data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
+    except Exception:
+        return set()
+    dash = data.get("dashboard")
+    fed = dash.get("federation") if isinstance(dash, dict) else None
+    items = fed.get("exclude") if isinstance(fed, dict) else None
+    return {str(x) for x in items} if isinstance(items, list) else set()
+
+
 def federated_investigation_sets(ws_root: Path) -> list[dict]:
     out: list[dict] = []
+    exclude = _federation_exclude(ws_root)
     for lw in linked_workspaces(ws_root):
         try:
             idir = lw.layout.investigations
@@ -219,6 +241,9 @@ def federated_investigation_sets(ws_root: Path) -> list[dict]:
                 except Exception:
                     continue
                 name = spec.get("name") or d.name
+                # Host-declared exclusions: match by slug, repo::name id, or repo.
+                if exclude & {name, f"{lw.repo}::{name}", lw.repo}:
+                    continue
                 members = [f"{lw.repo}::{s}" for s in (spec.get("studies") or [])]
                 out.append({
                     "name": name,

@@ -147,3 +147,40 @@ def test_find_composite_path_unknown_returns_none():
     from vivarium_workbench.lib.composite_lookup import find_composite_path
 
     assert find_composite_path(FIX, "host", "nope.composites.missing") is None
+
+
+# --- dashboard.federation.exclude (host hides a federated investigation) ---
+
+def test_federation_exclude_hides_investigation_by_slug(tmp_path, monkeypatch):
+    donor = linked_workspaces(FIX)
+    monkeypatch.setattr(federation_mod, "linked_workspaces", lambda ws_root: donor)
+    # control: no exclude -> donor_inv is federated in
+    (tmp_path / "workspace.yaml").write_text("name: host\n")
+    names = {i["name"] for i in federation_mod.federated_investigation_sets(tmp_path)}
+    assert "donor_inv" in names
+    # exclude by slug -> dropped, while the donor stays a dependency otherwise
+    (tmp_path / "workspace.yaml").write_text(
+        "name: host\ndashboard:\n  federation:\n    exclude: [donor_inv]\n"
+    )
+    names = {i["name"] for i in federation_mod.federated_investigation_sets(tmp_path)}
+    assert "donor_inv" not in names
+
+
+def test_federation_exclude_by_repo(tmp_path, monkeypatch):
+    donor = linked_workspaces(FIX)
+    monkeypatch.setattr(federation_mod, "linked_workspaces", lambda ws_root: donor)
+    (tmp_path / "workspace.yaml").write_text(
+        "name: host\ndashboard:\n  federation:\n    exclude: [donor-repo]\n"
+    )
+    assert federation_mod.federated_investigation_sets(tmp_path) == []
+
+
+def test_federation_exclude_absent_or_malformed_is_noop(tmp_path, monkeypatch):
+    donor = linked_workspaces(FIX)
+    monkeypatch.setattr(federation_mod, "linked_workspaces", lambda ws_root: donor)
+    # malformed (exclude not a list) must not raise and must not filter
+    (tmp_path / "workspace.yaml").write_text(
+        "name: host\ndashboard:\n  federation:\n    exclude: donor_inv\n"
+    )
+    names = {i["name"] for i in federation_mod.federated_investigation_sets(tmp_path)}
+    assert "donor_inv" in names
