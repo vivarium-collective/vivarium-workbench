@@ -1419,9 +1419,9 @@
 <div id="sim-run-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 16px 0">
   <button type="button" id="study-run-current-spec" class="action-btn" title="Run this study's CURRENT baseline spec (POST /api/study-run-baseline) as a brand-new run">▶ Run current spec</button>
   <button type="button" id="study-reproduce" class="btn-mini" title="Replay this study's most recent run's RECORDED manifest verbatim (POST /api/study-reproduce) — ignores any study.yaml edits made since">↻ Reproduce</button>
-  {# A backend's launch plugin may add its own buttons here (static/sms-launch.js
-     appends the remote "Dispatch composite" button, hidden until a remote backend
-     is configured). #}
+  {# A backend's launch plugin may add its own buttons here (the launch script
+     loaded below appends the remote "Dispatch composite" button, hidden until a
+     remote backend is configured). #}
 </div>
 
 <div class="overview-section" id="simulations-section">
@@ -2543,7 +2543,7 @@ window._seedFollowupProposal = _seedFollowupProposal;
 <script src="/checklist-select.js"></script>
 <script src="/progress-track.js"></script>
 <script src="/comparison-view.js"></script>
-<!-- sms-launch.js: the SMS/vEcoli launch UI (remote-pinned dispatch + the
+<!-- The backend launch plugin's script (remote-pinned dispatch + the
      "Dispatch composite" panel), quarantined out of study-detail.js. Loaded
      BEFORE it: study-detail.js calls window.SmsLaunch.mount() while it loads,
      and runs local-only when the file is absent. -->
@@ -2560,7 +2560,7 @@ window._seedFollowupProposal = _seedFollowupProposal;
 </script>
 <script>
 (function () {
-  // Task 8: the Configure & Run mount and the remote-run (smsvpctest) panel
+  // Task 8: the Configure & Run mount and the remote-run panel
   // were both removed from the Simulate tab — launching now lives entirely
   // in the header buttons (Reproduce / Run current spec). This block used
   // to also mount ConfigureRun into the (now-deleted) mount div and, in an
