@@ -45,7 +45,22 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | P2 Routes Rt2 (ai_excluded) | `ProviderRouter.ai_excluded` (default empty): a provider's routes the built-in AI must never see or call; `create_app` refuses a path that is not one of the router's own routes (as for `readonly_allowed`) and keeps the union on `app.state.provider_ai_excluded`; `lib/ai_tools.EXCLUDED_PATHS` drops `/api/remote-run-start` and `-build`, which the SMS router now declares (`routes.AI_EXCLUDED`), and `build_index` / `capabilities` use `ai_tools.excluded_paths(app)`; `is_excluded` takes the path set; `ai_tools` names no plugin route (the moved `/api/source/*` build routes were never literals: the core's `/api/source/` prefix covers them). Goldens taken on the base (`tests/test_ai_excluded_goldens.py`): with providers on, the operations the AI index leaves out and the Capabilities popover's `excluded` list are identical; declared: with providers off the two paths leave the popover's list (the routes do not exist then) | wb#1689 | **done**, merged 2026-11-20 |
 | Compose: the card checks the environment like the preflight | The compose analogue of Finding F: the preflight refused a named environment compose-api does not list (409 `unknown-environment`) or a compose-api it could not ask, while the card launched anyway and the detached run failed in `run_remote`. `remote_run_compose.check_environment(ws_root, *, timeout)` is the environment step both now share; `ComposeApiRuns.dispatch_composite` calls it after `checked_steps` with `CHECK_TIMEOUT` (15 s, since it runs inside the launch request; the preflight keeps the session's 120 s) and refuses with the preflight's reason (`ComposeDispatchError`'s body and status, or `_backend_error`'s for a client error), writing no run row and spawning nothing. The run-target badge shows an amber `Runs: Cloud · not ready ⚠` for any `ok: false` cloud preflight. The #1107 drift guard now runs compose's real preflight and card check against one fake session, with an unknown environment and a registry error as cases (strict xfail on the base); the dispatch table gains the unknown-environment row. viva-core and SMS dispatch unchanged | wb#1691 | in review (2026-11-20) |
 | P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, facet routes stay core, SMS-only routes into the plugin's router | — | in progress: the rows above are its PRs so far; Remote tab, Routes remain (Runs, Builds and Analyses are complete) |
-| P3 | Opaque string run ids end to end; the UI shows the nine SMS-today features (§2.5) by declared feature; launch panel quarantined (`sms-launch.js`); core tests run without the plugin | — | not started |
+| P3-0 | Provider interface additions: `features`, `check_config`, `base_url`, `deployment_default` (§2.2); no core caller, no behaviour change | — | not started |
+| P3 F0 | The features seam (§2.1): `lib/backends/features.py`, `GET /api/backend/features`, `remote_origin.features` on `/api/simulations` rows, `static/backend-features.js` (none in a snapshot bundle) | — | not started |
+| P3 F1 | Runs table (`sim-table.js`): analysis files, re-run and figures by the run's features; "Land results" replaces the id-form test | — | not started |
+| P3 F2 | Study page: the figure gallery by `artifacts`; neutral wording | — | not started |
+| P3 F3 | Source panel, workspace picker, `VivEnv` by `builds` (feature 9 rides on it) | — | not started |
+| P3 F4 | a: the Runs listing's second phase and the loom host by `listing`; b: the composite card's SMS tips come from the preflight answer | — | not started |
+| P3 I1 | Ids and wire literals: one core `REMOTE_RUN_PREFIX`; `not-sms` → `not-offered` (the browser accepts both until Z); the bare-id `backend-not-installed` audit | — | not started |
+| P3 C1 | Config seams: `lib/backends/config.py` (named URL, else the provider's; deployment default from the provider); the SMS aliases and the tunnel default move to the plugin; with providers off a set alias is ignored with a startup warning | — | not started |
+| P3 C2 | Server wording and hints neutral: startup lines, the runner's failure hint, `ProbeClient`, route descriptions (declared OpenAPI description change) | — | not started |
+| P3 M1 | The SMS-only payload models (`RemoteJobStatus`, `RemoteRunStep`, `RemoteRunJob`, `RemoteRunStartRequest/Response`, `BuildRemoteRequest/Response`, `SwitchBuildRequest`, `SourceBuilds`) move verbatim to `vivarium_workbench_sms/models.py` behind the new `Provider.payload_types() -> PayloadTypes`; `generate_ts` emits the core's types, then each provider's, and refuses to write with providers off; OpenAPI `components.schemas` byte-identical with providers on, the `.d.ts` declaration blocks identical (order and header changed); goldens taken on the base | — | in review (2026-11-20) |
+| P3 K1 | Core-only CI machinery: the plugin physically absent, the `plugin` marker (strict xfail when absent), a non-blocking job | — | not started |
+| P3 K2a | Test conversions, backends group (lazy plugin imports, `plugin` marks) | — | not started |
+| P3 K2b | Test conversions, workers and CLI group | — | not started |
+| P3 K2c | Test conversions, views and index group | — | not started |
+| P3 Z | Close P3: the SMS-terms ratchet becomes a ban, the AST string-constant ban, K3 (the core-only job blocking, then a required check) | — | not started |
+| P3 | Opaque ids (done: wb#1660, finished by I1); launch panel (done: wb#1659); declared features hide SMS-only controls (F0–F4); config seams (C1, C2); models (M1); core-only CI (K1, K2, Z) | — | in progress: the rows above are its PRs |
 | P4 | `vivarium_workbench_sms` moves into the viva-api repository as its own distribution, found by entry point; the Stanford image installs it | — | not started |
 | — | Already done, now counted as plugin work: analysis figures and PTools files read through `/viva/v1/datasets` | wb#1650 | **done**, merged 2026-11-19 |
 
@@ -149,6 +164,11 @@ class Backend:
   - A facet says what it does (`listing`, `artifacts`, `analyses`, `builds`), not how SMS does it.
   - SMS-specific detail lives in the plugin's implementation, for example vEcoli parameters, integer simulation ids and branch builds.
   - This leaves a path for compose-api: its core adapter can implement any facet later (§2.6), and the existing routes and UI then work for compose-api runs with no other workbench change.
+- **Features are derived, not listed (P3).**
+  - The facet features are the facets an active backend has: `listing`, `artifacts`, `analyses`, `builds`.
+  - A provider declares only the UI features no facet implies (`Provider.features()`; SMS: `sms-launch`).
+  - A run's own features are the facets of the backend that ran it (`artifacts`, `analyses`), carried on its `/api/simulations` row as `remote_origin.features`.
+  - **Features only hide optional controls** (the gallery, re-run, figures, build rows, the listing's second phase). No dispatch or run-target decision reads them: `/api/remote-run-config` and the preflight decide, as today. A features request that fails is "unknown": retried once, then the controls show as today and the server refuses with its 409.
 - **A facet is defined only when a step needs it.** Its methods come from the code it replaces; method shapes are not designed ahead of the code.
   - **An optional method on a facet** follows the same rule. `runs.status_many(run_ids) -> {run_id: body}` (`backends.BatchStatus`, step P2 Runs c2) asks the status of several runs in one call. Only SMS declares it, because it replaces SMS's one `compose_status_batch` call; no other backend has a batch route. `run_jobs.refresh_submitted` finds it by `getattr` and otherwise asks `runs.status` per run. The inert sentinels and the `unrouted` facet never declare it.
 - **Facets keep the views' `(body, status)` shapes,** as the run facet does, so routes and the browser don't change when code moves behind one.
@@ -174,9 +194,12 @@ class Provider(Protocol):
     def select(self, ws_root: Path) -> Backend | None: ...     # its claim on a NEW run (session build, pin)
     def recognise(self, client: object) -> Recognised: ...     # its half of backend_profile: (profile,
                                                                #   has_composites, stop); never raises
-    # added by later steps:
-    def check_config(self) -> None: ...                        # startup refusal (BackendConfigError) (P3)
-    def features(self) -> frozenset[str]: ...                  # what the UI may show (P3)
+    # P3 (P3-0; payload_types: M1):
+    def features(self) -> frozenset[str]: ...                  # UI features no facet implies (SMS: {"sms-launch"})
+    def check_config(self, named: str | None) -> None: ...     # its half of the one-backend rule (BackendConfigError)
+    def base_url(self) -> str | None: ...                      # the URL it reads when nothing is named; None if unset
+    def deployment_default(self) -> str | None: ...            # its deployment name when none is set (SMS: "smsvpctest")
+    def payload_types(self) -> PayloadTypes | None: ...        # its wire models, for generate_ts (M1)
     # P2 Runs a2 (lib/backends/provider.py):
     def router(self) -> ProviderRouter | None: ...             # routes only this provider serves, built per call
     # P2 Workers (lib/backends/provider.py):
@@ -212,6 +235,11 @@ class ProviderRouter:                                          # P2 Runs a2
     router: APIRouter                                          # its routes (TYPE_CHECKING import: no FastAPI in workers)
     readonly_allowed: frozenset[str]                           # its POST/DELETE paths a read-only deployment keeps
     ai_excluded: frozenset[str] = frozenset()                  # P2 Routes Rt2: its paths the built-in AI never sees
+
+@dataclass(frozen=True)
+class PayloadTypes:                                            # P3 M1
+    aliases: dict[str, object]                                 # named Literal types, kept by name in the .d.ts
+    models: list[type[BaseModel]]                              # its interfaces, emitted after the core's
 ```
 
 - **The core owns:**
@@ -256,6 +284,9 @@ class ProviderRouter:                                          # P2 Runs a2
 - **Hosted env workers (P2 Workers, done).** `env_worker_launcher.default_launcher()` asks the providers, in order, for a launcher (`Provider.worker_launcher()`). The core keeps the `WorkerLauncher` protocol and `LocalWorkerLauncher`; the proxy and dial-back launchers are the SMS plugin's (`vivarium_workbench_sms/env_workers.py`).
   - **The refusal rule.** The core knows only the names by which a deployment asks for hosted workers, `env_worker_launcher.HOSTED_WORKER_ENV` (`ENV_WORKER_PROXY_BASE`, `ENV_WORKER_ADVERTISE_HOST`, under either env prefix), and keeps them only to refuse, as P4 refuses an alias. When one is set and no provider supplies a launcher (providers off, plugin absent), the workbench refuses: `serve`, `api/__main__`, the commands in `cli.BACKEND_COMMANDS` and the provider commands with `Command.uses_backend` exit 2 at startup, and a pool call raises `BackendConfigError` (never cached, never `EnvWorkerUnavailable`, logged at ERROR once per pool). It never falls back to a local subprocess.
   - **Inside an env worker** generator discovery runs in-process (`composite_lookup.IN_WORKER_DISCOVER`, set by the worker's `main`): the worker is the environment, and a hosted worker pod has no plugin to launch a nested one with.
+- **Features reach the browser by route (P3; Q-features decided).** The core's `GET /api/backend/features` (`{features}`, a registry read, no network call) and, per run, `remote_origin.features` on `/api/simulations` rows. They are never rendered into the page shell: workspaces keep the rendered shell on disk and publish it (`docs/dashboard/`). A snapshot bundle resolves to no features, with no request.
+- **Wording is neutral (Jim, 2026-11-20).** No provider labels: core browser text and server text (startup lines, refusals, runner hints) say "remote backend" and the like, with providers on or off.
+- **Models (P3 M1).** The SMS-only payload models are the plugin's (`vivarium_workbench_sms/models.py`), with the same class names, so the OpenAPI schema names do not change. `lib/generate_ts.py` emits the core's types, then each provider's `payload_types()`; `main()` refuses to write `domain.generated.d.ts` while providers are off, since the file would lack their sections.
 
 ### 2.3 Existing runs are routed by their record
 
@@ -329,6 +360,7 @@ vivarium_workbench_sms/   # the plugin, from P1b (module names kept from lib/, s
     provider.py        # SmsProvider (P1c)
     routes.py, remote_pipeline_views.py   # SmsProvider.router() and its views (P2 Runs a2); only router() imports them
     cloud_dispatch.py  # the composite card's SMS cloud dispatch and preflight (P2 Builds B2)
+    models.py          # its payload models, served to generate_ts by Provider.payload_types() (P3 M1)
 ```
 
 **The registry loads lazily, and the move must not create an import cycle.**
@@ -341,7 +373,7 @@ vivarium_workbench_sms/   # the plugin, from P1b (module names kept from lib/, s
 **How the core finds the provider.**
 
 - Until P4 there is no entry point. The registry imports `vivarium_workbench_sms.provider` lazily, by name: one `ignore_imports` edge, which lasts until P4.
-- P3's core-only CI job turns it off with a flag.
+- P3's core-only CI job runs the core with the plugin physically absent (`PROVIDERS=none` stays a local mode).
 - P4 replaces the import with the entry-point group `vivarium_workbench.backends`, which is `pyproject.toml`'s first `entry-points` table. From then on, startup refuses when an SMS alias (`SMS_API_BASE` / `VIVA_API_BASE` / `VIVARIUM_WORKBENCH_REMOTE_PINNED`) is configured but no provider is installed. Those names stay listed in the core for that refusal.
 - So a stale editable install can't hide the provider before P4.
 
@@ -373,6 +405,10 @@ vivarium_workbench_sms/   # the plugin, from P1b (module names kept from lib/, s
 - **The plugin's router is included before the read-only filter and before the SPA catch-all** (`/{rel:path}`). Otherwise the catch-all route answers its GET requests first. `tests/test_backend_providers.py` pins the order, the guards on the moved routes, the read-only set and the clash refusals.
 - **Contracts from P2** (`pyproject.toml`): the plugin does not import `lib.remote_run_views` (Runs a1; the reverse seam) and does not import `api.app` (Runs a2; `app → provider → routes → app` would be a cycle). Both are `forbidden` with `allow_indirect_imports`.
 - **Ratchet counts as of P2 Remote tab R2:** 5 `ignore_imports` edges; the route ratchet's `ALLOWED` holds 2 (module, method) pairs.
+- **End-of-P3 guards (Z).**
+  - No SMS terms in core `static/` and `templates/` except `sms-launch.js` (F0's growth-only ratchet becomes a ban).
+  - No `sms-api`, `GovCloud`, `SMS_API_BASE` or `smsvpctest` string constant in core `.py` (docstrings excluded), outside `lib/backends/` and `backend_config.BACKEND_BASE_ENV_VARS`.
+  - The `plugin` test marker and the core-only CI job (K1): a test that needs the plugin is marked, and a marked test that passes without it fails (strict xfail). The job becomes a required check once it has been green a while (Jim, 2026-11-20).
 
 ### 2.5 What has to change
 
@@ -419,7 +455,7 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 | Routes | — | `api/app.py`: no module-level plugin import left (it imports without the plugin since Builds B3); no lazy plugin import either since Remote tab R1 (the refresh clear goes through `listing.invalidate`); `remote_run_jobs` went with Runs a2, `remote_analysis_figures` with Analyses, `source_build_views` with Builds B3; its read-only allowlist named SMS routes (Runs a2 moved `remote-run-start` / `-build`, Builds B3 `source/build-remote` / `switch-build`, to the plugin's declaration) | facet routes stay core and dispatch by facet; SMS-only routes go to the plugin's `router()` (§2.2) |
 | Workers (P2, wb#1668) | — | the launchers and the stamp read move whole (`ProxyWorkerLauncher`, `RemoteWorkerLauncher`, their workers, `.viv-build.json`'s `commit`) to `vivarium_workbench_sms/env_workers.py`; `env_worker_pool`, `env_worker_dialback`, `env_worker_client`: wording only | `Provider.worker_launcher` |
 | CLI and startup (P2, done) | — | `run-remote` → `vivarium_workbench_sms/cli.py`; the startup breaker probe runs on core config (`backend_config.start_probe(configured_base_url())`); the startup checks in `cli`, `startup`, `api/__main__` are core (`backend_config`, `check_worker_config`) | `Provider.cli`; `check_config` is P3 (the one SMS fact left in the checks is the alias env-var names in `backend_config`, which may not ask providers) |
-| Models and bundle | — | sms-api status + remote-provenance models in `models.py` (feed `generate_ts`) | P3 decides |
+| Models and bundle | — | the SMS-only payload models in `models.py` (feed `generate_ts`) → `vivarium_workbench_sms/models.py` (P3 M1); `RemoteOrigin` stays core | M1: `Provider.payload_types()` |
 | Target predicates (P2, this area's PR) | — | none. `remote_pinned`'s four predicates were core wrappers: `resolve_run_target` moved to `backends`, the three `uses_*_dispatch` were deleted (no production caller). Callers: `investigation_steps`, `investigation_run_views`, `investigation_run_one_views`, `study_runs`, `composite_test_run_views`, `remote_run_views`, `api/app.py` | `backends.resolve_run_target` / `backends.active`; the SMS half is `Provider.select` (P1c) |
 | To check in P2's plans | — | the vEcoli/ParCa case in `readouts_views` (keyed on `backends.session_build` since P2 Builds B1; the ParCa wording stays core model vocabulary); the `SMS_API_BASE` hint in `run_runner` (Runs b: stays, P3 wording); `run_runner._remote_analysis_options` (Analyses: stays core, a model convention like the vEcoli knobs, carried opaque through `run_composite`) and `RunRequest.build_ref` (since Builds B2: what a backend's `dispatch_composite` returned in `Detached`, carried unread to `run_composite`); vEcoli knobs (`n_seeds`, `n_generations`) in `preflight.py`, `env_worker.py`; P3 (opaque ids, from Remote tab R1): `_sim_recency_key`'s `int(simulation_id)` tiebreak (already guarded, so a sort-order question, not a crash) and the listing's run-id dedup | — |
 
@@ -427,7 +463,7 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 
 The UI shows these only when the run's backend has the matching feature. Checked against the routes and browser code on 2026-11-19.
 
-| # | Feature | Where in the UI | Routes | Gated today by | Facet / feature | Could compose-api offer it? |
+| # | Feature | Where in the UI | Routes | Gated before P3 by | Facet / feature (P3 hides it by this) | Could compose-api offer it? |
 |---|---|---|---|---|---|---|
 | 1 | Cloud builds: build a branch on the deployment, list or switch builds | Source / branch picker: "Build on cloud", the Cloud toggle (`branch-source.js`, `workspace-picker.js`, `session.js`) | `/api/source/builds`, `build-remote`, `switch-build` | `isRemote` | `builds` | yes: its registry environments and versions are the analogue |
 | 2 | Pinned deployment runs, and the relabelled run card | run card, configure-run dialog (`study-detail.js`, `walkthrough.js`, `configure-run.js`) | `/api/remote-run-config`; `remote-run-pinned-build` and `remote-run-build` (HTTP clients only, no browser caller) | `pinned: true` | `builds` (pin) | maybe: pin a registry version |
@@ -437,7 +473,7 @@ The UI shows these only when the run's backend has the matching feature. Checked
 | 6 | Land a run's analysis files (`analyses.json`, PTools exports) | row action on a completed remote run (`sim-table.js`) | `/api/remote-run-land-artifacts` | any remote row with an id (also compose-api's); the server refuses a run whose backend has no `artifacts` facet (409 `not-sms`) | `artifacts` | yes: run results and datasets |
 | 7 | Re-run analyses on a finished run | row action (`sim-table.js`) | `/api/remote-run-analysis` | as 6, by the `analyses` facet | `analyses` | needs an analysis job kind there |
 | 8 | Analysis figures, per run and as a study gallery (also feeds the Viz / Analyses tabs) | figures window (`sim-table.js`), study tabs (`study-detail.js`) | `/api/remote-analysis-figures`, `remote-analysis-figure`, `study-remote-figures` | per-run: as 6; the study gallery asks every backend with an `artifacts` facet (`backends.offering`; none with providers off: an empty gallery) | `artifacts` | yes, with 6 |
-| 9 | Explore a remote run's state | Loom embed (`loom-embed.js`: `run_target=deployment&build_sim=`) | `/api/composite-run/{id}/status` and `/stop` (SMS branch on `remote-sim-<int>`) | `remote-sim` rows | later, if ever | later |
+| 9 | Explore a remote run's state | Loom embed (`loom-embed.js`: `run_target=deployment&build_sim=`) | `/api/composite-run/{id}/status` and `/stop` (SMS branch on `remote-sim-<int>`) | `remote-sim` rows | `builds`: the loom's Cloud scope is `VivEnv.isCloud()` (F3) | later |
 
 **SMS assumptions outside any facet (P3).** A facet carries data, not UI and not id formats, so these need their own work:
 
@@ -447,17 +483,19 @@ The UI shows these only when the run's backend has the matching feature. Checked
   - `study-detail.js` and `perfetto-open.js` choose `simulation_id` or `run_id` by an all-digits test.
   - The composite-run status and stop routes match `remote-sim-<int>`.
 
-  P3 makes run ids opaque strings end to end; the record's `kind` decides, never the id's form. This has to land before any facet can serve compose-api runs.
+  P3 makes run ids opaque strings end to end; the record's `kind` decides, never the id's form. This has to land before any facet can serve compose-api runs. Done in wb#1660; I1 finishes it (the `remote-sim-` prefix becomes one core constant, `not-sms` becomes `not-offered`).
 - **The vEcoli launch panel** (feature 4) is SMS UI in core files. Decided: quarantine it in `static/sms-launch.js` behind a feature, as accepted debt (Q-launch-ui).
-- **Gating is a server refusal, not a hidden button.** The UI shows features 6–8 on any remote row with an id; P3 hides them by declared feature.
+- **Gating is a server refusal, not a hidden button.** The UI shows features 6–8 on any remote row with an id; P3 hides them by declared feature (F1–F4).
 - **SMS wording and plumbing:**
   - "sms-api" strings in `branch-source.js`, `study-detail.js`, `workspace-picker.js`, `loom-embed.js`, `session.js`, `progress-track.js`, `sim-table.js` and `index.html.j2`;
-  - the sms-api models in `models.py`, which feed the generated TypeScript types.
-- **To check in P3's plan:** the "remote workspace" Cloud toggle in `workspace-picker.js` (`ws.kind === "remote"`) may be a feature separate from cloud builds.
+  - the sms-api models in `models.py`, which feed the generated TypeScript types: M1, `Provider.payload_types()`.
+
+  P3 makes the wording neutral everywhere (Jim, 2026-11-20): F1–F4 in the browser, C2 on the server.
+- ~~**To check in P3's plan:** the "remote workspace" Cloud toggle in `workspace-picker.js`.~~ Resolved: its workspaces come from `/api/source/builds`, so it is feature 1 (`builds`).
 
 **Not SMS-only.** The run lifecycle on any remote run is core and shared with compose-api: poll, land, cancel, chain progress and trace (`sim-table.js`, `walkthrough.js`, `study-detail.js`, `perfetto-open.js`, `progress-track.js`). The backend health dot (`/api/source/remote-health`) stays in the core. Some things are SMS wording rather than SMS features: the "Cloud / Build via sms-api" help text in `index.html.j2`.
 
-**What P3 changes.** Each feature is already conditional, but on a different signal each time. P3 gives them one source: the run's backend, or for new runs the active backend, declares its features, and the browser shows or hides features 1–9 by that declaration. With the plugin installed, the UI looks exactly as it does today. Without it, none of 1–9 appear.
+**What P3 changes.** Each feature is already conditional, but on a different signal each time. P3 gives them one source: the run's backend, or for new runs the active backend, declares its features, and the browser shows or hides features 1–9 by that declaration. With the plugin installed, the same controls show as today (in neutral wording). Without it, none of 1–9 appear.
 
 ### 2.6 Adding a feature to compose-api later
 
@@ -521,14 +559,16 @@ Rounds repeat until they find nothing new. The PR description says what each rev
 
    When P2 ends, only the registry's provider import is left on the ignore list.
    **Pulled forward, in parallel with P1 (Jim, 2026-11-19).** Two P3 items don't depend on the P1 chain and run as their own PRs now: opaque run ids end to end, and the launch-panel quarantine (`static/sms-launch.js`, gated by today's signals until P1c's declared features exist). A short parallel PR gives compose-api a server identity if compose-api reports one; it does (compose-api#543, `deployment_id` on `GET /health`), see the Progress row.
-6. **P3: features, and a core without the plugin.**
-   - From P1c: the configured base URL, default deployment name, SMS alias env vars and the alias half of the one-backend check become neutral in the core (the provider supplies SMS's), and the bare-id `backend-not-installed` refusal.
-   - Run ids become opaque strings end to end (routes and browser); the record's `kind` decides, never the id's form (§2.5).
-   - The browser reads the active provider's `features` and hides SMS-only UI when they're absent.
-   - Quarantine the launch panel in `static/sms-launch.js` behind the `sms-launch` feature (Q-launch-ui, decided); move the SMS branches of mixed routes behind their facets (§2.2).
-   - The models and the bundle key are settled.
-   - A CI job turns the provider off and runs the core suite.
-   - The plugin's routes then leave the OpenAPI schema. The tests over the whole route table (`tests/test_traversal_sweep.py` and the generated TypeScript types) run with the plugin, and the core-only job skips them.
+6. **P3: features, and a core without the plugin.** Opaque ids (wb#1660) and the launch-panel quarantine (wb#1659) are done. The rest is one PR each (Progress rows):
+   - **P3-0:** the `Provider` additions (§2.2), with no core caller.
+   - **F0:** the features seam (§2.1, §2.2). **F1–F4**, in parallel after F0: the Runs table, the study page, the source panel / workspace picker / `VivEnv`, the listing's second phase and loom host, the composite card's tips. Features only hide optional controls; dispatch never reads them.
+   - **I1:** ids and wire literals (`REMOTE_RUN_PREFIX`, `not-offered`, the bare-id audit).
+   - **C1:** config seams (`lib/backends/config.py`; the SMS aliases and tunnel default to the plugin). **C2:** neutral server wording and hints.
+   - **M1:** the SMS-only payload models behind `Provider.payload_types()`.
+   - **K1:** the core-only CI job, plugin physically absent, non-blocking. **K2a/b/c:** convert the tests (lazy plugin imports, `plugin` marks).
+   - **Z:** the §2.4 bans; K3 makes the core-only job blocking, and then it becomes a required check.
+   - ~~Move the SMS branches of mixed routes behind their facets~~: P2 did it.
+   - **Correction:** the traversal sweep (`tests/test_traversal_sweep.py`) runs in both jobs; only the TS-types test and the full-schema OpenAPI goldens need the plugin.
 7. **P4: ship it.**
    - `vivarium_workbench_sms` becomes its own distribution, moved into the viva-api repository (Q-P4).
    - The entry point replaces the registry's import, which leaves the ignore list empty.
@@ -561,7 +601,7 @@ Rounds repeat until they find nothing new. The PR description says what each rev
   - **When to revisit: at P4, or earlier if compose-api composites need launch parameters.** Once the plugin moves to viva-api, every launch change becomes a two-repo change. At that point:
     - move `sms-launch.js` into the plugin (b), which by then is mostly a file move plus serving it;
     - or switch to (a), if a generic parameter form is wanted by then.
-- **Q-features: how features reach the browser.** Either extend an existing core view or add a route. Decide in P3's plan.
+- **Q-features, decided (P3 plan, 2026-11-20): a route plus a per-row annotation** (`GET /api/backend/features`, `remote_origin.features`), never rendered into the page shell (§2.2).
 
 ---
 
