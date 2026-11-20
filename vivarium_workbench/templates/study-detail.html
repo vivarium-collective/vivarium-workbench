@@ -36,7 +36,7 @@
        here" — inside the six-gate status row below (gate-current). #}
   </h1>
   </div>
-  {% if _q and (_q | trim) != (display_name | trim) %}<p id="study-question-headline" class="study-question-headline" title="{{ _q }}"><span class="q-glyph">Q</span> <span class="study-question-headline-text" data-edit-kind="study" data-edit-field="question" data-edit-value="{{ study.question }}" data-edit-multiline data-edit-label="Question">{{ _q }}</span></p>{% endif %}
+  {% if _q and (_q | trim) != (display_name | trim) %}<p id="study-question-headline" class="study-question-headline" title="{{ _q }}" data-edit-kind="study" data-edit-field="question" data-edit-value="{{ study.question }}" data-edit-multiline data-edit-label="Question"><span class="q-glyph">Q</span> <span class="study-question-headline-text">{{ _q }}</span></p>{% endif %}
   </div>
   <span class="study-header-actions" style="display:inline-flex; gap:10px; flex-shrink:0; align-items:center;">
     {# Two-axis study markers — Progress (● Completed) × Verdict (◆ Supported) —
@@ -165,7 +165,12 @@
 .study-kind-tag.study-kind-biological{background:#ecfdf5;color:#065f46}
 .study-kind-tag.study-kind-computational{background:#eff6ff;color:#1e40af}
 .study-kind-tag.study-kind-theoretical{background:#faf5ff;color:#6b21a8}
-.study-question-headline{margin:2px 0 0 0;font-size:0.85em;line-height:1.35;color:#475569;font-family:Georgia,"Times New Roman",serif}
+.study-question-headline{margin:2px 0 0 0;font-size:0.85em;line-height:1.35;color:#475569;font-family:Georgia,"Times New Roman",serif;padding-right:40px}
+/* Park the inline-edit ✎ in a reserved right gutter so it never lands over the
+   question text (the pencil is an absolutely-positioned child of the editable). */
+.study-question-headline>.ie-pencil{right:6px;top:1px}
+h1.study-title .study-name.ie-editable{padding-right:36px}
+h1.study-title .study-name>.ie-pencil{right:4px;top:6px}
 .study-question-headline .q-glyph{display:inline-block;font-size:0.78em;font-weight:700;font-family:ui-monospace,monospace;color:#64748b;background:#f1f5f9;padding:1px 7px;border-radius:4px;margin-right:6px;vertical-align:middle}
 /* Study Export menu — styled to match the investigation-level ↓ Export menu
    exactly: grey uppercase section labels + full-width, left-aligned, stacked
