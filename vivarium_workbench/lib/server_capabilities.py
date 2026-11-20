@@ -1,134 +1,18 @@
-"""Feature-detect what a viva-api deployment can actually do — dual-engine W4/Q5.
+"""Which dispatch surface a named backend gives the workbench (docs/backend-adapters.md §2.2).
 
-Spec: ``docs/dual-engine-comparison.md`` §5.3 (rollout rule 2) + §5.6 (Q5).
-viva-api #262 added ``GET /core/v1/capabilities`` → ``{version, capabilities:
-[str, ...]}`` where each entry means "this deployment, right now, can genuinely
-serve this" (code present AND configured AND wired). The consumer contract, per
-that endpoint's own docstring:
-
-* branch on **membership** in ``capabilities`` — **never on version** (a
-  deployment can run an image from an unmerged branch that no version ordering
-  describes: the 2026-08-19 production incident);
-* an **absent** name means "not available here", never "unknown";
-* **unrecognised** names are ignored.
-
-A deployment that predates the endpoint 404s — mapped here to "advertises
-nothing" (an empty set), which by the contract above reads as "nothing beyond
-the pre-capabilities baseline is available". A network failure is NOT mapped to
-absence: an unreachable service must surface as unreachable, not as
-"unsupported" (those demand different fixes from the user).
-
-Dispatch paths call :func:`require_capabilities` so an old deployment yields a
-clear "this viva-api doesn't support X yet" — never a half-dispatched run.
+The core half of the capability probe: the dispatch vocabulary (``DISPATCH_*``), compose-api detection by OpenAPI
+operation ids, the brief profile cache and the rule that a named backend which cannot be asked refuses a run. The
+viva-api half (``GET /viva/v1/capabilities``, the capability contract, health services) is the provider's
+``recognise`` and lives in the SMS plugin (``vivarium_workbench_sms.sms_api_client``, step P2). The client the probe
+reads with is the provider's ``probe_client``, or the core's plain-HTTP ``backend_config.ProbeClient`` with providers
+off.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
+from vivarium_workbench.lib import backend_config
+from vivarium_workbench.lib.backend_config import BackendError, OpenApiProbe
 from vivarium_workbench.lib.errors import APIError
-from vivarium_workbench_sms.sms_api_client import (
-    CAPABILITY_VIVA_V1_COMPOSITES as CAPABILITY_VIVA_V1_COMPOSITES,
-    CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS as CAPABILITY_VIVA_V1_COMPOSITES_DOCUMENTS,
-    CAPABILITY_VIVA_V1_SURFACE as CAPABILITY_VIVA_V1_SURFACE,
-    CAPABILITY_VIVA_V1_WORKERS as CAPABILITY_VIVA_V1_WORKERS,
-    SmsApiClient,
-    SmsApiError,
-)
-
-# Capability names the workbench branches on. Mirrored from viva-api's
-# CAPABILITY_REGISTRY — the strings themselves are the public, stable API
-# (lower-case kebab-case slugs); these constants exist so workbench call sites
-# can't typo them.
-CAPABILITY_CONTAINER_JOBS = "container-jobs"
-CAPABILITY_DUAL_ENGINE_COMPARISON = "dual-engine-comparison"
-CAPABILITY_CHAIN_DISPATCH = "chain-dispatch"
-CAPABILITY_CHAIN_PROGRESS = "chain-progress"
-# GET /api/v1/simulations/{id}/trace + GET /viva/v1/composites/{id}/trace answer a
-# Chrome Trace Event JSON document (the workbench's "Open in Perfetto").
-CAPABILITY_VIVA_V1_TRACE = "viva-v1-trace"
-# GET /viva/v1/datasets (filter by source/owner/kind/attributes) + /datasets/{id}/content
-# (one registered file's bytes through the API, no storage credentials).
-CAPABILITY_VIVA_V1_DATASETS = "viva-v1-datasets"
-# The /viva/v1 path switches (CAPABILITY_VIVA_V1_SURFACE, CAPABILITY_VIVA_V1_WORKERS)
-# are defined beside the resolver that reads them, in sms_api_client, and
-# re-exported above so every name the workbench branches on is importable here.
-
-# The version string reported for a deployment that predates the endpoint —
-# for error messages and logs only (never branched on, like any version).
-_PRE_CAPABILITIES_VERSION = "pre-capabilities (endpoint absent)"
-
-
-@dataclass(frozen=True)
-class ServerCapabilities:
-    """A deployment's advertisement: what it can serve, and (for humans) its version."""
-
-    version: str
-    capabilities: frozenset = field(default_factory=frozenset)
-
-    def supports(self, *names: str) -> bool:
-        """True when EVERY named capability is advertised."""
-        return all(n in self.capabilities for n in names)
-
-
-class CapabilityUnsupportedError(RuntimeError):
-    """The deployment does not advertise a required capability.
-
-    The §5.3 contract: a clear "this service doesn't support X yet" naming the
-    missing capabilities and the server's version (for the bug report) — never
-    a half-dispatched run.
-    """
-
-    def __init__(self, missing: "list[str]", version: str) -> None:
-        super().__init__(
-            "this viva-api deployment does not support: "
-            + ", ".join(sorted(missing))
-            + f" (server version: {version}) — upgrade/redeploy viva-api, or use a "
-            "deployment that advertises "
-            + ("this capability" if len(missing) == 1 else "these capabilities")
-        )
-        self.missing = sorted(missing)
-        self.version = version
-
-
-def fetch_capabilities(client: SmsApiClient) -> ServerCapabilities:
-    """The deployment's advertisement, honestly degraded.
-
-    * endpoint answers → its ``{version, capabilities}`` verbatim;
-    * **404** (deployment predates the endpoint) → an EMPTY advertisement —
-      by the endpoint's own contract, absent means "not available here";
-    * any other failure (unreachable, 5xx) → the ``SmsApiError`` propagates:
-      "can't reach the service" must never be reported as "unsupported".
-    """
-    try:
-        raw = client.capabilities() or {}
-    except SmsApiError as e:
-        if e.status == 404:
-            return ServerCapabilities(
-                version=_PRE_CAPABILITIES_VERSION, capabilities=frozenset()
-            )
-        raise
-    names = raw.get("capabilities") or []
-    return ServerCapabilities(
-        version=str(raw.get("version") or "unknown"),
-        capabilities=frozenset(str(n) for n in names),
-    )
-
-
-def require_capabilities(client: SmsApiClient, *names: str) -> ServerCapabilities:
-    """Gate a dispatch path on the deployment advertising every ``name``.
-
-    Returns the fetched :class:`ServerCapabilities` on success (so callers can
-    log the version / branch on further names without a second round-trip).
-    Raises :class:`CapabilityUnsupportedError` naming every missing capability,
-    or lets the transport ``SmsApiError`` propagate when the service is
-    unreachable (a different problem needing a different fix).
-    """
-    caps = fetch_capabilities(client)
-    missing = [n for n in names if n not in caps.capabilities]
-    if missing:
-        raise CapabilityUnsupportedError(missing, caps.version)
-    return caps
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +33,7 @@ COMPOSE_OPERATIONS = frozenset({
 })
 
 
-def backend_profile(client: SmsApiClient) -> dict:
+def backend_profile(client: OpenApiProbe) -> dict:
     """What the configured backend can do for a workspace, read live (never cached here).
 
     ``GET /viva/v1/capabilities`` (membership, never version) plus, when the
@@ -193,7 +77,7 @@ def backend_profile(client: SmsApiClient) -> dict:
     # compose-api: asked exactly when the capability list lacks viva-v1-composites, as before step P1c.
     try:
         version, operations = client.openapi_operations()
-    except SmsApiError as e:
+    except BackendError as e:
         if e.status is None or e.status >= 500:
             # Something is there (the capabilities route answered 404, or -- providers off -- was not asked), but it
             # cannot say what it is (a refused connection, a timeout, a 5xx): not a legacy backend that is up.
@@ -206,6 +90,16 @@ def backend_profile(client: SmsApiClient) -> dict:
         out["dispatch"] = DISPATCH_COMPOSE
         out["version"] = version or out["version"]
     return out
+
+
+def _probe_client(base: str) -> OpenApiProbe:
+    """The client :func:`backend_profile` reads ``base`` with: the active provider's (the same provider whose
+    ``recognise`` reads it), else the core's plain-HTTP :class:`backend_config.ProbeClient`, which only asks
+    ``/openapi.json`` (compose-api detection)."""
+    import vivarium_workbench.lib.backends.provider as _provider
+
+    active = _provider.providers()
+    return active[0].probe_client(base) if active else backend_config.ProbeClient(base)
 
 
 #: How long a dispatch decision is trusted. Run entrypoints resolve the target
@@ -229,9 +123,7 @@ def explicit_backend_profile() -> "dict | None":
     """
     import time
 
-    from vivarium_workbench_sms.sms_api_client import explicit_backend_base_url
-
-    base = explicit_backend_base_url()
+    base = backend_config.explicit_backend_base_url()
     if base is None:
         return None
     hit = _PROFILE_CACHE.get(base)
@@ -240,9 +132,9 @@ def explicit_backend_profile() -> "dict | None":
     # Through the circuit breaker (RemoteLink), as every other call is: a connection failure opens it, and while it is
     # open this answers "unreachable" without a network call, so a dead or hung backend is not asked every few
     # seconds by every request thread. The breaker's own probe (every 30 s while ``serve`` runs, on the one URL
-    # ``sms_api_base()`` names at start-up) or the first call after its minute is up closes it when the backend is
+    # ``backend_config.configured_base_url()`` names at start-up) or the first call after its minute is up closes it when the backend is
     # back, and the profile is read again within ``_PROFILE_FAILURE_TTL`` after that.
-    profile = backend_profile(SmsApiClient.for_("probe", base))
+    profile = backend_profile(_probe_client(base))
     _PROFILE_CACHE[base] = (time.monotonic(), profile)
     return profile
 
@@ -259,9 +151,7 @@ def require_named_backend_reachable() -> None:
     profile = explicit_backend_profile()
     if profile is None or profile["reachable"]:
         return
-    from vivarium_workbench_sms.sms_api_client import explicit_backend_base_url
-
-    base = explicit_backend_base_url()
+    base = backend_config.explicit_backend_base_url()
     raise APIError(
         502, f"the backend named for this workbench ({base}) cannot be reached ({profile['error']}); "
              "a run is not started locally in its place",

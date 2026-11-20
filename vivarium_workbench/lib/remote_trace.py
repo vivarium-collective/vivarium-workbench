@@ -11,7 +11,7 @@ bytes to Perfetto in the browser (``static/perfetto-open.js``).
 Both functions return ``(body, status)`` like the other ``*_views`` modules; a
 successful :func:`fetch_trace` returns the trace BYTES as the body.
 
-Branching is on capability membership, never on version (``server_capabilities``):
+Branching is on capability membership, never on version (the capability contract in ``sms_api_client``):
 a deployment that does not advertise ``viva-v1-trace`` gets **409** naming the
 capability, and :func:`trace_support` reports ``supported: false`` so the UI hides
 the action instead of offering one that cannot work.
@@ -25,13 +25,15 @@ import json
 from typing import Optional, Union
 
 from vivarium_workbench.lib import perfetto_ui
-from vivarium_workbench.lib.server_capabilities import (
+from vivarium_workbench_sms.sms_api_client import (
     CAPABILITY_VIVA_V1_TRACE,
     CapabilityUnsupportedError,
+    SmsApiClient,
+    SmsApiError,
     fetch_capabilities,
     require_capabilities,
+    sms_api_base,
 )
-from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError, sms_api_base
 
 TraceBody = Union[bytes, dict]
 

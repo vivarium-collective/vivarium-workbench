@@ -18,9 +18,12 @@ import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Protocol
+from typing import TYPE_CHECKING, Callable, Optional, Protocol
 
 if TYPE_CHECKING:
+    import argparse
+
+    from vivarium_workbench.lib.backend_config import OpenApiProbe
     from vivarium_workbench.lib.backends import Backend
     from vivarium_workbench.lib.env_worker_launcher import WorkerLauncher
 
@@ -40,6 +43,19 @@ class Recognised:
     profile: dict
     has_composites: bool
     stop: bool
+
+
+@dataclass(frozen=True)
+class Command:
+    """A subcommand a provider adds to ``vivarium-workbench`` (``Provider.cli``). The core owns argparse: it adds the
+    subparser, ``configure`` fills in its arguments and ``run`` is its handler (exit code). ``uses_backend`` puts it
+    with ``cli.BACKEND_COMMANDS``: the one-backend check and the hosted-worker check run before it."""
+
+    name: str
+    help: str
+    configure: "Callable[[argparse.ArgumentParser], None]"
+    run: "Callable[[argparse.Namespace], int]"
+    uses_backend: bool
 
 
 class Provider(Protocol):
@@ -63,6 +79,18 @@ class Provider(Protocol):
     def worker_launcher(self) -> "Optional[WorkerLauncher]":
         """The launcher for this deployment's hosted env workers, read from the provider's own deployment config, or
         ``None`` when this deployment configures none. Called once per pool (the pool caches it); no network call."""
+        ...
+
+    # -- P2 Client --
+    def probe_client(self, base_url: str) -> "OpenApiProbe":
+        """The client its ``recognise`` reads ``base_url`` with. It must also answer ``openapi_operations()`` (the
+        core's compose-api detection runs on the same client, after ``recognise``). No network call."""
+        ...
+
+    # -- P2 CLI --
+    def cli(self) -> "tuple[Command, ...]":
+        """Its subcommands. Built on every call (the CLI calls it once per process), never cached, so a test can patch
+        a handler on the provider's module."""
         ...
 
 

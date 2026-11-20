@@ -123,7 +123,7 @@ def datasets_served(client) -> bool:
         if hit and now - hit[1] < hit[2]:
             return hit[0]
     try:
-        from vivarium_workbench.lib.server_capabilities import (
+        from vivarium_workbench_sms.sms_api_client import (
             CAPABILITY_VIVA_V1_DATASETS, fetch_capabilities)
         served, ttl = fetch_capabilities(client).supports(CAPABILITY_VIVA_V1_DATASETS), _CAPS_TTL
     except Exception as e:

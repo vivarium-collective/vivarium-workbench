@@ -18,7 +18,7 @@ import re
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -281,6 +281,66 @@ def ping(base_url: str, timeout: "float | None" = None) -> str:
     if isinstance(parsed, dict):
         return str(parsed.get("version") or parsed.get("__version__") or body)
     return str(parsed)
+
+
+class OpenApiProbe(Protocol):
+    """What the core's capability probe (``server_capabilities.backend_profile``) asks of a client: compose-api
+    detection. ``Provider.probe_client`` returns one (the SMS provider's ``SmsApiClient``), and so does
+    :class:`ProbeClient` with providers off. Typing only."""
+
+    def openapi_operations(self) -> "tuple[str | None, frozenset[str]]": ...
+
+
+class ProbeClient:
+    """compose-api detection without a provider's client (docs/backend-adapters.md §2.2, step P2).
+
+    ``GET /openapi.json``, probe class (one attempt, 3 s), through the per-URL breaker, with the caller-identity
+    header: the same request and the same errors as ``SmsApiClient.for_("probe", base).openapi_operations()`` (a
+    test pins that they agree), which keeps being used while providers are on.
+    """
+
+    def __init__(self, base_url: str, timeout: float = 3.0) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    def _mark(self, up: bool, error: str = "") -> None:
+        """Passive breaker bookkeeping, which must never fail the call (as ``SmsApiClient._mark_link_*``)."""
+        try:
+            if up:
+                link(self.base_url).mark_up()
+            else:
+                link(self.base_url).mark_down(error)
+        except Exception:  # noqa: BLE001 - breaker bookkeeping must not fail a real call
+            pass
+
+    def openapi_operations(self) -> "tuple[str | None, frozenset[str]]":
+        """The server's ``GET /openapi.json``: its ``info.version`` and every ``operationId``. Raises
+        :class:`BackendError` (``CircuitOpen`` while the breaker is open; ``status`` set on an HTTP error, ``None``
+        when the server could not be reached), or ``ValueError`` on a body that is not JSON."""
+        link(self.base_url).check()
+        url = self.base_url + "/openapi.json"
+        headers = {"Accept": "application/json"}
+        identity = caller_identity()
+        if identity:
+            headers[IDENTITY_HEADER] = identity
+        req = Request(url, method="GET", headers=headers)
+        try:
+            with urlopen(req, timeout=self.timeout) as r:  # noqa: S310 — fixed scheme, configured backend
+                doc = json.loads(r.read().decode())
+        except HTTPError as e:
+            raise BackendError(f"GET {url} -> {e.code}{_http_error_detail(e)}", status=e.code) from e
+        except (URLError, OSError) as e:
+            self._mark(False, str(e))
+            raise BackendError(f"GET {url} failed (sms-api unreachable — is the tunnel up?): {e}") from e
+        self._mark(True)
+        doc = doc if isinstance(doc, dict) else {}
+        info: dict = doc["info"] if isinstance(doc.get("info"), dict) else {}
+        paths: dict = doc["paths"] if isinstance(doc.get("paths"), dict) else {}
+        operations = frozenset(
+            str(op["operationId"])
+            for item in paths.values() if isinstance(item, dict)
+            for op in item.values() if isinstance(op, dict) and op.get("operationId"))
+        return (str(info["version"]) if info.get("version") else None), operations
 
 
 # --- the per-URL circuit breaker ---------------------------------------------------------------------------------

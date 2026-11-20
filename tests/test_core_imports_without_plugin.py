@@ -9,10 +9,9 @@ whole SMS modules into the plugin, and a core module that still imports one at m
 removes the entries it fixes, none may add one, and a stale entry fails too, so the list can only shrink. It is empty
 when P2 ends.
 
-Importing is not running. Until ``lib.server_capabilities`` stops importing the plugin (P2's Client area), a study run
-IN the worker still fails without the plugin at call time: ``study_runs.run_study_*`` -> ``backends.resolve_run_target``
--> ``backends.named`` -> ``server_capabilities``. ``test_run_target_answers_without_the_plugin`` pins that as a strict
-xfail, so it flips to a failure (remove the marker) the day it is fixed.
+Importing is not running. A study run IN the worker resolves its target at call time (``study_runs.run_study_*`` ->
+``backends.resolve_run_target`` -> ``backends.named`` -> ``server_capabilities``); since step P2's Client area that path
+no longer imports the plugin either, and ``test_run_target_answers_without_the_plugin`` keeps it that way.
 """
 from __future__ import annotations
 
@@ -21,13 +20,11 @@ import subprocess
 import sys
 import textwrap
 
-import pytest
 
 STILL_NEED_PLUGIN = frozenset({
     "vivarium_workbench.api.app",
     "vivarium_workbench.lib.remote_run_views",
     "vivarium_workbench.lib.remote_trace",
-    "vivarium_workbench.lib.server_capabilities",
 })
 
 # Modules allowed to fail for a reason other than the plugin: optional extras that may be absent (the ``chat`` extra).
@@ -123,7 +120,6 @@ _CALL_PROBE = textwrap.dedent('''
 ''')
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="lib.server_capabilities still imports the plugin at module level (P2 Client)")
 def test_run_target_answers_without_the_plugin(monkeypatch):
     from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
 
@@ -131,6 +127,34 @@ def test_run_target_answers_without_the_plugin(monkeypatch):
         monkeypatch.delenv(var, raising=False)
         monkeypatch.delenv(var.replace("VIVARIUM_WORKBENCH_", "VIVARIUM_DASHBOARD_"), raising=False)
     proc = subprocess.run([sys.executable, "-c", _CALL_PROBE], capture_output=True, text=True, timeout=300)
-    if "@@RESULT@@" not in proc.stdout and "vivarium_workbench_sms" not in proc.stderr:
-        raise RuntimeError(f"probe failed for another reason:\n{proc.stderr[-2000:]}")  # not the expected xfail
     assert "@@RESULT@@local" in proc.stdout, proc.stderr[-2000:]
+
+
+_CLI_PROBE = textwrap.dedent('''
+    import argparse, sys
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    import vivarium_workbench.lib.server_capabilities, vivarium_workbench.lib.startup
+    from vivarium_workbench import cli
+
+    action = next(a for a in cli._build_parser()._actions if isinstance(a, argparse._SubParsersAction))
+    assert "run-remote" not in action.choices, sorted(action.choices)
+    try:
+        cli.main(["gen-readme", "--help"])
+    except SystemExit as e:
+        print("@@RESULT@@" + str(e.code))
+''')
+
+
+def test_the_cli_and_startup_work_without_the_plugin():
+    """Step P2 CLI: ``cli``, ``startup`` and ``server_capabilities`` import with the plugin absent; the CLI parses and
+    simply has no ``run-remote``."""
+    proc = subprocess.run([sys.executable, "-c", _CLI_PROBE], capture_output=True, text=True, timeout=300)
+    assert "@@RESULT@@0" in proc.stdout, proc.stderr[-2000:]
+    assert "warning" not in proc.stderr  # an absent plugin is not a broken one

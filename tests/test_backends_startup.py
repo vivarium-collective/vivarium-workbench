@@ -60,11 +60,30 @@ def _subcommands() -> set[str]:
 
 
 def test_every_subcommand_is_classified_exactly_once():
+    """Core subcommands are in exactly one core set; a provider's (step P2 CLI) say for themselves
+    (``Command.uses_backend``) and may not reuse a core name."""
     subs = _subcommands()
+    provided = {c.name for c in cli._provider_commands()}
     assert not (cli.BACKEND_COMMANDS & cli.NO_BACKEND_COMMANDS)
-    assert subs == cli.BACKEND_COMMANDS | cli.NO_BACKEND_COMMANDS, (
+    assert not (provided & (cli.BACKEND_COMMANDS | cli.NO_BACKEND_COMMANDS))
+    assert subs == cli.BACKEND_COMMANDS | cli.NO_BACKEND_COMMANDS | provided, (
         "classify new subcommands in cli.BACKEND_COMMANDS or cli.NO_BACKEND_COMMANDS: "
-        f"{sorted(subs ^ (cli.BACKEND_COMMANDS | cli.NO_BACKEND_COMMANDS))}")
+        f"{sorted(subs ^ (cli.BACKEND_COMMANDS | cli.NO_BACKEND_COMMANDS | provided))}")
+    # run-remote is the SMS provider's, and it reaches a backend: both start-up checks run before it
+    assert "run-remote" in provided and "run-remote" not in cli.BACKEND_COMMANDS
+    assert "run-remote" in cli._backend_commands(cli._provider_commands())
+
+
+def test_a_provider_backend_command_gets_the_hosted_worker_check(monkeypatch, capsys, tmp_path):
+    """The one backend-command set (core + ``uses_backend``) carries P2 Workers' check too."""
+    from vivarium_workbench.lib import env_worker_launcher
+
+    def refuse():
+        raise sac.BackendConfigError("hosted env workers are asked for but no provider supplies them")
+
+    monkeypatch.setattr(env_worker_launcher, "check_worker_config", refuse)
+    assert cli.main(["run-remote", "--workspace", str(tmp_path), "some.composite"]) == 2
+    assert "no provider supplies them" in capsys.readouterr().err
 
 
 def test_a_backend_command_refuses_two_backends(monkeypatch, capsys, tmp_path):
@@ -113,3 +132,29 @@ def test_serves_flag_replaces_a_stale_named_env_var(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_serve_detached", lambda *a, **k: called.append(1) or 0)
     assert cli.main(["serve", "--workspace", str(tmp_path), "--detach", "--backend-base-url", "http://api:8000"]) == 0
     assert called
+
+
+class _Stop(BaseException):
+    """Ends ``serve_fastapi`` right after the start-up probes (``except Exception`` there does not catch it)."""
+
+
+@pytest.mark.parametrize("env, expected", [({SMS: "http://api:8000"}, ["http://api:8000"]), ({}, [])])
+def test_serve_starts_the_breaker_probe_on_the_configured_url(monkeypatch, tmp_path, env, expected):
+    """Step P2: the startup probe is core config (``backend_config.start_probe(configured_base_url())``), the URL
+    ``remote_link.start_probe()`` used; only when a backend is configured."""
+    from vivarium_workbench.lib import _root, backend_config, startup, workspace_deps_views
+
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    started = []
+    monkeypatch.setattr(backend_config, "start_probe", lambda url: started.append(url))
+    monkeypatch.setattr(workspace_deps_views, "remote_health",
+                        lambda: {"reachable": True, "base_url": "x", "version": "1"})
+
+    def stop(_ws):
+        raise _Stop
+
+    monkeypatch.setattr(_root, "set_workspace_root", stop)
+    with pytest.raises(_Stop):
+        startup.serve_fastapi(tmp_path, port=0)
+    assert started == expected

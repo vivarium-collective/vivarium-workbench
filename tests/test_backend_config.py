@@ -197,3 +197,79 @@ def test_compose_api_reports_its_identity_through_its_own_function(monkeypatch):
     monkeypatch.setattr(records, "fetch_server_id", lambda url, **k: asked.append((url, k)) or "c-1")
     rec = records.remote_record("compose-api", "compose-1", "http://compose:1")
     assert rec["server_id"] == "c-1" and asked == [("http://compose:1", {"kind": "compose-api"})]
+
+
+# --- the core's plain-HTTP probe client, and the SMS client it stands in for (step P2 Client) ------------------------
+
+_PROBE_CLIENTS = {
+    "core": lambda base: bc.ProbeClient(base),
+    "sms": lambda base: sac.SmsApiClient.for_("probe", base),
+}
+_OPENAPI = (b'{"info": {"version": "0.7"}, "paths": {"/simulation/run": {"post": {"operationId": "run-simulation"}},'
+            b' "/x": {"get": {"operationId": "list-environments"}, "parameters": []}}}')
+
+
+@pytest.fixture
+def _fresh_links():
+    with bc._links_lock:
+        saved = dict(bc._links)
+        bc._links.clear()
+    yield
+    with bc._links_lock:
+        bc._links.clear()
+        bc._links.update(saved)
+
+
+def _ask(which: str, base: str):
+    return _PROBE_CLIENTS[which](base).openapi_operations()
+
+
+@pytest.mark.parametrize("which", sorted(_PROBE_CLIENTS))
+def test_probe_client_reads_the_compose_operations(monkeypatch, _fresh_links, which):
+    seen = _serve(monkeypatch, lambda req: _Resp(_OPENAPI))
+    assert _ask(which, "http://p2-probe:1/") == ("0.7", frozenset({"run-simulation", "list-environments"}))
+    [(url, headers, timeout)] = seen
+    assert url == "http://p2-probe:1/openapi.json"
+    assert headers == {"Accept": "application/json", "X-auth-request-email": "tester@github"}
+    assert timeout == 3.0
+    assert bc.link("http://p2-probe:1").state == bc.STATE_UP
+
+
+@pytest.mark.parametrize("which", sorted(_PROBE_CLIENTS))
+@pytest.mark.parametrize("code", [404, 503])
+def test_probe_client_http_error_has_its_status_and_no_retry(monkeypatch, _fresh_links, which, code):
+    def boom(req):
+        raise HTTPError(req.full_url, code, "nope", {}, io.BytesIO(b'{"detail": "no"}'))
+
+    seen = _serve(monkeypatch, boom)
+    with pytest.raises(bc.BackendError) as ei:
+        _ask(which, "http://p2-probe:2")
+    assert ei.value.status == code
+    assert str(ei.value) == f"GET http://p2-probe:2/openapi.json -> {code}: no"
+    assert len(seen) == 1
+    assert bc.link("http://p2-probe:2").state == bc.STATE_UNKNOWN  # an HTTP status is not a link failure
+
+
+@pytest.mark.parametrize("which", sorted(_PROBE_CLIENTS))
+def test_probe_client_unreachable_opens_the_breaker(monkeypatch, _fresh_links, which):
+    def boom(req):
+        raise URLError("connection refused")
+
+    seen = _serve(monkeypatch, boom)
+    with pytest.raises(bc.BackendError) as ei:
+        _ask(which, "http://p2-probe:3")
+    assert ei.value.status is None
+    assert str(ei.value) == ("GET http://p2-probe:3/openapi.json failed (sms-api unreachable — is the tunnel up?): "
+                             "<urlopen error connection refused>")
+    assert bc.link("http://p2-probe:3").state == bc.STATE_DOWN
+    with pytest.raises(bc.CircuitOpen):
+        _ask(which, "http://p2-probe:3")
+    assert len(seen) == 1  # the second call never touched the socket
+
+
+@pytest.mark.parametrize("which", sorted(_PROBE_CLIENTS))
+def test_probe_client_not_json_is_a_value_error(monkeypatch, _fresh_links, which):
+    _serve(monkeypatch, lambda req: _Resp(b"<html>"))
+    with pytest.raises(ValueError):
+        _ask(which, "http://p2-probe:4")
+    assert bc.link("http://p2-probe:4").state == bc.STATE_UNKNOWN
