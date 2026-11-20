@@ -17,7 +17,7 @@ from pathlib import Path
 from vivarium_workbench.lib import git_status, github_auth, study_spec
 from vivarium_workbench.lib import remote_run_views as rrv
 from vivarium_workbench_sms import remote_pipeline_views as pv
-from vivarium_workbench_sms import remote_run_jobs, sms_landing, sms_legacy
+from vivarium_workbench_sms import remote_pinned, remote_run_jobs, sms_landing, sms_legacy
 
 
 # ---------------------------------------------------------------------------
@@ -810,7 +810,7 @@ def test_run_analysis_missing_simulation_id_400(monkeypatch, tmp_path):
 
 def test_run_analysis_unauthenticated_401(monkeypatch, tmp_path):
     _bind_analysis_client(monkeypatch, tmp_path, authed=False)
-    monkeypatch.setattr(rrv.remote_pinned, "is_pinned_enabled", lambda: False)
+    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: False)
     assert rrv.remote_run_analysis(tmp_path, {"simulation_id": 199})[1] == 401
 
 

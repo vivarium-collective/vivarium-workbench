@@ -2229,10 +2229,10 @@ def resolve_or_fetch_store(workspace: Path, row: dict) -> "tuple[Path | None, te
         return None, None
 
     from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
-    from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
+    from vivarium_workbench_sms import sms_api_client
     tmp = tempfile.TemporaryDirectory()
     try:
-        tar_path = SmsApiClient(_sms_api_base()).download_data(int(sim_id), Path(tmp.name))
+        tar_path = SmsApiClient(sms_api_client.sms_api_base()).download_data(int(sim_id), Path(tmp.name))
     except SmsApiError:
         tmp.cleanup()
         return None, None

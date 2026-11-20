@@ -139,7 +139,7 @@ def test_resolve_pinned_build_raises_when_no_match():
 
 
 def test_pinned_build_start_409_when_disabled(monkeypatch, tmp_path):
-    monkeypatch.setattr(rrv.remote_pinned, "pinned_config", lambda: None)
+    monkeypatch.setattr(rp, "pinned_config", lambda: None)
     body, status = pv.remote_run_pinned_build_start(tmp_path, {"study": "s"})
     assert status == 409
     assert "not enabled" in body["error"]
@@ -147,7 +147,7 @@ def test_pinned_build_start_409_when_disabled(monkeypatch, tmp_path):
 
 def test_pinned_build_start_returns_built_phase(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        rrv.remote_pinned,
+        rp,
         "pinned_config",
         lambda: rp.PinnedConfig(
             repo_url="https://github.com/vivarium-collective/v2ecoli", branch="main"
@@ -171,7 +171,7 @@ def test_submit_gate_allows_pinned_without_session(monkeypatch, tmp_path):
     # No GitHub session, but pinned mode on → gate passes (fails later on the
     # missing study, NOT on 401).
     monkeypatch.setattr(github_auth, "current_session", lambda: None)
-    monkeypatch.setattr(rrv.remote_pinned, "is_pinned_enabled", lambda: True)
+    monkeypatch.setattr(rp, "is_pinned_enabled", lambda: True)
     _body, status = rrv.remote_run_submit(tmp_path, {"study": "", "simulator_id": 69})
     assert status != 401
     assert status == 400  # study is required
@@ -179,7 +179,7 @@ def test_submit_gate_allows_pinned_without_session(monkeypatch, tmp_path):
 
 def test_submit_gate_401_when_no_session_and_not_pinned(monkeypatch, tmp_path):
     monkeypatch.setattr(github_auth, "current_session", lambda: None)
-    monkeypatch.setattr(rrv.remote_pinned, "is_pinned_enabled", lambda: False)
+    monkeypatch.setattr(rp, "is_pinned_enabled", lambda: False)
     _body, status = rrv.remote_run_submit(tmp_path, {"study": "s", "simulator_id": 69})
     assert status == 401
 
@@ -190,8 +190,13 @@ def test_submit_gate_401_when_no_session_and_not_pinned(monkeypatch, tmp_path):
 
 
 def test_remote_run_config_off(monkeypatch, tmp_path):
-    monkeypatch.setattr(rrv.remote_pinned, "pinned_config", lambda: None)
-    monkeypatch.setattr(rrv.remote_pinned, "remote_deployment_name", lambda: "smscdk")
+    """Nothing pinned and no session build: no backend with builds is selected, so the core answers with the
+    configured deployment name (``backend_config.deployment_name``; step P2 Builds B3) and SMS is not asked."""
+    from vivarium_workbench.lib import backend_config
+
+    monkeypatch.setattr(rp, "pinned_config", lambda: None)
+    monkeypatch.setattr(backend_config, "deployment_name", lambda: "smscdk")
+    monkeypatch.setattr(rp, "remote_deployment_name", lambda: pytest.fail("SMS's pin was asked with nothing pinned"))
     body, status = rrv.remote_run_config(tmp_path)
     assert status == 200
     assert body == {"pinned": False, "deployment": "smscdk"}
@@ -199,7 +204,7 @@ def test_remote_run_config_off(monkeypatch, tmp_path):
 
 def test_remote_run_config_on_resolves_commit(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        rrv.remote_pinned,
+        rp,
         "pinned_config",
         lambda: rp.PinnedConfig(
             repo_url="https://github.com/vivarium-collective/v2ecoli", branch="main"
@@ -216,7 +221,7 @@ def test_remote_run_config_on_resolves_commit(monkeypatch, tmp_path):
 
 def test_remote_run_config_on_degrades_on_missing_build(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        rrv.remote_pinned,
+        rp,
         "pinned_config",
         lambda: rp.PinnedConfig(
             repo_url="https://github.com/nobody/nothing", branch="main"
@@ -271,7 +276,7 @@ def test_pinned_build_start_prefers_session_build_over_static_pin(
     # binding must win -- this is exactly the bug: pinned dispatch silently
     # ignoring which workspace the user actually selected.
     monkeypatch.setattr(
-        rrv.remote_pinned,
+        rp,
         "pinned_config",
         lambda: rp.PinnedConfig(
             repo_url="https://github.com/vivarium-collective/v2ecoli", branch="main"
@@ -286,13 +291,13 @@ def test_pinned_build_start_prefers_session_build_over_static_pin(
 
 def test_remote_run_config_prefers_session_build_over_static_pin(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        rrv.remote_pinned,
+        rp,
         "pinned_config",
         lambda: rp.PinnedConfig(
             repo_url="https://github.com/vivarium-collective/v2ecoli", branch="main"
         ),
     )
-    monkeypatch.setattr(rrv.remote_pinned, "remote_deployment_name", lambda: "smscdk")
+    monkeypatch.setattr(rp, "remote_deployment_name", lambda: "smscdk")
     _stamp_build_meta(tmp_path)
     body, status = rrv.remote_run_config(tmp_path)
     assert status == 200
@@ -304,7 +309,7 @@ def test_pinned_build_start_falls_back_to_static_pin_when_unswitched(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
-        rrv.remote_pinned,
+        rp,
         "pinned_config",
         lambda: rp.PinnedConfig(
             repo_url="https://github.com/vivarium-collective/v2ecoli", branch="main"

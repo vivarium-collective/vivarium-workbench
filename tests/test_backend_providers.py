@@ -516,6 +516,10 @@ _SMS_ONLY_ROUTES = (
     ("get", "/api/remote-run-status", 404),
     ("post", "/api/remote-run-build", 405),
     ("post", "/api/remote-run-pinned-build", 405),
+    # step P2 Builds B3: the Source panel's build routes (with providers off its build list shows "unreachable")
+    ("get", "/api/source/builds", 404),
+    ("post", "/api/source/build-remote", 405),
+    ("post", "/api/source/switch-build", 405),
 )
 
 #: What moved from lib.remote_run_views to the plugin's remote_pipeline_views (the three views and their helper), and
@@ -747,3 +751,85 @@ def test_cloud_dispatch_reads_every_seam_through_its_module():
     offenders = [f"{n.module}:{n.lineno}" for n in ast.walk(tree)
                  if isinstance(n, ast.ImportFrom) and n.module in watched]
     assert offenders == []
+# --- the builds facet and the build routes (step P2, Builds B3) ------------------------------------------------------
+
+#: The build routes the SMS router declares read-only-safe (the remote-build flow, "the core of remote-only").
+_BUILD_POSTS = frozenset({"/api/source/build-remote", "/api/source/switch-build"})
+
+
+def test_only_sms_legacy_declares_builds_and_the_sentinels_do_not():
+    from vivarium_workbench_sms.sms_legacy import SmsLegacyBuilds
+
+    assert isinstance(backends.SMS_LEGACY.builds, SmsLegacyBuilds)
+    assert [b.name for b in backends._ALL if b.builds is not None] == ["sms-legacy"]
+    assert all(s.builds is None for s in backends._SENTINELS.values())
+
+
+def test_the_pin_the_study_dispatch_and_the_build_routes_left_the_core():
+    """Permanent anti-seam test: the moved names are gone from the core (a stale patch on them raises), and the
+    alias users read ``sms_api_client.sms_api_base`` through its module instead of ``workspace_deps_views``."""
+    import ast
+    import inspect
+
+    from vivarium_workbench.api import app as appmod
+    from vivarium_workbench.lib import remote_run_views as rrv
+    from vivarium_workbench.lib import study_runs
+    from vivarium_workbench.lib import workspace_deps_views as wdv
+    from vivarium_workbench_sms import source_build_views as sbv
+
+    assert [n for n in ("_sms_api_base", "build_source_builds") if hasattr(wdv, n)] == []
+    assert [n for n in ("_remote_run_config", "remote_pinned") if hasattr(rrv, n)] == []
+    assert not hasattr(appmod, "_source_build_views")
+    assert hasattr(sbv, "build_source_builds")
+    # study_runs names no plugin module at all (its dispatch is ``builds.run_study``).
+    tree = ast.parse(inspect.getsource(study_runs))
+    plugin = [n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+              and (n.module or "").startswith("vivarium_workbench_sms")]
+    assert plugin == []
+
+
+def test_the_build_routes_are_the_plugins_and_read_only_keeps_the_two_posts():
+    from vivarium_workbench.api import app as appmod
+
+    app = appmod.create_app()
+    routes = _app_routes(app)
+    for path, method in (("/api/source/builds", "get"), ("/api/source/build-remote", "post"),
+                         ("/api/source/switch-build", "post")):
+        assert routes[(path, method)].endpoint.__module__ == "vivarium_workbench_sms.routes"
+    assert app.state.readonly_allowed_mutations >= _BUILD_POSTS
+    assert not (_BUILD_POSTS & set(appmod._READONLY_ALLOWED_MUTATIONS))  # declared by the plugin, not the core
+    # The core's switch stays core and keeps its read-only exemption.
+    assert routes[("/api/source/switch", "post")].endpoint.__module__ == "vivarium_workbench.api.app"
+    assert "/api/source/switch" in appmod._READONLY_ALLOWED_MUTATIONS
+
+
+def test_with_providers_off_the_pin_is_not_reported_and_sms_is_not_asked(providers_off, tmp_path, monkeypatch,
+                                                                       inproc_client):
+    """Declared change (Builds B3), providers off only: a pin env var used to reach SMS's pin; now no backend with
+    builds is selected, so the card reads ``pinned: false`` with the configured deployment name, and nothing is
+    sent."""
+    from vivarium_workbench_sms import remote_pinned
+    from vivarium_workbench_sms import sms_api_client as sac
+
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_REPO_URL", "https://github.com/o/r")
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT", "smscdk")
+    monkeypatch.setattr(sac.SmsApiClient, "list_branch_builds", lambda *a, **k: pytest.fail("SMS was asked"))
+    monkeypatch.setattr(remote_pinned, "resolved_from_session_build", lambda *a: pytest.fail("SMS's pin was read"))
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    r = inproc_client(tmp_path).get("/api/remote-run-config")
+    assert (r.status_code, r.json()) == (200, {"pinned": False, "deployment": "smscdk"})
+
+
+def test_bind_session_does_nothing_without_a_key_or_a_path(monkeypatch):
+    from fastapi import Response
+
+    from vivarium_workbench.api import deps
+    from vivarium_workbench.lib import session_env, session_registry
+
+    monkeypatch.setattr(session_registry, "rebind", lambda *a: pytest.fail("rebound"))
+    monkeypatch.setattr(session_env, "prepare", lambda *a, **k: pytest.fail("prepared"))
+    for key, body in ((None, {"source": {"path": "/x"}}), ("k", {"source": {}}), ("k", {})):
+        resp = Response()
+        deps.bind_session(None, resp, key, body, managed=True)  # type: ignore[arg-type]
+        assert "set-cookie" not in resp.headers and "materialization" not in body

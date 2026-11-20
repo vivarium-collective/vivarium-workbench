@@ -775,54 +775,21 @@ def run_study_baseline(ws_root, body):
             "params": generator_overrides, "n_steps": params_n_steps,
         })
 
-    # item 83: on a deployment target, delegate to the ONE proven, real
-    # remote-dispatch mechanism (remote_run_submit -> real POST
-    # /api/v1/simulations, the same path "Run current spec" already uses when
-    # a session is pinned) instead of the unconditional 409 launch_into_study
-    # raises below. Scoped narrowly to the case that mechanism actually
-    # supports: the study's DEFAULT baseline entry (entry is baseline[0], no
-    # explicit ?composite= override) and a real (non-dry-run) dispatch.
-    # remote_run_submit has no way to select a specific composite -- it
-    # dispatches whatever the pinned simulator's own build contains -- so a
-    # non-default `requested` composite still falls through to
-    # launch_into_study's existing, accurate 409 rather than risk silently
-    # running the wrong composite. dry_run also falls through unchanged
-    # (preview stays local-only; no real dispatch to preview against).
+    # item 83: on a backend that runs this workspace as one of its own builds (a session build or the deployment's
+    # pin), delegate to that backend's study run (``builds.run_study``: SMS's real POST /api/v1/simulations, the same
+    # path "Run current spec" already uses when a session is pinned) instead of the unconditional 409
+    # launch_into_study raises below. Scoped narrowly to the case that mechanism actually supports: the study's
+    # DEFAULT baseline entry (entry is baseline[0], no explicit ?composite= override) and a real (non-dry-run)
+    # dispatch. A build has no way to select a specific composite -- it runs whatever the build contains -- so a
+    # non-default `requested` composite still falls through to launch_into_study's existing, accurate 409 rather
+    # than risk silently running the wrong composite. dry_run also falls through unchanged (preview stays
+    # local-only; no real dispatch to preview against).
     if not dry_run and entry is baseline[0] and not requested:
         from vivarium_workbench.lib import backends
 
-        target = backends.resolve_run_target(ws_root)
-        if target == "deployment":
-            num_generations = generator_overrides.get("n_generations")
-            num_seeds = generator_overrides.get("n_seeds")
-            # Backlog items 86/88: any composite-declared param beyond the two run-size
-            # knobs above (e.g. a fork/injection spec, or a multi-node dispatch request)
-            # rides through to viva-api as a generic passthrough dict — never silently
-            # dropped the way it previously was. Composite-agnostic: no key here is
-            # inspected or special-cased by name.
-            extra_params = {
-                k: v for k, v in generator_overrides.items()
-                if k not in ("n_generations", "n_seeds")
-            }
-            # Lazy: the hosted env-worker pod ships the core without the plugin, and this module must import there.
-            from vivarium_workbench_sms import remote_pinned
-            from vivarium_workbench_sms.sms_api_client import SmsApiClient
-            from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
-            simulator_id = remote_pinned.resolve_pinned_simulator_id(
-                SmsApiClient(_sms_api_base()), ws_root)
-            if simulator_id is None:
-                return {"error": "no remote build resolved for this deployment/"
-                                 "session — switch to a built workspace or "
-                                 "configure a pinned repo@branch"}, 409
-            from vivarium_workbench.lib.remote_run_views import remote_run_submit
-            return remote_run_submit(ws_root, {
-                "study": name,
-                "simulator_id": simulator_id,
-                "num_generations": num_generations,
-                "num_seeds": num_seeds,
-                "run_parca": bool(body.get("run_parca", True)),
-                "extra_params": extra_params or None,
-            })
+        chosen = backends.active(ws_root)
+        if chosen is not None and chosen.builds is not None:
+            return chosen.builds.run_study(ws_root, study=name, params=generator_overrides, request=body)
 
     return launch_into_study(
         ws_root, name, spec_id, generator_overrides, params_n_steps,

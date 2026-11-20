@@ -117,8 +117,8 @@ def configured_base_url() -> str:
     --backend-base-url`` sets) > ``VIVA_API_BASE`` > ``SMS_API_BASE`` (the
     legacy alias, since the backend repo was renamed sms-api -> viva-api) >
     ``http://localhost:8080`` (the SSM tunnel). The single source of truth for
-    this lookup — ``workspace_deps_views`` and ``remote_simulations`` re-export
-    it under their old ``_sms_api_base`` name.
+    this lookup — the plugin's ``sms_api_client.sms_api_base`` (and ``remote_simulations`` and ``sms_legacy``,
+    under their ``_sms_api_base`` name) read it at call time.
 
     Exactly one backend is configured per process (:func:`check_single_backend`, at process entry), so a named
     backend and an alias, when both are set, are the same URL. This reads the environment only: no network call,

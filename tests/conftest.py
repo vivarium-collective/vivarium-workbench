@@ -84,7 +84,7 @@ UNREACHABLE_VIVA_API_BASE = "http://127.0.0.1:1"
 def _isolate_viva_api_base():
     """Point the viva-api client at a closed port for the whole run.
 
-    ``workspace_deps_views._sms_api_base()`` falls back to
+    ``sms_api_client.sms_api_base()`` falls back to
     ``http://localhost:8080`` when neither ``VIVA_API_BASE`` nor
     ``SMS_API_BASE`` is set — and **8080 is exactly where a developer's SSM
     tunnel to the live dev deployment listens** (``sms-proxy.sh -s smsvpctest``,
