@@ -3366,8 +3366,16 @@ body.pcard-splitting iframe{ pointer-events:none; }
 :root[data-theme="dark"] .repo-card-ws { background: var(--panel); }
 
 /* Studies-overview header action cluster: + Investigation / + Study / Audit Report */
-.iset-hdr-btn { display: inline-flex; align-items: center; gap: 5px; }
-.iset-hdr-btn svg { flex: none; }
+.iset-hdr-btn { display: inline-flex; align-items: center; }
+/* + Investigation is the primary call-to-action of the cluster. */
+.iset-hdr-btn-primary { border-color: #3b82f6; color: #1d4ed8; font-weight: 600; }
+.iset-hdr-btn-primary:hover { background: #eff6ff; }
+:root[data-theme="dark"] .iset-hdr-btn-primary { border-color: #3b82f6; color: #bfdbfe; }
+:root[data-theme="dark"] .iset-hdr-btn-primary:hover { background: #1e293b; }
+/* Investigation-header show/hide toggles (Details / Graph): a pressed/active
+   look when their panel is expanded, so they read as reveal controls. */
+.inv-toggle-on { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+:root[data-theme="dark"] .inv-toggle-on { background: #1e293b; border-color: #3b82f6; color: #bfdbfe; }
 .market-results { margin-top: 14px; }
 /* Keep the Registry results full-width and vertically reserved so switching
    facets or waiting on a slow load doesn't reflow the card columns or bounce
@@ -5022,6 +5030,7 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
    the "▸ Investigation graph" collapsed bar. No blue. */
 .inv-header-bar { gap: 8px; flex-wrap: wrap; }
 .inv-header-bar .btn-mini,
+.inv-row-shortcuts .btn-mini,
 .inv-header-bar .aig-na-chip {
   font-size: 0.75em;
   font-weight: 600;
@@ -5038,9 +5047,12 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 }
 .inv-header-bar .aig-na-chip { display: inline-flex; align-items: center; gap: 5px; }
 .inv-header-bar .btn-mini:hover,
+.inv-row-shortcuts .btn-mini:hover,
 .inv-header-bar .aig-na-chip:hover { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
-.inv-header-bar .btn-mini:disabled { opacity: 0.55; cursor: default; }
-.inv-header-bar .btn-mini:disabled:hover { background: #f8fafc; color: #475569; border-color: #e5e7eb; }
+.inv-header-bar .btn-mini:disabled,
+.inv-row-shortcuts .btn-mini:disabled { opacity: 0.55; cursor: default; }
+.inv-header-bar .btn-mini:disabled:hover,
+.inv-row-shortcuts .btn-mini:disabled:hover { background: #f8fafc; color: #475569; border-color: #e5e7eb; }
 /* Keep only a quiet status tint on the chip's glyph/text so the pill still reads
    as a status without breaking the shared shape. */
 .inv-header-bar .aig-na-chip.aig-na-clear { color: #166534; }
@@ -5049,10 +5061,12 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 .inv-header-bar .aig-na-chip.aig-na-flag.aig-na-high { color: #991b1b; }
 #ws-actions { display: inline-flex; align-items: center; gap: 8px; }
 :root[data-theme="dark"] .inv-header-bar .btn-mini,
+:root[data-theme="dark"] .inv-row-shortcuts .btn-mini,
 :root[data-theme="dark"] .inv-header-bar .aig-na-chip {
   background: rgba(148,163,184,0.12); border-color: rgba(148,163,184,0.3); color: #cbd5e1;
 }
 :root[data-theme="dark"] .inv-header-bar .btn-mini:hover,
+:root[data-theme="dark"] .inv-row-shortcuts .btn-mini:hover,
 :root[data-theme="dark"] .inv-header-bar .aig-na-chip:hover { background: rgba(148,163,184,0.22); color: #e2e8f0; }
 
 /* ── Dockable investigation graph (while a study is embedded) ──

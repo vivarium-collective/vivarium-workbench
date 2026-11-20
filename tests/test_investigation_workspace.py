@@ -345,26 +345,23 @@ def test_investigation_overview_collapsed_by_default_graph_prominent():
     assert "_applyInvOverviewState()" in _fn_body("_wsResetStudyTabs")
 
 
-def test_needs_attention_is_a_compact_toolbar_chip():
-    """The all-clear state is a compact chip in the toolbar, not a big green
-    banner; the needs state is a compact clickable chip that reveals the detail."""
-    assert 'id="aig-needs-attention-chip"' in TPL
+def test_needs_attention_is_a_detail_tab():
+    """Needs-attention is folded INTO the investigation details as its own tab —
+    not a top-bar chip. The shared deterministic scan body (_aigScanBodyHtml)
+    fills the tab's mount, and the tab button carries the flagged-count badge."""
+    assert 'id="aig-needs-attention-chip"' not in TPL  # chip gone from the header
     i = JS.index("function _renderInvNeedsAttention")
     body = JS[i: JS.index("window._renderInvNeedsAttention", i)]
-    # All-clear renders a small chip — not the old full-width green
-    # "✓ Nothing needs attention" banner. The clear/quiet label + class now come
-    # from the honest _naQuietState helper (which yields "✓ All clear"/aig-na-clear
-    # only when a study actually ran — issue #1618, bug 3).
-    assert "_naQuietState(d.summary)" in body
-    assert "aig-na-clear" in JS and "All clear" in JS
-    assert "Nothing needs attention" not in body     # old big all-clear banner gone
-    # Needs state is a clickable chip that opens the detail list (in a popover —
-    # the single surface; the old in-body banner is gone).
-    assert "aig-na-flag" in body
-    assert "_aigShowAllClearInfo" in body
-    assert "needs-attention-banner" not in body      # no duplicate in-body banner
-    css = (ROOT / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
-    assert ".aig-na-chip" in css
+    # Fills the Needs-attention tab mount with the shared scan body.
+    assert "inv-attention-mount" in body
+    assert "_aigScanBodyHtml(d)" in body
+    # Reflects the flagged count on the tab button (badge), not a chip.
+    assert "inv-brief-tab-badge" in body
+    assert 'inv-brief-tab[onclick*="attention"]' in body
+    assert "needs-attention-banner" not in body       # no in-body banner
+    # The shared scan body + the honest quiet-state helper still exist.
+    assert "function _aigScanBodyHtml" in JS
+    assert "_naQuietState(summary)" in JS and "All clear" in JS
 
 
 def test_embedded_study_hides_in_iframe_header_nav():

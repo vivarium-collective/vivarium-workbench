@@ -63,14 +63,17 @@ def test_intro_is_inquiry_brief_host():
         assert f'id="{id_}"' not in dv, f"stale block {id_} still present"
 
 
-def test_needs_attention_single_surface_is_toolbar_chip():
-    # Needs-attention is a SINGLE surface now: the toolbar chip. The duplicate
-    # in-body banner (#investigation-needs-attention) was removed, and the chip
-    # opens the deterministic scan in the same rich popover used for "all clear".
-    assert 'id="investigation-needs-attention"' not in HTML, \
-        "in-body needs-attention banner should be removed (chip is the only surface)"
-    assert 'id="aig-needs-attention-chip"' in HTML, "toolbar needs-attention chip missing"
-    assert "_aigShowAllClearInfo(this)" in JS, "chip should open the scan popover"
+def test_needs_attention_is_a_detail_tab_not_a_toolbar_chip():
+    # Needs-attention now lives INSIDE the investigation details, as its own tab —
+    # it is no longer a top-bar chip (moved off the highest menu level). The
+    # deterministic scan body is shared (_aigScanBodyHtml) and rendered into the
+    # tab's mount; the tab button carries the flagged-count badge.
+    assert 'id="investigation-needs-attention"' not in HTML, "no in-body banner"
+    assert 'id="aig-needs-attention-chip"' not in HTML, \
+        "needs-attention chip should be gone from the header (it is a tab now)"
+    assert "inv-attention-mount" in JS, "needs-attention tab mount missing"
+    assert "id: 'attention'" in JS, "needs-attention tab not pushed into the brief tabs"
+    assert "function _aigScanBodyHtml" in JS, "shared scan body renderer missing"
     assert "needs-attention-banner" not in JS, "in-body banner HTML should be gone"
 
 
@@ -88,3 +91,72 @@ def test_dag_header_removed_toolbar_is_self_evident():
     # The graph toolbar (single control row) + the legend chip remain.
     assert 'class="aig-toolbar"' in dv
     assert 'id="dag-legend-chip"' in dv
+
+
+def test_detail_header_reworked_back_addstudy_toggles():
+    """The investigation-detail header: Back lands top-left and reads 'Back to
+    Investigations'; a + Study button creates a study pre-scoped to the open
+    investigation; the two toggles read as Details / Graph show-hide controls."""
+    # Back relabeled + is the first control in the header bar (top-left).
+    assert "Back to Investigations" in HTML
+    top = HTML[HTML.index('class="inv-header-top"'):]
+    assert top.index('id="ws-back"') < top.index('class="inv-header-nav"'), \
+        "Back should sit left of the right-hand nav cluster"
+    # + Study, scoped to the current investigation.
+    assert 'id="ws-add-study"' in HTML
+    assert "_openBrowseCreate('study', window._currentIset)" in HTML
+    # Toggles relabeled to read as reveal controls, with an active/pressed state.
+    assert "> Details<" in HTML and "> Graph<" in HTML
+    assert "inv-toggle-on" in JS
+
+
+def test_validation_is_a_tab_without_rfc_label():
+    """Validation moved into the investigation-detail tab strip as its own tab,
+    and the '(RFC-0007)' label is dropped."""
+    assert "id: 'validation'" in JS
+    assert "inv-validation-mount" in JS
+    assert "<summary>Validation (RFC-0007)</summary>" not in JS   # rendered label dropped
+    # the loader fills the tab mount, not a standalone <details> panel
+    assert "function _vivLoadValidationPanel" in JS
+
+
+def test_export_menu_supports_open_in_browser():
+    """The investigation Export menu offers open-in-browser (not only download),
+    mirroring the list page: report/notebook/figures each gain an Open action."""
+    i = JS.index("function _wsSetInvestigationActions")
+    body = JS[i: JS.index("window._wsSetInvestigationActions", i)]
+    assert "window._vivReportOpen(event)" in body       # open the HTML report
+    assert "window._vivNotebookOpen(event)" in body      # open the notebook
+    assert "Open in browser" in body
+    assert "Download PDF" in body and "_downloadInvestigationReport(null," in body  # download still there
+
+
+def test_list_links_cell_is_a_shortcuts_dropdown():
+    """The list/card LINKS cell is a single 'Shortcuts ▾' button that opens the
+    SAME grouped menu as the investigation-detail Shortcuts (Report / Notebook /
+    Figures, each with open-in-browser + download) — not a row of inline text
+    links. The column header is renamed 'Shortcuts', and the old inline
+    'report / notebook / figures' label-links are gone."""
+    i = JS.index("window._vivInvLinksHtml = function")
+    body = JS[i: i + 2600]
+    # single dropdown button, not inline links
+    assert "Shortcuts ▾</button>" in body
+    assert "inv-row-shortcuts-menu" in body
+    # same grouped menu as the detail Shortcuts
+    assert "Open in browser" in body
+    assert "Download PDF" in body and "Download .ipynb" in body
+    assert "window._vivReportOpen(event," in body        # per-row name is passed
+    # old inline label-links removed
+    assert ">report</span>" not in body and ">notebook</span>" not in body
+    # column header renamed
+    assert "['Shortcuts', 'left']" in JS and "['Links', 'left']" not in JS
+    # toggle/close helpers wired
+    assert "window._toggleRowShortcuts = function" in JS
+    assert "window._closeRowShortcuts = function" in JS
+
+
+def test_detail_shortcuts_button_renamed_from_export():
+    """The investigation-detail dropdown button reads 'Shortcuts ▾' (it opens
+    links too, not only downloads), replacing the old '↓ Export ▾' label."""
+    assert "Shortcuts ▾</button>" in JS
+    assert "Export ▾</button>" not in JS
