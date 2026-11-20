@@ -165,6 +165,26 @@
   }
   window._setSimSubtab = _setSimSubtab;
 
+  // Model tab secondary subtabs (Composition | Variants | Interventions |
+  // Readouts). All four panels live inside #panel-compose and are rendered at
+  // load, so this only toggles visibility — vanilla show/hide, mirroring
+  // _setSimSubtab. Readouts loaders fire when the Model tab opens, so no
+  // per-subtab dispatch is needed here.
+  function _setModelSubtab(sub) {
+    document.querySelectorAll('.model-subtab').forEach(function (b) {
+      var on = b.dataset.modelsub === sub;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('.model-subpanel').forEach(function (p) {
+      var on = p.dataset.modelsubpanel === sub;
+      p.classList.toggle('active', on);
+      p.hidden = !on;
+    });
+    if (window._autoGrowTextareas) window._autoGrowTextareas();
+  }
+  window._setModelSubtab = _setModelSubtab;
+
   // Cross-tab link helper (Fable §6 #15, Task C1): a link on any tab can
   // point at an anchor that lives inside a DIFFERENT, currently-hidden tab
   // panel (e.g. an Overview finding's "via test <a>" citing a Tests-tab
