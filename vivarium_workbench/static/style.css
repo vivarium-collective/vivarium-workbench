@@ -4723,9 +4723,7 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 .model-subtab-count { font-size:0.72em; font-weight:700; background:#eef2ff; color:#4338ca;
   border-radius:9999px; padding:1px 7px; line-height:1.6; }
 .model-subpanel[hidden] { display:none; }
-.model-loom-mount { min-height:60vh; }
-.model-loom-frame { width:100%; height:72vh; min-height:520px; border:1px solid #e5e7eb;
-  border-radius:10px; background:#fff; display:block; }
+.model-loom-mount { min-height:40vh; }
 
 /* Variants / Interventions — clean card list + labelled add card */
 .msub-intro { font-size:0.9em; color:#475569; margin:0 0 16px; max-width:72ch; line-height:1.5; }

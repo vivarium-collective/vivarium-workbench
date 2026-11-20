@@ -186,38 +186,26 @@
   }
   window._setModelSubtab = _setModelSubtab;
 
-  // Mount the interactive bigraph-loom for the study's composite directly into
-  // the Loom sub-tab. Lazy (iframes are heavy, so only on first open) and
-  // idempotent. Resolves the composite id the same way the Model Definition
-  // panel does — the composite card's resolved full address, else the short
-  // ref, else the study's first baseline composite.
+  // When the Loom sub-tab opens, auto-open the FIRST composite card's inline
+  // bigraph (the baseline) so the tab shows a diagram directly — no extra click.
+  // Variant cards stay collapsed behind their own "Explore composite" toggle
+  // (each loom is heavy; opened on demand). Idempotent; retries briefly while
+  // _loadModelCards is still resolving the cards.
   function _mountModelLoom() {
     var host = document.getElementById('model-loom-mount');
-    if (!host || host.dataset.mounted) return;
-    var cardMount = document.getElementById('model-composite-cards');
-    var byAddr = cardMount && cardMount.querySelector('[data-address]');
-    var byRef = cardMount && cardMount.querySelector('[data-model-composite]');
-    var id = (byAddr && byAddr.getAttribute('data-address'))
-          || (byRef && byRef.getAttribute('data-model-composite'))
-          || ((window._study && window._study.baseline && window._study.baseline[0])
-                ? window._study.baseline[0].composite : '');
-    if (!id) {
-      // the composite card may not have resolved its address yet — retry briefly
+    if (!host || host.dataset.opened) return;
+    var firstWrap = host.querySelector('.model-composite-card-wrap');
+    if (!firstWrap || firstWrap.querySelector('.mdef-explore-btn') == null) {
+      // cards not rendered / resolved yet — retry briefly
       _mountModelLoom._tries = (_mountModelLoom._tries || 0) + 1;
-      if (_mountModelLoom._tries < 25) return void setTimeout(_mountModelLoom, 150);
-      host.innerHTML = '<p class="empty-message">No composite to show in the loom.</p>';
+      if (_mountModelLoom._tries < 40) return void setTimeout(_mountModelLoom, 150);
       return;
     }
-    var apiUrl = (window.DataSource && window.DataSource.apiUrl)
-      ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
-    var frame = document.createElement('iframe');
-    frame.className = 'model-loom-frame';
-    frame.src = apiUrl('/bigraph-loom/index.html') + '?id=' + encodeURIComponent(id) + '&graph=open';
-    frame.setAttribute('title', 'Interactive bigraph — ' + id);
-    frame.setAttribute('loading', 'lazy');
-    host.innerHTML = '';
-    host.appendChild(frame);
-    host.dataset.mounted = '1';
+    host.dataset.opened = '1';
+    // The Explore toggle shows the hidden card and the composite-card code lazily
+    // mounts the loom when it becomes visible — exactly a user click, so reuse it.
+    var expl = firstWrap.querySelector('.mdef-explore-btn');
+    if (expl && /^▸/.test(expl.textContent || '')) expl.click();
   }
   window._mountModelLoom = _mountModelLoom;
 
@@ -1744,8 +1732,11 @@
     _tries = _tries || 0;
     // composite-resolve needs the FULL module address; study.baseline[].composite is
     // the short name. The loom card carries the resolved full address as data-address,
-    // so wait briefly for it to mount, then use it (fall back to the short id).
-    var card = mount.querySelector('[data-address]');
+    // so wait briefly for it to mount, then use it (fall back to the short id). The
+    // composite cards now render in the Loom sub-pane, so search the whole Model tab
+    // for the resolved address, not just this (Composition) mount.
+    var _cpanel = document.getElementById('panel-compose') || document;
+    var card = _cpanel.querySelector('[data-address]');
     var fullId = card && card.getAttribute('data-address');
     if (!fullId && _tries < 25) {
       return void setTimeout(function () { _renderModelDefinition(mount, fallbackId, _tries + 1); }, 120);
@@ -1810,6 +1801,8 @@
     });
     if (!order.length) {
       mount.innerHTML = '<p class="empty-message">No composite declared for this study yet.</p>';
+      var _lm0 = document.getElementById('model-loom-mount');
+      if (_lm0) _lm0.innerHTML = '<p class="empty-message">No composite to show in the loom yet.</p>';
       return;
     }
     // Consolidation (Fable §4.2 / #14): the loom cards below ARE the study's
@@ -1878,8 +1871,15 @@
     var _hasStudyCfg = !!_studyCfgRef;
     if (_hasStudyCfg) _renderStudyConfigPanel(mount, _studyCfgRef, _esc0);
     // Model-forward: render the composite AS A MODEL (contract/ports/math/symbols)
-    // above the loom card(s). Uses the primary (baseline) composite.
+    // in the Composition mount. Uses the primary (baseline) composite.
     if (order.length) _renderModelDefinition(mount, order[0]);
+    // The interactive composite cards (baseline + each variant, each a collapsible
+    // "Explore composite" diagram) render in the LOOM sub-pane, not Composition —
+    // Composition shows the model's definition + config, the Loom tab shows the
+    // diagrams. _mountModelLoom() auto-opens the baseline card there.
+    var loomMount = document.getElementById('model-loom-mount');
+    var cardsMount = loomMount || mount;
+    if (loomMount) loomMount.innerHTML = '';
     order.forEach(function (id) {
       var entry = byId[id];
       var wrap = document.createElement('div');
@@ -1927,7 +1927,7 @@
         '</div>') : '';
       wrap.innerHTML = _armHdr +
         '<p class="muted" style="font-size:0.85em;margin:0">Resolving composite…</p>';
-      mount.appendChild(wrap);
+      cardsMount.appendChild(wrap);
       // Expand a config-file reference (the vecoli arm's whole_config, or a
       // config_file) to the ACTUAL config that runs, so "Config used" shows the
       // real config instead of a bare path. (ecoli_baseline's config_file is
