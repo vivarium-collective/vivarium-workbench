@@ -12,6 +12,7 @@
 * ``cli()``: its subcommands (``run-remote``, ``vivarium_workbench_sms/cli.py``);
 * ``router()``: the routes only SMS serves (the legacy pipeline, the thin client's build phase and the source builds,
   ``vivarium_workbench_sms/routes.py``).
+* ``payload_types()``: its wire models, for the core's TypeScript generator (``vivarium_workbench_sms/models.py``).
 
 The core finds this module by importing it (until step P4's entry point) and reads ``PROVIDER``.
 """
@@ -22,7 +23,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from vivarium_workbench.lib.backends.provider import ProviderRouter, Recognised, SessionBuild
+from vivarium_workbench.lib.backends.provider import PayloadTypes, ProviderRouter, Recognised, SessionBuild
 
 if TYPE_CHECKING:
     from vivarium_workbench.lib.backends import Backend
@@ -128,6 +129,22 @@ class SmsProvider:
         from vivarium_workbench_sms import routes  # lazy, like backends()
 
         return ProviderRouter(routes.build_router(), routes.READONLY_ALLOWED, ai_excluded=routes.AI_EXCLUDED)
+
+    def payload_types(self) -> PayloadTypes:
+        """Its wire models (``vivarium_workbench_sms/models.py``, step P3 M1), for ``lib/generate_ts.py``: the legacy
+        pipeline's job and the payloads of its routes. Imported here, lazily, like ``router()``."""
+        from vivarium_workbench_sms import models
+
+        return PayloadTypes(
+            aliases={"RemoteJobStatus": models.RemoteJobStatus},
+            models=[
+                models.RemoteRunStep,
+                models.RemoteRunJob,
+                models.SourceBuilds,
+                models.BuildRemoteResponse,
+                models.RemoteRunStartResponse,
+            ],
+        )
 
 
 PROVIDER = SmsProvider()

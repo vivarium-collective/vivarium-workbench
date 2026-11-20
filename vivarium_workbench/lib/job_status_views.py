@@ -4,7 +4,7 @@ Two routes share byte-identical logic, parameterised only by which in-process
 job manager they read:
 
   GET /api/investigation-run-unblocked-status  → ``lib.run_jobs.manager``
-  GET /api/remote-run-status                   → ``lib.remote_run_jobs.manager``
+  GET /api/remote-run-status                   → the SMS plugin's ``remote_run_jobs.manager`` (its route)
 
 ``job_status`` takes the manager as a *parameter* so it stays pure and trivially
 testable with a fake manager — it never imports the manager singletons itself,
@@ -16,8 +16,8 @@ The manager need only expose:
   * ``get(job_id: str) -> <job-with-.to_dict()> | None``
 
 The returned job's ``.to_dict()`` shape is manager-specific (``RunJob`` emits
-``items[]``, ``RemoteRunJob`` emits ``steps[]``), so callers pass the 200 body
-through a pass-through pydantic model rather than a declared-field one.
+``items[]``; the SMS plugin's ``RemoteRunJob``, a model of its own ``models`` module, emits ``steps[]``), so
+callers pass the 200 body through a pass-through pydantic model rather than a declared-field one.
 """
 
 from __future__ import annotations

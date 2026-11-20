@@ -8,6 +8,9 @@ fields, descriptions), the operations that ``$ref`` them, and their TypeScript d
 ``tests/_contracts/sms_payload_models_golden.json``. Only the models that moved are pinned, so a PR that changes
 another model does not touch these goldens; the whole ``components.schemas`` dump was compared once, base against
 branch, in the M1 PR.
+
+Needs the SMS plugin installed with providers on (its routes and its ``payload_types()``): mark ``plugin`` when step P3
+K1 adds that marker.
 """
 
 from __future__ import annotations

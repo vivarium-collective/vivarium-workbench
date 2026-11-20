@@ -33,19 +33,18 @@ from fastapi.responses import JSONResponse
 from vivarium_workbench.api import deps as _deps
 from vivarium_workbench.api.deps import get_workspace
 from vivarium_workbench.lib import job_status_views as _job_status_views
-from vivarium_workbench.lib.models import (
-    BuildRemoteRequest,
-    BuildRemoteResponse,
-    JobStatusPayload,
-    RemoteRunStartRequest,
-    RemoteRunStartResponse,
-    SourceBuilds,
-    SourceSwitchResponse,
-    SwitchBuildRequest,
-)
+from vivarium_workbench.lib.models import JobStatusPayload, SourceSwitchResponse
 from vivarium_workbench_sms import remote_pipeline_views as _views
 from vivarium_workbench_sms import remote_run_jobs as _remote_run_jobs
 from vivarium_workbench_sms import source_build_views as _source_build_views
+from vivarium_workbench_sms.models import (
+    BuildRemoteRequest,
+    BuildRemoteResponse,
+    RemoteRunStartRequest,
+    RemoteRunStartResponse,
+    SourceBuilds,
+    SwitchBuildRequest,
+)
 
 #: Its POST paths a read-only deployment keeps (``ProviderRouter.readonly_allowed``): the run launch and the
 #: thin client's build phase, as on the core's allowlist before step P2 Runs a2. ``remote-run-pinned-build`` was

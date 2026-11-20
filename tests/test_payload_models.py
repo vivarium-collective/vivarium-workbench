@@ -7,11 +7,11 @@ so they fail if a handler's dict shape drifts away from its model.
 from vivarium_workbench.lib.models import (
     ChartPayload,
     RemoteOrigin,
-    RemoteRunJob as RemoteRunJobModel,
     SimRow,
     SimulationsPayload,
     StudyChartsPayload,
 )
+from vivarium_workbench_sms.models import RemoteRunJob as RemoteRunJobModel
 from vivarium_workbench_sms.remote_run_jobs import RemoteRunJob
 from vivarium_workbench.lib.simulations_index import _row_to_dict
 
