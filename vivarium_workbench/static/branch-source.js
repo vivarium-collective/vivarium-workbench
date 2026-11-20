@@ -1001,8 +1001,13 @@
     if (!host) return;
     if (SNAP) { await _loadSnapshotEntries(); _renderSnapshot(); return; }
     _stopBuildsPoll();
+    // /api/workspaces is slow (git status across every workspace). Start it NOW,
+    // before the features wait, so a slow features answer never delays it; it is
+    // fetched ONCE and reused for both `current` and the local entries.
+    var wsFetch = fetch("/api/workspaces").catch(function () { return null; });
     // Wait (briefly, bounded) for the declared features so a workbench without
-    // `builds` never flashes the Cloud toggle; usually already settled.
+    // `builds` never flashes the Cloud toggle; usually already settled. Only the
+    // render is gated on this race, not the workspaces fetch above.
     await Promise.race([_featuresSettled(), new Promise(function (res) { setTimeout(res, FEATURES_WAIT_MS); })]);
     _dropCloudScope();
     _hideBuildHelp();
@@ -1012,10 +1017,7 @@
     // until they finished. A second _render() below fills in the loaded entries.
     state.loading = true;
     _render();
-    // /api/workspaces is slow (git status across every workspace). Fetch it ONCE
-    // here and reuse it for both `current` and the local entries (was fetched
-    // twice, doubling the wait).
-    var r = await fetch("/api/workspaces").catch(function () { return null; });
+    var r = await wsFetch;
     var wsData = (r && r.ok) ? await r.json().catch(function () { return {}; }) : {};
     state._wsData = wsData;
     var cur = wsData.current || null;

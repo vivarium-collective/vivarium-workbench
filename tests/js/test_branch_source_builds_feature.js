@@ -188,6 +188,36 @@ test('VivEnv alone: with builds the held Cloud scope stays', async () => {
   assert.strictEqual(win.VivEnv.isCloud(), true);
 });
 
+test('features answering AFTER the 1.5 s wait: as before until they resolve, then Local', async () => {
+  let release;
+  const deferred = new Promise((r) => { release = r; });
+  const { win, host, calls, events, helpItems } = load({ features: deferred });
+  const t0 = Date.now();
+  const done = win._renderBranchSource();
+  await tick(10);
+  // the slow /api/workspaces fetch starts before (not after) the bounded features wait
+  assert.ok(calls.includes('/api/workspaces'), 'workspaces requested during the features wait: ' + calls);
+  await done;
+  assert.ok(Date.now() - t0 >= 1400, 'the first paint waited (bounded) for the features');
+  // timed out → unknown → exactly as before the step
+  assert.strictEqual(win.BackendFeatures.known(), false);
+  assert.ok(calls.includes('/api/source/builds'), 'unknown: builds requested');
+  let texts = buttonsTexts(host);
+  assert.ok(texts.includes('Cloud') && texts.includes('Build on cloud'), 'unknown: Cloud shown: ' + texts);
+  assert.strictEqual(win.VivEnv.isCloud(), true);
+  helpItems.forEach((el) => assert.notStrictEqual(el.style.display, 'none'));
+  // the features finally answer without builds: the panel switches to Local
+  release(['analyses']);
+  await tick(50);
+  assert.strictEqual(win.BackendFeatures.known(), true);
+  assert.strictEqual(win.VivEnv.isCloud(), false);
+  assert.strictEqual(win.VivEnv.scope(), 'local');
+  texts = buttonsTexts(host);
+  assert.ok(!texts.includes('Cloud') && !texts.includes('Build on cloud'), 'Cloud controls gone: ' + texts);
+  helpItems.forEach((el) => assert.strictEqual(el.style.display, 'none', 'build-only help hidden'));
+  assert.ok(events.includes('viv:envchange'));
+});
+
 test('the panel wording is neutral', () => {
   assert.ok(!/sms-api|SMS_API_BASE|GovCloud/i.test(SOURCE_SRC), 'no SMS nouns in branch-source.js');
 });
