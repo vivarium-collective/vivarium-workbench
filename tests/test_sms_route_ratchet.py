@@ -67,7 +67,6 @@ ALLOWED: dict[str, frozenset[str]] = {
     "lib.remote_run_landing": frozenset({"download_data"}),
     "lib.remote_run_views": frozenset({"run_analysis", "upload_simulator"}),
     "lib.remote_trace": frozenset({"compose_status", "simulation_trace"}),
-    "lib.run_jobs": frozenset({"compose_status_batch"}),
     "lib.simulations_index": frozenset({"download_data"}),
 }
 
@@ -197,9 +196,9 @@ def test_no_new_sms_method_calls():
 
 
 #: (module, method) pairs in ALLOWED: 42 as of step 1a; 13 after step P1b moved the plugin's own modules out of
-#: the core (a move, not 28 removed calls); 12 after step P2 Client moved the capability contract into the plugin.
-#: Only removals lower it.
-PINNED_PAIRS = 12
+#: the core (a move, not 28 removed calls); 12 after step P2 Client moved the capability contract into the plugin;
+#: 11 after step P2 Runs c2 moved run_jobs' batch status into the plugin. Only removals lower it.
+PINNED_PAIRS = 11
 
 
 def test_allowed_methods_never_grow():

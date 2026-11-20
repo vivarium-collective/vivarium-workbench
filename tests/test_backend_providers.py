@@ -440,3 +440,17 @@ def test_with_providers_off_the_core_answers_unrouted_requests(providers_off, tm
         assert (r.status_code, body["reason"]) == expected, body
     else:
         assert (r.status_code, body["error"]) == expected, body
+
+
+# --- the optional batch status (step P2, Runs c2) ---------------------------------------------------------------------
+
+def test_only_sms_legacy_declares_the_optional_batch_status():
+    """``runs.status_many`` (:class:`backends.BatchStatus`) is optional and found by ``getattr``: SMS declares it (its
+    one ``compose_status_batch`` call), compose-api and viva-core do not, and neither does any inert sentinel nor the
+    unrouted facet."""
+    assert callable(getattr(backends.SMS_LEGACY.runs, "status_many", None))
+    assert not hasattr(backends.COMPOSE.runs, "status_many")
+    assert not hasattr(backends.VIVA_CORE.runs, "status_many")
+    for sentinel in backends._SENTINELS.values():
+        assert not hasattr(sentinel.runs, "status_many")
+    assert not hasattr(backends.SMS_LEGACY.unrouted, "status_many")

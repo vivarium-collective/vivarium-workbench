@@ -55,6 +55,17 @@ class UnroutedFacet(Protocol):
     def cancel(self, params: dict) -> tuple[dict, int]: ...
 
 
+class BatchStatus(Protocol):
+    """Optional on a backend's ``runs`` facet (step P2, Runs c2): the status of several runs in ONE ask, for a backend
+    with a batch route (SMS's ``/compose/v1`` batch). Returns ``{run_id: body}`` in ``runs.status``'s body shape
+    (``phase``: "done" | "failed" | other; ``raw_status``; ``error``) for the ids it answered; an id it did not
+    answer is absent. Raises when the backend did not answer at all. ``run_jobs.refresh_submitted`` asks it when the
+    owning backend's runs facet has it (``getattr``), else ``runs.status`` per id. The inert sentinels never declare
+    it (they own no run)."""
+
+    def status_many(self, run_ids: "list[str]") -> "dict[str, dict]": ...
+
+
 @dataclass(frozen=True)
 class Backend:
     """One backend. Only the run facet exists so far (§2.1's other facets come with later steps).

@@ -158,3 +158,31 @@ def test_the_cli_and_startup_work_without_the_plugin():
     proc = subprocess.run([sys.executable, "-c", _CLI_PROBE], capture_output=True, text=True, timeout=300)
     assert "@@RESULT@@0" in proc.stdout, proc.stderr[-2000:]
     assert "warning" not in proc.stderr  # an absent plugin is not a broken one
+
+
+_REFRESH_PROBE = textwrap.dedent('''
+    import sys
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import remote_run_compose, run_jobs
+
+    remote_run_compose.status = lambda run_id: ({"phase": "done", "raw_status": "completed", "error": None}, 200)
+    job = run_jobs.RunJob("inv", [{"status": "submitted", "simulation_id": 4},
+                                  {"status": "submitted", "simulation_id": "compose-1"}])
+    run_jobs.refresh_submitted(job)
+    loaded = any(n == "vivarium_workbench_sms" or n.startswith("vivarium_workbench_sms.") for n in sys.modules)
+    print("@@RESULT@@" + ",".join(it["status"] for it in job.to_dict()["items"]) + f";plugin={loaded}")
+''')
+
+
+def test_refresh_submitted_answers_without_the_plugin():
+    """Step P2 Runs c2: with the plugin absent, an integer (SMS) item is owned by no backend and stays ``submitted``
+    without SMS being asked; a compose-api item still settles."""
+    proc = subprocess.run([sys.executable, "-c", _REFRESH_PROBE], capture_output=True, text=True, timeout=300)
+    assert "@@RESULT@@submitted,done;plugin=False" in proc.stdout, proc.stdout[-2000:] + proc.stderr[-2000:]
