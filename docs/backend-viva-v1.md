@@ -174,6 +174,11 @@ Listing/registering simulators and branch builds (`/core/v1/simulator/*`, partly
 `/api/v1/simulations/{id}/data` downloads, trace (`/viva/v1/composites/{id}/trace` is used where advertised).
 These stay on the legacy `SmsApiClient` methods.
 
+The trace lives in the plugin since P2 Runs b2 (`vivarium_workbench_sms/sms_trace.py`): a recorded viva-core run
+(the Runs tab sends its id as `simulation_id`) goes to `VivaCoreRuns.trace` -> `GET /viva/v1/composites/{id}/trace`
+after the `viva-v1-trace` capability check, and a recorded sms-legacy simulation to `SmsLegacyRuns.trace` ->
+`GET /api/v1/simulations/{id}/trace`; anything no record routes goes to the SMS `unrouted` facet, unchanged.
+
 ## Identity / auth
 
 None is required for any call above on the live target (all reads above were unauthenticated).
