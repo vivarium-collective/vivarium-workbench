@@ -29,6 +29,8 @@ CORE = [
     "vivarium_workbench.api.app",
     "vivarium_workbench.cli",
     "vivarium_workbench.lib.startup",
+    "vivarium_workbench.lib.remote_run",
+    "vivarium_workbench.lib.run_runner",
 ]
 
 

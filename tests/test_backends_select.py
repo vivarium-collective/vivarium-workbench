@@ -153,23 +153,27 @@ class _Stop(Exception):
 
 
 def test_run_remote_with_a_caller_client_never_asks_which_backend(monkeypatch, tmp_path):
-    """A caller-supplied client (CLI ``run-remote``, tests) keeps /compose/v1 and reads no profile."""
-    from vivarium_workbench.lib import backends, remote_run
+    """A caller-supplied client (CLI ``run-remote``, tests) goes to the plugin's run directly: /compose/v1, and no
+    profile or backend choice is read."""
+    from vivarium_workbench.lib import backends
+    from vivarium_workbench_sms import deployment_run
 
     def no(*a, **k):
         raise AssertionError("backend selection consulted although the caller supplied a client")
 
     monkeypatch.setattr(backends, "select", no)
+    monkeypatch.setattr(backends, "unrouted", no)
     monkeypatch.setattr(sc, "explicit_backend_profile", no)
     monkeypatch.setattr(remote_pinned, "pinned_config", lambda: (_ for _ in ()).throw(_Stop()))
     with pytest.raises(_Stop):
-        remote_run.run_remote(tmp_path, "c", client=object(), dest=tmp_path / "out")
+        deployment_run.run(tmp_path, "c", client=object(), dest=tmp_path / "out")
 
 
 @pytest.mark.parametrize("named, to_compose", [("compose", True), ("viva", False), ("legacy", False)])
 def test_run_remote_without_a_client_follows_the_named_backend(world, monkeypatch, named, to_compose):
     """Named compose-api: run_composite. Anything else continues to the document / ``/compose/v1`` path, which
-    reads the pinned config next (stopped there). Which of those two it takes (viva-core vs legacy) is pinned end
+    reads the pinned config next (stopped there); "legacy" (nothing selected) gets there through the unrouted facet
+    (step P2, Runs b), which reads no profile. Which of those two it takes (viva-core vs legacy) is pinned end
     to end by ``test_backend_dispatch_viva_v1::test_run_remote_runs_a_document_and_lands_the_compose_results``."""
     from vivarium_workbench.lib import remote_run, remote_run_compose
 

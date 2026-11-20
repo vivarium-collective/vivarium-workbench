@@ -61,9 +61,6 @@ NOT_SMS_RECEIVERS = frozenset({
 #: of calls). Shrink this as step P2 lands; never grow it.
 ALLOWED: dict[str, frozenset[str]] = {
     "lib.composite_test_run_views": frozenset({"run_simulation"}),
-    # compose_status is passed as a bound method: ``(status_of or client.compose_status)(sim_id)``.
-    "lib.remote_run": frozenset({"compose_status", "compose_status_batch", "compose_submit",
-                                 "download_compose_results"}),
     "lib.remote_run_landing": frozenset({"download_data"}),
     "lib.remote_run_views": frozenset({"run_analysis", "upload_simulator"}),
     "lib.remote_trace": frozenset({"compose_status", "simulation_trace"}),
@@ -73,8 +70,8 @@ ALLOWED: dict[str, frozenset[str]] = {
 #: Every SMS method any module calls, as of step 1a. With PINNED_PAIRS below, this keeps a move between modules
 #: (a new ALLOWED key) from also slipping a new call in. Only ever remove names from it.
 PINNED_UNION: frozenset[str] = frozenset({
-    "analysis_status", "cancel_simulation", "compose_status", "compose_status_batch",
-    "compose_submit", "download_compose_results", "download_data", "download_workspace", "get_simulation",
+    "analysis_status", "cancel_simulation", "compose_status",
+    "download_data", "download_workspace", "get_simulation",
     "list_analyses", "list_branch_builds", "list_build_simulations", "list_simulators", "register_branch_head",
     "run_analysis", "run_simulation", "simulation_chain_progress", "simulation_status", "simulation_trace",
     "simulator_commit", "simulator_status", "upload_simulator",
@@ -197,8 +194,9 @@ def test_no_new_sms_method_calls():
 
 #: (module, method) pairs in ALLOWED: 42 as of step 1a; 13 after step P1b moved the plugin's own modules out of
 #: the core (a move, not 28 removed calls); 12 after step P2 Client moved the capability contract into the plugin;
-#: 11 after step P2 Runs c2 moved run_jobs' batch status into the plugin. Only removals lower it.
-PINNED_PAIRS = 11
+#: 11 after step P2 Runs c2 moved run_jobs' batch status into the plugin; 7 after step P2 Runs b moved the SMS
+#: deployment run (remote_run.run_remote's SMS half) into the plugin. Only removals lower it.
+PINNED_PAIRS = 7
 
 
 def test_allowed_methods_never_grow():

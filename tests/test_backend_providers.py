@@ -454,3 +454,18 @@ def test_only_sms_legacy_declares_the_optional_batch_status():
     for sentinel in backends._SENTINELS.values():
         assert not hasattr(sentinel.runs, "status_many")
     assert not hasattr(backends.SMS_LEGACY.unrouted, "status_many")
+
+
+# --- step P2 Runs b: the deployment runner's facet method -----------------------------------------------------------
+
+def test_every_backend_runs_a_composite_and_the_sentinels_refuse_it(tmp_path):
+    """``RunFacet.run_composite`` (the detached runner's blocking call) on every active backend; the unrouted facet
+    has it too; an inert sentinel refuses it rather than answering."""
+    for backend in backends._ALL:
+        assert callable(getattr(backend.runs, "run_composite", None)), backend.name
+        if backend.unrouted is not None:
+            assert callable(getattr(backend.unrouted, "run_composite", None)), backend.name
+    for sentinel in backends._SENTINELS.values():
+        with pytest.raises(RuntimeError, match="provider is not active"):
+            sentinel.runs.run_composite(tmp_path, "c", dest=tmp_path, n_steps=1, overrides=None, emit_paths=None,
+                                        analysis_options=None, build_ref=None, poll_interval=0, poll_timeout=0)
