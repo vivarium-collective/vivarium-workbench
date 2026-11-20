@@ -95,13 +95,19 @@ def _guards_import_error(handler: ast.ExceptHandler) -> bool:
                or (isinstance(n, ast.Attribute) and n.attr in _GUARDING_EXCEPTIONS) for n in names)
 
 
-def plugin_imports_at_module_level(source: str) -> list[int]:
+def plugin_imports_at_module_level(source: str, local_needs_plugin=None) -> list[int]:
     """The line numbers of the plugin imports a module runs when it is imported (so: when pytest collects it).
 
-    Counted: ``import`` / ``from ... import`` of the plugin, and ``importlib.import_module("<plugin>...")``, in the
-    module body and in the bodies of top-level ``if`` / ``with`` / ``try`` / ``for`` / ``while`` / ``class``
-    statements. Not counted: anything inside a function, an ``if TYPE_CHECKING:`` body (its ``else`` is counted),
-    and the body of a ``try`` whose handlers catch ``ImportError`` (or a parent of it) -- collection survives those.
+    Counted, in the module body and in the bodies of top-level ``if`` / ``with`` / ``try`` / ``for`` / ``while`` /
+    ``class`` statements:
+    - ``import`` / ``from ... import`` of the plugin, and ``importlib.import_module("<plugin>...")``;
+    - an import of a sibling test-tree module (``from test_backends_existing import ws``) for which
+      ``local_needs_plugin(name)`` is true -- the plugin arrives transitively;
+    - a call to a function of this module whose body imports the plugin, directly or through another such function
+      (``MODULES = CORE + _plugin_modules()``).
+    Not counted: an import inside a function that is not called at import time, an ``if TYPE_CHECKING:`` body (its
+    ``else`` is counted), and the body of a ``try`` whose handlers catch ``ImportError`` (or a parent of it) --
+    collection survives those.
     """
     tree = ast.parse(source)
     lines: list[int] = []
@@ -112,16 +118,56 @@ def plugin_imports_at_module_level(source: str) -> list[int]:
                 and bool(node.args) and isinstance(node.args[0], ast.Constant)
                 and isinstance(node.args[0].value, str) and _is_plugin_module(node.args[0].value))
 
-    def _expr_imports(node) -> bool:
-        return any(_is_plugin_call(n) for n in ast.walk(node))
+    def _needs(module: str | None) -> bool:
+        if not module:
+            return False
+        if _is_plugin_module(module):
+            return True
+        return local_needs_plugin is not None and bool(local_needs_plugin(module.split(".")[0]))
+
+    def _imports_anywhere(node) -> bool:
+        for n in ast.walk(node):
+            if isinstance(n, ast.Import) and any(_needs(a.name) for a in n.names):
+                return True
+            if isinstance(n, ast.ImportFrom) and n.level == 0 and _needs(n.module):
+                return True
+            if _is_plugin_call(n):
+                return True
+        return False
+
+    # The module's functions that import the plugin when called (a fixpoint over calls between them).
+    functions = {f.name: f for f in tree.body if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    importing = {name for name, f in functions.items() if _imports_anywhere(f)}
+    changed = True
+    while changed:
+        changed = False
+        for name, f in functions.items():
+            if name not in importing and any(
+                    isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in importing
+                    for n in ast.walk(f)):
+                importing.add(name)
+                changed = True
+
+    def _runs_plugin_import(node) -> bool:
+        # Like ast.walk, but a lambda's body does not run at import time.
+        todo = [node]
+        while todo:
+            n = todo.pop()
+            if isinstance(n, ast.Lambda):
+                continue
+            if _is_plugin_call(n) or (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                                      and n.func.id in importing):
+                return True
+            todo.extend(ast.iter_child_nodes(n))
+        return False
 
     def visit(body) -> None:
         for stmt in body:
             if isinstance(stmt, ast.Import):
-                if any(_is_plugin_module(a.name) for a in stmt.names):
+                if any(_needs(a.name) for a in stmt.names):
                     lines.append(stmt.lineno)
             elif isinstance(stmt, ast.ImportFrom):
-                if stmt.level == 0 and stmt.module and _is_plugin_module(stmt.module):
+                if stmt.level == 0 and _needs(stmt.module):
                     lines.append(stmt.lineno)
             elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -142,7 +188,7 @@ def plugin_imports_at_module_level(source: str) -> list[int]:
                 visit(stmt.body)
                 visit(getattr(stmt, "orelse", []))
             elif isinstance(stmt, (ast.Expr, ast.Assign, ast.AnnAssign, ast.AugAssign)):
-                if _expr_imports(stmt):
+                if _runs_plugin_import(stmt):
                     lines.append(stmt.lineno)
 
     visit(tree.body)
@@ -152,18 +198,30 @@ def plugin_imports_at_module_level(source: str) -> list[int]:
 _PLUGIN_IMPORT_CACHE: dict[tuple[str, int], bool] = {}
 
 
-def module_imports_plugin(path: Path) -> bool:
-    """Whether collecting this test module imports the plugin (AST; cached by path and mtime)."""
+def module_imports_plugin(path: Path, _visiting: frozenset[str] = frozenset()) -> bool:
+    """Whether importing this test-tree module imports the plugin, directly or through a sibling module it imports
+    (``from test_backends_existing import ws``). AST only; cached by path and mtime; an import cycle counts as no."""
     try:
         key = (str(path), path.stat().st_mtime_ns)
     except OSError:
         return False
-    if key not in _PLUGIN_IMPORT_CACHE:
-        try:
-            _PLUGIN_IMPORT_CACHE[key] = bool(plugin_imports_at_module_level(path.read_text(encoding="utf-8")))
-        except (SyntaxError, UnicodeDecodeError, OSError):
-            _PLUGIN_IMPORT_CACHE[key] = False      # let pytest report it
-    return _PLUGIN_IMPORT_CACHE[key]
+    if key in _PLUGIN_IMPORT_CACHE:
+        return _PLUGIN_IMPORT_CACHE[key]
+    if str(path) in _visiting:
+        return False
+    visiting = _visiting | {str(path)}
+
+    def _sibling_needs_plugin(name: str) -> bool:
+        sibling = path.parent / f"{name}.py"
+        return sibling != path and sibling.is_file() and module_imports_plugin(sibling, visiting)
+
+    try:
+        result = bool(plugin_imports_at_module_level(path.read_text(encoding="utf-8"), _sibling_needs_plugin))
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        result = False      # let pytest report it
+    if result or not _visiting:     # inside a cycle a "no" may be provisional; a "yes" is always final
+        _PLUGIN_IMPORT_CACHE[key] = result
+    return result
 
 
 def _test_modules() -> list[Path]:
@@ -220,9 +278,19 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         return
     state = _CORE_ONLY_COUNTS
     ignored = [p.name for p in _test_modules() if module_imports_plugin(p)] if CORE_MODE == "absent" else []
-    lines = [
-        f"### Core-only mode: plugin {CORE_MODE}",
-        "",
+    collect_errors = sorted({r.nodeid or str(getattr(r, "fspath", "?")) for r in terminalreporter.stats.get("error", [])
+                             if getattr(r, "when", None) == "collect"})
+    lines = [f"### Core-only mode: plugin {CORE_MODE}", ""]
+    if collect_errors or exitstatus == pytest.ExitCode.INTERRUPTED:
+        lines += [
+            f"> [!CAUTION]\n> **{len(collect_errors)} test module(s) failed to COLLECT** (exit status "
+            f"{int(exitstatus)}): their tests did not run at all. A module that imports the plugin at import time "
+            "without the detector seeing it (tests/conftest.py `plugin_imports_at_module_level`) lands here.",
+            "",
+            *[f"- collection error: `{e}`" for e in collect_errors],
+            "",
+        ]
+    lines += [
         f"- test modules ignored (import the plugin at module level): **{len(ignored)}**",
         f"- `plugin`-marked tests run in this job: **{len(state['plugin_items'])}**",
         f"- of those xfailed: **{len(state['xfailed'])}**; strict XPASS (stale mark): **{len(state['xpassed'])}**",
@@ -237,6 +305,11 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
             if ignored:
                 fh.write("\n<details><summary>ignored modules</summary>\n\n"
                          + "\n".join(f"- `{n}`" for n in ignored) + "\n\n</details>\n")
+    if out:   # GitHub annotations, so the run page shows them without opening the log
+        for e in collect_errors:
+            terminalreporter.write_line(
+                f"::error title=core-only collection error::{e} failed to collect; its tests did not run")
+
 
 # ---------------------------------------------------------------------------
 # Global catalog isolation

@@ -6,7 +6,7 @@ every test module that imports the plugin at module level (it cannot be collecte
 module level must be a pure-plugin module and say so with ``pytestmark = pytest.mark.plugin``.
 
 ``UNMARKED_PLUGIN_IMPORTERS`` is a ratchet: the modules that imported the plugin at module level without the mark when
-the core-only job arrived (K1: 51 modules). Step P3's K2 PRs empty it -- moving the import into the tests that need it
+the core-only job arrived (K1: 53 modules). Step P3's K2 PRs empty it -- moving the import into the tests that need it
 and marking those, or marking a pure-plugin module whole. It may only shrink: a new module that imports the plugin at
 module level must be marked, and an entry that no longer applies must be removed.
 
@@ -37,7 +37,9 @@ UNMARKED_PLUGIN_IMPORTERS: frozenset[str] = frozenset({
     "test_backends_select.py",
     "test_backends_startup.py",
     "test_composite_card_dispatch_table.py",
+    "test_compose_composite_provenance.py",   # through test_backend_dispatch_compose
     "test_env_worker_launcher.py",
+    "test_import_order.py",                   # MODULES = CORE + _plugin_modules() at import time
     "test_job_class_task_routing.py",
     "test_listing_facet.py",
     "test_non_root_store_roots.py",
@@ -103,7 +105,7 @@ def _scan() -> tuple[set[str], set[str]]:
         marked = _declares_plugin_mark(source)
         if module_imports_plugin(path) and not marked:
             unmarked.add(_name(path))
-        if marked and PLUGIN_PACKAGE not in source:
+        if marked and PLUGIN_PACKAGE not in source and not module_imports_plugin(path):
             hollow.add(_name(path))
     return unmarked, hollow
 
@@ -160,6 +162,45 @@ def test_the_plugin_marker_is_registered(pytestconfig):
 ])
 def test_the_detector(source, expected):
     assert plugin_imports_at_module_level(source) == expected
+
+
+@pytest.mark.parametrize(("source", "expected"), [
+    # a sibling test module that needs the plugin brings it in transitively
+    ("from test_needs import ws\n", [1]),
+    ("import test_needs\n", [1]),
+    ("from test_core import ws\n", []),
+    ("def f():\n    from test_needs import ws\n", []),
+    # a module function that imports the plugin, called at import time (directly or through another function)
+    ("def _mods():\n    import vivarium_workbench_sms\n    return []\nMODULES = ['a'] + _mods()\n", [4]),
+    ("def _a():\n    import vivarium_workbench_sms\ndef _b():\n    return _a()\nX = _b()\n", [5]),
+    ("def _a():\n    from test_needs import ws\nX = _a()\n", [3]),
+    # defined but not called at import time
+    ("def _mods():\n    import vivarium_workbench_sms\n", []),
+    ("def _mods():\n    import vivarium_workbench_sms\nF = lambda: _mods()\n", []),
+])
+def test_the_detector_follows_local_modules_and_calls(source, expected):
+    assert plugin_imports_at_module_level(source, lambda name: name == "test_needs") == expected
+
+
+def test_module_imports_plugin_follows_sibling_modules_and_survives_cycles(tmp_path):
+    (tmp_path / "test_direct.py").write_text("import vivarium_workbench_sms\n")
+    (tmp_path / "test_via.py").write_text("from test_direct import x\n")
+    (tmp_path / "test_via_via.py").write_text("import test_via\n")
+    (tmp_path / "_helper.py").write_text("from vivarium_workbench_sms import provider\n")
+    (tmp_path / "test_helper_user.py").write_text("from _helper import provider\n")
+    (tmp_path / "test_core.py").write_text("import os\nfrom test_cycle_b import y\n")
+    (tmp_path / "test_cycle_a.py").write_text("from test_cycle_b import y\n")
+    (tmp_path / "test_cycle_b.py").write_text("from test_cycle_a import x\n")
+    (tmp_path / "test_cycle_plugin.py").write_text("from test_cycle_c import y\nimport vivarium_workbench_sms\n")
+    (tmp_path / "test_cycle_c.py").write_text("from test_cycle_plugin import x\n")
+    answers = {name: module_imports_plugin(tmp_path / f"{name}.py") for name in (
+        "test_direct", "test_via", "test_via_via", "test_helper_user", "test_core", "test_cycle_a", "test_cycle_b",
+        "test_cycle_c", "test_cycle_plugin")}
+    assert answers == {
+        "test_direct": True, "test_via": True, "test_via_via": True, "test_helper_user": True,
+        "test_core": False, "test_cycle_a": False, "test_cycle_b": False,
+        "test_cycle_c": True, "test_cycle_plugin": True,
+    }
 
 
 def test_the_mark_check():
