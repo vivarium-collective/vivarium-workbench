@@ -7,9 +7,11 @@ view keeps its own routing and calls the matching ``*_tail`` here once it has de
 (through ``runs``, or ``unrouted`` for a request that names no run: :class:`SmsLegacyUnrouted`).
 
 Step P2 (Runs a1) moved the SMS constants and the login check (``_run_auth_ok``) here from ``remote_run_views``. The
-seams tests patch (``SmsApiClient``, ``SmsApiError``, ``_sms_api_base``, ``load_spec``, ``_run_auth_ok``,
-``land_remote_run``) are this module's own globals, read at call time; the SMS code still in ``remote_run_views``
-reads them through this module too, so each has exactly one patch target. It is deleted only if the plugin itself
+seams tests patch (``SmsApiClient``, ``SmsApiError``, ``_sms_api_base``, ``load_spec``, ``_run_auth_ok``) are this
+module's own globals, read at call time; the SMS code still in ``remote_run_views`` reads them through this module
+too, so each has exactly one patch target. The SMS store landing (``land_remote_run``,
+``land_remote_simulation_artifacts``) is :mod:`vivarium_workbench_sms.sms_landing`'s (Runs c1), read through that
+module at call time and bound nowhere else. It is deleted only if the plugin itself
 leaves ``/api/v1`` (out of scope, Appendix A).
 """
 
@@ -22,7 +24,7 @@ from pathlib import Path
 
 from vivarium_workbench.lib import github_auth, study_spec
 from vivarium_workbench.lib.investigations import load_spec
-from vivarium_workbench.lib.remote_run_landing import land_remote_run
+from vivarium_workbench_sms import sms_landing
 from vivarium_workbench_sms import remote_pinned, sms_api_client
 from vivarium_workbench.lib.backends.records import remote_record as _remote_record
 from vivarium_workbench_sms.sms_api_client import DOWNLOAD_TIMEOUT, SmsApiClient, SmsApiError
@@ -184,7 +186,7 @@ def land_tail(ws_root: Path, body: dict) -> tuple[dict, int]:
         # tar.gz, which can be multi-GB; the 30s status-call default would abort
         # it mid-download (CD2 pipeline audit §3.12).
         tar_path = client.download_data(int(sim_id), Path(td), timeout=DOWNLOAD_TIMEOUT)
-        run_id = land_remote_run(
+        run_id = sms_landing.land_remote_run(
             study_spec.study_dir(ws_root, study),
             spec_id=spec_id,
             simulation_id=int(sim_id),
@@ -206,6 +208,19 @@ def land_tail(ws_root: Path, body: dict) -> tuple[dict, int]:
         # still succeeds, this is informational.
         response["analysis_errors"] = analysis_errors
     return response, 200
+
+
+def land_artifacts_tail(ws_root: Path, sim_id: "int | str", run_id: str) -> tuple[dict, int]:
+    """The SMS half of ``remote_run_views.remote_run_land_artifacts``, moved verbatim (step P2, Runs c1): the view
+    keeps its guards (login, the 400, ``_sms_only``) and calls this once the run is SMS's."""
+    client = SmsApiClient(_sms_api_base())
+    try:
+        result = sms_landing.land_remote_simulation_artifacts(ws_root, int(sim_id), run_id, client=client)
+    except SmsApiError as e:
+        return {"error": f"land failed: sms-api unavailable: {e}"}, 502
+    except Exception as e:  # noqa: BLE001 — surface a shaped error, never a 500 traceback page
+        return {"error": f"land failed: {type(e).__name__}: {e}"}, 500
+    return result, 200
 
 
 def status_tail(params: dict) -> tuple[dict, int]:

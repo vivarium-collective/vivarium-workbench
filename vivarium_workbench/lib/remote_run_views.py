@@ -13,9 +13,11 @@ The pipeline externals — ``manager``, ``PipelineCtx``, ``run_remote_pipeline``
 ``github_auth`` — are bound at MODULE level so tests monkeypatch them with fakes
 and never touch a real network / git / auth service. The SMS seams
 (``SmsApiClient``, ``SmsApiError``, ``_sms_api_base``, ``load_spec``,
-``_run_auth_ok``, ``land_remote_run``) and constants live in
+``_run_auth_ok``) and constants live in
 :mod:`vivarium_workbench_sms.sms_legacy` (step P2, Runs a1) and are read through
-that module at call time: one patch target per name, none bound here. The
+that module at call time: one patch target per name, none bound here
+(``land_remote_run`` is ``sms_landing``'s since Runs c1, read as
+``sms_legacy.sms_landing.land_remote_run``). The
 lifecycle requests no run record routes go to the backend's ``unrouted`` facet
 (``backends.unrouted()``); with providers off the core answers them itself.
 """
@@ -108,7 +110,7 @@ def remote_run_start(ws_root: Path, body: dict) -> tuple[dict, int]:
         run_parca=bool(body.get("run_parca", True)),
         client=client,
         push_and_sha=lambda: git_status.remote_push_and_sha(ws_root),
-        land=sms_legacy.land_remote_run,
+        land=sms_legacy.sms_landing.land_remote_run,
     )
     job = manager.submit(study, lambda j: run_remote_pipeline(j, ctx))
     return {"job_id": job.job_id}, 202
@@ -463,16 +465,7 @@ def remote_run_land_artifacts(ws_root: Path, body: dict) -> tuple[dict, int]:
     refused = _sms_only(ws_root, sim_id, body)  # step 1c-2: never another backend's run
     if refused is not None:
         return refused
-    from vivarium_workbench.lib.remote_run_landing import land_remote_simulation_artifacts
-
-    client = _sms_client()
-    try:
-        result = land_remote_simulation_artifacts(ws_root, int(sim_id), run_id, client=client)
-    except sms_legacy.SmsApiError as e:
-        return {"error": f"land failed: sms-api unavailable: {e}"}, 502
-    except Exception as e:  # noqa: BLE001 — surface a shaped error, never a 500 traceback page
-        return {"error": f"land failed: {type(e).__name__}: {e}"}, 500
-    return result, 200
+    return sms_legacy.land_artifacts_tail(ws_root, sim_id, run_id)  # step P2, Runs c1: the SMS half
 
 
 def remote_run_analysis(ws_root: Path, body: dict) -> tuple[dict, int]:
