@@ -54,11 +54,11 @@ from vivarium_workbench.api.deps import (
     get_workspace as get_workspace,
     get_workspace_context as get_workspace_context,
     session_key_of as _session_key_of,
+    bind_session as _bind_session,
 )
 from vivarium_workbench.lib import csrf as _csrf
 from vivarium_workbench.lib import path_safety as _path_safety
 from vivarium_workbench.lib import source_switch_views as _source_switch_views
-from vivarium_workbench_sms import source_build_views as _source_build_views
 from vivarium_workbench.lib import job_status_views as _job_status_views
 from vivarium_workbench.lib import run_jobs as _run_jobs
 from vivarium_workbench.lib import remote_run_views as _remote_run_views
@@ -209,7 +209,6 @@ from vivarium_workbench.lib.models import (
     RemoteSourceState,
     ProvenanceManifest,
     RemoteHealth,
-    SourceBuilds,
     StudyChartsPayload,
     SystemDepsCheck,
     UiConfig,
@@ -319,11 +318,8 @@ from vivarium_workbench.lib.models import (
     # C-state-3a: source/switch (in-process workspace re-point)
     SourceSwitchRequest,
     SourceSwitchResponse,
-    # C-state-3b: source build-remote / switch-build (sms-api network routes)
-    BuildRemoteRequest,
-    BuildRemoteResponse,
+    # C-state-3b: (source build-remote / switch-build are the SMS provider's routes, step P2 Builds B3)
     MaterializeRepoRequest,
-    SwitchBuildRequest,
     # C-state-3e: GitHub device-flow auth (pass-through payload)
     AuthPayload,
     AiCapabilitiesPayload,
@@ -540,8 +536,9 @@ _READONLY_ALLOWED_MUTATIONS = {
     "/api/save-run-as-variant",
     "/api/run-delete",
     # switch which committed workspace this server serves (in-process re-point)
-    # + the remote-build flow (the core of remote-only)
-    "/api/source/switch", "/api/source/build-remote", "/api/source/switch-build",
+    # (the remote-build flow, build-remote + switch-build, is the SMS provider's: it declares
+    # them itself, ``ProviderRouter.readonly_allowed``, step P2 Builds B3)
+    "/api/source/switch",
     # GitHub auth (needed to reach the remote / private content)
     "/api/auth/github/start", "/api/auth/github/logout",
     # built-in chat: provider login + the chat turn (its own mutating calls are
@@ -3999,25 +3996,9 @@ def create_app() -> FastAPI:
             return CompositeRunTrajectory.model_validate(body)
         return JSONResponse(status_code=status, content=body)
 
-    # Workspace & source routes  (Batch 13)
+    # Workspace & source routes  (Batch 13). GET /api/source/builds is the SMS provider's route
+    # (vivarium_workbench_sms/routes.py, step P2 Builds B3).
     # -----------------------------------------------------------------------
-
-    @app.get(
-        "/api/source/builds",
-        response_model=SourceBuilds,
-        tags=["Workspaces & sources"],
-        summary="Remote sms-api simulator build list for the source dropdown",
-    )
-    def source_builds_route() -> SourceBuilds:
-        """Remote sms-api build list (mirrors the stdlib GET /api/source/builds).
-
-        Best-effort: returns ``{builds: [], error: <reason>}`` when the sms-api
-        tunnel is not reachable.  Always HTTP 200.  No workspace dependency — the
-        sms-api base URL is read from the ``SMS_API_BASE`` env var.
-
-        Library-backed via ``lib.workspace_deps_views.build_source_builds``.
-        """
-        return SourceBuilds.model_validate(_workspace_deps.build_source_builds())
 
     @app.get(
         "/api/source/remote-health",
@@ -6947,123 +6928,10 @@ def create_app() -> FastAPI:
             req.model_dump(), switch_active=False)
         if status != 200:
             return JSONResponse(status_code=status, content=body)
-        session_key = _session_key_of(request)
-        source_path = (body.get("source") or {}).get("path")
-        if session_key and source_path:
-            session_registry.rebind(session_key, source_path)
-            # Align the browser's vw_session COOKIE to this (per-tab, header) session
-            # so a subsequent page navigation/reload — which carries only the cookie,
-            # NOT the X-VW-Session header — routes GET / to the just-switched
-            # workspace. Without this the header session was bound but the reload kept
-            # rendering the stale cookie session (switch appeared to "not work").
-            response.set_cookie(
-                session_registry.SESSION_COOKIE, session_key,
-                httponly=True, samesite="lax",
-                secure=(request.url.scheme == "https"), path="/",
-            )
-            # Eager-on-switch (materialization-lifecycle §10): prepare the env now.
-            # A catalog entry is in-place local (§2a) → ready at once, no uv sync.
-            body["materialization"] = session_env.prepare(session_key, source_path)
-        return SourceSwitchResponse.model_validate(body)
-
-    @app.post(
-        "/api/source/build-remote",
-        response_model=BuildRemoteResponse,
-        tags=["Workspaces & sources"],
-        summary="Register a repo+branch HEAD as an sms-api build",
-    )
-    def source_build_remote(
-        req: BuildRemoteRequest,
-    ) -> Union[BuildRemoteResponse, JSONResponse]:
-        """Register a repo+branch's HEAD as an sms-api simulator build.
-
-        Mirrors the stdlib ``POST /api/source/build-remote``.  Body:
-        ``{"repo", "branch"}`` — resolves the branch HEAD via sms-api and
-        registers it, returning ``{ok, simulator_id, repo, branch, commit}``.
-
-        Status codes (byte-identical to the legacy handler):
-          - 400  missing repo/branch (``{"error": "repo and branch are required"}``)
-          - 502  unresolved HEAD (``{"error": "could not resolve branch HEAD via sms-api"}``)
-          - 502  ``{"error": "sms-api: <err>"}``
-          - 200  ``{ok, simulator_id, repo, branch, commit}``
-
-        The CSRF middleware already guards this POST.  Library-backed via
-        ``lib.source_build_views.build_remote`` (a network route — sms-api is
-        reached through the lib client).
-        """
-        body, status = _source_build_views.build_remote(req.model_dump())
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return BuildRemoteResponse.model_validate(body)
-
-    @app.post(
-        "/api/source/switch-build",
-        response_model=SourceSwitchResponse,
-        tags=["Workspaces & sources"],
-        summary="Materialize a remote build's workspace and re-point in-process",
-    )
-    def source_switch_build(
-        req: SwitchBuildRequest,
-        request: Request,
-        response: Response,
-    ) -> Union[SourceSwitchResponse, JSONResponse]:
-        """Materialize a remote build's workspace (cached) and re-point to it.
-
-        Body: ``{"simulator_id"}`` — looks the build up in the sms-api listing,
-        downloads+extracts its workspace once (cached per commit), then
-        materializes THIS session's own exclusive clone of it (item 20's fix —
-        every session used to bind to the same shared directory, with no write
-        isolation), stamps build provenance into that clone (best-effort), then
-        binds the **calling session** to it (per-session, slice 4/5 — the
-        process-global root and other sessions are untouched) and returns
-        ``{ok, source}``.
-
-        Status codes:
-          - 400  missing ``simulator_id`` (``{"error": "missing 'simulator_id'"}``)
-          - 502  sms-api unreachable (``{"error": "sms-api unavailable: <err>"}``)
-          - 404  build not found (``{"error": "build <id> not found"}``)
-          - 502  materialize failed (``{"error": "materialize failed: <err>"}``)
-          - 200  ``{ok: true, source: {path, name}}``
-
-        The CSRF middleware already guards this POST.  ``switch_active=False`` —
-        materialize + resolve without the global re-point; the per-session bind is
-        ``session_registry.rebind``. ``session_key`` is resolved BEFORE the call so
-        ``switch_build`` can materialize this session's own clone rather than the
-        shared base every session used to bind to directly.
-
-        **Aligns the cookie on this response (item 78)** — same as ``source_switch``
-        and for the same reason: the client's own ``window.location.reload()`` right
-        after this call carries no ``X-VW-Session`` header (a plain navigation, not a
-        ``fetch()``), so it resolves via the cookie. Scoped to *this* response only —
-        the middleware no longer refreshes the cookie on unrelated traffic (see
-        ``_session_workspace_mw``), so without this the reload would keep rendering
-        whatever workspace the cookie happened to already be on.
-        """
-        session_key = _session_key_of(request)
-        body, status = _source_build_views.switch_build(
-            req.model_dump(), switch_active=False, session_key=session_key)
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        source_path = (body.get("source") or {}).get("path")
-        if session_key and source_path:
-            session_registry.rebind(session_key, source_path)
-            response.set_cookie(
-                session_registry.SESSION_COOKIE, session_key,
-                httponly=True, samesite="lax",
-                secure=(request.url.scheme == "https"), path="/",
-            )
-            # managed=True (item 63): the materialized build is a bare tarball
-            # extraction with no `.venv` of its own — the in-place fast path
-            # left `env_resolver.resolve_interpreter` falling through to
-            # `sys.executable` (the WORKBENCH's own interpreter/deps, not this
-            # commit's), so the env-worker silently imported composite modules
-            # under the wrong dependency versions and composite-parameter
-            # discovery degraded to empty. Routing through the managed path
-            # provisions a real `.venv` via `uv sync` against this commit's own
-            # lock file (coordinate-keyed, cached across sessions on the same
-            # commit) before anything trusts this session's environment.
-            body["materialization"] = session_env.prepare(
-                session_key, source_path, managed=True)
+        # Bind the session, align the browser's vw_session COOKIE to it (a reload carries only the cookie), and
+        # prepare the env eagerly (materialization-lifecycle §10): a catalog entry is in-place local (§2a) → ready
+        # at once, no uv sync, so no managed= (api.deps.bind_session, shared with the SMS provider's switch-build).
+        _bind_session(request, response, _session_key_of(request), body)
         return SourceSwitchResponse.model_validate(body)
 
     @app.post(

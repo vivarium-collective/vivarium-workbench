@@ -22,7 +22,7 @@ from vivarium_workbench.lib import study_spec
 from vivarium_workbench_sms import remote_pinned
 from vivarium_workbench.lib.investigations import load_spec
 from vivarium_workbench_sms.sms_api_client import DOWNLOAD_TIMEOUT, SmsApiClient, SmsApiError
-from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
+from vivarium_workbench_sms import sms_api_client
 
 _TERMINAL_OK = {"completed"}
 _TERMINAL_BAD = {"failed", "cancelled"}
@@ -35,7 +35,7 @@ def is_run_id(value: object) -> bool:
 
 
 def _client() -> SmsApiClient:
-    return SmsApiClient(_sms_api_base())
+    return SmsApiClient(sms_api_client.sms_api_base())
 
 
 # Moved here from the core's remote_run in step P2 (Runs b): the /viva/v1 document options and the interim
@@ -170,7 +170,7 @@ def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
         if refused is not None:
             return refused
         return {"error": str(e), "reachable": False}, 502
-    _record_pending(ws_root, study, composite_id, run["id"], _sms_api_base())
+    _record_pending(ws_root, study, composite_id, run["id"], sms_api_client.sms_api_base())
     out = {"run_id": run["id"], "phase": "running", "backend": "viva-v1"}
     if steps != n_steps:
         out["warning"] = (f"n_steps clamped from {n_steps} to {steps}: this workbench sends at most 1000 "
@@ -252,7 +252,7 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
             return {"run_id": found[0], "already_landed": True}, 200
     landed = cr.generate_run_id(spec_id, params=provenance)
     # step 1c: where the run went, kept out of the id's hash (added after it is derived)
-    provenance["remote"] = _remote_record("viva-core", run_id, _sms_api_base())
+    provenance["remote"] = _remote_record("viva-core", run_id, sms_api_client.sms_api_base())
     try:
         with tempfile.TemporaryDirectory() as td:
             archive = client.download_compose_results(simulation_id, Path(td), timeout=DOWNLOAD_TIMEOUT)

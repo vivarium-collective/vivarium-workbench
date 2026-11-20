@@ -1337,7 +1337,7 @@ class RemoteHealth(BaseModel):
 
 
 class SourceBuilds(BaseModel):
-    """``GET /api/source/builds`` payload (lib.workspace_deps_views.build_source_builds).
+    """``GET /api/source/builds`` payload (vivarium_workbench_sms.source_build_views.build_source_builds).
 
     Best-effort remote build list: ``{builds: [...], error: str|null}``.  Always
     HTTP 200 — ``builds`` is empty and ``error`` carries a reason when the
@@ -1346,7 +1346,7 @@ class SourceBuilds(BaseModel):
     Pure pass-through (``extra="allow"``, no declared fields) so build-entry
     keys (simulator_id, repo, branch, commit, label, …) survive verbatim.
 
-    Source: ``lib.workspace_deps_views.build_source_builds``.
+    Source: ``vivarium_workbench_sms.source_build_views.build_source_builds`` (the SMS provider's route).
     """
 
     model_config = ConfigDict(extra="allow")

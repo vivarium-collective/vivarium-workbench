@@ -1,4 +1,6 @@
-"""Pure builders for the two sms-api source-build POST routes.
+"""Pure builders for the three sms-api source-build routes (``GET /api/source/builds``,
+``POST /api/source/build-remote``, ``POST /api/source/switch-build``), served by the SMS provider's router
+(``vivarium_workbench_sms/routes.py``, step P2 Builds B3).
 
 Behaviour-preserving ports of the stdlib handlers
 ``server.Handler._post_source_build_remote`` and ``_post_source_switch_build``.
@@ -10,13 +12,14 @@ non-200 in ``JSONResponse``.  No ``import server`` here.
 The network names — :class:`SmsApiClient`, :class:`SmsApiError`,
 :func:`list_build_sources`, :func:`materialize_build` — are bound at module
 level so tests monkeypatch them with fakes and never touch a real network.
+``build_source_builds`` (moved from ``lib.workspace_deps_views``) keeps its own seams instead: it reads
+``sms_api_client.SmsApiClient`` and ``remote_build_source.list_build_sources`` through their modules, as it did there.
 
 ``switch_build`` re-points the active workspace via the 3a shared lib switch
 ``active_workspace.switch_workspace`` (sets ``lib._root`` + invalidates the lib
 caches).
 
-``_sms_api_base`` is REUSED from :mod:`lib.workspace_deps_views` (the batch-13
-canonical lib copy) rather than adding a 4th copy.  ``normalize_repo_url`` is
+The base URL is ``sms_api_client.sms_api_base()``, read through its module at call time. ``normalize_repo_url`` is
 imported from the core :mod:`lib.git_status`.
 """
 
@@ -27,6 +30,7 @@ from pathlib import Path
 
 from vivarium_workbench.lib import active_workspace
 from vivarium_workbench.lib.git_status import normalize_repo_url
+from vivarium_workbench_sms import remote_build_source, sms_api_client
 from vivarium_workbench_sms.remote_build_source import (
     ensure_git_workspace,
     list_build_sources,
@@ -34,7 +38,16 @@ from vivarium_workbench_sms.remote_build_source import (
     materialize_session_build,
 )
 from vivarium_workbench_sms.sms_api_client import BranchHeadUnresolved, SmsApiClient, SmsApiError
-from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
+
+
+def build_source_builds() -> dict:
+    """Builder for GET /api/source/builds (moved from ``lib.workspace_deps_views``, step P2 Builds B3).
+
+    Mirrors ``server.Handler._get_source_builds``.  Env-based (``SMS_API_BASE``);
+    no ws_root needed.  Always returns a dict — best-effort (empty builds +
+    error reason when sms-api is down).
+    """
+    return remote_build_source.list_build_sources(sms_api_client.SmsApiClient(sms_api_client.sms_api_base()))
 
 
 def build_remote(body: dict) -> tuple[dict, int]:
@@ -52,7 +65,7 @@ def build_remote(body: dict) -> tuple[dict, int]:
     if not repo or not branch:
         return {"error": "repo and branch are required"}, 400
     repo = normalize_repo_url(repo)
-    client = SmsApiClient(_sms_api_base())
+    client = SmsApiClient(sms_api_client.sms_api_base())
     try:
         # One call on a server advertising viva-v1-environments-build (it resolves
         # the head itself); the latest + register pair otherwise (W2).
@@ -98,7 +111,7 @@ def switch_build(body: dict, *, switch_active: bool = True, session_key: str | N
     sim_id = (body or {}).get("simulator_id")
     if sim_id is None:
         return {"error": "missing 'simulator_id'"}, 400
-    client = SmsApiClient(_sms_api_base())
+    client = SmsApiClient(sms_api_client.sms_api_base())
     listing = list_build_sources(client)
     entry = next((b for b in listing["builds"] if b["simulator_id"] == sim_id), None)
     if entry is None:

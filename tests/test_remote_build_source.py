@@ -405,13 +405,13 @@ def test_list_build_sources_degrades_on_error():
 
 def test_source_builds_route_in_do_get(monkeypatch):
     """The GET /api/source/builds builder returns the sms-api build list."""
-    from vivarium_workbench.lib import workspace_deps_views as wdv
+    from vivarium_workbench_sms import source_build_views as sbv
     from vivarium_workbench_sms import remote_build_source
     monkeypatch.setattr(
         remote_build_source, "list_build_sources",
         lambda client: {"builds": [{"simulator_id": 7, "label": "x"}], "error": None},
     )
-    out = wdv.build_source_builds()
+    out = sbv.build_source_builds()
     assert out["builds"][0]["simulator_id"] == 7
 
 

@@ -1,11 +1,9 @@
-"""Pure builders for the remote-run lifecycle routes (submit, poll, land, cancel, chain progress), the analysis-output
-and re-run routers (land-artifacts, re-run, figures, the study gallery) and the SMS view the Builds area still owns
-(``_remote_run_config``).
+"""Pure builders for the remote-run lifecycle routes (submit, poll, land, cancel, chain progress) and the analysis-output
+and re-run routers (land-artifacts, re-run, figures, the study gallery). The pin ``/api/remote-run-config`` reports is
+the selected backend's ``builds.pin`` (step P2, Builds B3).
 
-Each view returns ``(body, status)``; the FastAPI route wraps every path in ``JSONResponse``. The SMS seams
-(``SmsApiClient``, ``SmsApiError``, ``_sms_api_base``, ``load_spec``, ``_run_auth_ok``) and
-constants live in :mod:`vivarium_workbench_sms.sms_legacy` (step P2, Runs a1) and are read through that module at
-call time: one patch target per name, none bound here. The lifecycle requests no run record routes go to the
+Each view returns ``(body, status)``; the FastAPI route wraps every path in ``JSONResponse``. This module imports no
+plugin module: every SMS answer comes through a backend's facets (step P2: Runs, Analyses, Builds B3). The lifecycle requests no run record routes go to the
 backend's ``unrouted`` facet (``backends.unrouted()``); with providers off the core answers them itself.
 
 The SMS-only views (the legacy pipeline submit and the thin client's build phase) and their routes moved to the
@@ -20,18 +18,10 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
-from vivarium_workbench_sms import remote_pinned
-from vivarium_workbench.lib import backends, path_safety, remote_run_compose
-from vivarium_workbench_sms import sms_legacy
+from vivarium_workbench.lib import backend_config, backends, path_safety, remote_run_compose
 
 if TYPE_CHECKING:
     from vivarium_workbench.lib.backends import AnalysisFacet, ArtifactFacet, Backend
-
-
-def _sms_client() -> "sms_legacy.SmsApiClient":
-    """A client on the SMS host, built from ``sms_legacy``'s seams at call time (tests patch them there). Used by
-    ``_remote_run_config`` only (transitional: Builds)."""
-    return sms_legacy.SmsApiClient(sms_legacy._sms_api_base())
 
 
 def remote_run_config(ws_root: Path) -> tuple[dict, int]:
@@ -44,16 +34,20 @@ def remote_run_config(ws_root: Path) -> tuple[dict, int]:
     a hardcoded "smsvpctest". Resolving the build is best-effort — a missing build
     or unreachable sms-api degrades to ``build_error`` rather than failing the card.
 
-    Mirrors ``remote_pipeline_views.remote_run_pinned_build_start``'s priority: this session's own
-    switched build (``ws_root``'s ``.viv-build.json``) wins over the deployment's
-    static repo@branch pin, so the label always matches what will actually run."""
+    The pin is the selected backend's (``builds.pin``, step P2 Builds B3: the session's own build wins over the
+    deployment's static pin there); a backend without builds, or none selected, reports ``{"pinned": false}`` with
+    the configured deployment name and asks nothing."""
     # The profile first: reading it is how a named compose-api becomes known as one, and the pinned build below is
-    # looked up on the SMS host (sms_api_base()) only once it is.
+    # looked up on the SMS host only once it is.
     backend = _backend_info()
-    body, status = _remote_run_config(ws_root)
+    chosen = backends.select(ws_root)
+    if chosen is not None and chosen.builds is not None:
+        body = chosen.builds.pin(ws_root)
+    else:
+        body = {"pinned": False, "deployment": backend_config.deployment_name()}
     if backend is not None:
         body["backend"] = backend
-    return body, status
+    return body, 200
 
 
 def _backend_info() -> "dict | None":
@@ -62,38 +56,6 @@ def _backend_info() -> "dict | None":
     from vivarium_workbench.lib.server_capabilities import explicit_backend_profile
 
     return explicit_backend_profile()
-
-
-def _remote_run_config(ws_root: Path) -> tuple[dict, int]:
-    deployment = remote_pinned.remote_deployment_name()
-    session_build = remote_pinned.resolved_from_session_build(ws_root)
-    if session_build is not None:
-        return {
-            "pinned": True,
-            "repo_url": session_build["repo_url"],
-            "branch": session_build["branch"],
-            "deployment": deployment,
-            "commit": session_build["commit"],
-            "simulator_id": session_build["simulator_id"],
-        }, 200
-    cfg = remote_pinned.pinned_config()
-    if cfg is None:
-        return {"pinned": False, "deployment": deployment}, 200
-    out: dict = {
-        "pinned": True,
-        "repo_url": cfg.repo_url,
-        "branch": cfg.branch,
-        "deployment": deployment,
-    }
-    try:
-        resolved = remote_pinned.resolve_pinned_build(
-            _sms_client(), cfg.repo_url, cfg.branch
-        )
-        out["commit"] = resolved["commit"]
-        out["simulator_id"] = resolved["simulator_id"]
-    except (remote_pinned.NoPinnedBuildError, sms_legacy.SmsApiError) as e:
-        out["build_error"] = str(e)
-    return out, 200
 
 
 def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:

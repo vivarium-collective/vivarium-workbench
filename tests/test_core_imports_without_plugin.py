@@ -22,8 +22,6 @@ import textwrap
 
 
 STILL_NEED_PLUGIN = frozenset({
-    "vivarium_workbench.api.app",
-    "vivarium_workbench.lib.remote_run_views",
     "vivarium_workbench.lib.remote_trace",
 })
 

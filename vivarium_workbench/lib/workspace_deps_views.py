@@ -18,32 +18,9 @@ from typing import Optional
 import psutil
 
 # ---------------------------------------------------------------------------
-# GET /api/source/builds
+# GET /api/source/remote-health  (GET /api/source/builds is the SMS plugin's:
+# vivarium_workbench_sms.source_build_views.build_source_builds, step P2 Builds B3)
 # ---------------------------------------------------------------------------
-
-def _sms_api_base() -> str:
-    """Base URL of the viva-api (nee sms-api; the SSM tunnel by default).
-
-    Delegates to the single source of truth :func:`sms_api_client.sms_api_base`;
-    kept under this name because several modules import it from here.
-    """
-    from vivarium_workbench_sms.sms_api_client import sms_api_base
-
-    return sms_api_base()
-
-
-def build_source_builds() -> dict:
-    """Builder for GET /api/source/builds.
-
-    Mirrors ``server.Handler._get_source_builds``.  Env-based (``SMS_API_BASE``);
-    no ws_root needed.  Always returns a dict — best-effort (empty builds +
-    error reason when sms-api is down).
-    """
-    from vivarium_workbench_sms import remote_build_source
-    from vivarium_workbench_sms.sms_api_client import SmsApiClient
-
-    return remote_build_source.list_build_sources(SmsApiClient(_sms_api_base()))
-
 
 def remote_health() -> dict:
     """Reachability + config status of the remote sms-api endpoint (``SMS_API_BASE``).
@@ -55,7 +32,7 @@ def remote_health() -> dict:
     """
     from vivarium_workbench.lib import backend_config
 
-    base = _sms_api_base()
+    base = backend_config.configured_base_url()
     configured = backend_config.backend_configured()
     try:
         version = backend_config.ping(base)

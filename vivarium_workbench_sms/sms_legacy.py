@@ -11,8 +11,9 @@ seams tests patch (``SmsApiClient``, ``SmsApiError``, ``_sms_api_base``, ``load_
 module's own globals, read at call time; the SMS code still in ``remote_run_views`` reads them through this module
 too, so each has exactly one patch target. The SMS store landing (``land_remote_run``,
 ``land_remote_simulation_artifacts``) is :mod:`vivarium_workbench_sms.sms_landing`'s (Runs c1), read through that
-module at call time and bound nowhere else. It is deleted only if the plugin itself
-leaves ``/api/v1`` (out of scope, Appendix A).
+module at call time and bound nowhere else. Step P2 Builds B3 added the ``builds`` facet (:class:`SmsLegacyBuilds`): the
+pin ``/api/remote-run-config`` reports and the study baseline's run of the selected build. This module is deleted
+only if the plugin itself leaves ``/api/v1`` (out of scope, Appendix A).
 """
 
 from __future__ import annotations
@@ -569,6 +570,76 @@ class SmsLegacyRuns:
 
         return cloud_dispatch.dispatch_composite(ws_root, body, spec_id=spec_id, overrides=overrides,
                                                  emit_paths=emit_paths, steps=steps)
+
+
+class SmsLegacyBuilds:
+    """The ``builds`` facet (step P2, Builds B3): a run of the session's own build (``.viv-build.json``) or of the
+    deployment's pinned repo@branch. Moved from the core: ``pin`` is ``remote_run_views._remote_run_config``, and
+    ``run_study`` is the study baseline's dispatch from ``study_runs.run_study_baseline``. ``remote_pinned`` and this
+    module's seams (``SmsApiClient``, ``_sms_api_base``, ``submit_tail``) are read at call time."""
+
+    def pin(self, ws_root: Path) -> dict:
+        """Report pinned-run config for the client to relabel the run card. This session's own switched build wins
+        over the deployment's static repo@branch pin, as in ``remote_pipeline_views.remote_run_pinned_build_start``,
+        so the label always matches what will actually run."""
+        deployment = remote_pinned.remote_deployment_name()
+        session_build = remote_pinned.resolved_from_session_build(ws_root)
+        if session_build is not None:
+            return {
+                "pinned": True,
+                "repo_url": session_build["repo_url"],
+                "branch": session_build["branch"],
+                "deployment": deployment,
+                "commit": session_build["commit"],
+                "simulator_id": session_build["simulator_id"],
+            }
+        cfg = remote_pinned.pinned_config()
+        if cfg is None:
+            return {"pinned": False, "deployment": deployment}
+        out: dict = {
+            "pinned": True,
+            "repo_url": cfg.repo_url,
+            "branch": cfg.branch,
+            "deployment": deployment,
+        }
+        try:
+            resolved = remote_pinned.resolve_pinned_build(
+                SmsApiClient(_sms_api_base()), cfg.repo_url, cfg.branch
+            )
+            out["commit"] = resolved["commit"]
+            out["simulator_id"] = resolved["simulator_id"]
+        except (remote_pinned.NoPinnedBuildError, SmsApiError) as e:
+            out["build_error"] = str(e)
+        return out
+
+    def run_study(self, ws_root: Path, *, study: str, params: dict, request: dict) -> tuple[dict, int]:
+        """Item 83: the study's default baseline entry on the selected build, through the ONE proven remote-dispatch
+        mechanism (the SMS submit, a real POST /api/v1/simulations), which dispatches whatever the build contains."""
+        num_generations = params.get("n_generations")
+        num_seeds = params.get("n_seeds")
+        # Backlog items 86/88: any composite-declared param beyond the two run-size
+        # knobs above (e.g. a fork/injection spec, or a multi-node dispatch request)
+        # rides through to viva-api as a generic passthrough dict — never silently
+        # dropped the way it previously was. Composite-agnostic: no key here is
+        # inspected or special-cased by name.
+        extra_params = {
+            k: v for k, v in params.items()
+            if k not in ("n_generations", "n_seeds")
+        }
+        simulator_id = remote_pinned.resolve_pinned_simulator_id(
+            SmsApiClient(_sms_api_base()), ws_root)
+        if simulator_id is None:
+            return {"error": "no remote build resolved for this deployment/"
+                             "session — switch to a built workspace or "
+                             "configure a pinned repo@branch"}, 409
+        return submit_tail(ws_root, {
+            "study": study,
+            "simulator_id": simulator_id,
+            "num_generations": num_generations,
+            "num_seeds": num_seeds,
+            "run_parca": bool(request.get("run_parca", True)),
+            "extra_params": extra_params or None,
+        })
 
 
 class SmsLegacyUnrouted:

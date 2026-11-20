@@ -1,13 +1,13 @@
 def test_sms_api_base_default_and_override(monkeypatch):
-    from vivarium_workbench.lib import workspace_deps_views as wdv
+    from vivarium_workbench_sms import sms_api_client  # the workspace_deps_views alias is gone (step P2 Builds B3)
     # "Unconfigured" means BOTH names unset — VIVA_API_BASE is read first, and
     # conftest's _isolate_viva_api_base now sets both for the run, so deleting
     # only the legacy alias would leave the canonical name pointing elsewhere.
     monkeypatch.delenv("VIVA_API_BASE", raising=False)
     monkeypatch.delenv("SMS_API_BASE", raising=False)
-    assert wdv._sms_api_base() == "http://localhost:8080"
+    assert sms_api_client.sms_api_base() == "http://localhost:8080"
     monkeypatch.setenv("SMS_API_BASE", "http://localhost:9000")
-    assert wdv._sms_api_base() == "http://localhost:9000"
+    assert sms_api_client.sms_api_base() == "http://localhost:9000"
 
 
 def test_normalize_repo_url_strips_git_suffix():

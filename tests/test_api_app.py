@@ -195,8 +195,9 @@ def test_switch_build_aligns_cookie_on_its_own_response(client, monkeypatch):
     session_registry.clear()
 
     import vivarium_workbench.api.app as api_app
+    from vivarium_workbench_sms import source_build_views as sbv  # the SMS provider's route (step P2 Builds B3)
     monkeypatch.setattr(
-        api_app._source_build_views, "switch_build",
+        sbv, "switch_build",
         lambda body, **kw: (
             {"ok": True, "source": {"path": "/tmp/managed-build", "name": None}},
             200,
@@ -2706,24 +2707,24 @@ class TestWorkCompositeDiffRoute:
 class TestSourceBuildsRoute:
     def test_always_200(self, client, monkeypatch):
         """GET /api/source/builds always returns HTTP 200."""
-        from vivarium_workbench.lib import workspace_deps_views as wdv
-        monkeypatch.setattr(wdv, "build_source_builds", lambda: {"builds": [], "error": None})
+        from vivarium_workbench_sms import source_build_views as sbv
+        monkeypatch.setattr(sbv, "build_source_builds", lambda: {"builds": [], "error": None})
         r = client.get("/api/source/builds")
         assert r.status_code == 200
 
     def test_returns_builds_list_and_error(self, client, monkeypatch):
         """Body carries builds[] and error (null or string)."""
-        from vivarium_workbench.lib import workspace_deps_views as wdv
-        monkeypatch.setattr(wdv, "build_source_builds", lambda: {"builds": [], "error": None})
+        from vivarium_workbench_sms import source_build_views as sbv
+        monkeypatch.setattr(sbv, "build_source_builds", lambda: {"builds": [], "error": None})
         body = client.get("/api/source/builds").json()
         assert "builds" in body
         assert isinstance(body["builds"], list)
 
     def test_degraded_when_sms_api_down(self, client, monkeypatch):
         """When sms-api is down, builds=[] and error carries a reason (still 200)."""
-        from vivarium_workbench.lib import workspace_deps_views as wdv
+        from vivarium_workbench_sms import source_build_views as sbv
         monkeypatch.setattr(
-            wdv, "build_source_builds",
+            sbv, "build_source_builds",
             lambda: {"builds": [], "error": "connection refused"},
         )
         r = client.get("/api/source/builds")

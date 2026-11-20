@@ -1,7 +1,7 @@
 """Tests for lib.workspace_deps_views builders + server shim parity.
 
 Covers:
-  - build_source_builds()    : GET /api/source/builds
+  - build_source_builds()    : GET /api/source/builds (now vivarium_workbench_sms.source_build_views, step P2 Builds B3)
   - build_workspaces()       : GET /api/workspaces
   - build_system_deps_check(): GET /api/system-deps-check?name=<module>
 
@@ -26,11 +26,11 @@ import yaml
 
 
 class TestBuildSourceBuilds:
-    """build_source_builds() — env-based, no ws_root."""
+    """source_build_views.build_source_builds() (moved from workspace_deps_views, step P2 Builds B3) — env-based."""
 
     def test_happy_path(self, monkeypatch):
         """When sms-api returns simulators, builds list is populated."""
-        from vivarium_workbench.lib import workspace_deps_views as wdv
+        from vivarium_workbench_sms import source_build_views as sbv
 
         canned = {"builds": [
             {"simulator_id": 1, "repo": "v2ecoli", "commit": "abc123",
@@ -40,26 +40,26 @@ class TestBuildSourceBuilds:
             "vivarium_workbench_sms.remote_build_source.list_build_sources",
             lambda client: canned,
         )
-        result = wdv.build_source_builds()
+        result = sbv.build_source_builds()
         assert result == canned
         assert isinstance(result["builds"], list)
         assert result["error"] is None
 
     def test_sms_api_down_returns_empty_with_error(self, monkeypatch):
         """When sms-api is unreachable, builds is [] and error has a reason."""
-        from vivarium_workbench.lib import workspace_deps_views as wdv
+        from vivarium_workbench_sms import source_build_views as sbv
 
         monkeypatch.setattr(
             "vivarium_workbench_sms.remote_build_source.list_build_sources",
             lambda client: {"builds": [], "error": "connection refused"},
         )
-        result = wdv.build_source_builds()
+        result = sbv.build_source_builds()
         assert result["builds"] == []
         assert result["error"] == "connection refused"
 
     def test_uses_sms_api_base_env(self, monkeypatch):
         """The SMS_API_BASE env var is forwarded to the SmsApiClient."""
-        from vivarium_workbench.lib import workspace_deps_views as wdv
+        from vivarium_workbench_sms import source_build_views as sbv
 
         seen_base: list[str] = []
 
@@ -80,7 +80,7 @@ class TestBuildSourceBuilds:
             "vivarium_workbench_sms.remote_build_source.list_build_sources",
             lambda client: {"builds": [], "error": None},
         )
-        wdv.build_source_builds()
+        sbv.build_source_builds()
         assert seen_base == ["http://myproxy:9090"]
 
 

@@ -140,6 +140,27 @@ class AnalysisFacet(Protocol):
     def rerun(self, ws_root: Path, body: dict) -> tuple[dict, int]: ...
 
 
+class BuildFacet(Protocol):
+    """Optional (step P2, Builds B3): a backend that runs a workspace as one of its own BUILDS (an image built from a
+    pushed commit) rather than as a document. Only sms-legacy declares it; the core reaches it through the backend
+    it selected (``select`` / ``active``), so there is no registry rule. Both methods answer in the views' shapes.
+
+    ``run_study`` sits here, not on ``runs``, only because this facet is optional: it is the study baseline's run
+    of the selected build, which a backend without builds has no meaning for."""
+
+    def pin(self, ws_root: Path) -> dict:
+        """``/api/remote-run-config``'s build half: ``{"pinned": False, "deployment"}`` when nothing is pinned, else
+        ``{"pinned": True, "repo_url", "branch", "deployment", "commit"?, <build id>?, "build_error"?}``. Best-effort:
+        a build it cannot resolve is ``build_error``, never a raise."""
+        ...
+
+    def run_study(self, ws_root: Path, *, study: str, params: dict, request: dict) -> "tuple[dict, int]":
+        """Run study ``study``'s default baseline entry on the selected build with ``params`` (the entry's params and
+        the request's overrides); ``request`` is the study-run request body. ``(body, status)``: a submit's 202, or
+        a 409 when no build resolves."""
+        ...
+
+
 @dataclass(frozen=True)
 class Backend:
     """One backend: its run facet and the optional facets below (§2.1; the rest come with later steps).
@@ -150,7 +171,9 @@ class Backend:
 
     ``unrouted`` (optional) answers the lifecycle requests no run record routes (:class:`UnroutedFacet`).
     ``artifacts`` / ``analyses`` (optional, :class:`ArtifactFacet` / :class:`AnalysisFacet`): a backend without one
-    refuses those operations on its runs (409 ``not-sms`` until P3 renames the literal)."""
+    refuses those operations on its runs (409 ``not-sms`` until P3 renames the literal).
+
+    ``builds`` (optional) runs the workspace as the backend's own build (:class:`BuildFacet`)."""
 
     name: str
     runs: RunFacet
@@ -158,6 +181,7 @@ class Backend:
     unrouted: Optional[UnroutedFacet] = None
     artifacts: Optional[ArtifactFacet] = None
     analyses: Optional[AnalysisFacet] = None
+    builds: Optional[BuildFacet] = None
 
 
 COMPOSE = Backend("compose-api", ComposeApiRuns(), identity=compose_health_identity)

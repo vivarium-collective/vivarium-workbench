@@ -26,9 +26,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import Request
+from fastapi import Request, Response
 
-from vivarium_workbench.lib import session_registry
+from vivarium_workbench.lib import session_env, session_registry
 from vivarium_workbench.lib.workspace_context import WorkspaceContext
 
 
@@ -68,3 +68,34 @@ def get_workspace(request: Request = None) -> Path:
     env var / cwd), so existing behavior is preserved.
     """
     return get_workspace_context(request).ws_root
+
+
+def bind_session(request: Request, response: Response, session_key: "str | None", body: dict, *,
+                 managed: bool = False) -> None:
+    """Bind the calling session to the workspace a successful switch answered (``body["source"]["path"]``), align
+    the browser's cookie to it on this response, and prepare its environment eagerly (``body["materialization"]``).
+    Does nothing when there is no session key or no source path.
+
+    Shared by the core's ``/api/source/switch`` and a provider's build switch (the SMS plugin's
+    ``/api/source/switch-build``, step P2 Builds B3), so no session code lives in a plugin.
+
+    The cookie: a page navigation or reload carries only the cookie, not the ``X-VW-Session`` header, so without it
+    the reload would keep rendering the stale cookie session (item 78). Scoped to this response only.
+
+    ``managed`` (item 63): a materialized build is a bare tarball extraction with no ``.venv`` of its own, so it is
+    prepared on the managed path (a real ``uv sync`` against the commit's own lock file). Otherwise (a catalog entry,
+    in place and ready at once) ``prepare`` gets no ``managed`` argument at all, as before. ``session_env`` and
+    ``session_registry`` are read through their modules at call time (tests patch them there)."""
+    source_path = (body.get("source") or {}).get("path")
+    if not (session_key and source_path):
+        return
+    session_registry.rebind(session_key, source_path)
+    response.set_cookie(
+        session_registry.SESSION_COOKIE, session_key,
+        httponly=True, samesite="lax",
+        secure=(request.url.scheme == "https"), path="/",
+    )
+    if managed:
+        body["materialization"] = session_env.prepare(session_key, source_path, managed=True)
+    else:
+        body["materialization"] = session_env.prepare(session_key, source_path)
