@@ -86,7 +86,7 @@ def test_registry_installs_are_now_reachable_but_pushing_and_rebinding_are_not(t
     for path in ("/api/branch/push", "/api/work-push", "/api/work-create-pr",     # the one exception: pushing
                  "/api/work-link-branch", "/api/remote-run-start", "/api/remote-run-build",   # ...also push (the
                  # remote-run pair is the SMS provider's declaration, ProviderRouter.ai_excluded; absent if off)
-                 "/api/source/switch", "/api/workspaces/start", "/api/auth/github/start",
+                 "/api/source/switch", "/api/source/build-remote", "/api/source/switch-build", "/api/workspaces/start", "/api/auth/github/start",
                  "/api/ai/credentials", "/api/chat/turn", "/api/events"):
         assert not any(p == path for _, p in served), f"{path} must stay unreachable"
     assert ("POST", "/api/dirty-commit-all") in served          # a LOCAL commit is fine

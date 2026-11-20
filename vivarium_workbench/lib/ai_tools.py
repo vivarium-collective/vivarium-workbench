@@ -115,8 +115,10 @@ def excluded_paths(app: FastAPI) -> frozenset[str]:
     return EXCLUDED_PATHS | getattr(app.state, "provider_ai_excluded", frozenset())
 
 
-def is_excluded(path: str, tags: list[str] | tuple[str, ...], method: str = "get",
-                paths: frozenset[str] = EXCLUDED_PATHS) -> bool:
+def is_excluded(path: str, tags: list[str] | tuple[str, ...], method: str = "get", *,
+                paths: frozenset[str]) -> bool:
+    """``paths`` is required (no default): a caller that forgot the providers' exclusions must fail, not fall back
+    to the core's list alone (:func:`excluded_paths`)."""
     return (
         path in paths
         or path.startswith(EXCLUDED_PATH_PREFIXES)
@@ -141,7 +143,7 @@ def build_index(app: FastAPI) -> dict[str, dict[str, Any]]:
             if not op:
                 continue
             tags = op.get("tags") or []
-            if is_excluded(path, tags, method, paths):
+            if is_excluded(path, tags, method, paths=paths):
                 continue
             oid = op["operationId"]
             index[oid] = {
