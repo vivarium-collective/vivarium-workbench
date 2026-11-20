@@ -288,7 +288,7 @@ def test_runtime_defaults_when_no_workspace_yaml(tmp_path, monkeypatch):
     cs.run_composite_subprocess(ws, **_run_kwargs(ws, db, spec_id=spec, run_id="rD"))
     payload = _extract_payload(fake.script)
     assert payload["default_emitter"] == "sqlite"
-    assert payload["max_generations"] == 3
+    assert payload["max_generations"] == 1  # single generation unless a study declares more
     assert payload["single_daughters"] is False
 
 
