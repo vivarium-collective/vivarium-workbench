@@ -1445,14 +1445,15 @@ NO_BACKEND_COMMANDS = frozenset({
 
 def _provider_commands() -> "tuple[Command, ...]":
     """The active providers' subcommands (step P2 CLI). A provider that fails to load costs only its own subcommands,
-    with a warning: it must not take ``doctor``, ``migrate-*`` or ``gen-readme`` down with it. (The backend commands
-    still refuse to start on it: ``check_worker_config`` asks the providers again.)"""
+    with a warning: it must not take ``doctor``, ``migrate-*`` or ``gen-readme`` down with it. (When the provider
+    itself is broken, the backend commands still refuse to start: ``check_worker_config`` asks the providers again.
+    A broken ``cli()`` alone costs only the subcommands.)"""
     from vivarium_workbench.lib.backends import provider as _provider
 
     try:
         return tuple(c for p in _provider.providers() for c in p.cli())
     except Exception as e:  # noqa: BLE001 - see docstring
-        print(f"warning: backend provider failed to load ({type(e).__name__}: {e}); its subcommands are unavailable",
+        print(f"warning: the backend provider's subcommands failed to load ({type(e).__name__}: {e}); they are unavailable",
               file=sys.stderr)
         return ()
 

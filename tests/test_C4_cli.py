@@ -360,7 +360,7 @@ def test_a_broken_provider_drops_its_subcommands_with_a_warning(monkeypatch, cap
     monkeypatch.setattr(cli, "cmd_gen_readme", lambda args: ran.append(args) or 0)
     assert cli.main(["gen-readme", "--workspace", str(tmp_path)]) == 0
     assert ran
-    assert "backend provider failed to load (ImportError: boom)" in capsys.readouterr().err
+    assert "backend provider's subcommands failed to load (ImportError: boom)" in capsys.readouterr().err
     with pytest.raises(SystemExit) as e:
         cli.main(["run-remote", "c"])
     assert e.value.code == 2
