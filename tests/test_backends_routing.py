@@ -248,21 +248,21 @@ def test_cancel_legacy_errors(calls, monkeypatch, msg, code):
 
 @pytest.mark.parametrize("kw", [{"simulation_id": "compose-6"}, {"composite_run_id": "compose-6"}])
 def test_trace_compose_id_in_sim_or_run_key(calls, kw):
-    assert remote_trace.fetch_trace(object(), **kw, ws_root=_WS)[1] == 200
+    assert remote_trace.fetch_trace(**kw, ws_root=_WS)[1] == 200
     assert calls == [("compose", "trace", "compose-6")]
 
 
 def test_trace_compose_id_in_compose_id_key_is_400(calls):
-    assert remote_trace.fetch_trace(object(), compose_id="compose-6", ws_root=_WS)[1] == 400
+    assert remote_trace.fetch_trace(compose_id="compose-6", ws_root=_WS)[1] == 400
     assert calls == []
 
 
 def test_trace_compose_sim_plus_compose_id_is_compose_not_400(calls):
-    assert remote_trace.fetch_trace(object(), simulation_id="compose-6", compose_id=5, ws_root=_WS)[1] == 200
+    assert remote_trace.fetch_trace(simulation_id="compose-6", compose_id=5, ws_root=_WS)[1] == 200
 
 
 def test_trace_viva_sim_plus_compose_run_goes_to_compose(calls):
-    remote_trace.fetch_trace(object(), simulation_id="simulation-X", composite_run_id="compose-6", ws_root=_WS)
+    remote_trace.fetch_trace(simulation_id="simulation-X", composite_run_id="compose-6", ws_root=_WS)
     assert calls == [("compose", "trace", "compose-6")]
 
 
@@ -274,8 +274,8 @@ def test_trace_viva_sim_plus_compose_run_goes_to_compose(calls):
     lambda: rrv.remote_run_chain_progress({"simulation_id": " compose-9 "}, ws_root=_WS),
     lambda: rrv.remote_run_cancel({"run_id": " compose-9 "}, ws_root=_WS),
     lambda: rrv.remote_run_cancel({"simulation_id": " compose-9 "}, ws_root=_WS),
-    lambda: remote_trace.fetch_trace(object(), simulation_id=" compose-9 ", ws_root=_WS),
-    lambda: remote_trace.fetch_trace(object(), composite_run_id=" compose-9 ", ws_root=_WS),
+    lambda: remote_trace.fetch_trace(simulation_id=" compose-9 ", ws_root=_WS),
+    lambda: remote_trace.fetch_trace(composite_run_id=" compose-9 ", ws_root=_WS),
 ])
 def test_compose_ids_are_stripped_everywhere(calls, call):
     call()

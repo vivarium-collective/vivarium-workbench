@@ -138,6 +138,7 @@ def test_sms_only_operations_refuse_a_non_sms_or_foreign_run(ws, asked, fn, monk
 
 def test_trace_routes_by_the_record(ws, asked, monkeypatch):
     from vivarium_workbench.lib import remote_trace
+    from vivarium_workbench_sms import sms_api_client, sms_trace
 
     calls = []
 
@@ -150,12 +151,13 @@ def test_trace_routes_by_the_record(ws, asked, monkeypatch):
             calls.append(("simulation_trace", sid))
             return b"{}"
 
-    monkeypatch.setattr(remote_trace, "require_capabilities", lambda client, *names: None)
+    monkeypatch.setattr(sms_api_client, "require_capabilities", lambda client, *names: None)
+    monkeypatch.setattr(sms_trace, "make_client", Client)
     _record(ws, "simulation-V", "viva-core", HERE)
-    assert remote_trace.fetch_trace(Client(), ws_root=ws, simulation_id="simulation-V")[1] == 200
+    assert remote_trace.fetch_trace(ws_root=ws, simulation_id="simulation-V")[1] == 200
     assert calls == [("composite_run_trace", "simulation-V")]
     _record(ws, "44", "sms-legacy", ELSEWHERE, dep="prod-elsewhere")
-    body, status, _ = remote_trace.fetch_trace(Client(), ws_root=ws, simulation_id="44")
+    body, status, _ = remote_trace.fetch_trace(ws_root=ws, simulation_id="44")
     assert status == 409 and calls == [("composite_run_trace", "simulation-V")]
 
 

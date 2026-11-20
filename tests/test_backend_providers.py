@@ -833,3 +833,124 @@ def test_bind_session_does_nothing_without_a_key_or_a_path(monkeypatch):
         resp = Response()
         deps.bind_session(None, resp, key, body, managed=True)  # type: ignore[arg-type]
         assert "set-cookie" not in resp.headers and "materialization" not in body
+
+
+
+
+# --- step P2 Runs b2: the trace -------------------------------------------------------------------------------------
+
+def test_every_backend_traces_and_the_unrouted_facet_traces_and_answers_support(tmp_path, monkeypatch):
+    """``RunFacet.trace`` on every active backend -- real for viva-core and sms-legacy since Runs b2, no longer
+    ``NotImplementedError`` -- and ``UnroutedFacet.trace`` / ``trace_support`` on the unrouted backend; an inert
+    sentinel refuses ``trace``."""
+    from vivarium_workbench_sms import sms_trace
+
+    calls: list = []
+
+    class Client:
+        def capabilities(self):
+            calls.append(("capabilities",))
+            return {"version": "1", "capabilities": ["viva-v1-trace"]}
+
+        def simulation_trace(self, sid):
+            calls.append(("simulation_trace", sid))
+            return b"{}"
+
+        def composite_run_trace(self, rid):
+            calls.append(("composite_run_trace", rid))
+            return b"{}"
+
+    monkeypatch.setattr(sms_trace, "make_client", Client)
+    for backend in backends._ALL:
+        assert callable(getattr(backend.runs, "trace", None)), backend.name
+        if backend.unrouted is not None:
+            assert callable(getattr(backend.unrouted, "trace", None)), backend.name
+            assert callable(getattr(backend.unrouted, "trace_support", None)), backend.name
+    assert backends.SMS_LEGACY.runs.trace("12") == (b"{}", 200, "simulation-12-trace.json")
+    assert backends.VIVA_CORE.runs.trace("simulation-X") == (b"{}", 200, "composite-simulation-X-trace.json")
+    assert calls == [("capabilities",), ("simulation_trace", 12), ("capabilities",),
+                     ("composite_run_trace", "simulation-X")]
+    unrouted = backends.unrouted().unrouted
+    assert unrouted.trace({"simulation_id": None, "composite_run_id": None, "compose_id": None})[1] == 400
+    assert unrouted.trace_support() == ({"supported": True, "reason": None, "capability": "viva-v1-trace",
+                                         "server_version": "1"}, 200)
+    for sentinel in backends._SENTINELS.values():
+        with pytest.raises(RuntimeError, match="provider is not active"):
+            sentinel.runs.trace("12")
+
+
+_TRACE_REFUSED = (409, "backend-not-installed", "backend-not-installed", True)
+_TRACE_ONE_ID = "give exactly one of simulation_id, composite_run_id, compose_id"
+
+
+@pytest.mark.parametrize("query, expected", [
+    # Declared change (Runs b2): one id that no record or id form routes is refused, terminal; before, the SMS
+    # client was asked (or, for a non-integer simulation_id, a 400).
+    ({"simulation_id": 12}, _TRACE_REFUSED),
+    ({"simulation_id": "abc"}, _TRACE_REFUSED),
+    ({"composite_run_id": "simulation-X"}, _TRACE_REFUSED),
+    ({"compose_id": 7}, _TRACE_REFUSED),
+    # Unchanged: no id, or several, is the old 400.
+    ({}, (400, _TRACE_ONE_ID)),
+    ({"simulation_id": 12, "compose_id": 7}, (400, _TRACE_ONE_ID)),
+])
+def test_with_providers_off_the_trace_never_reaches_sms(providers_off, tmp_path, monkeypatch, inproc_client,
+                                                        query, expected):
+    from vivarium_workbench.lib import server_capabilities as sc
+    from vivarium_workbench_sms import sms_api_client, sms_legacy
+
+    monkeypatch.setattr(sc, "explicit_backend_profile", lambda: None)
+    monkeypatch.setattr(sms_api_client.SmsApiClient, "__init__", lambda *a, **k: pytest.fail("SMS was asked"))
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda *a, **k: pytest.fail("SMS was asked"))
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    r = inproc_client(tmp_path).get(f"/api/remote-run-trace?{urlencode(query)}")
+    body = r.json()
+    if expected == _TRACE_REFUSED:
+        assert (r.status_code, body.get("reason"), body.get("phase"), body.get("terminal")) == expected, body
+        assert body["simulation_id"] == str(next(iter(query.values())))
+    else:
+        assert (r.status_code, body["error"]) == expected, body
+
+
+def test_with_providers_off_trace_support_says_no_backend(providers_off, tmp_path, monkeypatch, inproc_client):
+    """Declared change (Runs b2): with nothing named and providers off the support answer is ``no-backend``, with no
+    request and the viewer as always (``perfetto-open.js`` keeps the action hidden); before, the SMS client was asked
+    at the configured or default URL."""
+    from vivarium_workbench.lib import server_capabilities as sc
+    from vivarium_workbench_sms import sms_api_client
+
+    monkeypatch.setattr(sc, "explicit_backend_profile", lambda: None)
+    monkeypatch.setattr(sms_api_client.SmsApiClient, "__init__", lambda *a, **k: pytest.fail("SMS was asked"))
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_PERFETTO_UI", "off")
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    r = inproc_client(tmp_path).get("/api/remote-run-trace-support")
+    assert r.status_code == 200
+    body = r.json()
+    assert list(body) == ["supported", "reason", "capability", "error", "viewer"]
+    assert (body["supported"], body["reason"], body["capability"]) == (False, "no-backend", None)
+    assert body["viewer"]["mode"] == "off"
+
+
+def test_with_providers_off_a_compose_run_is_still_traced_by_compose_api(providers_off, tmp_path, monkeypatch):
+    """compose-api is core: its runs are traced with providers off, under either key, and a named compose-api
+    still says it serves traces."""
+    from vivarium_workbench.lib import remote_run_compose, remote_trace
+    from vivarium_workbench.lib import server_capabilities as sc
+    from vivarium_workbench_sms import sms_api_client
+
+    monkeypatch.setattr(sc, "explicit_backend_profile",
+                        lambda: {"reachable": True, "dispatch": sc.DISPATCH_COMPOSE, "error": None})
+    monkeypatch.setattr(sms_api_client.SmsApiClient, "__init__", lambda *a, **k: pytest.fail("SMS was asked"))
+    monkeypatch.setattr(remote_run_compose, "trace", lambda rid: (b"{}", 200, f"{rid}.json"))
+    for key in ("simulation_id", "composite_run_id"):
+        assert remote_trace.fetch_trace(ws_root=tmp_path, **{key: "compose-6"}) == (b"{}", 200, "compose-6.json")
+    body, status = remote_trace.trace_support()
+    assert (status, body["supported"], body["capability"]) == (200, True, "get-simulation-trace-chrome")
+
+
+def test_with_providers_off_a_blank_trace_id_is_no_id(providers_off, tmp_path):
+    """A whitespace-only id counts as no id (as the run views' ``_first_id``): 400, not a 409 naming an empty run."""
+    from vivarium_workbench.lib import remote_trace
+
+    body, status, _ = remote_trace.fetch_trace(ws_root=tmp_path, simulation_id="  ")
+    assert status == 400, body

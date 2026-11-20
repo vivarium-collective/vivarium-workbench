@@ -104,7 +104,8 @@ shorter run.
 | progress (`/api/remote-run-chain-progress`) | the same status, as a single job with no seeds |
 | land (`/api/remote-run-land`) | `GET /results/simulation/results/file`; its `results_*.pber` is read, landing `user_emitter` (`remote_run_landing.land_composite_results`) |
 | cancel (`/api/remote-run-cancel`) | `DELETE /simulations/{id}`, which needs a signed-in caller: set `COMPOSE_API_TOKEN`, as compose-api's CLI reads it. A 401 says so |
-| trace (`/api/remote-run-trace?simulation_id=compose-<id>`, or `composite_run_id=`) | `GET /results/simulation/trace/chrome` |
+| trace (`/api/remote-run-trace?simulation_id=compose-<id>`, or `composite_run_id=`) | `GET /results/simulation/trace/chrome` (`ComposeApiRuns.trace`; the core routes a compose run there by its record or id form, under either key, with or without providers) |
+| trace support (`/api/remote-run-trace-support`) | no request: when compose-api is the named backend the core answers `supported: true, capability: "get-simulation-trace-chrome"` itself (compose-api has no capabilities route); otherwise the `unrouted` backend answers, or `no-backend` with providers off (P2 Runs b2) |
 
 Run ids are `compose-<simulation id>`. compose-api's ids are integers, which the other routes read as legacy
 simulation ids, so the compose check runs before them.
