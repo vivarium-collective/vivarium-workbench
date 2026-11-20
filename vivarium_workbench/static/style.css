@@ -3371,6 +3371,10 @@ body.pcard-splitting iframe{ pointer-events:none; }
 .iset-hdr-btn-primary:hover { background: #eff6ff; }
 :root[data-theme="dark"] .iset-hdr-btn-primary { border-color: #3b82f6; color: #bfdbfe; }
 :root[data-theme="dark"] .iset-hdr-btn-primary:hover { background: #1e293b; }
+/* Investigation-header show/hide toggles (Details / Graph): a pressed/active
+   look when their panel is expanded, so they read as reveal controls. */
+.inv-toggle-on { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+:root[data-theme="dark"] .inv-toggle-on { background: #1e293b; border-color: #3b82f6; color: #bfdbfe; }
 .market-results { margin-top: 14px; }
 /* Keep the Registry results full-width and vertically reserved so switching
    facets or waiting on a slow load doesn't reflow the card columns or bounce
