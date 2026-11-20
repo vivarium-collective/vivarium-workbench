@@ -6971,10 +6971,11 @@ body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]{
 .mdef-eqs{ margin:6px 0 9px; }
 .mdef-eqs-lbl, .mdef-syms-lbl{ font-size:0.68em; font-weight:700; text-transform:uppercase;
   letter-spacing:0.05em; color:#0f766e; margin:0 0 5px; }
-.mdef-eq{ font-family:ui-monospace,SFMono-Regular,monospace; font-size:0.92em; color:#0f172a;
-  background:#f0fdfa; border-left:3px solid #14b8a6; border-radius:0 6px 6px 0;
-  padding:6px 11px; margin:0 0 4px; overflow-x:auto; white-space:nowrap; }
-.mdef-eq code{ background:none; padding:0; color:inherit; }
+.mdef-eq{ font-family:"Cambria Math",Cambria,Georgia,"Times New Roman",serif; font-size:1.08em;
+  color:#0f172a; background:#f0fdfa; border-left:3px solid #14b8a6; border-radius:0 6px 6px 0;
+  padding:7px 13px; margin:0 0 5px; overflow-x:auto; white-space:nowrap; letter-spacing:0.01em; }
+.mdef-eq sub{ font-size:0.72em; line-height:0; vertical-align:-0.25em; }
+.mdef-eq sup{ font-size:0.72em; line-height:0; vertical-align:0.5em; }
 .mdef-syms{ margin:9px 0 2px; }
 .mdef-sym-list{ display:grid; grid-template-columns:max-content 1fr; gap:3px 12px; margin:0; align-items:baseline; }
 .mdef-sym-list dt code{ font-size:0.82em; color:#3730a3; background:#eef2ff; padding:0 6px; border-radius:4px;

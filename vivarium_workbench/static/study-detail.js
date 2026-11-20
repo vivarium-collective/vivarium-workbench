@@ -186,26 +186,25 @@
   }
   window._setModelSubtab = _setModelSubtab;
 
-  // When the Loom sub-tab opens, auto-open the FIRST composite card's inline
-  // bigraph (the baseline) so the tab shows a diagram directly — no extra click.
-  // Variant cards stay collapsed behind their own "Explore composite" toggle
-  // (each loom is heavy; opened on demand). Idempotent; retries briefly while
-  // _loadModelCards is still resolving the cards.
+  // When the Loom sub-tab opens, auto-open the FIRST composite card's bigraph
+  // (the baseline) so the tab shows a diagram directly — no extra click. The
+  // cards render expanded (no "Explore composite" toggle) in the Loom pane; this
+  // opens the card's "run · outputs · graph" explore section (via the shared
+  // _pcardToggleSec). Idempotent; retries briefly while _loadModelCards resolves.
   function _mountModelLoom() {
     var host = document.getElementById('model-loom-mount');
     if (!host || host.dataset.opened) return;
-    var firstWrap = host.querySelector('.model-composite-card-wrap');
-    if (!firstWrap || firstWrap.querySelector('.mdef-explore-btn') == null) {
-      // cards not rendered / resolved yet — retry briefly
+    var explore = host.querySelector('.pcard-sec-explore');
+    if (!explore) {
       _mountModelLoom._tries = (_mountModelLoom._tries || 0) + 1;
       if (_mountModelLoom._tries < 40) return void setTimeout(_mountModelLoom, 150);
       return;
     }
     host.dataset.opened = '1';
-    // The Explore toggle shows the hidden card and the composite-card code lazily
-    // mounts the loom when it becomes visible — exactly a user click, so reuse it.
-    var expl = firstWrap.querySelector('.mdef-explore-btn');
-    if (expl && /^▸/.test(expl.textContent || '')) expl.click();
+    if (!explore.classList.contains('pcard-sec-open')) {
+      var head = explore.querySelector('.pcard-sec-head');
+      if (head && typeof window._pcardToggleSec === 'function') window._pcardToggleSec(head);
+    }
   }
   window._mountModelLoom = _mountModelLoom;
 
@@ -1633,11 +1632,26 @@
   // prominently, the same math the loom node cards lead with. No KaTeX on this
   // page, so render as clean monospace equation lines (these contracts author
   // math as readable one-liners, not heavy LaTeX).
+  // Prettify a contract.math one-liner toward a LaTeX-like reading WITHOUT a math
+  // typesetter: relational/arrow operators become symbols, `*` a middle dot, and
+  // single-letter-base `x_sub` tokens render as real subscripts (the physics
+  // convention — k_ext, c_base, m_start), `^x` as superscripts. Multi-letter
+  // identifiers (has_pump, decay_no_heredity) are left intact. Returns HTML.
+  function _prettyMath(raw) {
+    var s = String(raw == null ? '' : raw);
+    s = s.replace(/<=/g, '≤').replace(/>=/g, '≥')
+         .replace(/!=/g, '≠').replace(/->/g, '→');
+    s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    s = s.replace(/\*/g, '·');
+    s = s.replace(/\b([A-Za-z])_([A-Za-z0-9]+)/g, '$1<sub>$2</sub>');
+    s = s.replace(/\^\{([^}]*)\}/g, '<sup>$1</sup>').replace(/\^([A-Za-z0-9]+)/g, '<sup>$1</sup>');
+    return s;
+  }
   function _mdEquations(c) {
     var m = (c && Array.isArray(c.math)) ? c.math : [];
     if (!m.length) return '';
     return '<div class="mdef-eqs"><div class="mdef-eqs-lbl">Equations</div>' +
-      m.map(function (e) { return '<div class="mdef-eq"><code>' + _esc(String(e)) + '</code></div>'; }).join('') +
+      m.map(function (e) { return '<div class="mdef-eq">' + _prettyMath(String(e)) + '</div>'; }).join('') +
       '</div>';
   }
   // The symbols the equations use (contract.symbols: {sym: meaning}).
@@ -2011,7 +2025,10 @@
           // stays card-like until the user opens the diagram — and the heavy loom is
           // only mounted on demand (it is lazy, so this also avoids load failures for
           // users who never open it).
-          if (cardEl && cardEl.parentNode === wrap) {
+          // Collapse behind an "Explore composite" toggle ONLY when the cards live
+          // in the Composition mount. In the Loom sub-pane (cardsMount !== mount)
+          // the card IS the content — show it directly, no toggle.
+          if (cardsMount === mount && cardEl && cardEl.parentNode === wrap) {
             cardEl.style.display = 'none';
             var _expl = document.createElement('button');
             _expl.type = 'button';
