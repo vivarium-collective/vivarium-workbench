@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from vivarium_workbench.lib import backend_config as _backend_config
+from vivarium_workbench.lib.backends.provider import SessionBuild
 from vivarium_workbench.lib.env_compat import get_env
 from vivarium_workbench_sms.sms_api_client import SmsApiClient
 
@@ -60,6 +61,26 @@ def pinned_config() -> PinnedConfig | None:
 
 def is_pinned_enabled() -> bool:
     return pinned_config() is not None
+
+
+def session_build(ws_root: Path) -> SessionBuild | None:
+    """``SmsProvider.session_build``: this session's switched build, read from its WS3 stamp (``.viv-build.json``,
+    written by ``switch_build``), or ``None`` when ``ws_root`` has no stamp. A stamp that is not JSON, or not a JSON
+    object, is ``readable=False``. Otherwise the fields are the stamp's own, raw: ``id`` = ``simulator_id``,
+    ``repo_url`` = ``repo_url`` or ``repo``, ``commit``, ``branch``. No network call; never raises on the stamp's
+    contents."""
+    meta_path = Path(ws_root) / ".viv-build.json"
+    if not meta_path.is_file():
+        return None
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - never raises on the stamp (OSError, ValueError, RecursionError on deep nesting)
+        data = None
+    if not isinstance(data, dict):
+        return SessionBuild(readable=False, id=None, repo_url=None, commit=None, branch=None)
+    return SessionBuild(readable=True, id=data.get("simulator_id"),
+                        repo_url=data.get("repo_url") or data.get("repo") or None,
+                        commit=data.get("commit"), branch=data.get("branch"))
 
 
 def resolved_from_session_build(ws_root: Path) -> dict | None:

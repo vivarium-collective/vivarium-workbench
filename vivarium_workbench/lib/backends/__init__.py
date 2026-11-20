@@ -111,6 +111,8 @@ COMPOSE = Backend("compose-api", ComposeApiRuns(), identity=compose_health_ident
 # backend (the same object every time) or, with providers off, to an inert sentinel that no lookup ever returns,
 # so those comparisons stay false (``None`` would not: ``None is None`` is true for a local run).
 if TYPE_CHECKING:
+    from vivarium_workbench.lib.backends.provider import SessionBuild
+
     VIVA_CORE: Backend
     SMS_LEGACY: Backend
     _ALL: "tuple[Backend, ...]"
@@ -270,13 +272,27 @@ def resolve_run_target(ws_root: "Path | str") -> "Literal['local', 'deployment']
     only the session build, so a pin with no session build fell through to a local subprocess. Every run entrypoint
     now resolves through this one function and threads the result into ``invoke_run(..., target=...)``.
 
-    Deliberately NOT ``run_core.run_target_for``, which stays ``.viv-build.json``-only: a composite PREVIEW
-    (``composite_resolve.resolve_composite_for_request``) needs a concrete ``simulator_id`` stamp, which a bare
-    deployment-wide pin does not provide.
+    Deliberately NOT ``run_core.run_target_for``, which stays session-build-only (:func:`session_build`): a
+    composite PREVIEW (``composite_resolve.resolve_composite_for_request``) needs the session build's id, which a
+    bare deployment-wide pin does not provide.
 
     Callers read it through the module at call time (``backends.resolve_run_target(...)``) so tests can patch it.
     """
     return "deployment" if active(ws_root) is not None else "local"
+
+
+def session_build(ws_root: "Path | str") -> "SessionBuild | None":
+    """The build ``ws_root`` is a checkout of (step P2 Builds): the first provider's answer
+    (``Provider.session_build``), or ``None`` -- a plain local workspace, providers off, or the plugin absent. No
+    network call; never raises. The core's readers of the session build (the rail chip, the provenance manifest, the
+    preview, the readouts soft-degrade, ``run_core.run_target_for``) ask here and never name the provider's record."""
+    import vivarium_workbench.lib.backends.provider as _provider
+
+    for p in _provider.providers():
+        found = p.session_build(Path(ws_root))
+        if found is not None:
+            return found
+    return None
 
 
 # --- an EXISTING run: the backend its record names (step 1c-2) ---------------------------------------------------

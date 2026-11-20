@@ -3,6 +3,7 @@
 * ``backends()``: ``viva-core`` (``/viva/v1`` document and composite runs) and ``sms-legacy`` (``/api/v1`` integer
   simulations), one viva-api server -- they share ``viva_health_identity``;
 * ``select()``: a run of the session's own build (``.viv-build.json``) or of a pinned deployment is SMS's;
+* ``session_build()``: the session's own build, read from its ``.viv-build.json`` stamp (``remote_pinned``);
 * ``recognise()``: the viva-core half of the capability probe (``server_capabilities.backend_profile``);
 * ``worker_launcher()``: viva-api's hosted env-worker launcher (proxy or dial-back), when the deployment asks for one;
 * ``probe_client()``: the client the capability probe reads a named backend with (``SmsApiClient``, probe class);
@@ -19,7 +20,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from vivarium_workbench.lib.backends.provider import ProviderRouter, Recognised
+from vivarium_workbench.lib.backends.provider import ProviderRouter, Recognised, SessionBuild
 
 if TYPE_CHECKING:
     from vivarium_workbench.lib.backends import Backend
@@ -53,12 +54,18 @@ class SmsProvider:
     def select(self, ws_root: Path) -> "Optional[Backend]":
         """SMS's claim on a NEW run, with no network call: the session's own build (``.viv-build.json``), checked
         first, or the deployment's pinned config. Read through their modules at call time (tests patch them)."""
-        from vivarium_workbench.lib import run_core
         from vivarium_workbench_sms import remote_pinned
 
-        if run_core.run_target_for(Path(ws_root)) == "deployment" or remote_pinned.is_pinned_enabled():
+        if self.session_build(Path(ws_root)) is not None or remote_pinned.is_pinned_enabled():
             return self.backends()[1]
         return None
+
+    def session_build(self, ws_root: Path) -> "Optional[SessionBuild]":
+        """The session's own build (``remote_pinned.session_build``: its ``.viv-build.json`` stamp), or ``None``. Read
+        through the module at call time (tests patch it). No network call; never raises."""
+        from vivarium_workbench_sms import remote_pinned
+
+        return remote_pinned.session_build(Path(ws_root))
 
     def recognise(self, client: object) -> Recognised:
         """The viva-core half of ``server_capabilities.backend_profile``, moved verbatim (step P1c): the capability

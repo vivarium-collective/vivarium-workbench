@@ -265,3 +265,28 @@ def test_a_deployment_run_works_or_refuses_cleanly_without_the_plugin(monkeypatc
     assert "@@NONE@@RuntimeError: this run targets a deployment, but no remote backend is named" in proc.stdout, (
         proc.stdout[-2000:], proc.stderr[-2000:])
     assert "@@COMPOSE@@results.zip" in proc.stdout, (proc.stdout[-2000:], proc.stderr[-2000:])
+
+
+_SESSION_BUILD_PROBE = textwrap.dedent('''
+    import pathlib, sys, tempfile
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import backends, run_core
+
+    ws = pathlib.Path(tempfile.mkdtemp())
+    (ws / ".viv-build.json").write_text('{"simulator_id": 42, "commit": "abc"}')
+    print("@@RESULT@@" + repr((backends.session_build(ws), run_core.run_target_for(ws))))
+''')
+
+
+def test_the_session_build_answers_without_the_plugin():
+    """Step P2 Builds B1: with the plugin absent a stamped workspace is no session build and runs locally (before B1,
+    ``composite_resolve``'s preview raised ``ModuleNotFoundError`` on any workspace)."""
+    proc = subprocess.run([sys.executable, "-c", _SESSION_BUILD_PROBE], capture_output=True, text=True, timeout=300)
+    assert "@@RESULT@@(None, 'local')" in proc.stdout, proc.stderr[-2000:]
