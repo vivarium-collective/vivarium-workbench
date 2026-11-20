@@ -39,8 +39,11 @@ class VivaCoreRuns:
         return remote_run_viva_v1.cancel(run_id)
 
     def trace(self, run_id: str) -> "tuple[Union[bytes, dict], int, str]":
-        # remote_trace.fetch_trace still serves viva-core traces itself; it moves here in step 4.
-        raise NotImplementedError("viva-core traces are served by remote_trace.fetch_trace until step 4")
+        """A recorded viva-core run's trace: its composite run's (``GET /viva/v1/composites/{id}/trace``; step P2,
+        Runs b2). The Runs tab sends a viva row's id as ``simulation_id``; the core routes it here by its record."""
+        from vivarium_workbench_sms import sms_trace  # lazy: loading the registry (env workers) skips it
+
+        return sms_trace.fetch(sms_trace.make_client(), composite_run_id=run_id)
 
     def run_composite(self, ws_root: Path, composite_id: str, *, dest: Path, n_steps: float,
                       overrides: "dict | None", emit_paths: "list[str] | None",

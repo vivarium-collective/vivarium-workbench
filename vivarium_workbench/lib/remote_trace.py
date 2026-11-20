@@ -1,20 +1,19 @@
-"""A remote run's trace, fetched from viva-api for the workbench's "Open in Perfetto".
+"""The trace routes' core (``/api/remote-run-trace``, ``/api/remote-run-trace-support``) for the workbench's
+"Open in Perfetto": route by the run's record, else the ``unrouted`` backend; count the events; name the viewer.
 
-viva-api serves a run's trace as a Chrome Trace Event JSON document at
-``GET /api/v1/simulations/{id}/trace`` (a viva-api simulation) and
-``GET /viva/v1/composites/{id}/trace`` (a composite run), advertised by the
-``viva-v1-trace`` capability. The browser never talks to viva-api: it asks this
-server (``/api/remote-run-trace``), which proxies through
-:class:`~vivarium_workbench_sms.sms_api_client.SmsApiClient`, and then hands the
-bytes to Perfetto in the browser (``static/perfetto-open.js``).
+A run's trace is a Chrome Trace Event JSON document its backend serves. The browser never talks to a backend: it
+asks this server, which routes the request (step P2, Runs b2) and hands the bytes to Perfetto in the browser
+(``static/perfetto-open.js``):
 
-Both functions return ``(body, status)`` like the other ``*_views`` modules; a
-successful :func:`fetch_trace` returns the trace BYTES as the body.
+* a compose-api run (by its record or its id's form, under either id key): compose-api's ``runs.trace``;
+* a run of another backend or deployment: its record's 409 refusal;
+* a LONE ``simulation_id`` whose record names a provider's backend: that backend's ``runs.trace``;
+* anything else (no record, a ``/compose/v1`` ``compose_id``, several ids, none): the ``unrouted`` backend's
+  ``trace``, whose own id checks answer. With providers off: 400 for no id or several, else a terminal 409
+  ``backend-not-installed``.
 
-Branching is on capability membership, never on version (the capability contract in ``sms_api_client``):
-a deployment that does not advertise ``viva-v1-trace`` gets **409** naming the
-capability, and :func:`trace_support` reports ``supported: false`` so the UI hides
-the action instead of offering one that cannot work.
+Both functions return ``(body, status)`` like the other ``*_views`` modules; a successful :func:`fetch_trace` returns
+the trace BYTES as the body. :func:`trace_support` says whether to offer the action at all (always 200).
 """
 
 from __future__ import annotations
@@ -25,15 +24,6 @@ import json
 from typing import Optional, Union
 
 from vivarium_workbench.lib import perfetto_ui
-from vivarium_workbench_sms.sms_api_client import (
-    CAPABILITY_VIVA_V1_TRACE,
-    CapabilityUnsupportedError,
-    SmsApiClient,
-    SmsApiError,
-    fetch_capabilities,
-    require_capabilities,
-    sms_api_base,
-)
 
 TraceBody = Union[bytes, dict]
 
@@ -71,18 +61,12 @@ def count_trace_events(body: bytes) -> Optional[int]:
     return sum(1 for e in events if not (isinstance(e, dict) and e.get("ph") == "M"))
 
 
-def make_client() -> SmsApiClient:
-    """The client the routes use (a seam: tests replace ``SmsApiClient`` here)."""
-    return SmsApiClient(sms_api_base())
+def trace_support() -> "tuple[dict, int]":
+    """Whether the trace action can be offered, and which Perfetto to open (``viewer``, always last).
 
-
-def trace_support(client: SmsApiClient) -> "tuple[dict, int]":
-    """Whether the trace action can be offered, and which Perfetto to open.
-
-    Always 200: an unreachable viva-api is ``supported: false`` with
-    ``reason: "unreachable"`` (the UI just keeps the action hidden), kept
-    distinct from ``reason: "capability-absent"`` for a deployment that is
-    reachable but does not serve traces.
+    compose-api serves every run's trace (it has no capabilities route); otherwise the ``unrouted`` backend says
+    whether it does. With providers off: ``supported: false, reason: "no-backend"``, with no request (the UI keeps
+    the action hidden). Always 200.
     """
     viewer = perfetto_ui.viewer_config().as_dict()
     from vivarium_workbench.lib import backends
@@ -91,90 +75,50 @@ def trace_support(client: SmsApiClient) -> "tuple[dict, int]":
         # compose-api serves every run's trace (get-simulation-trace-chrome); it has no capabilities route
         return ({"supported": True, "reason": None, "capability": "get-simulation-trace-chrome",
                  "viewer": viewer}, 200)
-    try:
-        caps = fetch_capabilities(client)
-    except SmsApiError as e:
-        return ({"supported": False, "reason": "unreachable", "error": str(e),
-                 "capability": CAPABILITY_VIVA_V1_TRACE, "viewer": viewer}, 200)
-    supported = caps.supports(CAPABILITY_VIVA_V1_TRACE)
-    return ({"supported": supported,
-             "reason": None if supported else "capability-absent",
-             "capability": CAPABILITY_VIVA_V1_TRACE,
-             "server_version": caps.version,
-             "viewer": viewer}, 200)
+    ub = backends.unrouted()
+    if ub is not None and ub.unrouted is not None:
+        body, status = ub.unrouted.trace_support()
+    else:
+        body, status = ({"supported": False, "reason": "no-backend", "capability": None,
+                         "error": "no remote backend was named (serve --backend-base-url)"}, 200)
+    return {**body, "viewer": viewer}, status
 
 
-def _positive_int(value: object) -> Optional[int]:
-    if value is None or value == "":
-        return None
-    try:
-        n = int(str(value))
-    except (TypeError, ValueError):
-        return -1
-    return n if n > 0 else -1
+def fetch_trace(*, ws_root: "Path | str", simulation_id: object = None, composite_run_id: object = None,
+                compose_id: object = None, deployment: "str | None" = None,
+                study: "str | None" = None) -> "tuple[TraceBody, int, str]":
+    """The trace for exactly one of ``simulation_id``, ``composite_run_id`` or ``compose_id`` (a ``/compose/v1``
+    submission number, never a run's id), routed as the module docstring says.
 
-
-def fetch_trace(client: SmsApiClient, *, ws_root: "Path | str", simulation_id: object = None,
-                composite_run_id: object = None, compose_id: object = None,
-                deployment: "str | None" = None, study: "str | None" = None) -> "tuple[TraceBody, int, str]":
-    """The trace for exactly one of: a viva-api simulation, a composite run, or a
-    ``/compose/v1`` submission (resolved to its composite run by ``correlation_id``).
-
-    Returns ``(body, status, filename)``; ``body`` is the trace bytes on 200 and an
-    ``{"error": ...}`` dict otherwise. Statuses: 400 bad/ambiguous id, 409
-    capability absent, 404 no such run / no trace yet (passed through from
-    viva-api), 502 viva-api unreachable or failed.
+    Returns ``(body, status, filename)``; ``body`` is the trace bytes on 200 and an ``{"error": ...}`` dict
+    otherwise. Statuses are the answering backend's (400 bad/ambiguous id, 404, 409, 502), or a record's 409 refusal.
     """
     from vivarium_workbench.lib import backends
+    import vivarium_workbench.lib.backends.records as records
 
+    ids = {"simulation_id": simulation_id, "composite_run_id": composite_run_id, "compose_id": compose_id}
     # Step 1c-2: a run id is looked up in its record, which names the backend that ran it. compose-api answers
-    # itself; a viva-core run's trace is its composite run's (the Runs tab sends a viva row's id as simulation_id);
-    # a run of another backend is refused. ``compose_id`` is a /compose/v1 submission number, not a run's id.
-    for key, given in (("simulation_id", simulation_id), ("composite_run_id", composite_run_id)):
+    # itself under either key; a run of another backend is refused. A provider's backend answers only a LONE
+    # simulation_id (the Runs tab sends a viva-core row's id as simulation_id): any other combination goes to the
+    # unrouted backend as given, exactly as before Runs b2.
+    for key in ("simulation_id", "composite_run_id"):
+        given = ids[key]
         if given in (None, ""):
             continue
         res = backends.resolve(ws_root, given, deployment=deployment, study=study)
         if res.refusal is not None:
             return res.refusal[0], res.refusal[1], ""
-        if res.kind == "compose-api":
+        if res.kind == backends.COMPOSE.name:
             return backends.COMPOSE.runs.trace(str(given).strip())
-        if (res.kind == "viva-core" and res.via == "record" and key == "simulation_id"
-                and composite_run_id in (None, "")):
-            # A viva-core run the workspace recorded (the Runs tab sends its id as simulation_id). Only a recorded
-            # one: any other non-integer simulation_id stays the 400 it always was.
-            simulation_id, composite_run_id = None, str(given).strip()
-    sim = _positive_int(simulation_id)
-    compose = _positive_int(compose_id)
-    run = str(composite_run_id).strip() if composite_run_id not in (None, "") else None
-    given = [x for x in (sim, compose, run) if x is not None]
-    if len(given) != 1:
+        if (res.via == "record" and res.kind and key == "simulation_id"
+                and composite_run_id in (None, "") and compose_id in (None, "")):
+            return backends.by_kind(res.kind).runs.trace(str(given).strip())
+    ub = backends.unrouted()
+    if ub is not None and ub.unrouted is not None:
+        return ub.unrouted.trace(ids)
+    # Providers off: nothing installed serves a run that no record or id form routed.
+    named_ids = [v for v in ids.values() if v not in (None, "")]
+    if len(named_ids) != 1:
         return ({"error": "give exactly one of simulation_id, composite_run_id, compose_id"}, 400, "")
-    if sim == -1 or compose == -1:
-        return ({"error": "simulation_id / compose_id must be a positive integer"}, 400, "")
-
-    try:
-        require_capabilities(client, CAPABILITY_VIVA_V1_TRACE)
-    except CapabilityUnsupportedError as e:
-        return ({"error": str(e), "missing": e.missing, "server_version": e.version}, 409, "")
-    except SmsApiError as e:
-        return ({"error": f"viva-api unreachable: {e}"}, 502, "")
-
-    try:
-        if sim is not None:
-            return client.simulation_trace(sim), 200, f"simulation-{sim}-trace.json"
-        if compose is not None:
-            status = client.compose_status(compose) or {}
-            run = str(status.get("correlation_id") or "").strip() or None
-            if run is None:
-                return ({"error": f"compose run {compose} has no correlation_id to find its trace by"},
-                        404, "")
-        assert run is not None
-        return client.composite_run_trace(run), 200, f"composite-{_safe(run)}-trace.json"
-    except SmsApiError as e:
-        if e.status in (404, 409):
-            return ({"error": str(e)}, e.status, "")
-        return ({"error": str(e)}, 502, "")
-
-
-def _safe(name: str) -> str:
-    return "".join(c if c.isalnum() or c in "-_." else "_" for c in name)[:80] or "run"
+    body, status = records.unowned(str(named_ids[0]).strip())
+    return body, status, ""

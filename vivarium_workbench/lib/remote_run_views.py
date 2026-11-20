@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
 from vivarium_workbench.lib import backend_config, backends, path_safety, remote_run_compose
+import vivarium_workbench.lib.backends.records as records
 
 if TYPE_CHECKING:
     from vivarium_workbench.lib.backends import AnalysisFacet, ArtifactFacet, Backend
@@ -104,21 +105,9 @@ def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:
     if ub is not None and ub.unrouted is not None:
         return ub.unrouted.submit(ws_root, body)
     if body.get("simulator_id"):  # providers off: no installed provider serves builds
-        return _not_installed("", "a simulator id names a build, and no installed provider serves builds in this "
-                                  "workbench")
+        return records.not_installed("", "a simulator id names a build, and no installed provider serves builds in this "
+                                         "workbench")
     return {"error": "no remote backend was named (serve --backend-base-url)", "reason": "no-backend"}, 409
-
-
-def _not_installed(rid: str, error: str) -> tuple[dict, int]:
-    """Providers off: the request names something (a run no active backend owns, a build or an analysis) that only an
-    installed provider could answer. Refused like a record whose provider is not active (terminal 409)."""
-    from vivarium_workbench.lib.backends.records import refusal
-
-    return refusal(rid, error, reason="backend-not-installed", phase="backend-not-installed")
-
-
-def _unowned(rid: str) -> tuple[dict, int]:
-    return _not_installed(rid, f"run {rid} belongs to no backend an installed provider serves in this workbench")
 
 
 def _first_id(params: dict, keys: "tuple[str, ...]") -> str:
@@ -151,7 +140,7 @@ def _owner(ws_root: Path, rid: str, where: dict) -> "Union[Backend, tuple[dict, 
     chosen = backends.for_existing(ws_root, rid, deployment=where.get("deployment"), study=where.get("study"))
     if isinstance(chosen, tuple):
         return chosen
-    return _unowned(rid) if chosen is None else chosen
+    return records.unowned(rid) if chosen is None else chosen
 
 
 def _not_offered(rid: str, backend: "Backend", what: str) -> tuple[dict, int]:
@@ -231,7 +220,7 @@ def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
         ub = backends.unrouted()
         if ub is not None and ub.unrouted is not None:
             return ub.unrouted.land(ws_root, _no_id(body))  # no id: the backend's exact answers (401 before 400)
-        return _unowned(rid) if rid else ({"error": "study and simulation_id are required"}, 400)
+        return records.unowned(rid) if rid else ({"error": "study and simulation_id are required"}, 400)
     return chosen.runs.land(ws_root, {**body, "simulation_id": rid})
 
 
@@ -382,13 +371,13 @@ def remote_run_status(params: dict, *, ws_root: Path) -> tuple[dict, int]:
         return ub.unrouted.status({**params, "simulation_id": rid} if rid else _no_id(params))
     # Providers off.
     if rid:
-        return _unowned(rid)
+        return records.unowned(rid)
     if params.get("analysis_id"):
-        return _not_installed("", "an analysis id names an SMS analysis, and no installed provider serves analyses "
-                                  "in this workbench")
+        return records.not_installed("", "an analysis id names an SMS analysis, and no installed provider serves analyses "
+                                         "in this workbench")
     if params.get("simulator_id"):
-        return _not_installed("", "a simulator id names a build, and no installed provider serves builds in this "
-                                  "workbench")
+        return records.not_installed("", "a simulator id names a build, and no installed provider serves builds in this "
+                                         "workbench")
     return {"error": "simulator_id, simulation_id or analysis_id required"}, 400
 
 
@@ -414,7 +403,7 @@ def remote_run_chain_progress(params: dict, *, ws_root: Path) -> tuple[dict, int
         ub = backends.unrouted()
         if ub is not None and ub.unrouted is not None:
             return ub.unrouted.progress(_no_id(params))  # no id: the backend's own 400
-        return _unowned(rid) if rid else ({"error": "simulation_id required"}, 400)
+        return records.unowned(rid) if rid else ({"error": "simulation_id required"}, 400)
     return chosen.runs.progress(rid)
 
 
@@ -445,5 +434,5 @@ def remote_run_cancel(body: dict, *, ws_root: Path) -> tuple[dict, int]:
         ub = backends.unrouted()
         if ub is not None and ub.unrouted is not None:
             return ub.unrouted.cancel(_no_id(body))  # no id: the backend's own 400
-        return _unowned(rid) if rid else ({"error": "simulation_id required"}, 400)
+        return records.unowned(rid) if rid else ({"error": "simulation_id required"}, 400)
     return chosen.runs.cancel(rid)

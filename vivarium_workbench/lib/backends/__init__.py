@@ -73,7 +73,8 @@ class RunFacet(Protocol):
 
 class UnroutedFacet(Protocol):
     """What a backend answers for a run-lifecycle request the core cannot route by a run's record: one that names no
-    run, or (status) carries a build or analysis id beside it (step P2, Runs a1). The views' ``(body, status)``
+    run, or (status) carries a build or analysis id beside it (step P2, Runs a1), or (trace) names a run no record
+    routes (Runs b2). The views' ``(body, status)``
     shapes; the backend's own checks run first, so its "not authenticated" still comes before any "id required".
     The methods are the SMS tails' own signatures. A bare ``analysis_id`` poll stays here for good: it names no run,
     so no record can route it (step P2, Analyses and figures). Once Builds takes the build ids, it answers only
@@ -85,6 +86,19 @@ class UnroutedFacet(Protocol):
     def status(self, params: dict) -> tuple[dict, int]: ...
     def progress(self, params: dict) -> tuple[dict, int]: ...
     def cancel(self, params: dict) -> tuple[dict, int]: ...
+
+    def trace(self, ids: dict) -> "tuple[Union[bytes, dict], int, str]":
+        """A trace request no record routes (step P2, Runs b2): ``{simulation_id, composite_run_id, compose_id}`` as
+        given -- no record, a backend's own submission number, or several ids. The backend's own id checks answer
+        (its 400s). :meth:`RunFacet.trace`'s shape."""
+        ...
+
+    def trace_support(self) -> "tuple[dict, int]":
+        """Whether this backend serves run traces, when compose-api is not the named backend (step P2, Runs b2):
+        ``{supported, reason, capability, server_version?, error?}``, always 200, never raising (an unreachable
+        server is ``supported: false, reason: "unreachable"``). The core adds ``viewer``."""
+        ...
+
     def run_composite(self, ws_root: Path, composite_id: str, *, dest: Path, n_steps: float,
                       overrides: "dict | None", emit_paths: "list[str] | None",
                       analysis_options: "dict | None", build_ref: "dict | None",

@@ -7822,7 +7822,7 @@ def create_app() -> FastAPI:
         base path), ``external`` (an absolute Perfetto URL) or ``off`` (the action
         downloads the JSON). See ``lib.remote_trace`` and ``lib.perfetto_ui``."""
         from vivarium_workbench.lib import remote_trace as _remote_trace
-        body, status = _remote_trace.trace_support(_remote_trace.make_client())
+        body, status = _remote_trace.trace_support()
         return JSONResponse(status_code=status, content=body)
 
     @app.get("/api/remote-run-trace", tags=["Runs"], response_class=Response,
@@ -7847,7 +7847,7 @@ def create_app() -> FastAPI:
         Perfetto."""
         from vivarium_workbench.lib import remote_trace as _remote_trace
         body, status, filename = _remote_trace.fetch_trace(
-            _remote_trace.make_client(), simulation_id=simulation_id,
+            simulation_id=simulation_id,
             composite_run_id=composite_run_id, compose_id=compose_id,
             ws_root=ws, deployment=deployment, study=study)
         if isinstance(body, bytes):

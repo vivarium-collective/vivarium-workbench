@@ -316,6 +316,18 @@ def refusal(rid: str, error: str, *, reason: str = "other-backend", phase: str =
     return body, 409
 
 
+def not_installed(rid: str, error: str) -> "tuple[dict, int]":
+    """Providers off: the request names something (a run no active backend owns, a build or an analysis) that only an
+    installed provider could answer. Refused like a record whose provider is not active (terminal 409). One body for
+    the run views and the trace (step P2, Runs b2; moved from ``remote_run_views``)."""
+    return refusal(rid, error, reason="backend-not-installed", phase="backend-not-installed")
+
+
+def unowned(rid: str) -> "tuple[dict, int]":
+    """:func:`not_installed` for a run id no active backend owns."""
+    return not_installed(rid, f"run {rid} belongs to no backend an installed provider serves in this workbench")
+
+
 def _other_backend(record: dict, why: str) -> "tuple[dict, int]":
     now = configured_url(record.get("kind") or "")
     return refusal(str(record.get("id") or ""),

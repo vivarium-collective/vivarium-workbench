@@ -542,7 +542,10 @@ class SmsLegacyRuns:
         return cancel_tail({"simulation_id": run_id})
 
     def trace(self, run_id: str) -> "tuple[bytes | dict, int, str]":
-        raise NotImplementedError("SMS simulation traces are served by remote_trace.fetch_trace")
+        """A recorded sms-legacy simulation's trace (``GET /api/v1/simulations/{id}/trace``; step P2, Runs b2)."""
+        from vivarium_workbench_sms import sms_trace  # lazy: sms_trace reads this module's seams
+
+        return sms_trace.fetch(sms_trace.make_client(), simulation_id=run_id)
 
     def run_composite(self, ws_root: Path, composite_id: str, *, dest: Path, n_steps: float,
                       overrides: "dict | None", emit_paths: "list[str] | None",
@@ -660,6 +663,20 @@ class SmsLegacyUnrouted:
 
     def cancel(self, params: dict) -> tuple[dict, int]:
         return cancel_tail(params)
+
+    def trace(self, ids: dict) -> "tuple[bytes | dict, int, str]":
+        """A trace request no record routes (no record, a ``/compose/v1`` ``compose_id``, or several ids): viva-api's
+        own id checks answer (step P2, Runs b2)."""
+        from vivarium_workbench_sms import sms_trace  # lazy: sms_trace reads this module's seams
+
+        return sms_trace.fetch(sms_trace.make_client(), simulation_id=ids.get("simulation_id"),
+                               composite_run_id=ids.get("composite_run_id"), compose_id=ids.get("compose_id"))
+
+    def trace_support(self) -> "tuple[dict, int]":
+        """Whether viva-api serves run traces (``viva-v1-trace``), when compose-api is not the named backend."""
+        from vivarium_workbench_sms import sms_trace  # lazy: sms_trace reads this module's seams
+
+        return sms_trace.support(sms_trace.make_client())
 
     def run_composite(self, ws_root: Path, composite_id: str, *, dest: Path, n_steps: float,
                       overrides: "dict | None", emit_paths: "list[str] | None",
