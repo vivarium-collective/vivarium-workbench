@@ -4,7 +4,8 @@ The detached runner's deployment run goes to the backend ``backends.select`` pic
 the backend that answers unrouted requests (``unrouted.run_composite``), else it is a ``RuntimeError``. The SMS run
 itself is the plugin's ``deployment_run.run``. These tests pin the dispatch table with providers on and off, the two
 signatures, and the two rules that keep every test patch live (no SMS seam left in the core; the plugin reads core
-names through the module).
+names through the module). The tests of the SMS run and of the plugin's sources are marked ``plugin``; the compose-api
+and providers-off tests run core-only too (docs/backend-adapters.md step P3, K2a).
 """
 from __future__ import annotations
 
@@ -20,7 +21,16 @@ from vivarium_workbench.lib import server_capabilities as sc
 from vivarium_workbench.lib.backends import provider as provider_mod
 from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
 
-PLUGIN_DIR = Path(__file__).resolve().parent.parent / "vivarium_workbench_sms"
+
+def _plugin_module(name: str):
+    """The plugin's module ``name``, or None when the plugin is absent (core-only): an SMS path it could guard
+    cannot be reached then."""
+    import importlib
+
+    try:
+        return importlib.import_module(f"vivarium_workbench_sms.{name}")
+    except ImportError:
+        return None
 
 
 @pytest.fixture(autouse=True)
@@ -44,8 +54,9 @@ def providers_off(monkeypatch):
 
 @pytest.fixture
 def calls(monkeypatch):
-    """Record what reaches compose-api's run and the plugin's SMS run (neither runs)."""
-    from vivarium_workbench_sms import deployment_run
+    """Record what reaches compose-api's run and the plugin's SMS run (neither runs; with the plugin absent there is
+    no SMS run to reach)."""
+    deployment_run = _plugin_module("deployment_run")
 
     seen: list = []
 
@@ -58,7 +69,8 @@ def calls(monkeypatch):
         return Path(k["dest"]) / "results.tar.gz"
 
     monkeypatch.setattr(remote_run_compose, "run_composite", compose)
-    monkeypatch.setattr(deployment_run, "run", sms)
+    if deployment_run is not None:
+        monkeypatch.setattr(deployment_run, "run", sms)
     return seen
 
 
@@ -92,6 +104,7 @@ def test_without_analyses_compose_api_prints_no_note(tmp_path, monkeypatch, call
     assert calls[0][2]["dest"] == tmp_path.resolve() / ".pbg" / "remote-results"
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("which, via_viva_v1", [("viva", True), ("legacy", False), ("none", False)])
 def test_sms_backends_get_the_plugin_run(tmp_path, monkeypatch, calls, which, via_viva_v1):
     """viva-core: a document run. A session build or pin (sms-legacy) and a deployment run nothing selected (the
@@ -114,12 +127,13 @@ def test_sms_backends_get_the_plugin_run(tmp_path, monkeypatch, calls, which, vi
 
 def test_providers_off_with_nothing_named_is_a_runtime_error_and_never_reaches_sms(providers_off, tmp_path,
                                                                                    monkeypatch):
-    from vivarium_workbench_sms import sms_api_client as sac
+    sac = _plugin_module("sms_api_client")
 
     def no(*a, **k):
         raise AssertionError("SMS reached with providers off")
 
-    monkeypatch.setattr(sac.SmsApiClient, "__init__", no)
+    if sac is not None:   # installed but off: it must not be reached; absent, it cannot be
+        monkeypatch.setattr(sac.SmsApiClient, "__init__", no)
     with pytest.raises(RuntimeError, match="no remote backend is named"):
         remote_run.run_remote(tmp_path, "c")
 
@@ -189,6 +203,7 @@ def test_the_dispatcher_takes_no_client_and_is_keyword_only():
     assert all(params[n].kind is inspect.Parameter.KEYWORD_ONLY for n in names[2:])
 
 
+@pytest.mark.plugin
 def test_the_plugin_run_keeps_the_old_run_remote_parameters():
     """``deployment_run.run`` is the old ``remote_run.run_remote`` (names, order, defaults), plus ``via_viva_v1``, so
     a caller that supplies a client only changed which function it calls."""
@@ -216,21 +231,25 @@ def test_remote_run_binds_no_sms_seam():
         assert not hasattr(remote_run, name), name
 
 
+@pytest.mark.plugin
 def test_plugin_reads_core_remote_run_through_the_module():
     """Plugin code reads ``git_pip_url``, ``workspace_pinned_deps`` and ``remote_dispatch_preflight`` as
     ``remote_run.<name>`` at call time, never from-imports them: tests patch them on ``remote_run``, and a
     from-imported copy would make those patches silently dead. ``deployment_run`` reads the client the same way
     (``sms_api_client.<name>``). (``backend_environment`` was one of them until step P2 Builds B2 moved it into
-    ``remote_run_viva_v1``.)"""
+    ``remote_run_viva_v1``.) It reads the installed plugin's sources."""
+    import vivarium_workbench_sms
+
+    plugin_dir = Path(vivarium_workbench_sms.__file__).parent
     offenders = []
-    for path in sorted(PLUGIN_DIR.glob("*.py")):
+    for path in sorted(plugin_dir.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module == "vivarium_workbench.lib.remote_run":
                 offenders.append(f"{path.name}:{node.lineno}")
     assert not offenders, f"from-imports of vivarium_workbench.lib.remote_run in the plugin: {offenders}"
 
-    tree = ast.parse((PLUGIN_DIR / "deployment_run.py").read_text(encoding="utf-8"))
+    tree = ast.parse((plugin_dir / "deployment_run.py").read_text(encoding="utf-8"))
     sac = [f"deployment_run.py:{n.lineno}" for n in ast.walk(tree)
            if isinstance(n, ast.ImportFrom) and n.module == "vivarium_workbench_sms.sms_api_client"]
     assert not sac, f"deployment_run from-imports sms_api_client names (read them through the module): {sac}"

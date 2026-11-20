@@ -1,5 +1,14 @@
-"""Tests for resolve_composite_for_request — local vs deployment dispatch."""
+"""Tests for resolve_composite_for_request — local vs deployment dispatch.
+
+Two session-build tests are marked ``plugin``: a ``.viv-build.json`` stamp is the SMS provider's record of a session
+build (``backends.session_build`` asks the providers). With the plugin absent or providers off the stamp is inert and
+the workspace resolves as a plain local one, which a static spec does too (so that test stays core), while a generator
+only the session's environment can import is a local miss (docs/backend-adapters.md step P3, K2a).
+"""
 from pathlib import Path
+
+import pytest
+
 from vivarium_workbench.lib import composite_resolve as cr
 
 
@@ -10,6 +19,7 @@ def test_dispatch_local_when_no_viv_build(tmp_path, monkeypatch):
     assert out == {"name": "local"} and called["local"] == ("pkg.x", {"k": 1})
 
 
+@pytest.mark.plugin
 def test_dispatch_deployment_prefers_local_when_generator_found(tmp_path, monkeypatch):
     """item 63: a session-bound materialized build (.viv-build.json present)
     has real files on disk — resolve via the same safe env-worker discovery
@@ -96,6 +106,7 @@ def test_local_generator_payload_returns_real_parameters(tmp_path, monkeypatch):
     assert "not available" in out["notice"] and "parameters" in out["notice"].lower()
 
 
+@pytest.mark.plugin
 def test_dispatch_deployment_degrades_when_local_misses(tmp_path, monkeypatch):
     """A deployment build that neither local path can see degrades to the
     honest-unavailable 200 shape and asks no remote. viva-api has never served a

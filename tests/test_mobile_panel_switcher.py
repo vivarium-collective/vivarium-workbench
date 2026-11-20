@@ -81,3 +81,17 @@ def test_the_bar_is_phone_only_and_sheets_leave_room_for_it():
     assert "calc(56px + env(safe-area-inset-bottom))" in css
     # Page content is padded so nothing hides behind the bar when it's shown.
     assert "body.viv-has-panelbar .viv-content" in css
+
+
+def test_dock_stacks_reserve_no_space_on_mobile_so_main_is_not_shoved():
+    # A docked panel lives in its side's .vp-stack flex item, which on desktop
+    # carries the panel's docked width/height. On a phone the panels are fixed-
+    # overlay sheets, so the stack must collapse to zero or it shoves .viv-main
+    # (and the mobile topbar inside it) sideways behind the sheet. It stays
+    # displayed, though — display:none would hide its fixed panel child too.
+    css = (STATIC / "responsive.css").read_text()
+    block = css[css.index(".vp-stack {"):]
+    block = block[: block.index("}")]
+    assert "flex: 0 0 0 !important" in block
+    assert "width: 0 !important" in block and "height: 0 !important" in block
+    assert "display: none" not in block

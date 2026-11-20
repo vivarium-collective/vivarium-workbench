@@ -6,12 +6,18 @@ target. Under SP-A this returned 409 (deployment execution unbuilt). SP-D2 BUILD
 that path: ``composite_test_run`` now accepts (202) and stamps ``target:
 "deployment"`` into the run-request, so the detached runner dispatches to sms-api
 ``/compose/v1`` instead of running locally.
+
+The stamp, the pinned mode and the build resolution are the SMS plugin's, so the dispatch tests are marked ``plugin``;
+the two ``_execute_remote`` forwarding tests are core (docs/backend-adapters.md step P3, K2a).
 """
 from __future__ import annotations
 
 import json
 
+import pytest
 
+
+@pytest.mark.plugin
 def test_composite_test_run_on_remote_build_dispatches(tmp_path, monkeypatch):
     from vivarium_workbench.lib import composite_test_run_views as v
     from vivarium_workbench.lib import run_registry
@@ -46,6 +52,7 @@ def test_composite_test_run_on_remote_build_dispatches(tmp_path, monkeypatch):
     assert req["steps"] == 7
 
 
+@pytest.mark.plugin
 def test_composite_test_run_remote_unpushed_returns_409(tmp_path, monkeypatch):
     """A deployment-target dispatch on a workspace that isn't git-clean+pushed
     returns a clean 409 (the preflight) with an actionable message, and spawns
@@ -107,6 +114,7 @@ def test_execute_remote_forwards_overrides_to_run_remote(tmp_path, monkeypatch):
     assert captured["n_steps"] == 3
 
 
+@pytest.mark.plugin
 def test_composite_test_run_explicit_cloud_build_dispatches_image(tmp_path, monkeypatch):
     """Plan B: a Cloud run against a SELECTED build (run_target='deployment' +
     build with a simulator_id) dispatches the build's PRE-BUILT IMAGE via
@@ -157,6 +165,7 @@ def test_composite_test_run_explicit_cloud_build_dispatches_image(tmp_path, monk
     assert not (tmp_path / ".pbg" / "runs" / resp["run_id"]).exists()
 
 
+@pytest.mark.plugin
 def test_composite_test_run_cloud_no_build_returns_409(tmp_path, monkeypatch):
     """run_target='deployment' but NO build resolved → clean 409 (never silently
     fall back to local — that silent-local behaviour is the confusion we remove)."""
@@ -204,6 +213,7 @@ def test_execute_remote_forwards_build_ref_to_run_remote(tmp_path, monkeypatch):
     assert captured["build_ref"] == bref
 
 
+@pytest.mark.plugin
 def test_remote_sim_run_status_and_trajectory_map_to_sms_api(tmp_path, monkeypatch):
     """Plan B: the loom polls /api/composite-run/remote-sim-<id>/status and
     /api/composite-run/remote-sim-<id>. Status maps the sms-api phase
@@ -235,6 +245,7 @@ def test_remote_sim_run_status_and_trajectory_map_to_sms_api(tmp_path, monkeypat
     assert traj == {"run_id": "remote-sim-909", "trajectory": [], "remote": True}
 
 
+@pytest.mark.plugin
 def test_composite_test_run_pinned_workspace_dispatches_image(tmp_path, monkeypatch):
     """Plan B, pinned path: a composite-card Run on a workspace pinned to a build
     (a full .viv-build.json) sends NO explicit run_target — the loom only sends it
@@ -274,6 +285,7 @@ def test_composite_test_run_pinned_workspace_dispatches_image(tmp_path, monkeypa
     assert captured["simulator_id"] == 124
 
 
+@pytest.mark.plugin
 def test_config_selection_honors_spec_id_over_default(tmp_path, monkeypatch):
     """#1113: config selection must key off ``spec_id``. When the build carries a
     config NAMED after the requested composite AND the generic whole-cell default,
@@ -310,6 +322,7 @@ def test_config_selection_honors_spec_id_over_default(tmp_path, monkeypatch):
     assert captured["config_filename"] == "mecillinam_wellmixed.json"
 
 
+@pytest.mark.plugin
 def test_config_selection_spec_match_no_default(tmp_path, monkeypatch):
     """#1113: on a build with NO whole-cell default, a composite whose config IS
     present must resolve to it (keyed off ``spec_id``) rather than fail closed —
@@ -344,6 +357,7 @@ def test_config_selection_spec_match_no_default(tmp_path, monkeypatch):
     assert captured["config_filename"] == "mecillinam_wellmixed.json"
 
 
+@pytest.mark.plugin
 def test_composite_test_run_no_config_no_default_fails_closed(tmp_path, monkeypatch):
     """#1113: a Cloud image dispatch with NO explicit config, against a build whose
     repo has no whole-cell default, must FAIL CLOSED (409 no-config-for-composite)

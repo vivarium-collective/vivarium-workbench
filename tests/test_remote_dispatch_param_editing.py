@@ -33,6 +33,9 @@ repo (vanilla JS, no bundler — see CLAUDE.md's "no separate build step").
 Those are covered as source-level assertions instead, matching this repo's
 own established convention for testing static JS (test_remote_run_panel.py /
 test_compose_unification.py).
+
+A ``/api/remote-run-submit`` that carries a ``simulator_id`` goes to the SMS plugin's backend, so its three tests are
+marked ``plugin`` (docs/backend-adapters.md step P3, K2a); the baseline round trip and the JS source checks are core.
 """
 from __future__ import annotations
 
@@ -110,6 +113,7 @@ def test_edited_baseline_param_survives_save_and_reload_over_real_http(tmp_path,
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.plugin
 def test_remote_run_submit_blocks_with_clear_error_when_unset_over_real_http(
     tmp_path, inproc_client, monkeypatch
 ):
@@ -186,6 +190,7 @@ def fake_sms_api():
         thread.join(timeout=5)
 
 
+@pytest.mark.plugin
 def test_remote_run_submit_forwards_correct_values_over_real_http(
     tmp_path, inproc_client, monkeypatch, fake_sms_api
 ):
@@ -215,6 +220,7 @@ def test_remote_run_submit_forwards_correct_values_over_real_http(
     assert "simulation_config_filename" not in query
 
 
+@pytest.mark.plugin
 def test_remote_run_submit_forwards_config_filename_over_real_http(
     tmp_path, inproc_client, monkeypatch, fake_sms_api
 ):

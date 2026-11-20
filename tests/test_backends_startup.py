@@ -3,6 +3,9 @@
 A backend named with ``--backend-base-url`` / ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL`` must equal every alias that is
 also set (``VIVA_API_BASE``, ``SMS_API_BASE``). The check reads the environment only and runs at process entry, for
 the subcommands that can reach a backend; ``sms_api_base()`` itself never fails.
+
+The aliases are the SMS plugin's (step P3 C1): with it absent they are ignored, so the cases that need an alias read
+-- and the plugin's ``run-remote`` -- are marked ``plugin`` (docs/backend-adapters.md step P3, K2a).
 """
 from __future__ import annotations
 
@@ -13,7 +16,6 @@ import pytest
 from vivarium_workbench import cli
 from vivarium_workbench.lib import backend_config
 from vivarium_workbench.lib.backends import config as backend_cfg
-from vivarium_workbench_sms import sms_api_client as sac
 
 NAMED, VIVA, SMS = backend_config.BACKEND_BASE_ENV_VARS
 
@@ -24,33 +26,56 @@ def _clean_env(monkeypatch):
         monkeypatch.delenv(v, raising=False)
 
 
-@pytest.mark.parametrize("env, ok", [
+def _alias_case(env, ok):
+    """A case that needs the plugin's aliases (absent, they are ignored): marked ``plugin``."""
+    return pytest.param(env, ok, marks=pytest.mark.plugin)
+
+
+#: Every environment shape the start-up check must answer.
+_ENVS = [
     ({}, True),
     ({SMS: "http://api:8000"}, True),                                   # Stanford
     ({VIVA: "http://a", SMS: "http://b"}, True),                        # aliases only: the first is the backend
     ({NAMED: "http://api:8000"}, True),
     ({NAMED: "http://api:8000", SMS: "http://api:8000"}, True),
     ({NAMED: "http://API:8000/", SMS: "http://api:8000"}, True),        # normalised: case, trailing slash
-    ({NAMED: "http://compose.test", SMS: "http://api:8000"}, False),    # compose-api beside Stanford's SMS
-    ({NAMED: "http://api:8000", VIVA: "http://api:8000", SMS: "http://other"}, False),  # every set alias counts
-    ({NAMED: "http://api:8000", VIVA: "http://other", SMS: "http://api:8000"}, False),
-    ({NAMED: "http://api:8000", SMS: "not a url"}, False),
+    _alias_case({NAMED: "http://compose.test", SMS: "http://api:8000"}, False),    # compose-api beside Stanford's SMS
+    _alias_case({NAMED: "http://api:8000", VIVA: "http://api:8000", SMS: "http://other"}, False),  # every alias counts
+    _alias_case({NAMED: "http://api:8000", VIVA: "http://other", SMS: "http://api:8000"}, False),
+    _alias_case({NAMED: "http://api:8000", SMS: "not a url"}, False),
     ({NAMED: "not a url"}, False),
-])
+]
+
+
+@pytest.mark.parametrize("env, ok", _ENVS)
 def test_check_config(monkeypatch, env, ok):
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     if ok:
         backend_cfg.check_config()
     else:
-        with pytest.raises(sac.BackendConfigError):
+        with pytest.raises(backend_config.BackendConfigError):
             backend_cfg.check_config()
-    sac.sms_api_base()  # never raises, whatever the environment
 
 
+@pytest.mark.plugin
+def test_the_sms_base_url_never_raises_whatever_the_environment(monkeypatch):
+    """The SMS client's ``sms_api_base()`` answers every environment the check refuses (split from
+    ``test_check_config`` so the check itself runs core-only: docs/backend-adapters.md step P3, K2a)."""
+    from vivarium_workbench_sms import sms_api_client as sac
+
+    for case in _ENVS:
+        env = case.values[0] if hasattr(case, "values") else case[0]
+        with monkeypatch.context() as m:
+            for k, v in env.items():
+                m.setenv(k, v)
+            sac.sms_api_base()
+
+
+@pytest.mark.plugin
 def test_the_flag_value_is_checked_before_it_reaches_the_environment(monkeypatch):
     monkeypatch.setenv(SMS, "http://api:8000")
-    with pytest.raises(sac.BackendConfigError) as e:
+    with pytest.raises(backend_config.BackendConfigError) as e:
         backend_cfg.check_config("http://compose.test")
     assert "SMS_API_BASE" in str(e.value) and "compose.test" in str(e.value)
 
@@ -71,23 +96,31 @@ def test_every_subcommand_is_classified_exactly_once():
     assert subs == cli.BACKEND_COMMANDS | cli.NO_BACKEND_COMMANDS | provided, (
         "classify new subcommands in cli.BACKEND_COMMANDS or cli.NO_BACKEND_COMMANDS: "
         f"{sorted(subs ^ (cli.BACKEND_COMMANDS | cli.NO_BACKEND_COMMANDS | provided))}")
-    # run-remote is the SMS provider's, and it reaches a backend: both start-up checks run before it
+
+
+@pytest.mark.plugin
+def test_run_remote_is_the_sms_providers_backend_command():
+    """run-remote is the SMS provider's, and it reaches a backend: both start-up checks run before it (split from
+    the classification test above so that one runs core-only: docs/backend-adapters.md step P3, K2a)."""
+    provided = {c.name for c in cli._provider_commands()}
     assert "run-remote" in provided and "run-remote" not in cli.BACKEND_COMMANDS
     assert "run-remote" in cli._backend_commands(cli._provider_commands())
 
 
+@pytest.mark.plugin
 def test_a_provider_backend_command_gets_the_hosted_worker_check(monkeypatch, capsys, tmp_path):
     """The one backend-command set (core + ``uses_backend``) carries P2 Workers' check too."""
     from vivarium_workbench.lib import env_worker_launcher
 
     def refuse():
-        raise sac.BackendConfigError("hosted env workers are asked for but no provider supplies them")
+        raise backend_config.BackendConfigError("hosted env workers are asked for but no provider supplies them")
 
     monkeypatch.setattr(env_worker_launcher, "check_worker_config", refuse)
     assert cli.main(["run-remote", "--workspace", str(tmp_path), "some.composite"]) == 2
     assert "no provider supplies them" in capsys.readouterr().err
 
 
+@pytest.mark.plugin
 def test_a_backend_command_refuses_two_backends(monkeypatch, capsys, tmp_path):
     monkeypatch.setenv(NAMED, "http://compose.test")
     monkeypatch.setenv(SMS, "http://api:8000")
@@ -105,6 +138,7 @@ def test_a_no_backend_command_is_not_stopped(monkeypatch, capsys, tmp_path):
     assert ran and "two remote backends" not in capsys.readouterr().err
 
 
+@pytest.mark.plugin
 def test_serve_detach_refuses_with_the_message_before_detaching(monkeypatch, capsys, tmp_path):
     (tmp_path / "workspace.yaml").write_text("name: x\n")
     monkeypatch.setenv(SMS, "http://api:8000")
@@ -115,6 +149,7 @@ def test_serve_detach_refuses_with_the_message_before_detaching(monkeypatch, cap
     assert "two remote backends" in capsys.readouterr().err
 
 
+@pytest.mark.plugin
 def test_serve_fastapi_refuses_two_backends_set_directly_in_the_environment(monkeypatch, capsys, tmp_path):
     from vivarium_workbench.lib import startup
 
@@ -140,7 +175,7 @@ class _Stop(BaseException):
     """Ends ``serve_fastapi`` right after the start-up probes (``except Exception`` there does not catch it)."""
 
 
-@pytest.mark.parametrize("env, expected", [({SMS: "http://api:8000"}, ["http://api:8000"]), ({}, [])])
+@pytest.mark.parametrize("env, expected", [_alias_case({SMS: "http://api:8000"}, ["http://api:8000"]), ({}, [])])
 def test_serve_starts_the_breaker_probe_on_the_configured_url(monkeypatch, tmp_path, env, expected):
     """Step P2: the startup probe is core config (``backend_config.start_probe(backends.config.configured_base_url())``), the URL
     ``remote_link.start_probe()`` used; only when a backend is configured."""

@@ -26,7 +26,6 @@ import yaml
 
 from _viva_v1_stub import VivaV1Stub
 from vivarium_workbench.lib import remote_run_compose as rc
-from vivarium_workbench_sms import remote_run_viva_v1
 from vivarium_workbench.lib import server_capabilities as sc
 from vivarium_workbench.lib.remote_run_landing import land_composite_results
 
@@ -69,6 +68,14 @@ def test_run_ids_reach_their_own_backend():
     checked first, because viva-v1's own check takes ANY non-digit string."""
     assert rc.is_run_id(RUN_ID) and rc.simulation_id_of(RUN_ID) == SIM_ID
     assert not rc.is_run_id("4706") and not rc.is_run_id("simulation-D55FF7B") and not rc.is_run_id("compose-")
+
+
+@pytest.mark.plugin
+def test_viva_cores_id_check_also_takes_a_compose_id():
+    """Why the compose check must come first (split from the test above, which runs core-only: docs/backend-adapters.md
+    step P3, K2a): viva-core's check, the SMS plugin's, takes ANY non-digit string."""
+    from vivarium_workbench_sms import remote_run_viva_v1
+
     assert remote_run_viva_v1.is_run_id(RUN_ID), "why the compose check must come first"
 
 
@@ -716,7 +723,7 @@ def test_a_lost_submission_answer_with_no_run_found_says_it_may_exist(ws, stub, 
     assert len(stub.calls_to("run-simulation")) == 1
 
 
-@pytest.mark.parametrize("documents", [True, False])
+@pytest.mark.parametrize("documents", [pytest.param(True, marks=pytest.mark.plugin), False])
 def test_a_viva_v1_backend_is_not_mistaken_for_compose_api(ws, backend_env, dashboard_client, documents):
     """viva-api is FastAPI too, so it serves its own /openapi.json: that must not read as compose-api, whether or
     not it runs documents."""

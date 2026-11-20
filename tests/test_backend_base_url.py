@@ -18,7 +18,7 @@ import pytest
 from vivarium_workbench import cli
 from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
 from vivarium_workbench.lib.backends import config as backend_cfg
-from vivarium_workbench_sms import sms_api_client as sac
+from vivarium_workbench.lib import backend_config as bc
 
 
 @pytest.fixture
@@ -28,12 +28,18 @@ def clean_env(monkeypatch):
     return monkeypatch
 
 
+@pytest.mark.plugin
 def test_default_is_localhost(clean_env):
+    from vivarium_workbench_sms import sms_api_client as sac
+
     assert sac.sms_api_base() == "http://localhost:8080"
     assert backend_cfg.backend_configured() is False
 
 
+@pytest.mark.plugin
 def test_aliases_still_resolve_in_their_old_order(clean_env):
+    from vivarium_workbench_sms import sms_api_client as sac
+
     clean_env.setenv("SMS_API_BASE", "http://alias")
     assert sac.sms_api_base() == "http://alias"
     clean_env.setenv("VIVA_API_BASE", "http://viva")
@@ -41,16 +47,22 @@ def test_aliases_still_resolve_in_their_old_order(clean_env):
     assert backend_cfg.backend_configured() is True
 
 
+@pytest.mark.plugin
 def test_new_env_beats_aliases(clean_env):
+    from vivarium_workbench_sms import sms_api_client as sac
+
     clean_env.setenv("VIVA_API_BASE", "http://viva")
     clean_env.setenv("SMS_API_BASE", "http://alias")
     clean_env.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "http://new")
     assert sac.sms_api_base() == "http://new"
 
 
+@pytest.mark.plugin
 def test_resolving_the_base_url_never_touches_the_network(clean_env):
     """sms_api_base() is read from some forty places (health polls, every SMS call, the circuit breaker's own key):
     with a named backend AND an alias set it answers from the environment alone, and cannot fail."""
+    from vivarium_workbench_sms import sms_api_client as sac
+
     def boom(*a, **k):
         raise AssertionError("sms_api_base() made a network call")
 
@@ -66,7 +78,7 @@ def test_resolving_the_base_url_never_touches_the_network(clean_env):
     ("http://localhost:8080/prefix/", "http://localhost:8080/prefix"),
 ])
 def test_normalize_accepts(url, ok):
-    assert sac.normalize_backend_base_url(url) == ok
+    assert bc.normalize_backend_base_url(url) == ok
 
 
 @pytest.mark.parametrize("url", [
@@ -75,7 +87,7 @@ def test_normalize_accepts(url, ok):
 ])
 def test_normalize_rejects(url):
     with pytest.raises(ValueError):
-        sac.normalize_backend_base_url(url)
+        bc.normalize_backend_base_url(url)
 
 
 def _ns(**kw):

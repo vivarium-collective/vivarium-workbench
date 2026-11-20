@@ -18,6 +18,8 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 PKG = Path(__file__).resolve().parent.parent / "vivarium_workbench"
 PLUGIN = Path(__file__).resolve().parent.parent / "vivarium_workbench_sms"
 CLIENT = PLUGIN / "sms_api_client.py"
@@ -90,11 +92,11 @@ def _sms_calls() -> dict[str, set[str]]:
     return found
 
 
-def _client_sms_methods() -> set[str]:
+def _client_sms_methods(client: Path = CLIENT) -> set[str]:
     """The public ``SmsApiClient`` methods that reach an SMS route: a route literal in their body, or a
     reference (by name) to a client method, module-level helper, or module/class constant of
     ``sms_api_client`` that holds or reaches one (``_COMPOSE_PREFIX + "/..."`` counts)."""
-    tree = ast.parse(CLIENT.read_text(encoding="utf-8"))
+    tree = ast.parse(client.read_text(encoding="utf-8"))
     # Transport every request goes through, so not a route for other methods to inherit: the path
     # rewriter (it spells /viva/v1/compose to map /compose/v1 onto it) and the capability lookup it
     # consults (whose /core/v1 fallback makes ``capabilities`` itself an SMS method, listed above).
@@ -167,9 +169,15 @@ def test_the_core_spells_no_sms_route():
         "facet:\n  " + "\n  ".join(f"{m}: {sorted(v)}" for m, v in sorted(found.items())))
 
 
+@pytest.mark.plugin
 def test_sms_methods_match_the_client():
     """SMS_METHODS is exactly the client's public methods that reach an SMS route: a new one (or a renamed
-    one) must be listed, and a method that stops reaching one must leave the list."""
-    derived = _client_sms_methods()
+    one) must be listed, and a method that stops reaching one must leave the list. It parses the installed plugin's
+    client, so it needs the plugin (docs/backend-adapters.md step P3, K2a)."""
+    from vivarium_workbench_sms import sms_api_client
+
+    client = Path(sms_api_client.__file__)
+    assert client.resolve() == CLIENT.resolve()   # the client the ban's docstring and SMS_METHODS describe
+    derived = _client_sms_methods(client)
     assert derived == SMS_METHODS, {"missing from SMS_METHODS": sorted(derived - SMS_METHODS),
                                     "listed but not SMS": sorted(SMS_METHODS - derived)}

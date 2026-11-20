@@ -15,17 +15,19 @@ Observation points that work both before and after the move:
   through the module attribute at call time);
 * the legacy SMS path: a recording fake ``sms_legacy.SmsApiClient`` (the SMS code reads it through ``sms_legacy``
   at call time).
+
+Step P3 K2a: the cases routed to viva-core or the legacy SMS path need the SMS plugin and are marked ``plugin``; the
+compose-api and no-id cases run core-only too, where the fixtures record only what the core has (:func:`_plugin`).
 """
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import pytest
 
 from vivarium_workbench.lib import remote_run_compose, study_spec
-from vivarium_workbench_sms import remote_pinned, remote_run_viva_v1
 from vivarium_workbench.lib import remote_run_views as rrv
-from vivarium_workbench_sms import sms_landing, sms_legacy
 from vivarium_workbench.lib import remote_trace
 
 
@@ -34,6 +36,14 @@ from vivarium_workbench.lib import remote_trace
 # decides (the record-driven cases are in tests/test_backends_existing.py).
 import tempfile as _tempfile  # noqa: E402
 _WS = Path(_tempfile.mkdtemp(prefix="no-records-ws-"))
+
+def _plugin(*modules: str):
+    """The plugin's ``modules`` when the plugin is installed, else None (the core-only job)."""
+    try:
+        return tuple(importlib.import_module(f"vivarium_workbench_sms.{m}") for m in modules)
+    except ImportError:
+        return None
+
 
 class _Calls(list):
     """``(backend, method, arg)`` in call order."""
@@ -53,6 +63,14 @@ def calls(monkeypatch, tmp_path):
 
     for name in ("land", "status", "progress", "cancel", "trace"):
         monkeypatch.setattr(remote_run_compose, name, recorder("compose", name))
+    spec_file = tmp_path / "study.yaml"
+    spec_file.write_text("baseline: [{composite: c}]\n")
+    monkeypatch.setattr(study_spec, "study_spec_path", lambda ws, name: spec_file)
+    monkeypatch.setattr(study_spec, "study_dir", lambda ws, name: tmp_path)
+    plugin = _plugin("remote_run_viva_v1", "sms_landing", "sms_legacy")
+    if plugin is None:   # the core-only job: only compose-api records
+        return rec
+    remote_run_viva_v1, sms_landing, sms_legacy = plugin
     for name in ("land", "status", "progress", "cancel"):
         monkeypatch.setattr(remote_run_viva_v1, name, recorder("viva", name))
 
@@ -79,10 +97,6 @@ def calls(monkeypatch, tmp_path):
     monkeypatch.setattr(sms_legacy, "SmsApiClient", FakeClient)
     monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
     monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
-    spec_file = tmp_path / "study.yaml"
-    spec_file.write_text("baseline: [{composite: c}]\n")
-    monkeypatch.setattr(study_spec, "study_spec_path", lambda ws, name: spec_file)
-    monkeypatch.setattr(study_spec, "study_dir", lambda ws, name: tmp_path)
     monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [{"composite": "c"}]})
     monkeypatch.setattr(sms_landing, "land_remote_run", lambda *a, **k: rec.append(("sms", "land_remote_run", None)) or "r1")
     return rec
@@ -95,7 +109,9 @@ def _first(calls):
 # --- land ------------------------------------------------------------------------------------------------------
 
 def test_land_compose_id_goes_to_compose_without_gate_or_auth(calls, monkeypatch, tmp_path):
-    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: False)
+    plugin = _plugin("sms_legacy")
+    if plugin is not None:   # the SMS login check must not gate compose-api (absent, there is none)
+        monkeypatch.setattr(plugin[0], "_run_auth_ok", lambda: False)
     assert rrv.remote_run_land(tmp_path, {"simulation_id": "compose-7"}) == ({"via": "compose", "method": "land"}, 200)
     assert calls == [("compose", "land", {"simulation_id": "compose-7"})]
 
@@ -106,14 +122,18 @@ def test_land_compose_id_in_run_id_only_is_compose(calls, tmp_path):
     assert calls == [("compose", "land", {"run_id": "compose-7", "simulation_id": "compose-7"})]
 
 
+@pytest.mark.plugin
 def test_land_viva_id_goes_to_viva_whatever_is_named(calls, monkeypatch, tmp_path):
     # step 1c-2 (deliberate change): no named-backend gate in the view (viva-core land refuses 409 no-backend
     # itself when nothing is named); it was 401 / a ValueError (500) through the SMS path
+    from vivarium_workbench_sms import sms_legacy
+
     monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: False)
     rrv.remote_run_land(tmp_path, {"study": "s", "simulation_id": "simulation-D55"})
     assert _first(calls) == ("viva", "land")
 
 
+@pytest.mark.plugin
 def test_land_integer_id_goes_to_legacy(calls, tmp_path):
     body, status = rrv.remote_run_land(tmp_path, {"study": "s", "simulation_id": 12})
     assert (body, status) == ({"run_id": "r1"}, 200)
@@ -124,12 +144,14 @@ def test_land_integer_id_goes_to_legacy(calls, tmp_path):
 
 # --- status ----------------------------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_status_run_id_beats_simulation_id(calls):
     # step 1c-2 (deliberate change): one id rule, run_id first; a compose simulation_id used to win
     rrv.remote_run_status({"run_id": "simulation-X", "simulation_id": "compose-3"}, ws_root=_WS)
     assert calls == [("viva", "status", "simulation-X")]
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("run_id, backend, sent", [
     ("123", "sms", 123), (123, "sms", 123), (" x ", "viva", "x"),
 ])
@@ -152,11 +174,13 @@ def test_status_compose_id_is_stripped(calls):
     assert calls == [("compose", "status", "compose-3")]
 
 
+@pytest.mark.plugin
 def test_status_viva_simulation_id_goes_to_viva(calls):
     rrv.remote_run_status({"simulation_id": "simulation-X"}, ws_root=_WS)
     assert calls == [("viva", "status", "simulation-X")]
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("params, method", [
     ({"simulation_id": 5, "analysis_id": 7}, "analysis_status"),
     ({"simulation_id": 5, "simulator_id": 9}, "simulation_status"),
@@ -171,7 +195,10 @@ def test_status_nothing_is_400(calls):
     assert rrv.remote_run_status({}, ws_root=_WS)[1] == 400
 
 
+@pytest.mark.plugin
 def test_status_legacy_client_error_is_502_shape(calls, monkeypatch):
+    from vivarium_workbench_sms import sms_legacy
+
     class Boom:
         def __init__(self, *a, **k):
             pass
@@ -186,6 +213,7 @@ def test_status_legacy_client_error_is_502_shape(calls, monkeypatch):
 
 # --- chain progress --------------------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_progress_run_id_goes_to_viva(calls):
     rrv.remote_run_chain_progress({"run_id": "simulation-X"}, ws_root=_WS)
     assert calls == [("viva", "progress", "simulation-X")]
@@ -196,12 +224,14 @@ def test_progress_compose_simulation_id_goes_to_compose(calls):
     assert calls == [("compose", "progress", "compose-4")]
 
 
+@pytest.mark.plugin
 def test_progress_viva_form_simulation_id_goes_to_viva(calls):
     # step 1c-2 (deliberate change): it was a ValueError (500) through the SMS path
     rrv.remote_run_chain_progress({"simulation_id": "simulation-X"}, ws_root=_WS)
     assert calls == [("viva", "progress", "simulation-X")]
 
 
+@pytest.mark.plugin
 def test_progress_integer_goes_to_legacy(calls):
     body, status = rrv.remote_run_chain_progress({"simulation_id": 8}, ws_root=_WS)
     assert status == 200 and body["kind"] == "chain_progress"
@@ -216,23 +246,29 @@ def test_cancel_compose_either_key(calls, body):
     assert calls == [("compose", "cancel", "compose-2")]
 
 
+@pytest.mark.plugin
 def test_cancel_non_digit_simulation_id_goes_to_viva(calls):
     rrv.remote_run_cancel({"simulation_id": "simulation-X"}, ws_root=_WS)
     assert calls == [("viva", "cancel", "simulation-X")]
 
 
+@pytest.mark.plugin
 def test_cancel_run_id_beats_integer_simulation_id(calls):
     rrv.remote_run_cancel({"run_id": "simulation-X", "simulation_id": 5}, ws_root=_WS)
     assert calls == [("viva", "cancel", "simulation-X")]
 
 
+@pytest.mark.plugin
 def test_cancel_integer_goes_to_legacy(calls):
     body, status = rrv.remote_run_cancel({"simulation_id": 5}, ws_root=_WS)
     assert status == 200 and body == {"kind": "cancel", "simulation_id": 5, "cancelled": True}
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("msg, code", [("x -> 404", 404), ("x -> 500", 502)])
 def test_cancel_legacy_errors(calls, monkeypatch, msg, code):
+    from vivarium_workbench_sms import sms_legacy
+
     class Boom:
         def __init__(self, *a, **k):
             pass
@@ -252,7 +288,10 @@ def test_trace_compose_id_in_sim_or_run_key(calls, kw):
     assert calls == [("compose", "trace", "compose-6")]
 
 
+@pytest.mark.plugin
 def test_trace_compose_id_in_compose_id_key_is_400(calls):
+    """The 400 is the SMS unrouted facet's id check; with the plugin absent it is a terminal 409
+    ``backend-not-installed`` (``remote_trace`` docstring)."""
     assert remote_trace.fetch_trace(compose_id="compose-6", ws_root=_WS)[1] == 400
     assert calls == []
 
@@ -287,6 +326,7 @@ def test_progress_compose_run_id_goes_to_compose(calls):
     assert calls == [("compose", "progress", "compose-4")]
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("call, method", [
     (lambda: rrv.remote_run_chain_progress({"run_id": " x "}, ws_root=_WS), "progress"),
     (lambda: rrv.remote_run_cancel({"run_id": " x "}, ws_root=_WS), "cancel"),
@@ -302,12 +342,13 @@ def test_viva_ids_are_stripped(calls, call, method):
 # --- for_run / owns (new in step 1a; not used by production routing yet) ---------------------------------------
 
 @pytest.mark.parametrize("run_id, owner", [
-    ("compose-1", "compose-api"), ("compose-1 ", "compose-api"), (" compose-1", "compose-api"),
-    ("compose-x", "viva-core"), ("compose-", "viva-core"), ("COMPOSE-1", "viva-core"),
-    ("simulation-D55", "viva-core"),
-    ("123", "sms-legacy"), (123, "sms-legacy"), (" 123 ", "sms-legacy"), (0, None),
-    ("", None), (" ", None), (None, None),
-])
+    pytest.param(*case, marks=pytest.mark.plugin) if case[1] in ("viva-core", "sms-legacy") else case for case in [
+        ("compose-1", "compose-api"), ("compose-1 ", "compose-api"), (" compose-1", "compose-api"),
+        ("compose-x", "viva-core"), ("compose-", "viva-core"), ("COMPOSE-1", "viva-core"),
+        ("simulation-D55", "viva-core"),
+        ("123", "sms-legacy"), (123, "sms-legacy"), (" 123 ", "sms-legacy"), (0, None),
+        ("", None), (" ", None), (None, None),
+    ]])
 def test_for_run_owner_is_unique(run_id, owner):
     from vivarium_workbench.lib import backends
 
@@ -327,29 +368,34 @@ def submit_world(monkeypatch, tmp_path):
 
     for v in BACKEND_BASE_ENV_VARS:
         monkeypatch.delenv(v, raising=False)
-    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: False)
     sc._PROFILE_CACHE.clear()
     rec: list = []
-    for mod, tag in ((remote_run_compose, "compose"), (remote_run_viva_v1, "viva")):
-        monkeypatch.setattr(mod, "submit", lambda ws, body, _t=tag: rec.append((_t, "submit")) or ({"via": _t}, 202))
-
-    class FakeClient:
-        def __init__(self, *a, **k):
-            pass
-
-        def run_simulation(self, **kw):
-            rec.append(("sms", "run_simulation"))
-            return {"database_id": 77}
-
-    monkeypatch.setattr(sms_legacy, "SmsApiClient", FakeClient)
-    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
-    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
+    monkeypatch.setattr(remote_run_compose, "submit",
+                        lambda ws, body: rec.append(("compose", "submit")) or ({"via": "compose"}, 202))
     spec_file = tmp_path / "study.yaml"
     spec_file.write_text("baseline: [{composite: c}]\n")
     monkeypatch.setattr(study_spec, "study_spec_path", lambda ws, name: spec_file)
     monkeypatch.setattr(study_spec, "study_dir", lambda ws, name: tmp_path)
     monkeypatch.setattr(study_spec, "collect_study_observables", lambda spec: [])
-    monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [{"composite": "c"}]})
+    plugin = _plugin("remote_pinned", "remote_run_viva_v1", "sms_legacy")
+    if plugin is not None:   # absent (the core-only job), only compose-api records
+        remote_pinned, remote_run_viva_v1, sms_legacy = plugin
+        monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: False)
+        monkeypatch.setattr(remote_run_viva_v1, "submit",
+                            lambda ws, body: rec.append(("viva", "submit")) or ({"via": "viva"}, 202))
+
+        class FakeClient:
+            def __init__(self, *a, **k):
+                pass
+
+            def run_simulation(self, **kw):
+                rec.append(("sms", "run_simulation"))
+                return {"database_id": 77}
+
+        monkeypatch.setattr(sms_legacy, "SmsApiClient", FakeClient)
+        monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
+        monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
+        monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [{"composite": "c"}]})
 
     def name(kind):
         profiles = {
@@ -369,7 +415,7 @@ def submit_world(monkeypatch, tmp_path):
 SMS_BODY = {"study": "s", "simulator_id": 5, "num_generations": 1, "num_seeds": 1}
 
 
-@pytest.mark.parametrize("kind", ["compose", "viva"])
+@pytest.mark.parametrize("kind", ["compose", pytest.param("viva", marks=pytest.mark.plugin)])
 def test_submit_without_simulator_goes_to_the_named_backend(submit_world, kind):
     rec, name, ws = submit_world
     name(kind)
@@ -377,6 +423,7 @@ def test_submit_without_simulator_goes_to_the_named_backend(submit_world, kind):
     assert rec == [(kind, "submit")]
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("kind", [None, "legacy"])
 def test_submit_without_simulator_and_no_document_backend_is_sms_400(submit_world, kind):
     rec, name, ws = submit_world
@@ -396,6 +443,7 @@ def test_submit_without_simulator_on_an_unreachable_named_backend_raises_502(sub
     assert e.value.status_code == 502 and rec == []
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("kind", [None, "compose", "viva", "unreachable"])
 def test_submit_with_simulator_is_sms_whatever_is_named(submit_world, kind):
     rec, name, ws = submit_world
@@ -406,7 +454,10 @@ def test_submit_with_simulator_is_sms_whatever_is_named(submit_world, kind):
     assert rec == [("sms", "run_simulation")]
 
 
+@pytest.mark.plugin
 def test_submit_pinned_without_simulator_is_sms_even_with_compose_named(submit_world, monkeypatch):
+    from vivarium_workbench_sms import remote_pinned
+
     rec, name, ws = submit_world
     name("compose")
     monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: True)

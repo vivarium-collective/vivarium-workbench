@@ -60,11 +60,13 @@ def _left_out(app) -> list[tuple[str, str]]:
     return sorted(every - served)
 
 
+@pytest.mark.plugin
 def test_with_providers_on_the_ai_index_leaves_out_what_the_base_did():
     app = appmod.create_app()
     assert _left_out(app) == EXCLUDED_OPERATIONS
 
 
+@pytest.mark.plugin
 def test_with_providers_on_the_capabilities_popover_lists_what_the_base_did():
     app = appmod.create_app()
     assert ai_tools.capabilities(app)["excluded"] == CAPABILITIES_EXCLUDED
@@ -88,11 +90,13 @@ def test_with_providers_off_the_plugin_paths_leave_the_excluded_list(monkeypatch
     assert _left_out(app) == [op for op in EXCLUDED_OPERATIONS if op not in plugin_ops]
 
 
+@pytest.mark.plugin
 def test_with_providers_on_the_plugin_declares_its_pushing_routes():
     app = appmod.create_app()
     assert app.state.provider_ai_excluded == frozenset({"/api/remote-run-start", "/api/remote-run-build"})
 
 
+@pytest.mark.plugin
 def test_ai_tools_names_no_plugin_route():
     """The plugin's paths are its own declaration (``ProviderRouter.ai_excluded``), not ``ai_tools``' literals."""
     import inspect
