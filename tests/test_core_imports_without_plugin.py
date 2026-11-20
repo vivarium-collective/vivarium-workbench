@@ -5,9 +5,11 @@ The hosted env-worker pod ships the core (``vivarium_workbench``: ``env_worker.p
 whole SMS modules into the plugin, and a core module that still imports one at module level fails there with
 ``ModuleNotFoundError`` (``lib.study_runs`` did, and the worker's study-run methods import it).
 
-``STILL_NEED_PLUGIN`` is a ratchet: the core modules that still cannot be imported without the plugin. Each P2 PR
-removes the entries it fixes, none may add one, and a stale entry fails too, so the list can only shrink. It is empty
-when P2 ends.
+``STILL_NEED_PLUGIN`` was a ratchet through step P2 (the core modules that could not yet be imported without the
+plugin); P2 emptied it, and at its end (Routes Rt3) it became a permanent guard: **any entry is a regression**. Make
+the offending import lazy, or move the code into the plugin behind a backend facet. ``MUST_IMPORT`` names the modules
+whose import is checked on its own (not only through the package walk): the env worker, what its study-run methods
+import, and the app (``api.app``: ``create_app()`` with the plugin absent includes no provider routes).
 
 Importing is not running. A study run IN the worker resolves its target at call time (``study_runs.run_study_*`` ->
 ``backends.resolve_run_target`` -> ``backends.named`` -> ``server_capabilities``); since step P2's Client area that path
@@ -21,6 +23,7 @@ import sys
 import textwrap
 
 
+#: Permanent guard (end of step P2): any entry is a regression.
 STILL_NEED_PLUGIN: frozenset[str] = frozenset()
 
 # Modules allowed to fail for a reason other than the plugin: optional extras that may be absent (the ``chat`` extra).
@@ -31,8 +34,8 @@ OPTIONAL_EXTRA_MODULES = frozenset({
     "vivarium_workbench.lib.ai_tools",
 })
 
-# Must import without the plugin: the env worker itself, and what its study-run methods import.
-MUST_IMPORT = ("vivarium_workbench.env_worker", "vivarium_workbench.lib.study_runs")
+# Must import without the plugin: the env worker itself, what its study-run methods import, and the app.
+MUST_IMPORT = ("vivarium_workbench.env_worker", "vivarium_workbench.lib.study_runs", "vivarium_workbench.api.app")
 
 _PROBE = textwrap.dedent('''
     import importlib, json, pkgutil, sys
@@ -92,11 +95,9 @@ def _probe() -> dict:
 def test_core_modules_import_without_the_plugin():
     result = _probe()
     assert result["must"] == {name: None for name in MUST_IMPORT}, result["must"]
-    need = frozenset(result["need"])
-    new = sorted(need - STILL_NEED_PLUGIN)
-    stale = sorted(STILL_NEED_PLUGIN - need)
-    assert not new, f"core modules that newly need the SMS plugin to import (make the import lazy): {new}"
-    assert not stale, f"these import without the plugin now; remove them from STILL_NEED_PLUGIN: {stale}"
+    assert not STILL_NEED_PLUGIN, f"STILL_NEED_PLUGIN is a permanent guard; any entry is a regression: {STILL_NEED_PLUGIN}"
+    need = sorted(frozenset(result["need"]) - STILL_NEED_PLUGIN)
+    assert not need, f"core modules that need the SMS plugin to import (make the import lazy): {need}"
     unexpected = sorted(set(result["other"]) - OPTIONAL_EXTRA_MODULES)
     assert not unexpected, f"core modules failing to import for another reason: {result['other']}"
 
@@ -443,3 +444,52 @@ def test_the_store_fetch_answers_without_the_plugin():
     marker = [ln for ln in proc.stdout.splitlines() if ln.startswith("@@RESULT@@")]
     assert marker, proc.stderr[-2000:]
     assert json.loads(marker[-1][len("@@RESULT@@"):]) == {"got": [None, None], "plugin": []}
+
+
+_COMPOSITE_RUN_PROBE = textwrap.dedent('''
+    import json, sys, tempfile
+    from pathlib import Path
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from starlette.testclient import TestClient
+    from vivarium_workbench.api.app import create_app
+    from vivarium_workbench.lib import composite_run_views, composite_stop_views
+
+    ws = Path(tempfile.mkdtemp())
+    (ws / "workspace.yaml").write_text("name: ws\\n", encoding="utf-8")
+    status = composite_run_views.build_composite_run_status(ws, "remote-sim-12")
+    stop = composite_stop_views.stop_composite_run(ws, "remote-sim-12")
+    support = TestClient(create_app()).get("/api/remote-run-trace-support")
+    plugin = [m for m in sys.modules if m.startswith("vivarium_workbench_sms")]
+    print("@@RESULT@@" + json.dumps({"status": [status[1], status[0].get("reason")],
+                                     "stop": [stop[1], stop[0]["outcome"]],
+                                     "support": [support.status_code, support.json()["supported"],
+                                                 support.json()["reason"]],
+                                     "plugin": plugin}))
+''')
+
+
+def test_the_composite_run_routes_and_the_app_answer_without_the_plugin(monkeypatch):
+    """End of step P2 (Routes Rt3): with the plugin absent, a cloud composite run's status is a terminal 409
+    ``backend-not-installed`` (routed by record; nothing owns it), Stop still detaches (``remote-uncancellable``: no
+    SMS call), and ``create_app()`` builds and serves the trace-support route (``no-backend``)."""
+    from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
+
+    for var in BACKEND_BASE_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+        monkeypatch.delenv(var.replace("VIVARIUM_WORKBENCH_", "VIVARIUM_DASHBOARD_"), raising=False)
+    proc = subprocess.run([sys.executable, "-c", _COMPOSITE_RUN_PROBE], capture_output=True, text=True, timeout=300)
+    marker = [ln for ln in proc.stdout.splitlines() if ln.startswith("@@RESULT@@")]
+    assert marker, proc.stderr[-2000:]
+    assert json.loads(marker[-1][len("@@RESULT@@"):]) == {
+        "status": [409, "backend-not-installed"],
+        "stop": [200, "remote-uncancellable"],
+        "support": [200, False, "no-backend"],
+        "plugin": [],
+    }

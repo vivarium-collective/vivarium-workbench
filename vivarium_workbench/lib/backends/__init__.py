@@ -1,10 +1,12 @@
 """The workbench's remote backends, one adapter each (docs/backend-adapters.md §2).
 
-Step 1a names the adapters that already exist informally and routes the remote-run views' calls through them:
-
-* :data:`COMPOSE` -- compose-api (:mod:`remote_run_compose`), run ids ``compose-<n>``;
-* :data:`VIVA_CORE` -- viva-core's ``/viva/v1`` run surface (:mod:`remote_run_viva_v1`), string run ids;
-* :data:`SMS_LEGACY` -- the frozen SMS ``/api/v1`` path (:mod:`.sms_legacy`), integer simulation ids.
+The core owns one backend, :data:`COMPOSE` (compose-api: :mod:`.compose_api` over :mod:`remote_run_compose`, run
+ids ``compose-<n>``). Every other backend comes from a provider (:mod:`.provider`, the registry; step P1c): today the
+SMS plugin's two, ``viva-core`` (viva-api's ``/viva/v1`` run surface, string run ids) and ``sms-legacy`` (the frozen
+SMS ``/api/v1`` path, integer simulation ids), both in ``vivarium_workbench_sms``. They are published here as
+``VIVA_CORE`` / ``SMS_LEGACY`` for this package and the plugin; since the end of step P2 no core module outside
+``lib/backends/`` names them (``tests/test_core_names_no_provider_backend.py``): the core asks a backend for a facet
+(``runs``, ``unrouted``, ``artifacts``, ``analyses``, ``builds``, ``listing``) instead.
 
 Step 1b puts the choice of backend for a workspace's NEW run in one place: :func:`named`, :func:`select` and
 :func:`active` (§1; from P1c they consult the provider, §2.2), and :func:`resolve_run_target` (backlog item 18)
@@ -235,7 +237,8 @@ COMPOSE = Backend("compose-api", ComposeApiRuns(), identity=compose_health_ident
 # --- the provider registry (step P1c) ------------------------------------------------------------------------------
 #
 # Backends other than compose-api come from providers (``provider.providers()``; today the SMS plugin's two). Kept
-# as module attributes because code compares ``chosen is backends.VIVA_CORE``: each resolves to its provider's
+# as module attributes because the plugin (never the core outside this package, since the end of step P2) compares
+# ``chosen is backends.SMS_LEGACY``: each resolves to its provider's
 # backend (the same object every time) or, with providers off, to an inert sentinel that no lookup ever returns,
 # so those comparisons stay false (``None`` would not: ``None is None`` is true for a local run).
 if TYPE_CHECKING:
