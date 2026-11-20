@@ -1605,6 +1605,27 @@
         ' <span class="mdef-store-ref">' + _esc(path) + '</span></span>';
     }).join('');
   }
+  // The process's declared governing equations (contract.math) — surfaced
+  // prominently, the same math the loom node cards lead with. No KaTeX on this
+  // page, so render as clean monospace equation lines (these contracts author
+  // math as readable one-liners, not heavy LaTeX).
+  function _mdEquations(c) {
+    var m = (c && Array.isArray(c.math)) ? c.math : [];
+    if (!m.length) return '';
+    return '<div class="mdef-eqs"><div class="mdef-eqs-lbl">Equations</div>' +
+      m.map(function (e) { return '<div class="mdef-eq"><code>' + _esc(String(e)) + '</code></div>'; }).join('') +
+      '</div>';
+  }
+  // The symbols the equations use (contract.symbols: {sym: meaning}).
+  function _mdSymbols(c) {
+    var s = (c && c.symbols && typeof c.symbols === 'object') ? c.symbols : {};
+    var ks = Object.keys(s);
+    if (!ks.length) return '';
+    return '<div class="mdef-syms"><div class="mdef-syms-lbl">Symbols</div><dl class="mdef-sym-list">' +
+      ks.map(function (k) {
+        return '<dt><code>' + _esc(k) + '</code></dt><dd>' + _esc(String(s[k])) + '</dd>';
+      }).join('') + '</dl></div>';
+  }
   function _modelDefHtml(d) {
     d = d || {};
     var state = (d.state && typeof d.state === 'object') ? d.state : {};
@@ -1639,15 +1660,18 @@
       var cfgStr = Object.keys(cfg).map(function (k) {
         return '<code>' + _esc(k) + '</code> = ' + _esc(JSON.stringify(cfg[k]));
       }).join(' · ');
+      var contract = p._contract || p.contract || {};
       return '<div class="mdef-proc">' +
         '<div class="mdef-proc-hd"><strong>' + _esc(pn) + '</strong>' +
           (p.address ? ' <span class="mdef-cls">' + _esc(_mdClassName(p.address)) + '</span>' : '') + '</div>' +
         (sig ? '<div class="mdef-sig">' + _esc(sig) + '</div>' : '') +
+        _mdEquations(contract) +
         '<div class="mdef-io"><div class="mdef-io-row"><span class="mdef-io-lbl">reads</span><span class="mdef-io-ports">' +
           _mdPorts(p.inputs, '←') + '</span></div>' +
         '<div class="mdef-io-row"><span class="mdef-io-lbl">writes</span><span class="mdef-io-ports">' +
           _mdPorts(p.outputs, '→') + '</span></div></div>' +
         (cfgStr ? '<div class="mdef-io-row"><span class="mdef-io-lbl">config</span><span class="mdef-io-ports">' + cfgStr + '</span></div>' : '') +
+        _mdSymbols(contract) +
         '</div>';
     }).join('');
 
