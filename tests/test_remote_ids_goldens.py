@@ -17,6 +17,8 @@ from vivarium_workbench.lib import composite_run_views as crv
 from vivarium_workbench.lib import composite_stop_views as csv_
 from vivarium_workbench.lib import remote_run_views as rrv
 
+pytestmark = pytest.mark.plugin  # needs the SMS plugin (docs/backend-adapters.md step P3, K1)
+
 # The refusal literal and the stop note (declared wire changes in I1 are re-pointed here, and only here).
 # DECLARED (P3 I1): "not-sms" -> "not-offered"; the stop note was "Cloud runs continue on GovCloud — track it in the
 # Runs tab." (neutral text, Jim's decision B).

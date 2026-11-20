@@ -18,6 +18,12 @@ on:
   push:
     branches: [main]
 
+# A newer push to the same PR branch supersedes the running suite (each run is 8+ shard jobs). On `main` every push
+# gets its own complete run: a cancelled main run would leave that commit without a `suite` / `core-only` result.
+concurrency:
+  group: pytest-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   suite:
     # 4 shards x 4 cores each = ~16-way parallelism. Two levels, because each
@@ -103,3 +109,86 @@ jobs:
         run: uv sync --frozen --extra dev --extra test --extra chat
       - name: pytest (quarantined only)
         run: uv run --frozen bash scripts/pytest_gate.sh --only-known
+
+  core-only:
+    # docs/backend-adapters.md step P3 (K1): the suite with the SMS plugin REMOVED, as the core ships without it (the
+    # hosted env-worker pod, and step P4's split). Installed exactly like `suite`, then `vivarium_workbench_sms/` is
+    # deleted from the checkout: the editable install's .pth lists the project root, so the package stops resolving.
+    # tests/conftest.py then ignores the test modules that import the plugin at module level and strict-xfails the
+    # tests marked `plugin` (a pass is a failure: the mark is stale). See tests/test_plugin_test_marking.py.
+    #
+    # NON-BLOCKING for now (continue-on-error): step P3's K2 PRs convert the tests that still fail here. Step Z (K3)
+    # removes continue-on-error and `core-only` becomes a required check (Jim, 2026-11-20).
+    name: core-only ${{ matrix.group }}/4
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    timeout-minutes: 20
+    env:
+      UV_PYTHON: "3.12.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install (locked, same as suite)
+        run: uv sync --frozen --extra dev --extra test --extra chat
+      - name: Remove the SMS plugin (the core ships without it)
+        # The find_spec check fails the job loudly if the removal did not take (e.g. a non-editable install).
+        run: |
+          rm -rf vivarium_workbench_sms
+          .venv/bin/python -c "import importlib.util, sys; spec = importlib.util.find_spec('vivarium_workbench_sms'); print('vivarium_workbench_sms ->', spec); sys.exit(spec is not None)"
+      - name: Smoke (the app and the CLI start without the plugin)
+        run: |
+          set -euo pipefail
+          .venv/bin/python -c "from vivarium_workbench.api.app import create_app; create_app()"
+          help="$(.venv/bin/vivarium-workbench --help)"
+          echo "$help"
+          if ! grep -qE '^\s+serve\s' <<<"$help"; then
+            echo "::error::vivarium-workbench --help does not list the core 'serve' subcommand"; exit 1
+          fi
+          if grep -q 'run-remote' <<<"$help"; then
+            echo "::error::vivarium-workbench --help lists the plugin's 'run-remote' with the plugin removed"; exit 1
+          fi
+      - name: pytest (core only, shard ${{ matrix.group }}/4, quarantine deselected)
+        # --no-sync: never rebuild the editable install -- hatch's `packages` names the removed directory.
+        env:
+          PYTEST_SPLITS: "4"
+          PYTEST_GROUP: ${{ matrix.group }}
+        run: uv run --frozen --no-sync bash scripts/pytest_gate.sh
+
+  core-only-result:
+    # The stable check name for branch protection (like `suite`); required once step P3 ends.
+    #
+    # It reads the shards' real conclusions from the API rather than `needs.core-only.result`: with job-level
+    # continue-on-error, `needs.<job>.result` is `success` even when every shard failed, so the K1 check would be
+    # green while it enforces nothing. It reports red until step P3's K2 PRs finish converting the tests, but it
+    # does not gate merges until branch protection requires it (end of P3, step Z / K3, which also removes the
+    # continue-on-error here and on the shards).
+    name: core-only
+    needs: core-only
+    if: always()
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      actions: read
+    steps:
+      - name: Check core-only shard results
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          conclusions="$(gh api --paginate "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}/jobs" \
+            --jq '.jobs[] | select(.name | test("^core-only [0-9]+/[0-9]+$")) | "\(.name)=\(.conclusion)"')"
+          echo "$conclusions"
+          if [[ -z "$conclusions" ]]; then
+            echo "::error::no core-only shard jobs found"; exit 1
+          fi
+          if grep -qv '=success$' <<<"$conclusions"; then
+            echo "::error::one or more core-only shards failed (needs.result: ${{ needs.core-only.result }})"
+            exit 1
+          fi
+          echo "all core-only shards passed"

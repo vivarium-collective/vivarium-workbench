@@ -101,7 +101,7 @@ def ws(tmp_path, monkeypatch):
 
 @pytest.fixture
 def listing(monkeypatch):
-    rs = pytest.importorskip("vivarium_workbench_sms.remote_simulations")  # providers on: the plugin's listing
+    from vivarium_workbench_sms import remote_simulations as rs  # providers on: the plugin's listing
     monkeypatch.setattr(rs, "list_remote_simulations_swr", lambda ws, *a, **k: copy.deepcopy(LISTED))
     monkeypatch.setattr(rs, "remote_state", lambda ws, *a, **k: {"state": "fresh", "as_of": 1.0, "error": None})
     return rs
@@ -114,6 +114,7 @@ def _features_by_run(rows):
 
 # --- the process's features ------------------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_route_with_providers_on(ws, inproc_client):
     r = inproc_client(ws).get("/api/backend/features")
     assert r.status_code == 200
@@ -126,11 +127,13 @@ def test_route_with_providers_off(ws, providers_off, inproc_client):
     assert r.json() == {"features": []}
 
 
+@pytest.mark.plugin
 def test_sms_provider_declares_only_what_no_facet_implies():
-    sms = pytest.importorskip("vivarium_workbench_sms.provider")
+    from vivarium_workbench_sms import provider as sms
     assert sms.PROVIDER.features() == frozenset({"sms-launch"})
 
 
+@pytest.mark.plugin
 def test_process_features_are_the_facets_plus_the_providers_own():
     assert bf.process_features() == frozenset(SMS_PROCESS)
 
@@ -141,6 +144,7 @@ def test_run_features_by_kind(providers_off):
     assert bf.run_features(None) == frozenset()
 
 
+@pytest.mark.plugin
 def test_run_features_by_kind_providers_on():
     assert bf.run_features("sms-legacy") == frozenset(SMS_RUN)
     assert bf.run_features("viva-core") == frozenset()
@@ -148,6 +152,7 @@ def test_run_features_by_kind_providers_on():
     assert bf.run_features("no-such-kind") == frozenset()
 
 
+@pytest.mark.plugin
 def test_read_only_mode_keeps_the_route(ws, monkeypatch, inproc_client):
     monkeypatch.setenv("VIVARIUM_WORKBENCH_READONLY", "1")
     r = inproc_client(ws).get("/api/backend/features")
@@ -164,11 +169,13 @@ def test_the_route_is_in_the_openapi_schema(ws, inproc_client):
 
 # --- each run's features ---------------------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_rows_carry_their_runs_features(ws, listing, inproc_client):
     body = inproc_client(ws).get("/api/simulations").json()
     assert _features_by_run(body["simulations"]) == EXPECTED_ON
 
 
+@pytest.mark.plugin
 def test_the_library_build_annotates_every_remote_row(ws, listing):
     data = si.build_simulations_data(ws)
     assert _features_by_run(data["simulations"]) == EXPECTED_ON
@@ -176,12 +183,14 @@ def test_the_library_build_annotates_every_remote_row(ws, listing):
     assert "features" not in LISTED[0]["remote_origin"]
 
 
+@pytest.mark.plugin
 def test_the_cached_build_annotates_too(ws, listing):
     data = si.build_simulations_data_cached(ws)
     assert _features_by_run(data["simulations"]) == EXPECTED_ON
     assert si.build_simulations_data_cached(ws) is data  # served from the cache, still annotated
 
 
+@pytest.mark.plugin
 def test_include_remote_false_still_annotates_the_local_rows(ws, listing, inproc_client):
     body = inproc_client(ws).get("/api/simulations?include_remote=false").json()
     expected = {k: v for k, v in EXPECTED_ON.items() if not k.startswith("listed-")}
@@ -194,6 +203,7 @@ def test_rows_with_providers_off_have_no_features(ws, providers_off, inproc_clie
         k: (None if v is None else []) for k, v in EXPECTED_ON.items() if not k.startswith("listed-")}
 
 
+@pytest.mark.plugin
 def test_no_blocking_reads(ws, listing, monkeypatch, inproc_client):
     """#1106: neither answer may consult the active backend, a capability profile or a run record."""
     def boom(*a, **k):

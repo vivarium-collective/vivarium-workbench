@@ -2733,6 +2733,7 @@ class TestSourceBuildsRoute:
         assert body["builds"] == []
         assert body["error"] == "connection refused"
 
+    @pytest.mark.plugin
     def test_source_builds_in_openapi(self, client):
         # The SMS plugin's model (vivarium_workbench_sms.models, step P3 M1), served under the same schema name.
         from vivarium_workbench_sms.models import SourceBuilds
@@ -4469,6 +4470,7 @@ class TestSourceBuildRemoteRoute:
             "repo": "https://github.com/x/y", "branch": "main", "commit": "c0ffee",
         }
 
+    @pytest.mark.plugin
     def test_route_in_openapi(self, client):
         paths = client.get("/openapi.json").json()["paths"]
         assert "/api/source/build-remote" in paths
@@ -4709,6 +4711,7 @@ class TestRemoteRunStartRoute:
         assert r.status_code == 202
         assert captured["run_parca"] is False
 
+    @pytest.mark.plugin
     def test_route_in_openapi(self, client):
         paths = client.get("/openapi.json").json()["paths"]
         assert "/api/remote-run-start" in paths

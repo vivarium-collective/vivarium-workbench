@@ -2,7 +2,7 @@
 
 The committed file carries each backend provider's ``payload_types()`` section (step P3 M1), so
 ``test_generated_ts_is_current`` needs the SMS plugin installed with providers on (it becomes a ``plugin``-marked
-test when step P3 K1 adds that marker); the providers-off tests below are core.
+test, step P3 K1); the providers-off tests below are core.
 """
 
 import pytest
@@ -12,7 +12,8 @@ from vivarium_workbench.lib.backends import provider
 from vivarium_workbench.lib.generate_ts import OUTPUT_PATH, generate_ts
 
 
-# Needs the SMS plugin with providers on (its payload_types() section); mark `plugin` when K1 adds the marker.
+# Needs the SMS plugin with providers on (its payload_types() section).
+@pytest.mark.plugin
 def test_generated_ts_is_current():
     """The committed domain.generated.d.ts must match a fresh generation.
 

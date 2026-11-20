@@ -20,7 +20,10 @@ def _chosen(kind):
 
 @pytest.fixture
 def dispatch(tmp_path, monkeypatch):
-    """Patch the three destinations and the selection; returns ``run(kind) -> (destination, status)``."""
+    """Patch the three destinations and the selection; returns ``run(kind) -> (destination, status)``.
+
+    Patches the sms-legacy backend's ``builds`` facet, so every test using it needs the SMS plugin (marked ``plugin``).
+    """
     sd = tmp_path / "studies" / "demo"
     sd.mkdir(parents=True)
     (sd / "study.yaml").write_text("name: demo\nbaseline:\n  - {name: core, composite: pkg.composites.cell}\n")
@@ -51,10 +54,12 @@ def dispatch(tmp_path, monkeypatch):
     ("viva-core", (["documents"], 202, True)),
     ("sms-legacy", (["builds"], 202, False)),
 ])
+@pytest.mark.plugin
 def test_the_study_baseline_goes_where_it_went(dispatch, kind, expected):
     assert dispatch(kind) == expected
 
 
+@pytest.mark.plugin
 def test_the_documents_path_sends_the_composite(dispatch, tmp_path, monkeypatch):
     seen: list = []
     monkeypatch.setattr(remote_run_views, "remote_run_submit",
