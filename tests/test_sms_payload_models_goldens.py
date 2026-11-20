@@ -9,8 +9,8 @@ fields, descriptions), the operations that ``$ref`` them, and their TypeScript d
 another model does not touch these goldens; the whole ``components.schemas`` dump was compared once, base against
 branch, in the M1 PR.
 
-Needs the SMS plugin installed with providers on (its routes and its ``payload_types()``): mark ``plugin`` when step P3
-K1 adds that marker.
+Needs the SMS plugin installed with providers on (its routes and its ``payload_types()``): marked ``plugin`` (step P3
+K1).
 """
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ import json
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.plugin  # needs the SMS plugin (docs/backend-adapters.md step P3, K1)
 
 GOLDEN = json.loads((Path(__file__).parent / "_contracts" / "sms_payload_models_golden.json").read_text("utf-8"))
 

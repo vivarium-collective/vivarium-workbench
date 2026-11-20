@@ -15,6 +15,8 @@ import pytest
 from vivarium_workbench.lib import run_log
 from vivarium_workbench.lib import simulations_index as si
 
+pytestmark = pytest.mark.plugin  # needs the SMS plugin (docs/backend-adapters.md step P3, K1)
+
 
 def _origin(sim_id, *, exp=None, dep="golden-dep"):
     return {"deployment": dep, "simulation_id": sim_id, "experiment_id": exp, "backend": "q", "s3_uri": None}
@@ -54,7 +56,7 @@ LISTED = [
 
 @pytest.fixture
 def ws(tmp_path, monkeypatch):
-    rs = pytest.importorskip("vivarium_workbench_sms.remote_simulations")  # providers on: the plugin's listing
+    from vivarium_workbench_sms import remote_simulations as rs  # providers on: the plugin's listing
     (tmp_path / "workspace.yaml").write_text("name: golden\n", encoding="utf-8")
     for rid, fields in EVENTS:
         run_log.append_run_event(tmp_path, {"run_id": rid, "event": "started", **fields})
