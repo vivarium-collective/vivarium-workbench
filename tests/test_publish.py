@@ -483,26 +483,30 @@ def test_snapshot_css_bundled_in_home_shell(tmp_workspace, tmp_path):
 
 
 def test_walkthrough_composite_popout_is_snapshot_aware():
-    """The report's "What we ran" composite pop-out (_loomStaticPopout) must, in
-    snapshot mode, target the STATIC composite-state file under the configured
-    base path — /api/composite-state/<id>.json prefixed by basePath — not the
-    live query form (/api/composite-state?ref=<id>) at the bare origin, which
-    404s on a GitHub Pages project subpath. It must also suppress the pop-out
-    link for a composite known to be non-navigable (has_wiring === false).
-    Regression: the pop-out opened <origin>/bigraph-loom/... with no base path
-    and the live ?ref= query, so every composite link 404'd in the read-only
-    dashboard.
+    """In snapshot (read-only) mode the composite-state lookup must target the
+    STATIC baked file — <base>/api/composite-state/<id>.json via DataSource.apiUrl
+    — not the live query form (/api/composite-state?ref=<id>) at the bare origin,
+    which 404s on a GitHub Pages project subpath. Live mode keeps the ?ref= query.
+
+    The composite-state URL logic was extracted out of walkthrough.js into
+    composite-card.js (`_compositeBuildStateUrl`); the base-path handling moved
+    from cfg.basePath/cfg.mode to the `snapshot` body class + DataSource.apiUrl,
+    and the old has_wiring pop-out suppression was dropped in the loom refactor.
+    This test follows the behavior to its new home rather than the old strings.
     """
-    text = (STATIC_DIR / "walkthrough.js").read_text()
+    text = (STATIC_DIR / "composite-card.js").read_text()
     # Snapshot branch builds the static .json state path...
-    assert "'/api/composite-state/' + encodeURIComponent(composite) + '.json'" in text, \
-        "loom pop-out missing snapshot static composite-state path"
-    # ...and prefixes both state + loom URLs with the configured base path.
-    assert "cfg.basePath" in text and "cfg.mode === 'snapshot'" in text, \
-        "loom pop-out not snapshot/basePath aware"
-    # Non-navigable composites render plain text instead of a broken pop-out.
-    assert "known.has_wiring === false" in text, \
-        "composite cell does not suppress pop-out for non-navigable composites"
+    assert "'/api/composite-state/' + encodeURIComponent(id) + '.json'" in text, \
+        "composite-state lookup missing snapshot static .json path"
+    # ...gated on read-only snapshot mode (the body class), not the live query there.
+    assert "classList.contains('snapshot')" in text, \
+        "composite-state lookup not gated on snapshot mode"
+    # Live mode still uses the ?ref= query form.
+    assert "'/api/composite-state?ref=' + encodeURIComponent(id)" in text, \
+        "live composite-state lookup missing ?ref= query form"
+    # Base path resolves through DataSource.apiUrl (the GitHub Pages subpath).
+    assert "DataSource.apiUrl" in text, \
+        "composite-state URL not routed through DataSource.apiUrl for base path"
 
 
 def test_walkthrough_has_snapshot_body_class_and_switchpage_gating():
