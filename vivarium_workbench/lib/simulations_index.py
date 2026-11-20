@@ -1544,35 +1544,72 @@ def _emitter_tag(emitter) -> str:
     return emitter.lower() if isinstance(emitter, str) else ""
 
 
-def _append_remote_simulations(sims: list, ws_root: Path, *, fresh: bool = False) -> list:
-    """Append the active remote build's server-side runs (scoped to the build's
-    commit/repo) to the local Simulations-DB rows. No-op for local workspaces
-    or when sms-api is unreachable — single source for the local+remote merge,
-    shared by ``build_simulations_data`` and the ``/api/simulations`` handler.
-
-    By default this routes through the NON-blocking stale-while-revalidate helper
-    (``list_remote_simulations_swr``): it returns whatever the SWR cache holds
-    immediately and refreshes in the background, so a cold/slow/wedged tunnel can
-    never pin the request thread. ``fresh=True`` (threaded from ``?refresh=true``)
-    takes the blocking path but bounds it with a short timeout and one retry so
-    even the explicit refresh can't hang the request for minutes."""
+def _listings() -> list:
+    """The listing facets of ``backends.offering("listing")`` (step P2 Remote tab R1), in its order: found by facet
+    presence, a registry read -- never ``active()``, a profile or a record, any of which could block (#1106). Empty
+    when no backend lists runs (providers off, the plugin absent) or a broken provider makes the registry raise."""
     try:
-        from vivarium_workbench_sms import remote_simulations as _rs
-        if fresh:
-            remote = _rs.list_remote_simulations(
-                ws_root, use_cache=False,
-                timeout=_rs._FRESH_TIMEOUT, max_retries=_rs._FRESH_MAX_RETRIES)
-        else:
-            remote = _rs.list_remote_simulations_swr(ws_root)
-    except Exception:
-        remote = []
-    if not remote:
-        return sims
+        from vivarium_workbench.lib import backends
+        return [b.listing for b in backends.offering("listing") if b.listing is not None]
+    except Exception:  # noqa: BLE001 -- the listing then stays local
+        return []
+
+
+def list_remote_runs(ws_root: Path, *, fresh: bool = False, local: "list | None" = None) -> list:
+    """The runs every backend's ``listing`` facet reports (:func:`_listings`), deduped by ``run_id`` against the
+    ``local`` rows and across backends: a run_id already listed is not listed again (one backend's own rows are kept
+    as it gave them). ``[]`` when no backend lists runs or its server is unreachable. Shared by the Simulations-DB
+    merge and the study cards' remote counts (``investigations_index._remote_study_run_stats``).
+
+    By default each listing answers from its cache without blocking (stale-while-revalidate: a cold/slow/wedged
+    tunnel can never pin the request thread). ``fresh=True`` (threaded from ``?refresh=true``) asks for the bounded
+    blocking fetch."""
+    per_backend: list = []
+    for listing in _listings():
+        try:
+            per_backend.append(listing.list_runs(ws_root, fresh=fresh) or [])
+        except Exception:  # noqa: BLE001 -- one bad listing never hides another, nor the local rows
+            pass
+    have = {s.get("run_id") for s in (local or []) if isinstance(s, dict)}
+    extra: list = []
+    for remote in per_backend:
+        mine = [r for r in remote if r.get("run_id") not in have]
+        have.update(r.get("run_id") for r in mine)
+        extra += mine
+    return extra
+
+
+def _append_remote_simulations(sims: list, ws_root: Path, *, fresh: bool = False) -> list:
+    """Append the backends' listed runs (:func:`list_remote_runs`) to the local Simulations-DB rows -- single source
+    for the local+remote merge, shared by ``build_simulations_data`` and the ``/api/simulations`` handler. No-op
+    when no backend lists runs or its server is unreachable."""
     # Dedup: a landed remote run is already a local row (same run_id/experiment_id)
     # — don't list it twice. Keep the local (richer, has store/analyses) copy.
-    have = {s.get("run_id") for s in sims if isinstance(s, dict)}
-    extra = [r for r in remote if r.get("run_id") not in have]
+    extra = list_remote_runs(ws_root, fresh=fresh, local=sims)
     return list(sims) + extra if extra else sims
+
+
+def _remote_listing_state(ws_root: Path) -> "dict | None":
+    """The ``remote`` key of ``/api/simulations``: the first non-``None`` ``listing.state`` (:func:`_listings`), or
+    ``None``. Never raises."""
+    for listing in _listings():
+        try:
+            state = listing.state(ws_root)
+        except Exception:  # noqa: BLE001 -- provenance is best-effort; it never breaks the local listing
+            continue
+        if state is not None:
+            return state
+    return None
+
+
+def forget_remote_listings() -> None:
+    """``?refresh=true``: every listing forgets its cached rows (``listing.invalidate``) before the fresh fetch, so a
+    server that is down now reports "unavailable", not "stale". Never raises."""
+    for listing in _listings():
+        try:
+            listing.invalidate()
+        except Exception:  # noqa: BLE001 -- one backend's failure never keeps another's cache
+            pass
 
 
 # Shared emitter-kind -> display-label map (one place to add a kind's label).
@@ -2151,11 +2188,7 @@ def _build_simulations_data(ws_root: Path, include_remote: bool = True,
         # Provenance of the remote source, so the Runs tab can show
         # "as of HH:MM (refreshing…)" instead of a spinner. Best-effort: a
         # failure here must never break the local listing.
-        try:
-            from vivarium_workbench_sms import remote_simulations as _rs
-            remote_state = _rs.remote_state(ws_root)
-        except Exception:  # noqa: BLE001
-            remote_state = None
+        remote_state = _remote_listing_state(ws_root)
 
     # Capability-matched analysis tools + their launch URLs, per row (Simulations
     # DB "launch into tool" affordance). Best-effort at every layer already

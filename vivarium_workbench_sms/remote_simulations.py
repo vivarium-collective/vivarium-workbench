@@ -17,6 +17,11 @@ Design (see Simulations-DB remote-runs decision):
     Origin column distinguishes remote from local.
   * Graceful = if the workspace isn't a remote build, or sms-api is
     unreachable (tunnel down), return ``[]`` so the local listing never breaks.
+
+The core reaches this module only through the ``sms-legacy`` backend's listing
+facet (:class:`SmsListing`, docs/backend-adapters.md §2.1, step P2 Remote tab R1).
+The workspace's ``remote_run_study_map`` is core configuration
+(``vivarium_workbench.lib.remote_study_map``), read through that module.
 """
 
 from __future__ import annotations
@@ -24,10 +29,11 @@ from __future__ import annotations
 import concurrent.futures as _futures
 import datetime as _dt
 import json
-import re
 import threading
 import time
 from pathlib import Path
+
+from vivarium_workbench.lib import remote_study_map
 
 
 # TTL cache for the remote fetch. The sms-api list round-trip (+ per-record
@@ -168,51 +174,6 @@ def _map_remote_status(raw: "str | None", has_out_uri: bool) -> str:
     if s:
         return s
     return "completed" if has_out_uri else "running"
-
-
-def _load_remote_study_map(ws_root: Path) -> list:
-    """Workspace-declared experiment_id -> study_slug rules for remote runs.
-
-    Reads ``remote_run_study_map`` from the workspace config (``workspace.yaml``):
-    an ordered list of ``{pattern: <regex>, study: <slug>}`` entries, first match
-    wins. Returns a list of ``(compiled_regex, study_slug)``.
-
-    Why this exists: a remote (GovCloud) run is surfaced with ``db_path=None``
-    (its store is an ``s3://`` uri), so the local index's study-slug-from-db_path
-    inference cannot fire and every remote run lands orphaned
-    (``study_slug=None``). This lets a workspace declare how its remote runs'
-    ``experiment_id``s map to its studies so they show under the right study.
-
-    INTERIM (stopgap). The durable fix is stamping ``study_slug`` + the
-    RunIdentity record into the run at dispatch (viva-api#590), after which
-    remote runs carry their own study association and this heuristic is moot.
-    """
-    cfg = Path(ws_root) / "workspace.yaml"
-    if not cfg.is_file():
-        return []
-    try:
-        import yaml
-        doc = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return []
-    rules = doc.get("remote_run_study_map") or []
-    out = []
-    for r in rules:
-        if isinstance(r, dict) and r.get("pattern") and r.get("study"):
-            try:
-                out.append((re.compile(str(r["pattern"]), re.I), str(r["study"])))
-            except re.error:
-                continue
-    return out
-
-
-def _infer_study_slug(experiment_id: str, rules: list) -> "str | None":
-    """First workspace rule whose pattern matches ``experiment_id`` (or None)."""
-    e = experiment_id or ""
-    for pat, slug in rules:
-        if pat.search(e):
-            return slug
-    return None
 
 
 def _study_investigation_map(ws_root: Path) -> dict:
@@ -602,11 +563,11 @@ def _fetch_remote_simulations_meta(
     # Associate each remote run with its study via the workspace's declared
     # experiment_id -> study_slug rules (remote runs have no db_path, so the
     # local study-slug-from-path inference in simulations_index can't fire).
-    study_rules = _load_remote_study_map(ws_root)
+    study_rules = remote_study_map.load_rules(ws_root)
     if study_rules:
         inv_map = _study_investigation_map(ws_root)
         for r in rows:
-            slug = _infer_study_slug(r.get("run_id", ""), study_rules)
+            slug = remote_study_map.infer_study_slug(r.get("run_id", ""), study_rules)
             if slug:
                 r["study_slug"] = slug
                 r["studies"] = [slug]
@@ -618,3 +579,23 @@ def _fetch_remote_simulations_meta(
                     r["investigation_slug"] = inv
     rows.sort(key=lambda r: r.get("started_at") or 0.0, reverse=True)
     return (rows[:limit] if limit and limit > 0 else rows), None
+
+
+class SmsListing:
+    """The ``sms-legacy`` backend's listing facet (``backends.ListingFacet``, step P2 Remote tab R1): this module's
+    stale-while-revalidate cache, as the core used to call it. Every method looks its function up in this module's
+    globals at call time, so a test's ``setattr(remote_simulations, ...)`` stays live."""
+
+    def list_runs(self, ws_root: Path, *, fresh: bool = False) -> "list[dict]":
+        if fresh:
+            # The bounded blocking fetch (?refresh=true): a wedged tunnel must not pin the request for minutes.
+            return list_remote_simulations(ws_root, use_cache=False,
+                                           timeout=_FRESH_TIMEOUT, max_retries=_FRESH_MAX_RETRIES)
+        return list_remote_simulations_swr(ws_root)
+
+    def state(self, ws_root: Path) -> "dict | None":
+        return remote_state(ws_root)
+
+    def invalidate(self) -> None:
+        _REMOTE_CACHE.clear()
+        _REMOTE_META.clear()
