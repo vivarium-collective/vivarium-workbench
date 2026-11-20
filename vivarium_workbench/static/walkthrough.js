@@ -12467,21 +12467,28 @@
         if (window._currentIset && window._currentIset !== name) return;  // stale
         window._lastNeedsAttention = d;   // the popover/tab read this
         var total = (d.summary.total) || 0;
+        // Honest quiet/clear state (issue #1618, bug 3): "✓ All clear" only when
+        // something was actually evaluated — otherwise "No studies yet" / "No runs
+        // yet", a neutral state, not a validated pass. Drives the tab's tooltip.
+        var _q = _naQuietState(d.summary);
         var m = document.getElementById('inv-attention-mount');
         if (m) m.innerHTML = _aigScanBodyHtml(d);
-        // Reflect the flagged count on the tab button (amber badge when > 0).
+        // Reflect the flagged count on the tab button (amber badge when > 0),
+        // and never let a quiet/never-run investigation read as a validated pass.
         var tb = document.querySelector('.inv-brief-tab[onclick*="attention"]');
         if (tb) {
           var old = tb.querySelector('.inv-brief-tab-badge');
           if (old) old.remove();
           if (total > 0) {
             tb.classList.add('inv-brief-tab-attn');
+            tb.title = total + ' item' + (total === 1 ? '' : 's') + ' need attention';
             var b = document.createElement('span');
             b.className = 'inv-brief-tab-badge attn';
             b.textContent = total;
             tb.appendChild(b);
           } else {
             tb.classList.remove('inv-brief-tab-attn');
+            tb.title = _q.label;   // "No studies yet" / "No runs yet" / "✓ All clear"
           }
         }
       }).catch(function () { /* tolerant — leave the scanning note */ });
