@@ -368,16 +368,19 @@ def test_with_providers_on_sms_legacy_is_the_unrouted_backend():
     assert backends.VIVA_CORE.unrouted is None and backends.COMPOSE.unrouted is None
 
 
-@pytest.mark.plugin
 def test_two_backends_declaring_the_unrouted_facet_are_refused(monkeypatch):
-    from vivarium_workbench_sms.sms_legacy import SmsLegacyRuns, SmsLegacyUnrouted
+    class _Runs:   # stub facets: the registry only asks whether ``unrouted`` is declared
+        pass
+
+    class _Unrouted:
+        pass
 
     class Two:
         name = "two"
 
         def backends(self):
-            return (backends.Backend("a", SmsLegacyRuns(), unrouted=SmsLegacyUnrouted()),
-                    backends.Backend("b", SmsLegacyRuns(), unrouted=SmsLegacyUnrouted()))
+            return (backends.Backend("a", _Runs(), unrouted=_Unrouted()),   # type: ignore[arg-type]
+                    backends.Backend("b", _Runs(), unrouted=_Unrouted()))   # type: ignore[arg-type]
 
     monkeypatch.setattr(provider_mod, "providers", lambda: (Two(),))
     backends.reset_registry()

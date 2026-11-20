@@ -207,22 +207,25 @@ def test_run_remote_with_a_caller_client_never_asks_which_backend(monkeypatch, t
         deployment_run.run(tmp_path, "c", client=object(), dest=tmp_path / "out")
 
 
-@pytest.mark.plugin
-@pytest.mark.parametrize("named, to_compose", [("compose", True), ("viva", False), ("legacy", False)])
+@pytest.mark.parametrize("named, to_compose", [
+    ("compose", True),
+    pytest.param("viva", False, marks=pytest.mark.plugin),
+    pytest.param("legacy", False, marks=pytest.mark.plugin),
+])
 def test_run_remote_without_a_client_follows_the_named_backend(world, monkeypatch, named, to_compose):
     """Named compose-api: run_composite. Anything else continues to the document / ``/compose/v1`` path, which
     reads the pinned config next (stopped there); "legacy" (nothing selected) gets there through the unrouted facet
     (step P2, Runs b), which reads no profile. Which of those two it takes (viva-core vs legacy) is pinned end
     to end by ``test_backend_dispatch_viva_v1::test_run_remote_runs_a_document_and_lands_the_compose_results``."""
-    from vivarium_workbench_sms import remote_pinned
-
     from vivarium_workbench.lib import remote_run, remote_run_compose
 
+    remote_pinned = _plugin("remote_pinned")   # only the viva/legacy rows reach the pinned config
     configure, counts = world
     ws = configure(named)
     seen = []
     monkeypatch.setattr(remote_run_compose, "run_composite", lambda *a, **k: seen.append("compose") or "zip")
-    monkeypatch.setattr(remote_pinned, "pinned_config", lambda: (_ for _ in ()).throw(_Stop()))
+    if remote_pinned is not None:
+        monkeypatch.setattr(remote_pinned, "pinned_config", lambda: (_ for _ in ()).throw(_Stop()))
     try:
         remote_run.run_remote(ws, "c", dest=ws / "out")
     except _Stop:

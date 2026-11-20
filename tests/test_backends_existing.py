@@ -257,17 +257,24 @@ def test_a_non_string_deployment_is_ignored_not_a_500(ws, asked, junk):
     assert asked == [("viva", "cancel")]
 
 
-@pytest.mark.plugin
 def test_the_figures_routes_refuse_another_backends_run(ws, monkeypatch, inproc_client):
-    from vivarium_workbench_sms import sms_api_client
+    """Refused either way: another server's run with the plugin, a backend not installed without it (core-only)."""
+    from conftest import CORE_MODE
 
+    try:   # the tripwire, when there is a client to trip
+        from vivarium_workbench_sms import sms_api_client
+    except ImportError:
+        sms_api_client = None
+    if sms_api_client is not None:
+        monkeypatch.setattr(sms_api_client.SmsApiClient, "__init__", lambda *a, **k: pytest.fail("asked a backend"))
+    reason = "other-backend" if CORE_MODE is None else "backend-not-installed"
     _record(ws, "66", "sms-legacy", ELSEWHERE, dep="prod-elsewhere")
-    monkeypatch.setattr(sms_api_client.SmsApiClient, "__init__", lambda *a, **k: pytest.fail("asked a backend"))
     c = inproc_client(ws)
     for url in ("/api/remote-analysis-figures?simulation_id=66&study=s",
                 "/api/remote-analysis-figure?simulation_id=66&analysis=a&path=viz/x.png&study=s"):
         res = c.get(url)
         assert res.status_code == 409 and res.json()["terminal"] is True, url
+        assert res.json()["reason"] == reason, (url, res.json())
 
 
 @pytest.mark.plugin
