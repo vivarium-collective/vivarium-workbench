@@ -39,16 +39,25 @@ CORE = [
 
 
 def _plugin_modules() -> list[str]:
-    """Every module of the SMS plugin package (step P1b), so a new one is covered without editing this list."""
+    """Every module of the SMS plugin package (step P1b), so a new one is covered without editing this list.
+
+    Found without importing the plugin (``find_spec`` of a package does not run it), so collecting this module does
+    not need the plugin: the core checks above run core-only too (docs/backend-adapters.md step P3, K2a). Absent,
+    there are no plugin modules to check."""
+    import importlib.util
     import pkgutil
 
-    import vivarium_workbench_sms
-
+    try:
+        spec = importlib.util.find_spec("vivarium_workbench_sms")
+    except ImportError:
+        return []
+    if spec is None or not spec.submodule_search_locations:
+        return []
     return ["vivarium_workbench_sms"] + [f"vivarium_workbench_sms.{m.name}"
-                                         for m in pkgutil.iter_modules(vivarium_workbench_sms.__path__)]
+                                         for m in pkgutil.iter_modules(spec.submodule_search_locations)]
 
 
-MODULES = CORE + _plugin_modules()
+MODULES = CORE + [pytest.param(m, marks=pytest.mark.plugin) for m in _plugin_modules()]
 
 
 @pytest.mark.parametrize("module", MODULES)

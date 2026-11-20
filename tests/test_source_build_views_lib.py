@@ -17,6 +17,8 @@ from vivarium_workbench.lib import active_workspace
 from vivarium_workbench_sms import source_build_views
 from vivarium_workbench_sms.sms_api_client import SmsApiError
 
+pytestmark = pytest.mark.plugin  # every test drives the SMS plugin's source-build views
+
 
 @pytest.fixture(autouse=True)
 def _reset_root():

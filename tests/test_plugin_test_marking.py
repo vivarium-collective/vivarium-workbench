@@ -29,37 +29,13 @@ from conftest import (
 
 TESTS = Path(__file__).parent
 
-UNMARKED_PLUGIN_IMPORTERS: frozenset[str] = frozenset({
-    "test_C3_sms_client.py",
-    "test_analyses_facets.py",                # through test_backends_existing (its own imports are per test since K2c)
-    "test_backend_base_url.py",
-    "test_backend_config.py",
-    "test_backend_dispatch_compose.py",
-    "test_backend_interop.py",
-    "test_backends_existing.py",
-    "test_backends_records.py",
-    "test_backends_routing.py",
-    "test_backends_select.py",
-    "test_backends_startup.py",
-    "test_composite_card_dispatch_table.py",
-    "test_compose_composite_provenance.py",   # through test_backend_dispatch_compose
-    "test_import_order.py",                   # MODULES = CORE + _plugin_modules() at import time
-    "test_opaque_run_ids.py",                 # through test_backends_existing (its own imports are per test since K2c)
-    "test_resolve_cloud_target.py",
-    "test_sms_api_client.py",
-    "test_sms_api_environments.py",
-    "test_sms_api_identity.py",
-    "test_sms_api_paths.py",
-    "test_sms_capabilities.py",
-    "test_source_branch.py",
-    "test_source_build_views_lib.py",
-    "test_viva_v1_client_contract.py",
-})
+#: Empty since step P3 Z (the last two, test_source_branch and test_source_build_views_lib, were converted there).
+UNMARKED_PLUGIN_IMPORTERS: frozenset[str] = frozenset()
 
 #: The ratchet's ceiling: UNMARKED_PLUGIN_IMPORTERS's size when the core-only job arrived (K1). Each K2 PR that
 #: shrinks the set lowers this to the new size in the same PR; NEVER raise it -- a new module-level importer gets the
 #: mark instead.
-UNMARKED_PLUGIN_IMPORTERS_CEILING = 24
+UNMARKED_PLUGIN_IMPORTERS_CEILING = 0
 
 
 def _name(path: Path) -> str:
