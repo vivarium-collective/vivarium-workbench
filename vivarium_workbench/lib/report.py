@@ -667,29 +667,28 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         _ws_avatar = _inline_avatar_data_uri(ws_root, _ws_avatar)
     _ws_home = str(ws.get("homepage") or "").strip() or (
         f"https://github.com/{_repo_slug}" if _repo_slug else "")
-    # Rail-chip subtitle describing the ACTIVE source. A materialized remote
-    # build (.../build-cache/sim<id>-<commit>) carries a .viv-build.json with its
-    # branch/commit/id (stamped at switch time) and isn't a git repo; a local
-    # workspace uses its git branch. `workspace_is_remote` flags the build case
-    # so the chip can render a distinct dot + "remote build #<id>".
+    # Rail-chip subtitle describing the ACTIVE source. A session build (a
+    # materialized remote build, .../build-cache/sim<id>-<commit>; the provider
+    # recorded its branch/commit/id at switch time, backends.session_build) isn't
+    # a git repo; a local workspace uses its git branch. `workspace_is_remote`
+    # flags the build case so the chip can render a distinct dot + "remote build #<id>".
+    from vivarium_workbench.lib import backends as _backends
+
     _workspace_subtitle = ""
     _workspace_is_remote = False
-    _build_meta_path = ws_root / ".viv-build.json"
-    if _build_meta_path.is_file():
-        try:
-            import json as _json
-            _bm = _json.loads(_build_meta_path.read_text())
-            _workspace_is_remote = True
-            _parts = []
-            if _bm.get("branch"):
-                _parts.append(str(_bm["branch"]))
-            if _bm.get("commit"):
-                _parts.append("@ " + str(_bm["commit"])[:10])
-            _parts.append("· remote build #" + str(_bm.get("simulator_id", "?")))
-            _workspace_subtitle = " ".join(_parts)
-        except Exception:
+    _build = _backends.session_build(ws_root)
+    if _build is not None:
+        _workspace_is_remote = True
+        if not _build.readable:
             _workspace_subtitle = "remote build"
-            _workspace_is_remote = True
+        else:
+            _parts = []
+            if _build.branch:
+                _parts.append(str(_build.branch))
+            if _build.commit:
+                _parts.append("@ " + str(_build.commit)[:10])
+            _parts.append("· remote build #" + ("?" if _build.id is None else str(_build.id)))
+            _workspace_subtitle = " ".join(_parts)
     else:
         try:
             import subprocess as _sp

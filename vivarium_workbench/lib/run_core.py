@@ -16,9 +16,13 @@ class RunTargetUnavailable(RuntimeError):
 
 
 def run_target_for(workspace: Path) -> str:
-    """A materialized remote build (WS3's .viv-build.json stamp) runs on the
-    deployment; a plain local workspace runs locally."""
-    return "deployment" if (Path(workspace) / ".viv-build.json").is_file() else "local"
+    """A session build (a provider's checkout of one of its builds,
+    ``backends.session_build``) runs on the deployment; a plain local workspace
+    runs locally -- and so does every workspace with providers off or the plugin
+    absent."""
+    from vivarium_workbench.lib import backends  # lazy: backends sits above run_core
+
+    return "deployment" if backends.session_build(Path(workspace)) is not None else "local"
 
 
 @dataclass

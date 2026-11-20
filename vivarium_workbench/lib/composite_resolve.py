@@ -487,22 +487,20 @@ def resolve_composite_for_request(
     ws_root: "Path | str", spec_id: str, overrides: "dict | None" = None
 ) -> "dict | None":
     """Resolve a composite for a UI request, routing by source: a session-bound
-    materialized build (.viv-build.json — real files on disk, same dir the env
+    materialized build (``backends.session_build`` — real files on disk, same dir the env
     worker provisions a venv for, item 63) resolves LOCALLY, through the same
     general resolution any local workspace uses; a bare deployment-wide pin
     with no materialized clone has nothing to resolve against and degrades to
     ``wiring_status: "unavailable"``; a local workspace resolves locally. Returns the resolve payload dict (or None on
     a local miss)."""
-    from vivarium_workbench.lib.run_core import run_target_for
-    from vivarium_workbench_sms.remote_simulations import _read_build_meta
+    from vivarium_workbench.lib import backends
 
     ws_root = Path(ws_root)
-    if run_target_for(ws_root) == "deployment":
-        meta = _read_build_meta(ws_root) or {}
-        sim_id = meta.get("simulator_id")
-        if sim_id is None:
+    build = backends.session_build(ws_root)
+    if build is not None:
+        if build.id is None:
             return {"error": "remote build has no simulator_id stamp"}
-        # item 63: `.viv-build.json` only ever gets stamped into a materialized
+        # item 63: the session-build stamp only ever gets written into a materialized
         # session clone (source_build_views.switch_build) — its presence means
         # ws_root has real source files on disk. Not special-cased to any one
         # composite kind or workspace: try the SAME general local resolution
@@ -520,8 +518,8 @@ def resolve_composite_for_request(
         #      managed materialization path now provisions a real venv for).
         # Only when NEITHER general path can see it does this degrade. (A bare
         # deployment-wide pin -- VIVARIUM_WORKBENCH_REMOTE_PINNED with no
-        # materialized clone -- never gets here: it has no .viv-build.json
-        # stamp, so its target is "local" and it resolves locally.)
+        # materialized clone -- never gets here: it is no session build, so
+        # it resolves locally.)
         local = resolve_composite(ws_root, spec_id, overrides)
         if local is not None:
             return local

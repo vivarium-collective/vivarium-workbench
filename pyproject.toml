@@ -292,8 +292,6 @@ ignore_imports = [
     "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_simulations",
     "vivarium_workbench.api.app -> vivarium_workbench_sms.source_build_views",
     "vivarium_workbench.lib.backends.provider -> vivarium_workbench_sms.provider",  # the registry (P4: entry point)
-    "vivarium_workbench.lib.composite_resolve -> vivarium_workbench_sms.remote_simulations",
-    "vivarium_workbench.lib.composite_state_views -> vivarium_workbench_sms.remote_simulations",
     "vivarium_workbench.lib.composite_test_run_views -> vivarium_workbench_sms.remote_pinned",
     "vivarium_workbench.lib.composite_test_run_views -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.investigations_index -> vivarium_workbench_sms.remote_simulations",
