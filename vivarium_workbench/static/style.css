@@ -3365,8 +3365,12 @@ body.pcard-splitting iframe{ pointer-events:none; }
 :root[data-theme="dark"] .repo-card-ws { background: var(--panel); }
 
 /* Studies-overview header action cluster: + Investigation / + Study / Audit Report */
-.iset-hdr-btn { display: inline-flex; align-items: center; gap: 5px; }
-.iset-hdr-btn svg { flex: none; }
+.iset-hdr-btn { display: inline-flex; align-items: center; }
+/* + Investigation is the primary call-to-action of the cluster. */
+.iset-hdr-btn-primary { border-color: #3b82f6; color: #1d4ed8; font-weight: 600; }
+.iset-hdr-btn-primary:hover { background: #eff6ff; }
+:root[data-theme="dark"] .iset-hdr-btn-primary { border-color: #3b82f6; color: #bfdbfe; }
+:root[data-theme="dark"] .iset-hdr-btn-primary:hover { background: #1e293b; }
 .market-results { margin-top: 14px; }
 /* Keep the Registry results full-width and vertically reserved so switching
    facets or waiting on a slow load doesn't reflow the card columns or bounce

@@ -348,6 +348,64 @@ def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[s
             + "".join(nav) + '</nav><main>' + hdr + "".join(body) + '</main></div></body></html>')
 
 
+def build_figures_gallery_page(ws_root, name: str) -> Optional[str]:
+    """A STANDALONE (self-contained) HTML figure gallery for one investigation —
+    every member study's figure files embedded inline as ``data:`` URIs, grouped
+    by study, so the page opens in the browser with no further requests. Reuses
+    :func:`figures_gallery_index_html` (the same gallery the zip ships). Returns
+    ``None`` when the investigation has no displayable figures. Backs
+    ``GET /api/investigation/<slug>/figures.html`` (the "open figures in the
+    browser" action)."""
+    import base64
+
+    _MIME = {
+        ".svg": "image/svg+xml", ".png": "image/png", ".gif": "image/gif",
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+        ".html": "text/html",
+    }
+    ws_root = Path(ws_root).resolve()
+    figs = build_investigation_figures(ws_root, name)
+    files = figs.get("files") or []
+    if not files:
+        return None
+    # Group by study, preserving member order (files come in slug/member order).
+    by_study: "dict[str, list[dict]]" = {}
+    for f in files:
+        by_study.setdefault(str(f.get("study") or ""), []).append(f)
+
+    groups: list = []
+    any_item = False
+    for slug, items in by_study.items():
+        rendered: list = []
+        for it in items:
+            p = ws_root / str(it.get("rel_path") or "")
+            suf = p.suffix.lower()
+            if suf not in _GALLERY_EXT or not p.is_file():
+                continue
+            try:
+                raw = p.read_bytes()
+            except OSError:
+                continue
+            is_html = suf == ".html"
+            stem = p.stem
+            if is_html:
+                try:
+                    label = _fig_label(raw.decode("utf-8", "replace"), stem)
+                except Exception:
+                    label = stem
+            else:
+                label = stem.replace("-", " ").replace("_", " ").strip() or stem
+            mime = _MIME.get(suf, "application/octet-stream")
+            data_uri = f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
+            rendered.append((data_uri, label, is_html))
+            any_item = True
+        if rendered:
+            groups.append((slug, None, rendered))
+    if not any_item:
+        return None
+    return figures_gallery_index_html(name, groups)
+
+
 def build_figures_zip(ws_root, name: str) -> Optional[bytes]:
     """Zip EVERY figure file across the investigation's member studies, with a
     navigable ``index.html`` at the root (a sidebar table of contents → each figure

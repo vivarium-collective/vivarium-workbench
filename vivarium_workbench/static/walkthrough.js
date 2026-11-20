@@ -9926,14 +9926,14 @@
   }
   window._showInvestigationList = _showInvestigationList;
 
-  // ── Investigations/Studies semantic zoom ────────────────────────────────
-  // Same 3-level framework as the Registry: 'table' (dense, sortable-looking)
-  // | 'cards' (grid — the historical default) | 'full' (cards with detail
-  // expanded). Drives BOTH the Investigations and Studies browse tabs.
-  // Persists in localStorage, mirroring window._registryZoom.
+  // ── Investigations/Studies view ─────────────────────────────────────────
+  // Two views: 'table' (the List view — dense, sortable; the DEFAULT) and
+  // 'cards' (grid). Drives BOTH the Investigations and Studies browse tabs.
+  // Persists in localStorage. (The old 'full' detail view was removed; any
+  // persisted 'full' falls back to the List default below.)
   window._isetZoom = (function () {
     var z; try { z = localStorage.getItem('viv.isetZoom'); } catch (e) { z = null; }
-    return (z === 'table' || z === 'cards' || z === 'full') ? z : 'cards';
+    return (z === 'table' || z === 'cards') ? z : 'table';
   })();
   function _syncIsetToolbar() {
     // Scoped to [data-izoom] — .reg-zoom-btn is shared with the Registry zoom
@@ -9959,11 +9959,10 @@
     _renderInvestigationSets();
   }
   window._setIsetZoom = _setIsetZoom;
-  // Double-click a card → zoom in one level (table → cards → full), mirroring
-  // the Registry's _zoomInOn.
+  // Double-click a card → switch to the other view (table ↔ cards).
   function _isetZoomIn() {
-    var order = ['table', 'cards', 'full'];
-    var i = order.indexOf(window._isetZoom || 'cards');
+    var order = ['table', 'cards'];
+    var i = order.indexOf(window._isetZoom || 'table');
     _setIsetZoom(order[Math.min(order.length - 1, i + 1)]);
   }
   window._isetZoomIn = _isetZoomIn;
@@ -9974,7 +9973,7 @@
     _syncIsetToolbar();
     if (window._isetBrowseTab === 'studies') {
       if (window._isetZoom === 'table') _renderStudyBrowseTable(list);
-      else _renderStudyBrowseCards(list, window._isetZoom === 'full');
+      else _renderStudyBrowseCards(list, false);
       return;
     }
     if (!window._isetIndex.length) {
@@ -10140,15 +10139,7 @@
           '<span class="iset-studies-toggle" role="button" tabindex="0" ' +
             'onclick="event.stopPropagation();var d=this.closest(\'.investigation-set-card\').querySelector(\'.iset-studies-detail\');var open=d.style.display===\'none\';d.style.display=open?\'block\':\'none\';this.querySelector(\'.iset-chev\').textContent=open?\'▾\':\'▸\'" ' +
             'style="flex:1;cursor:pointer;user-select:none"><strong>' + iset.n_studies + '</strong> stud' + (iset.n_studies === 1 ? 'y' : 'ies') + ' <span class="iset-chev" style="color:#94a3b8">' + (full ? '▾' : '▸') + '</span></span>' +
-          '<a href="#" title="Download the rendered HTML report for this investigation" ' +
-            'onclick="window._vivReportFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ report</a>' +
-          '<a href="#" title="Download the runnable notebook for this investigation" ' +
-            'onclick="window._vivNotebookFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ notebook</a>' +
-          (iset.n_figures ? '<a href="#" title="Download all figures for this investigation (studies figures + post-study composites), as a zip" ' +
-            'onclick="window._vivFiguresFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ figures</a>' : '') +
+          '<span style="white-space:nowrap">' + window._vivInvLinksHtml(iset) + '</span>' +
         '</div>' +
         '<div class="iset-studies-detail" style="display:' + (full ? 'block' : 'none') + ';margin-top:8px;border-top:1px solid #f1f5f9;padding-top:6px">' + (studyRows || '<span class="muted" style="font-size:0.85em">No studies.</span>') + '</div>' +
         // "Run this investigation in your terminal" chip (like the composite/process card).
@@ -10157,7 +10148,7 @@
     }
 
     var GRID = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px;margin:6px 0 14px';
-    var _isetFull = (window._isetZoom === 'full');
+    var _isetFull = false;  // the 'full' detail view was removed; cards render compact.
     // Render a grid of investigation cards. A header is drawn only when `label`
     // is given; called with '' it yields one flat, headerless grid (the single
     // combined list — no Active/Closed section split).
@@ -11236,15 +11227,7 @@
         '<td style="padding:7px 10px;text-align:right;color:' + (iset.n_studies ? '#1e293b' : '#cbd5e1') + '">' + (iset.n_studies || 0) + '</td>' +
         '<td style="padding:7px 10px;color:#64748b">' + (q ? _esc(q) : '<span style="color:#cbd5e1">—</span>') + '</td>' +
         '<td style="padding:7px 10px;white-space:nowrap;font-size:0.85em">' +
-          '<a href="#" title="Download the rendered HTML report for this investigation" ' +
-            'onclick="window._vivReportFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;margin-right:10px">↓ report</a>' +
-          '<a href="#" title="Download the runnable notebook for this investigation" ' +
-            'onclick="window._vivNotebookFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none">↓ notebook</a>' +
-          (iset.n_figures ? '<a href="#" title="Download all figures for this investigation (studies figures + post-study composites), as a zip" ' +
-            'onclick="window._vivFiguresFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;margin-left:10px">↓ figures</a>' : '') +
+          window._vivInvLinksHtml(iset) +
         '</td>' +
         '</tr>';
     }).join('');
@@ -15191,6 +15174,73 @@
     var a = document.createElement('a');
     a.href = url; a.download = name + '-figures.zip';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
+
+  // ── "Open in the browser" link variants (vs. the ↓ download handlers above) ──
+  // Report: open the self-contained HTML report inline in a new tab. Live route
+  // serves it inline by default (no ?download); snapshot is a plain .html file.
+  window._vivReportOpen = function (ev, name) {
+    if (ev) ev.stopPropagation();
+    window.open(_investigationReportUrl(name), '_blank', 'noopener');
+  };
+  // Report download, HTML or PDF (wraps the existing exporter).
+  window._vivReportDownload = function (ev, name, fmt) {
+    if (ev) ev.stopPropagation();
+    _downloadInvestigationReport(name, fmt);
+  };
+  // Notebook: open inline so the browser shows it (live serves ?download=0 inline;
+  // snapshot opens the static .ipynb).
+  window._vivNotebookOpen = function (ev, name) {
+    if (ev) ev.stopPropagation();
+    var c = window.__DASH_CONFIG__ || {};
+    var base = c.basePath || '';
+    var url = (c.mode === 'snapshot')
+      ? base + '/investigation-notebooks/' + encodeURIComponent(name) + '.ipynb'
+      : '/api/investigation-notebook/' + encodeURIComponent(name) + '?download=0';
+    window.open(url, '_blank', 'noopener');
+  };
+  // Figures: open a standalone figure gallery (every figure inline) in a new tab.
+  // Live: the server renders /figures.html; snapshot has no standalone gallery, so
+  // fall back to the report (which inlines the figures).
+  window._vivFiguresOpen = function (ev, name) {
+    if (ev) ev.stopPropagation();
+    var c = window.__DASH_CONFIG__ || {};
+    var base = c.basePath || '';
+    var url = (c.mode === 'snapshot')
+      ? base + '/reports/investigation-' + encodeURIComponent(name) + '.html'
+      : '/api/investigation/' + encodeURIComponent(name) + '/figures.html';
+    window.open(url, '_blank', 'noopener');
+  };
+
+  // Shared LINKS cell for an investigation (used by both the List table and the
+  // Cards view) — each artifact offers open-in-browser AND download, so nothing
+  // is forced to auto-download. report: open HTML | download HTML | download PDF;
+  // notebook: open | download .ipynb; figures (when present): open gallery | zip.
+  window._vivInvLinksHtml = function (iset) {
+    var nm = _esc(iset.name);
+    var lk = 'color:#3b82f6;text-decoration:none';
+    var lab = 'color:#94a3b8';
+    var sep = '<span style="color:#cbd5e1;margin:0 6px">·</span>';
+    var a = function (handler, text, title) {
+      return '<a href="#" title="' + title + '" style="' + lk + '" onclick="' + handler + ';return false;">' + text + '</a>';
+    };
+    var groups = [
+      '<span style="' + lab + '">report</span> ' +
+        a("window._vivReportOpen(event,'" + nm + "')", 'open', 'Open the HTML report in a new browser tab') + ' ' +
+        a("window._vivReportDownload(event,'" + nm + "','html')", 'html', 'Download the HTML report') + ' ' +
+        a("window._vivReportDownload(event,'" + nm + "','pdf')", 'pdf', 'Download the PDF report'),
+      '<span style="' + lab + '">notebook</span> ' +
+        a("window._vivNotebookOpen(event,'" + nm + "')", 'open', 'Open the runnable notebook in a new browser tab') + ' ' +
+        a("window._vivNotebookFromCard(event,'" + nm + "')", 'ipynb', 'Download the runnable .ipynb notebook'),
+    ];
+    if (iset.n_figures) {
+      groups.push(
+        '<span style="' + lab + '">figures</span> ' +
+          a("window._vivFiguresOpen(event,'" + nm + "')", 'open', 'See the figures in a new browser tab') + ' ' +
+          a("window._vivFiguresFromCard(event,'" + nm + "')", 'zip', 'Download all figures as a zip')
+      );
+    }
+    return groups.join(sep);
   };
   // A single study's OUTPUTS (its image figures + any embedded HTML report /
   // dashboard and its viz assets) as a zip.

@@ -313,3 +313,26 @@ def test_figures_zip_index_is_navigable_gallery(tmp_path):
     local = {r for r in refs if not r.startswith("http")}
     assert local and local <= names
     assert 'href="html-01/mass.html" download' in idx  # per-figure download link
+
+
+def test_build_figures_gallery_page_embeds_figures_inline(tmp_path):
+    """The standalone gallery (open-figures-in-browser) returns a self-contained
+    HTML page with every figure embedded as a data: URI — no external file refs."""
+    html = figs.build_figures_gallery_page(_make_ws(tmp_path), "inv")
+    assert html is not None
+    assert html.lstrip().lower().startswith("<!doctype html>")
+    # declared figures are inlined as data: URIs (not relative in-zip paths), so
+    # the page stands alone with no external requests
+    assert "data:image/svg+xml;base64," in html
+    assert 'src="data:' in html and "/studies/" not in html  # nothing links to a file path
+    # the gallery names the investigation and groups by study
+    assert "inv" in html
+    assert "fig-07" in html and "fig-99" in html
+
+
+def test_build_figures_gallery_page_none_without_figures(tmp_path):
+    """No figures → None (the route turns this into a 404), never a broken page."""
+    inv = {"name": "empty", "title": "Empty", "studies": []}
+    _write(tmp_path / "investigations" / "empty" / "investigation.yaml",
+           __import__("yaml").safe_dump(inv))
+    assert figs.build_figures_gallery_page(tmp_path, "empty") is None

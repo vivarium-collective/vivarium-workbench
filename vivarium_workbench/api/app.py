@@ -4238,6 +4238,37 @@ def create_app() -> FastAPI:
         )
 
     @app.get(
+        "/api/investigation/{slug}/figures.html",
+        tags=["Downloads"],
+        summary="Standalone HTML figure gallery (figures inlined) — open in browser",
+        response_class=Response,
+    )
+    def investigation_figures_gallery_route(
+        slug: str,
+        ws: Path = Depends(get_workspace),
+    ) -> Response:
+        """Serve a self-contained HTML gallery of all the investigation's figures
+        (each embedded inline as a ``data:`` URI), so the figures can be VIEWED in
+        the browser rather than only downloaded as a zip. Served inline
+        (``text/html``, no ``Content-Disposition``).
+
+        404 ``{"error": …}`` when the investigation has no displayable figures.
+        Library-backed via ``lib.investigation_figures.build_figures_gallery_page``.
+        """
+        from vivarium_workbench.lib import investigation_figures as _figs
+        html = _figs.build_figures_gallery_page(ws, slug)
+        if html is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"no figures for investigation {slug!r}"},
+            )
+        return Response(
+            content=html,
+            media_type="text/html",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get(
         "/api/investigation/{slug}/figures.zip",
         tags=["Downloads"],
         summary="Zip of ALL investigation figures (panels + composites)",
@@ -4421,14 +4452,16 @@ def create_app() -> FastAPI:
     def investigation_notebook_route(
         slug: str,
         format: str = "ipynb",
+        download: int = 1,
         ws: Path = Depends(get_workspace),
     ) -> Response:
         """Generate + download an investigation's notebook/script (mirrors the
         stdlib GET /api/investigation-notebook/<slug>[?format=py]).
 
         Deterministic export (no AI). ``?format=py`` → ``text/x-python``;
-        otherwise → ``application/x-ipynb+json``.  Served as an attachment with
-        ``Cache-Control: no-store``.
+        otherwise → ``application/x-ipynb+json``. Served as an attachment with
+        ``Cache-Control: no-store`` by default; ``?download=0`` serves it inline
+        so the browser can open it in a new tab.
 
         HTTP 400 ``{"error": "investigation slug required"}`` when ``slug`` is
         empty; HTTP 404 ``{"error": "no investigation '<slug>'"}`` when absent;
@@ -4445,14 +4478,10 @@ def create_app() -> FastAPI:
         # Set Content-Type via headers (not media_type) so Starlette does not
         # append "; charset=utf-8" to the legacy bare "text/x-python" /
         # "application/x-ipynb+json" values — keeps the header byte-identical.
-        return Response(
-            content=data,
-            headers={
-                "Content-Type": mime,
-                "Cache-Control": "no-store",
-                "Content-Disposition": f'attachment; filename="{filename}"',
-            },
-        )
+        headers = {"Content-Type": mime, "Cache-Control": "no-store"}
+        if download:
+            headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return Response(content=data, headers=headers)
 
     @app.get(
         "/api/study/{slug}/notebook",
