@@ -156,15 +156,31 @@ jobs:
 
   core-only-result:
     # The stable check name for branch protection (like `suite`); required once step P3 ends.
+    #
+    # It reads the shards' real conclusions from the API rather than `needs.core-only.result`: with job-level
+    # continue-on-error, `needs.<job>.result` is `success` even when every shard failed, so the K1 check would be
+    # green while it enforces nothing. Non-blocking itself (continue-on-error) until step Z (K3) removes both.
     name: core-only
     needs: core-only
     if: always()
     runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      actions: read
     steps:
       - name: Check core-only shard results
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ "${{ needs.core-only.result }}" != "success" ]]; then
-            echo "::error::one or more core-only shards failed (${{ needs.core-only.result }})"
+          set -euo pipefail
+          conclusions="$(gh api --paginate "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}/jobs" \
+            --jq '.jobs[] | select(.name | test("^core-only [0-9]+/[0-9]+$")) | "\(.name)=\(.conclusion)"')"
+          echo "$conclusions"
+          if [[ -z "$conclusions" ]]; then
+            echo "::error::no core-only shard jobs found"; exit 1
+          fi
+          if grep -qv '=success$' <<<"$conclusions"; then
+            echo "::error::one or more core-only shards failed (needs.result: ${{ needs.core-only.result }})"
             exit 1
           fi
           echo "all core-only shards passed"
