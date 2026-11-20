@@ -51,12 +51,12 @@ def broken_plugin(monkeypatch):
 # --- the provider's half (needs the plugin) --------------------------------------------------------------------------
 
 def _sms():
-    pytest.importorskip("vivarium_workbench_sms")
     from vivarium_workbench_sms.provider import PROVIDER
 
     return PROVIDER
 
 
+@pytest.mark.plugin
 def test_the_sms_provider_answers_its_config(monkeypatch):
     p = _sms()
     assert (p.base_url(), p.configured(), p.deployment_default()) == ("http://localhost:8080", False, "smsvpctest")
@@ -70,6 +70,7 @@ def test_the_sms_provider_answers_its_config(monkeypatch):
     assert p.base_url() == "http://compose.test"  # the named backend first, as sms_api_base always read it
 
 
+@pytest.mark.plugin
 def test_the_core_names_the_backend_only_through_the_named_url(monkeypatch):
     """``backend_config`` (which may not ask providers) knows only the named URL; the alias and the tunnel are the
     provider's (``backends.config`` adds them)."""
@@ -187,8 +188,9 @@ def test_a_provider_that_failed_to_load_gets_the_hint(broken_plugin, capsys):
     assert cli.NO_PROVIDER_HINT in capsys.readouterr().err
 
 
+@pytest.mark.plugin
 def test_no_hint_while_a_provider_adds_subcommands(capsys):
-    pytest.importorskip("vivarium_workbench_sms")
+    import vivarium_workbench_sms  # noqa: F401  (a provider that adds subcommands)
     from vivarium_workbench import cli
 
     with pytest.raises(SystemExit):

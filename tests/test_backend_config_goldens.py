@@ -36,6 +36,14 @@ ENVS = {
 }
 
 
+def _matrix(on: dict, off: dict) -> list:
+    """Each case in both modes, case-major ids (``named-on``). An ``on`` case needs the plugin (``plugin`` mark: strict
+    xfail when it is absent) unless its golden is the same as with providers off -- the plugin then changes nothing."""
+    return [pytest.param(case, mode, id=f"{case}-{mode}",
+                         marks=pytest.mark.plugin if mode == "on" and on[case] != off[case] else ())
+            for case in on for mode in ("on", "off")]
+
+
 @pytest.fixture
 def env(monkeypatch):
     for v in _ALL:
@@ -123,8 +131,7 @@ OFF = {
 }
 
 
-@pytest.mark.parametrize("mode", ["on", "off"])
-@pytest.mark.parametrize("case", list(ENVS))
+@pytest.mark.parametrize(("case", "mode"), _matrix(ON, OFF))
 def test_check_url_and_deployment(env, case, mode):
     env(case, mode)
     assert (_check(), _url(), _deployment()) == (ON if mode == "on" else OFF)[case]
@@ -158,8 +165,7 @@ HEALTH_OFF = {
 }
 
 
-@pytest.mark.parametrize("mode", ["on", "off"])
-@pytest.mark.parametrize("case", list(HEALTH_ON))
+@pytest.mark.parametrize(("case", "mode"), _matrix(HEALTH_ON, HEALTH_OFF))
 def test_remote_health_body(env, case, mode, monkeypatch, tmp_path, inproc_client):
     from vivarium_workbench.lib import backend_config
 
@@ -246,8 +252,7 @@ SERVE_OFF = {
 }
 
 
-@pytest.mark.parametrize("mode", ["on", "off"])
-@pytest.mark.parametrize("case", list(ENVS))
+@pytest.mark.parametrize(("case", "mode"), _matrix(SERVE_ON, SERVE_OFF))
 def test_serve_startup_lines(env, case, mode, monkeypatch, tmp_path, capsys):
     env(case, mode)
     assert _serve(monkeypatch, tmp_path, capsys) == (SERVE_ON if mode == "on" else SERVE_OFF)[case]
@@ -287,13 +292,13 @@ NAMES_OFF = {
 }
 
 
-@pytest.mark.parametrize("mode", ["on", "off"])
-@pytest.mark.parametrize("case", list(NAMES_ON))
+@pytest.mark.parametrize(("case", "mode"), _matrix(NAMES_ON, NAMES_OFF))
 def test_deployment_names_now(env, case, mode):
     env(case, mode)
     assert _names_now() == (NAMES_ON if mode == "on" else NAMES_OFF)[case]
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("case", ["nothing", "named", "sms-alias"])
 def test_an_smsvpctest_row_proceeds_with_providers_on(env, case, tmp_path):
     """A row written before step 1c by the historical default deployment is still this workbench's (providers on)."""

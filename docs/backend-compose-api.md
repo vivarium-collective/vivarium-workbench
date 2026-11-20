@@ -125,7 +125,8 @@ simulation ids, so the compose check runs before them.
 
 **Not on compose-api:** the SMS-only flows (pinned and switched builds, `/api/v1/analyses`, chain campaigns). A
 workbench talks to one remote backend: naming compose-api beside an `SMS_API_BASE` / `VIVA_API_BASE` alias that points
-elsewhere is refused at startup (`sms_api_client.check_single_backend`; docs/backend-adapters.md step 1c).
+elsewhere is refused at startup (`backends.config.check_config`, which asks each active provider's `check_config`;
+docs/backend-adapters.md steps 1c and P3 C1). With providers off the alias is ignored with a startup warning.
 
 ## Onboarding a workspace
 
