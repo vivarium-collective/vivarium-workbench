@@ -125,7 +125,9 @@ def _row(exp, db_id, status, iso, *, study=None, inv=None, out_uri=True):
             # The SimRow model keeps neither the row's ``source: "remote"`` nor ``remote_origin.build``.
             "source": None,
             "remote_origin": {"deployment": "golden-dep", "simulation_id": db_id, "experiment_id": exp,
-                              "backend": "q-golden", "s3_uri": uri}}
+                              "backend": "q-golden", "s3_uri": uri,
+                              # Step P3 F0 (additive): a listed run's features are its listing backend's.
+                              "features": ["analyses", "artifacts"]}}
 
 
 #: The merged rows, in the payload's order (active runs pinned first, then newest-first).
