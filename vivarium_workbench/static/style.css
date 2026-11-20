@@ -4722,6 +4722,7 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 .model-subtab.active { color:#1e293b; border-bottom-color:#2563eb; }
 .model-subtab-count { font-size:0.72em; font-weight:700; background:#eef2ff; color:#4338ca;
   border-radius:9999px; padding:1px 7px; line-height:1.6; }
+.model-subtabs-action { margin-left:auto; align-self:center; }
 .model-subpanel[hidden] { display:none; }
 
 /* Variants / Interventions — clean card list + labelled add card */

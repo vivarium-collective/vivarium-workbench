@@ -893,25 +893,22 @@
 
 {# ─── Model tab (Design): composition + Readouts ────────────────────────────── #}
 <section class="study-tab-panel" data-kind="compose" id="panel-compose" hidden>
-  <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
-    <h2 class="overview-label" style="margin:0">Model composition</h2>
-    {# Download the runnable notebook for this study's investigation (includes
-       this study, with its composite + exposed parameters). Lives in the Model
-       tab — where the composition/params are — rather than the header. #}
-    <button type="button" class="btn-mini" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')" title="Download a runnable Jupyter notebook for THIS study — its composite + editable parameters + figures">↓ notebook</button>
-  </div>
-
   {# Sub-tabs within the Model tab: Composition | Variants | Interventions |
-     Readouts. Composition is the composite/params surface; the other three
-     used to be stacked below it and are now their own panes. Mirrors the
-     Simulations sim-subtab pattern — _setModelSubtab() in study-detail.js
-     just toggles which .model-subpanel is visible (all are server-rendered
-     at load, so their JS hooks bind unchanged). #}
+     Readouts. (The redundant "MODEL COMPOSITION" heading row was dropped — the
+     tabs are the label.) The ↓ notebook download moves onto the tab row,
+     right-aligned. Composition is the composite/params surface; the other
+     three used to be stacked below it and are now their own panes. Mirrors
+     the Simulations sim-subtab pattern — _setModelSubtab() in study-detail.js
+     just toggles which .model-subpanel is visible (all server-rendered at
+     load, so their JS hooks bind unchanged). #}
   <div class="model-subtabs" role="tablist" aria-label="Model sections">
     <button type="button" class="model-subtab active" data-modelsub="composition" role="tab" aria-selected="true" onclick="_setModelSubtab('composition')">Composition</button>
     <button type="button" class="model-subtab" data-modelsub="variants" role="tab" aria-selected="false" onclick="_setModelSubtab('variants')">Variants{% if study.variants %} <span class="model-subtab-count">{{ study.variants | length }}</span>{% endif %}</button>
     <button type="button" class="model-subtab" data-modelsub="interventions" role="tab" aria-selected="false" onclick="_setModelSubtab('interventions')">Interventions{% if study.interventions %} <span class="model-subtab-count">{{ study.interventions | length }}</span>{% endif %}</button>
     <button type="button" class="model-subtab" data-modelsub="readouts" role="tab" aria-selected="false" onclick="_setModelSubtab('readouts')">Readouts</button>
+    {# Download the runnable notebook for this study (composite + exposed
+       parameters + figures). Right-aligned on the tab row via margin-left:auto. #}
+    <button type="button" class="btn-mini model-subtabs-action" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')" title="Download a runnable Jupyter notebook for THIS study — its composite + editable parameters + figures">↓ notebook</button>
   </div>
 
   <div class="model-subpanel active" data-modelsubpanel="composition">
