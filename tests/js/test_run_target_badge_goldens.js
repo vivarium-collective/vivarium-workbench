@@ -27,7 +27,8 @@ function extract(name) {
 
 function computeWith(win) {
   // eslint-disable-next-line no-new-func
-  return new Function('window', extract('_computeRunTarget') + '\nreturn _computeRunTarget;')(win);
+  return new Function('window', extract('_selectedBuildTip') + '\n' + extract('_computeRunTarget') +
+    '\nreturn _computeRunTarget;')(win);
 }
 
 // The SMS preflight's `tip` (vivarium_workbench_sms/cloud_dispatch.SELECTED_BUILD_TIP): the card fills in the
@@ -76,6 +77,18 @@ function run() {
     tip: 'Cloud is active but no build is selected — a Run is blocked. Pick or build one, or switch to Local.',
   }, AMBER), 'SMS, Cloud scope, no build');
 
+  // No `tip` (a backend that has none, or no preflight answer): the neutral core text (step P3 F4b; before F4b this
+  // was the SMS text whatever the backend).
+  const NEUTRAL_124 = Object.assign({ label: '▶ Run → ☁ Cloud · build #124',
+    tip: '▶ Run dispatches to the remote backend against build #124 (abcdef1). ' +
+      'It runs the build’s committed code — local edits not in that build won’t apply.' }, GREEN);
+  const build124 = computeWith(cloudEnv({ simulator_id: 124, commit: 'abcdef1234567' }));
+  check(build124(Object.assign({}, SMS_IMAGE, { tip: undefined })), NEUTRAL_124, 'Cloud scope, a build, no tip');
+  check(build124(VIVA_CORE), NEUTRAL_124, 'Cloud scope, a build, viva-core preflight');
+  check(build124(null), NEUTRAL_124, 'Cloud scope, a build, no preflight answer');
+  check(build124(Object.assign({}, SMS_IMAGE, { tip: '' })), NEUTRAL_124, 'an empty tip is no tip');
+  check(build124(Object.assign({}, SMS_IMAGE, { tip: 42 })), NEUTRAL_124, 'a non-string tip is no tip');
+
   // SMS, the Environment scope on Local: the workspace's own preflight (an image resolves).
   const local = computeWith({ VivEnv: { isCloud: () => false, runBuild: () => null, setScope: () => {} } });
   check(local(SMS_IMAGE), Object.assign({ label: 'Runs: Cloud', tip: SMS_IMAGE.message }, BLUE), 'SMS image preflight');
@@ -113,7 +126,7 @@ function run() {
   const doc = { querySelectorAll: () => [badge] };
   // eslint-disable-next-line no-new-func
   const apply = new Function('window', 'document',
-    extract('_computeRunTarget') + '\n' + extract('_runTargetClickable') + '\n' + extract('_applyRunTargetBadges') +
+    extract('_selectedBuildTip') + '\n' + extract('_computeRunTarget') + '\n' + extract('_runTargetClickable') + '\n' + extract('_applyRunTargetBadges') +
     '\nreturn _applyRunTargetBadges;')({}, doc);
   apply(null);
   check({ text: badge.textContent, title: badge.title, bg: badge.style.background, fg: badge.style.color,
