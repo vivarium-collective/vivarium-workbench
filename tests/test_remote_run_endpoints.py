@@ -33,6 +33,7 @@ def test_remote_run_start_requires_login(monkeypatch, tmp_path):
     assert code == 401
 
 
+@pytest.mark.plugin  # since C1 the SMS_API_BASE / VIVA_API_BASE isolation only takes effect through the plugin
 def test_test_suite_cannot_reach_a_live_deployment(
     inproc_client, tmp_path, _isolate_viva_api_base
 ):
