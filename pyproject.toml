@@ -278,11 +278,9 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-# docs/backend-adapters.md §2.4, step P1b: the core does not import the SMS plugin. Every edge that remains is
-# listed below; THIS LIST IS THE RATCHET. Each step-P2 PR removes the entries it makes unnecessary and none may
-# add one (an entry that matches no import fails the check, so a stale one cannot linger). The lazy registry
-# imports in lib.backends were replaced by step P1c's one registry edge (lib.backends.provider), which step P4's
-# entry point removes; the list is empty at step P4.
+# docs/backend-adapters.md §2.4: the core does not import the SMS plugin. Since step P2 closed (Routes Rt3) the
+# only edge is the registry's (lib.backends.provider finds the provider by importing it); step P4's entry point
+# removes it and the list is empty. Nothing may be added (an entry that matches no import fails the check).
 name = "the core does not import the SMS plugin (vivarium_workbench_sms), except the listed edges"
 type = "forbidden"
 source_modules = ["vivarium_workbench"]
