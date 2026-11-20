@@ -285,6 +285,30 @@ def status_tail(params: dict) -> tuple[dict, int]:
         }, 502
 
 
+#: viva-api ``ComposeJobStatus`` values that mean the run is over (moved verbatim from ``run_jobs``, step P2 Runs c2).
+#: Anything not listed — waiting/queued/running/pending/suspended, or an absent
+#: status — leaves the item ``submitted``: an unknown state is not a finished one.
+_UPSTREAM_DONE = frozenset({"completed"})
+_UPSTREAM_FAILED = frozenset({"failed", "cancelled", "out_of_memory", "timeout"})
+
+
+def status_batch(run_ids: "list[str]") -> "dict[str, dict]":
+    """The SMS half of ``run_jobs.refresh_submitted`` (moved from its ``_refresh_sms``, step P2 Runs c2): the status
+    of several integer simulations in ONE ``compose_status_batch`` call, as ``runs.status``-shaped bodies keyed by
+    the id's text (:class:`vivarium_workbench.lib.backends.BatchStatus`). An id viva-api did not answer is absent.
+    Raises when viva-api does not answer, or answers a status that is not text (the caller keeps the items
+    ``submitted``)."""
+    rows = SmsApiClient(_sms_api_base()).compose_status_batch([int(r) for r in run_ids])
+    out: "dict[str, dict]" = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        upstream = (row.get("status") or "").lower()
+        phase = "done" if upstream in _UPSTREAM_DONE else "failed" if upstream in _UPSTREAM_FAILED else "running"
+        out[str(row.get("sim_id"))] = {"phase": phase, "raw_status": upstream, "error": row.get("error_message")}
+    return out
+
+
 def chain_progress_tail(params: dict) -> tuple[dict, int]:
     """The SMS half of ``remote_run_views.chain_progress``, moved verbatim."""
     sim_id = params.get("simulation_id")
@@ -485,6 +509,10 @@ class SmsLegacyRuns:
 
     def status(self, run_id: str) -> tuple[dict, int]:
         return status_tail({"simulation_id": run_id})
+
+    def status_many(self, run_ids: "list[str]") -> "dict[str, dict]":
+        """The optional batch status (:class:`vivarium_workbench.lib.backends.BatchStatus`): one viva-api call."""
+        return status_batch(run_ids)
 
     def progress(self, run_id: str) -> tuple[dict, int]:
         return chain_progress_tail({"simulation_id": run_id})
