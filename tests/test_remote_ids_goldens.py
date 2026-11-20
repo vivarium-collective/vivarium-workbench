@@ -3,11 +3,15 @@
 The composite-run routes the loom (and viva-superpowers' skills) poll with the synthetic ``remote-sim-<id>`` run id
 (status, stop, trajectory), and the refusal bodies of the SMS-only operations (re-run, land-artifacts) for a run
 whose backend does not offer them. Whole bodies are compared, so any drift shows.
+
+Needs the SMS plugin (its fixtures fake the plugin's client); the pure-core P3 I1 pins live in
+``test_remote_run_prefix.py``.
 """
 from __future__ import annotations
 
 import pytest
 
+import vivarium_workbench_sms  # noqa: F401 -- needs the plugin (core-only mode ignores this module)
 from test_backends_existing import HERE, _record, asked, ws  # noqa: F401 -- fixtures, found by name
 from vivarium_workbench.lib import composite_run_views as crv
 from vivarium_workbench.lib import composite_stop_views as csv_
@@ -63,10 +67,21 @@ def test_status_without_an_id_is_404(ws, asked, given):
     assert asked == []
 
 
-def test_status_of_a_zero_suffix_is_the_sms_required_answer(ws, asked):
-    assert crv.build_composite_run_status(ws, "remote-sim-0") == (
+@pytest.mark.parametrize("given", ["remote-sim-0", "remote-sim-00", "remote-sim-+0", "remote-sim--0",
+                                   "remote-sim- 0 "])
+def test_status_of_a_zero_suffix_is_the_sms_required_answer(ws, asked, given):
+    """Every spelling of zero (the base ``int()``-ed it to 0) is no id: the SMS half's "required" answer."""
+    assert crv.build_composite_run_status(ws, given) == (
         {"error": "simulator_id, simulation_id or analysis_id required"}, 400)
     assert asked == []
+
+
+def test_status_of_a_negative_suffix_is_passed_on_as_given(ws, asked):
+    """DECLARED (P3 I1): a negative integer spelling is no longer ``int()``-ed; it is passed on (and echoed) as the
+    string ``"-12"`` (the base echoed ``-12``); it went to the same backend before. No backend issues negative ids."""
+    body, status = crv.build_composite_run_status(ws, "remote-sim--12")
+    assert (status, body["simulation_id"], body["run_id"]) == (200, "-12", "remote-sim--12")
+    assert asked == [("viva", "status")]
 
 
 def test_status_route_keeps_the_prefix_and_the_status_key(ws, asked, inproc_client):
@@ -130,43 +145,10 @@ def test_the_refusal_through_the_route(ws, asked, inproc_client):
     assert (r.status_code, r.json()["reason"], r.json()["phase"]) == (409, NOT_OFFERED, NOT_OFFERED)
 
 
-# --- P3 I1 pins ----------------------------------------------------------------------------------------------------
-
-def test_the_core_spells_the_remote_run_prefix_only_in_ids():
-    """The ``remote-sim-`` prefix is one core constant (``lib/backends/ids.py``); no other core string constant
-    (docstrings included) spells it."""
-    import ast
-    from pathlib import Path
-
-    core = Path(__file__).resolve().parent.parent / "vivarium_workbench"
-    found = []
-    for path in core.rglob("*.py"):
-        rel = path.relative_to(core).as_posix()
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str) and "remote-sim-" in node.value:
-                found.append(rel)
-    assert sorted(found) == ["lib/backends/ids.py"]
-
-
-def test_the_prefix_is_the_external_contract():
-    from vivarium_workbench.lib.backends.ids import REMOTE_RUN_PREFIX, remote_run_id
-
-    assert REMOTE_RUN_PREFIX == "remote-sim-"
-    assert remote_run_id(9) == "remote-sim-9" and remote_run_id("simulation-V") == "remote-sim-simulation-V"
-
+# --- P3 I1 plugin pin ------------------------------------------------------------------------------------------------
 
 def test_the_plugins_cloud_dispatch_uses_the_core_prefix():
     from pathlib import Path
 
     src = (Path(__file__).resolve().parent.parent / "vivarium_workbench_sms" / "cloud_dispatch.py").read_text()
     assert '"remote-sim-' not in src and "remote_run_id(sim_db_id)" in src
-
-
-def test_the_study_page_accepts_both_refusal_literals():
-    """The browser accepts ``not-offered`` and the pre-I1 ``not-sms`` (a page loaded before the upgrade, or a server
-    behind it), in both places it reads the refusal phase."""
-    from pathlib import Path
-
-    detail = (Path(__file__).resolve().parent.parent / "vivarium_workbench" / "static" / "study-detail.js").read_text()
-    assert "d.phase === 'other-backend' || d.phase === 'not-offered' || d.phase === 'not-sms'" in detail
-    assert "d.phase !== 'other-backend' && d.phase !== 'not-offered' && d.phase !== 'not-sms'" in detail

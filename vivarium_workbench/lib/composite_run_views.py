@@ -178,11 +178,14 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
 
         # Opaque run ids: the suffix is the run's id on its backend, whatever its form, passed on as a string;
         # remote_run_status routes it by its record. An integer spelling is normalised as every route's query
-        # parameter is (``opaque_run_id``: "+12", "0012" -> "12"); "0" stays "0", which the status view reads as no id.
+        # parameter is (``opaque_run_id``: "+12", "0012" -> "12"). Every spelling of zero ("0", "00", "+0", "-0", which
+        # the old ``int()`` read as 0) becomes "" (no id), which the status view answers with the old "required" 400.
         suffix = run_id[len(REMOTE_RUN_PREFIX):].strip()
-        if not suffix:  # no id at all (as before); a "0" still goes on to the old "required" answer
+        if not suffix:  # no id at all (as before); a zero still goes on to the old "required" answer
             return {"error": "run not found"}, 404
-        rid = _rrv.opaque_run_id(suffix) or suffix
+        rid = _rrv.opaque_run_id(suffix)
+        if rid[:1] == "-" and rid[1:].isascii() and rid[1:].isdigit() and not rid[1:].strip("0"):
+            rid = ""  # "-0": opaque_run_id keeps a minus sign (no id has one), but int() read it as 0
         # This process dispatched it, to its own deployment (step 1c-2: an older row of another deployment with
         # the same integer id must not be taken for it).
         st, code = _rrv.remote_run_status({"simulation_id": rid, "deployment": remote_deployment_name()},

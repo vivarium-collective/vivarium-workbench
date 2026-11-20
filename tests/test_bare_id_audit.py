@@ -3,7 +3,9 @@ backend. Every caller of the existing-run router (``backends.for_existing`` and 
 its providers-off answer to ``12``: the terminal 409 ``backend-not-installed``, or a documented absence.
 
 ``test_every_router_caller_is_audited`` keeps the table honest: a new caller of the router in the core fails it until
-it is added here with its answer.
+it is added here with its answer. It finds callers by the called name only (a direct call of ``for_existing`` or a
+wrapper, or ``backends.resolve``) inside a top-level function or class; aliases (``fe = backends.for_existing``) and
+indirect calls (the router passed as a callback, ``getattr``) are not followed.
 
 Core-only compliant: the plugin is never imported at module level (when it is installed, its SMS client is a tripwire).
 """
