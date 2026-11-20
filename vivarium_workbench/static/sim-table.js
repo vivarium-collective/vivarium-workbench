@@ -1093,6 +1093,6 @@
     originLabel: originLabel, fmtTime: fmtTime, location: location, study: study,
     investigation: investigation, composite: composite, sourceCell: sourceCell, toolsCell: toolsCell,
     renderRow: renderRow, renderTable: renderTable, dropEmptyColumns: dropEmptyColumns,
-    rowWhere: _rowWhere, whereQuery: _whereQuery,
+    rowWhere: _rowWhere, whereQuery: _whereQuery, actionList: _actionList,
   };
 })();
