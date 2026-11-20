@@ -6,9 +6,9 @@ every test module that imports the plugin at module level (it cannot be collecte
 module level must be a pure-plugin module and say so with ``pytestmark = pytest.mark.plugin``.
 
 ``UNMARKED_PLUGIN_IMPORTERS`` is a ratchet: the modules that imported the plugin at module level without the mark when
-the core-only job arrived (K1). Step P3's K2 PRs empty it -- moving the import into the tests that need it and marking
-those, or marking a pure-plugin module whole. It may only shrink: a new module that imports the plugin at module level
-must be marked, and an entry that no longer applies must be removed.
+the core-only job arrived (K1: 51 modules). Step P3's K2 PRs empty it -- moving the import into the tests that need it
+and marking those, or marking a pure-plugin module whole. It may only shrink: a new module that imports the plugin at
+module level must be marked, and an entry that no longer applies must be removed.
 
 This guard runs in the normal suite (it needs the plugin present to mean anything).
 """
@@ -71,6 +71,8 @@ UNMARKED_PLUGIN_IMPORTERS: frozenset[str] = frozenset({
     "test_sms_capabilities.py",
     "test_source_branch.py",
     "test_source_build_views_lib.py",
+    "test_store_fetch.py",
+    "test_store_fetch_goldens.py",
     "test_trace_dispatch_table.py",
     "test_viva_v1_client_contract.py",
 })
