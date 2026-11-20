@@ -177,6 +177,7 @@ def _stub_remote_boundaries(monkeypatch):
         lambda ws, cid, path, overrides=None: Path(path).write_bytes(b"{}"))
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("n_steps,expected", [
     (5000, 1000.0),   # over the ceiling → clamped to 1000
     (2700, 1000.0),   # the default_n_steps that would 400 → clamped
@@ -193,6 +194,7 @@ def test_run_remote_clamps_steps(tmp_path, monkeypatch, n_steps, expected):
     assert client.interval_time == expected
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize(("n_steps", "clamped"), [(5000, True), (1001, True), (1000, False), (20, False)])
 def test_run_remote_says_when_it_clamps_steps(tmp_path, monkeypatch, capsys, n_steps, clamped):
     """The clamp itself is unchanged (above); what changes is that the run log says it happened, so a run that
@@ -234,6 +236,7 @@ class _AnalysisOptionsCaptureClient:
         return p
 
 
+@pytest.mark.plugin
 def test_run_remote_forwards_analysis_options_to_compose_submit(tmp_path, monkeypatch):
     """A truthy analysis_options reaches client.compose_submit(analysis_options=...)
     unchanged."""
@@ -248,6 +251,7 @@ def test_run_remote_forwards_analysis_options_to_compose_submit(tmp_path, monkey
     assert client.compose_submit_kwargs["analysis_options"] == options
 
 
+@pytest.mark.plugin
 def test_run_remote_omits_analysis_options_kwarg_when_falsy(tmp_path, monkeypatch):
     """analysis_options=None (the default, every pre-Task-8 caller) must NOT
     add an analysis_options kwarg to the compose_submit call at all -- proven
@@ -290,6 +294,7 @@ def _forbid_git_pip_url(monkeypatch):
     monkeypatch.setattr(remote_run, "git_pip_url", _boom)
 
 
+@pytest.mark.plugin
 def test_run_remote_pinned_derives_pip_url_from_built_commit(tmp_path, monkeypatch):
     """Pinned mode: the pip URL is git+<repo>.git@<resolved commit> and git_pip_url
     (which would raise on the dirty prod /workspace) is never called."""
@@ -312,6 +317,7 @@ def test_run_remote_pinned_derives_pip_url_from_built_commit(tmp_path, monkeypat
         "git+https://github.com/vivarium-collective/v2ecoli.git@abcdef123456"]
 
 
+@pytest.mark.plugin
 def test_run_remote_pinned_normalizes_dotgit_repo_url(tmp_path, monkeypatch):
     """A repo_url that already ends in .git yields a single .git suffix (no dupe)."""
     from vivarium_workbench_sms import deployment_run
@@ -332,6 +338,7 @@ def test_run_remote_pinned_normalizes_dotgit_repo_url(tmp_path, monkeypatch):
         "git+https://github.com/vivarium-collective/v2ecoli.git@deadbeef"]
 
 
+@pytest.mark.plugin
 def test_run_remote_unpinned_falls_back_to_git_pip_url(tmp_path, monkeypatch):
     """Local dev (no pinned config): keeps the clean+pushed git_pip_url path."""
     from vivarium_workbench_sms import deployment_run
@@ -344,6 +351,7 @@ def test_run_remote_unpinned_falls_back_to_git_pip_url(tmp_path, monkeypatch):
     assert client.extra_pip_deps == ["git+file:///x@abc1234"]
 
 
+@pytest.mark.plugin
 def test_run_remote_pinned_no_build_raises(tmp_path, monkeypatch):
     """Pinned mode with no built simulator surfaces NoPinnedBuildError, so the
     detached runner (_execute_remote) marks the run failed rather than submitting

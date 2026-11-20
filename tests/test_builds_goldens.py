@@ -80,6 +80,7 @@ def test_config_off(ws, no_pin, inproc_client):
     assert (r.status_code, r.text) == (200, '{"pinned":false,"deployment":"smscdk"}')
 
 
+@pytest.mark.plugin
 def test_config_pinned(ws, pin, monkeypatch, inproc_client):
     seen = _builds(monkeypatch, _V75)
     r = inproc_client(ws).get("/api/remote-run-config")
@@ -88,6 +89,7 @@ def test_config_pinned(ws, pin, monkeypatch, inproc_client):
     assert seen == [("http://127.0.0.1:1", PIN_REPO, "main")]
 
 
+@pytest.mark.plugin
 def test_config_pin_unresolved(ws, pin, monkeypatch, inproc_client):
     _builds(monkeypatch, [])
     r = inproc_client(ws).get("/api/remote-run-config")
@@ -96,6 +98,7 @@ def test_config_pin_unresolved(ws, pin, monkeypatch, inproc_client):
                                             'one first"}' % (PIN_REPO, PIN_REPO))
 
 
+@pytest.mark.plugin
 def test_config_session_build_wins_and_asks_nothing(ws, pin, monkeypatch, inproc_client):
     seen = _builds(monkeypatch, _V75)
     _stamp(ws)
@@ -137,6 +140,7 @@ _REQUEST_75 = {"study": "demo", "simulator_id": 75, "num_generations": 2, "num_s
                "extra_params": {"knob": {"a": 1}}}
 
 
+@pytest.mark.plugin
 def test_study_baseline_on_a_pin_submits_the_resolved_build(ws, pin, monkeypatch, submits, inproc_client):
     _builds(monkeypatch, _V75)
     r = inproc_client(ws).post("/api/study-run-baseline", json={"study": "demo"})
@@ -145,6 +149,7 @@ def test_study_baseline_on_a_pin_submits_the_resolved_build(ws, pin, monkeypatch
     assert list(submits[0]) == list(_REQUEST_75)
 
 
+@pytest.mark.plugin
 def test_study_baseline_on_a_session_build_submits_its_id(ws, no_pin, monkeypatch, submits, inproc_client):
     _stamp(ws)
     r = inproc_client(ws).post("/api/study-run-baseline", json={"study": "demo", "run_parca": False})
@@ -152,6 +157,7 @@ def test_study_baseline_on_a_session_build_submits_its_id(ws, no_pin, monkeypatc
     assert submits == [{**_REQUEST_75, "simulator_id": 66, "run_parca": False}]
 
 
+@pytest.mark.plugin
 def test_study_baseline_with_no_resolvable_build_409s(ws, pin, monkeypatch, submits, inproc_client):
     _builds(monkeypatch, [])
     r = inproc_client(ws).post("/api/study-run-baseline", json={"study": "demo"})
@@ -163,6 +169,7 @@ def test_study_baseline_with_no_resolvable_build_409s(ws, pin, monkeypatch, subm
 
 # --- the build routes -------------------------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_source_builds(ws, monkeypatch, inproc_client):
     from vivarium_workbench_sms import remote_build_source
 
@@ -180,6 +187,7 @@ def test_source_builds(ws, monkeypatch, inproc_client):
     assert bases == ["http://127.0.0.1:1"]
 
 
+@pytest.mark.plugin
 def test_build_remote(ws, monkeypatch, inproc_client):
     from vivarium_workbench_sms import sms_api_client as sac
 
@@ -211,6 +219,7 @@ def prepares(monkeypatch):
     return seen
 
 
+@pytest.mark.plugin
 def test_switch_build(ws, tmp_path, monkeypatch, prepares, inproc_client):
     from vivarium_workbench.lib import session_registry
     from vivarium_workbench_sms import remote_build_source
@@ -235,6 +244,7 @@ def test_switch_build(ws, tmp_path, monkeypatch, prepares, inproc_client):
     assert str(session_registry.get("tab-b3").source_path) == str(clone)
 
 
+@pytest.mark.plugin
 def test_switch_build_refusal_binds_nothing(ws, prepares, inproc_client):
     r = _tc(inproc_client(ws)).post("/api/source/switch-build", json={}, headers={"X-VW-Session": "tab-b3x"})
     assert (r.status_code, r.json()) == (400, {"error": "missing 'simulator_id'"})
@@ -266,6 +276,7 @@ _OPERATIONS = {
 }
 
 
+@pytest.mark.plugin
 def test_the_build_routes_openapi_operations():
     from vivarium_workbench.api import app as appmod
 
@@ -279,10 +290,17 @@ def test_the_build_routes_openapi_operations():
         "Materialize a remote build's workspace and re-point in-process")
 
 
+@pytest.mark.plugin
 def test_read_only_keeps_build_remote_and_switch_build(ws, monkeypatch, prepares, inproc_client):
     monkeypatch.setenv("VIVARIUM_WORKBENCH_READONLY", "1")
     client = inproc_client(ws)
     assert client.post("/api/source/build-remote", json={"repo": "x"}).json() == {
         "error": "repo and branch are required"}
     assert client.post("/api/source/switch-build", json={}).json() == {"error": "missing 'simulator_id'"}
+
+
+def test_read_only_keeps_source_switch(ws, monkeypatch, prepares, inproc_client):
+    """The core's half of the read-only allowlist above: ``/api/source/switch`` is the core's route."""
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_READONLY", "1")
+    client = inproc_client(ws)
     assert client.post("/api/source/switch", json={}).json() == {"error": "missing 'path'"}

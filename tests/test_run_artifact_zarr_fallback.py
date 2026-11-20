@@ -1,6 +1,9 @@
 """Tests for composite_run_views.build_run_artifact's zarr-native Viz/Report
 fallback — real xarray/zarr I/O throughout (no mocking of the reader layer),
 exercising the actual code path a GovCloud/Ray-dispatched run hits.
+
+The sms-api fetch of an s3-only run is the SMS plugin's (marked ``plugin``); the local and zarr fallbacks are core
+(docs/backend-adapters.md step P3, K2b).
 """
 from __future__ import annotations
 
@@ -11,7 +14,6 @@ import pytest
 
 from vivarium_workbench.lib.composite_runs import connect, save_metadata
 from vivarium_workbench.lib.composite_run_views import build_run_artifact
-from vivarium_workbench_sms.remote_pinned import remote_deployment_name
 
 
 def make_fake_zarr(store_path, n_steps=4):
@@ -73,6 +75,7 @@ def test_unknown_run_with_no_local_file_still_404s(tmp_path):
     assert content == b""
 
 
+@pytest.mark.plugin
 def test_falls_back_through_sms_api_for_s3_only_run(tmp_path, monkeypatch):
     """The full chain for a GovCloud-dispatched run: store_path is s3://
     (nothing local), remote_origin carries a simulation_id, so the fallback
@@ -89,6 +92,7 @@ def test_falls_back_through_sms_api_for_s3_only_run(tmp_path, monkeypatch):
 
     from vivarium_workbench.lib import composite_run_views as crv
     from vivarium_workbench.lib import simulations_index as si
+    from vivarium_workbench_sms.remote_pinned import remote_deployment_name
 
     ws = tmp_path
     (ws / ".pbg").mkdir(parents=True)

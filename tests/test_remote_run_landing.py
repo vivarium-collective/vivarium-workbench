@@ -3,12 +3,20 @@ import sqlite3
 import tarfile
 from pathlib import Path
 
+import pytest
+
 from vivarium_workbench.lib.remote_run_landing import land_ptools_tsvs
-from vivarium_workbench_sms.sms_landing import (
-    RemoteRunSeedCountMismatch,
-    _count_parquet_rows,
-    land_remote_run,
-)
+
+
+# The SMS landing (``land_remote_run`` and friends) is the SMS plugin's: the tests that use it take the ``sl`` fixture
+# (or the golden tail) and are marked ``plugin``; ``land_ptools_tsvs`` and the core half of the seam check are core
+# (docs/backend-adapters.md step P3, K2b).
+@pytest.fixture
+def sl():
+    """The SMS plugin's ``sms_landing`` module."""
+    from vivarium_workbench_sms import sms_landing
+
+    return sms_landing
 
 
 def _make_remote_zarr_tar(tmp_path: Path, seed: int = 0) -> Path:
@@ -74,7 +82,8 @@ def _make_remote_zarr_tar_with_analysis(tmp_path: Path, seed: int = 0) -> Path:
     return tar_path
 
 
-def test_land_folds_analysis_manifest_into_pbg_runs_analyses_json(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_folds_analysis_manifest_into_pbg_runs_analyses_json(tmp_path: Path, sl):
     """Once the analysis job has completed, landing (with ws_root passed) must
     fold its ``analysis.json`` into .pbg/runs/<run_id>/analyses.json -- the exact
     local artifact contract composite_flush.run_flush's own (non-remote)
@@ -85,7 +94,7 @@ def test_land_folds_analysis_manifest_into_pbg_runs_analyses_json(tmp_path: Path
     study.mkdir(parents=True)
     tar = _make_remote_zarr_tar_with_analysis(tmp_path)
 
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study, spec_id="s", simulation_id=115, experiment_id="e", commit="c",
         tar_path=tar, ws_root=ws_root,
     )
@@ -100,7 +109,8 @@ def test_land_folds_analysis_manifest_into_pbg_runs_analyses_json(tmp_path: Path
     }]
 
 
-def test_land_without_analysis_manifest_writes_nothing(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_without_analysis_manifest_writes_nothing(tmp_path: Path, sl):
     """If the analysis job hasn't completed by the time this run lands, landing
     the simulation output must still succeed -- and must not fabricate an
     analyses.json for output that was never actually produced."""
@@ -109,7 +119,7 @@ def test_land_without_analysis_manifest_writes_nothing(tmp_path: Path):
     study.mkdir(parents=True)
     tar = _make_remote_zarr_tar(tmp_path)
 
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study, spec_id="s", simulation_id=116, experiment_id="e", commit="c",
         tar_path=tar, ws_root=ws_root,
     )
@@ -117,14 +127,15 @@ def test_land_without_analysis_manifest_writes_nothing(tmp_path: Path):
     assert not (ws_root / ".pbg" / "runs" / run_id / "analyses.json").exists()
 
 
-def test_land_without_ws_root_skips_analysis_folding(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_without_ws_root_skips_analysis_folding(tmp_path: Path, sl):
     """ws_root is optional -- existing callers that never trigger analysis for
     a landed run must be unaffected, even if a manifest happens to be present."""
     study = tmp_path / "study"
     study.mkdir()
     tar = _make_remote_zarr_tar_with_analysis(tmp_path)
 
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study, spec_id="s", simulation_id=117, experiment_id="e", commit="c", tar_path=tar,
     )
 
@@ -141,7 +152,8 @@ def test_land_without_ws_root_skips_analysis_folding(tmp_path: Path):
 # completed row.
 # ---------------------------------------------------------------------------
 
-def test_land_removes_the_dispatch_time_pending_placeholder(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_removes_the_dispatch_time_pending_placeholder(tmp_path: Path, sl):
     from vivarium_workbench.lib import composite_runs as cr
 
     study = tmp_path / "study"
@@ -158,7 +170,7 @@ def test_land_removes_the_dispatch_time_pending_placeholder(tmp_path: Path):
         conn.close()
 
     tar = _make_remote_zarr_tar(tmp_path)
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study, spec_id="s", simulation_id=88, experiment_id="e", commit="c", tar_path=tar,
     )
     assert run_id != "remote-pending-88"  # the real row uses generate_run_id's own scheme
@@ -177,14 +189,15 @@ def test_land_removes_the_dispatch_time_pending_placeholder(tmp_path: Path):
     assert landed is not None and landed[0] == "completed"  # real row present
 
 
-def test_land_without_a_pending_placeholder_is_unaffected(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_without_a_pending_placeholder_is_unaffected(tmp_path: Path, sl):
     """Landing a simulation that was never dispatched through remote_run_submit
     (an older run, or one landed via another path) has no pending row to clean
     up — the delete is a silent no-op, landing succeeds exactly as before."""
     study = tmp_path / "study"
     study.mkdir()
     tar = _make_remote_zarr_tar(tmp_path)
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study, spec_id="s", simulation_id=999, experiment_id="e", commit="c", tar_path=tar,
     )
     conn = sqlite3.connect(str(study / "runs.db"))
@@ -197,11 +210,12 @@ def test_land_without_a_pending_placeholder_is_unaffected(tmp_path: Path):
     assert landed is not None and landed[0] == "completed"
 
 
-def test_land_zarr_places_store_and_writes_runs_meta(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_zarr_places_store_and_writes_runs_meta(tmp_path: Path, sl):
     study = tmp_path / "study"
     study.mkdir()
     tar = _make_remote_zarr_tar(tmp_path)
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study,
         spec_id="v2ecoli.composites.baseline",
         simulation_id=49,
@@ -228,25 +242,27 @@ def test_land_zarr_places_store_and_writes_runs_meta(tmp_path: Path):
     assert prov["store_path"].endswith(f"runs.{run_id}.zarr")
 
 
-def test_landed_zarr_is_discovered_by_study_charts(tmp_path: Path):
+@pytest.mark.plugin
+def test_landed_zarr_is_discovered_by_study_charts(tmp_path: Path, sl):
     from vivarium_workbench.lib import study_charts
 
     study = tmp_path / "study"
     study.mkdir()
     tar = _make_remote_zarr_tar(tmp_path)
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study, spec_id="s", simulation_id=7, experiment_id="e", commit="c", tar_path=tar
     )
     found = study_charts._latest_zarr_for_study(study)
     assert found == study / f"runs.{run_id}.zarr"
 
 
-def test_land_stores_s3_uri_in_provenance(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_stores_s3_uri_in_provenance(tmp_path: Path, sl):
     """s3_uri kwarg is recorded in params_json provenance."""
     study = tmp_path / "study"
     study.mkdir()
     tar = _make_remote_zarr_tar(tmp_path)
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study,
         spec_id="v2ecoli.composites.baseline",
         simulation_id=77,
@@ -266,14 +282,15 @@ def test_land_stores_s3_uri_in_provenance(tmp_path: Path):
     assert prov["s3_uri"] == "s3://bucket/prefix/exp/"
 
 
-def test_land_multiseed_keeps_every_seed(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_multiseed_keeps_every_seed(tmp_path: Path, sl):
     """Regression: landing a 2-seed dispatch must keep BOTH seeds' partitions, not
     silently discard every seed but the first (the found bug — land_remote_run's
     seed param defaulted to 0 and no caller ever overrode it)."""
     study = tmp_path / "study"
     study.mkdir()
     tar = _make_remote_zarr_tar_multiseed(tmp_path, seeds=(0, 1))
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study,
         spec_id="v2ecoli.composites.batch_baseline",
         simulation_id=114,
@@ -286,13 +303,14 @@ def test_land_multiseed_keeps_every_seed(tmp_path: Path):
     assert partitions == ["experiment_id=exp-seed00", "experiment_id=exp-seed01"]
 
 
-def test_land_multiseed_single_seed_still_works(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_multiseed_single_seed_still_works(tmp_path: Path, sl):
     """A single-seed dispatch (the common case) still lands correctly under the
     new union-all-seeds logic — no regression for the 1-seed path."""
     study = tmp_path / "study"
     study.mkdir()
     tar = _make_remote_zarr_tar_multiseed(tmp_path, seeds=(0,))
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study, spec_id="s", simulation_id=1, experiment_id="e", commit="c", tar_path=tar,
     )
     zarr_dir = study / f"runs.{run_id}.zarr"
@@ -342,7 +360,8 @@ def _make_remote_native_lineage_tar(
     return tar_path
 
 
-def test_land_native_lineage_zarr_keeps_every_lineage(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_native_lineage_zarr_keeps_every_lineage(tmp_path: Path, sl):
     """Regression guard for the same class of bug #674 fixed once already, recurring
     one level deeper: every lineage in a batch shares experiment_id=X/variant=Y, so a
     naive top-level union would keep only the first-processed lineage_seed and
@@ -350,7 +369,7 @@ def test_land_native_lineage_zarr_keeps_every_lineage(tmp_path: Path):
     study = tmp_path / "study"
     study.mkdir()
     tar = _make_remote_native_lineage_tar(tmp_path, seeds=(0, 1, 2))
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study,
         spec_id="v2ecoli.composites.ecoli_baseline",
         simulation_id=200,
@@ -372,12 +391,13 @@ def test_land_native_lineage_zarr_keeps_every_lineage(tmp_path: Path):
         assert leaf.is_file()
 
 
-def test_land_native_lineage_zarr_single_lineage_still_works(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_native_lineage_zarr_single_lineage_still_works(tmp_path: Path, sl):
     """A single-lineage batch (n_seeds=1) still lands correctly — no regression."""
     study = tmp_path / "study"
     study.mkdir()
     tar = _make_remote_native_lineage_tar(tmp_path, seeds=(0,))
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study, spec_id="s", simulation_id=201, experiment_id="exp-native", commit="c", tar_path=tar,
     )
     zarr_dir = study / f"runs.{run_id}.zarr"
@@ -393,7 +413,8 @@ def test_land_native_lineage_zarr_single_lineage_still_works(tmp_path: Path):
 # must be flagged rather than silently recorded as a trustworthy complete run.
 # ---------------------------------------------------------------------------
 
-def test_land_records_full_execution_provenance_from_sms_api_response(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_records_full_execution_provenance_from_sms_api_response(tmp_path: Path, sl):
     """A landed run's record must carry the image tag/digest, composite doc
     hash, merged config hash, real n_steps, and the SERVER-sourced commit —
     fixture values mirror what remote_run_views._resolve_execution_provenance
@@ -403,7 +424,7 @@ def test_land_records_full_execution_provenance_from_sms_api_response(tmp_path: 
     study.mkdir()
     tar = _make_remote_zarr_tar(tmp_path)
 
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study,
         spec_id="v2ecoli.composites.baseline",
         simulation_id=321,
@@ -449,7 +470,8 @@ def test_land_records_full_execution_provenance_from_sms_api_response(tmp_path: 
     assert manifest["environments"][0]["commit"] == "serverexecuted7"
 
 
-def test_land_manifest_commit_is_not_the_local_workspace_head(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_manifest_commit_is_not_the_local_workspace_head(tmp_path: Path, sl):
     """Regression guard for the exact 'partly wrong' bug: passing a real
     ws_root (a git repo with its OWN, DIFFERENT HEAD) must not leak that
     local commit into the landed run's manifest -- only the server-sourced
@@ -470,7 +492,7 @@ def test_land_manifest_commit_is_not_the_local_workspace_head(tmp_path: Path):
     ).stdout.strip()
 
     tar = _make_remote_zarr_tar(tmp_path)
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study, spec_id="s", simulation_id=322, experiment_id="e",
         commit="totally-different-server-commit", tar_path=tar, ws_root=ws_root,
     )
@@ -487,7 +509,8 @@ def test_land_manifest_commit_is_not_the_local_workspace_head(tmp_path: Path):
     assert local_head not in manifest_json  # the local HEAD never leaks in anywhere
 
 
-def test_land_seed_count_mismatch_raises_and_writes_nothing(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_seed_count_mismatch_raises_and_writes_nothing(tmp_path: Path, sl):
     """A dispatch that requested 3 seeds but only 2 landed (a real, observed
     failure mode -- a seed's own container crashed silently, or the tar was
     fetched before every seed finished writing) must be flagged, not recorded
@@ -498,8 +521,8 @@ def test_land_seed_count_mismatch_raises_and_writes_nothing(tmp_path: Path):
 
     import pytest
 
-    with pytest.raises(RemoteRunSeedCountMismatch):
-        land_remote_run(
+    with pytest.raises(sl.RemoteRunSeedCountMismatch):
+        sl.land_remote_run(
             study, spec_id="s", simulation_id=323, experiment_id="exp-mismatch",
             commit="c", tar_path=tar, expected_seeds=3,
         )
@@ -516,13 +539,14 @@ def test_land_seed_count_mismatch_raises_and_writes_nothing(tmp_path: Path):
         assert count == 0
 
 
-def test_land_seed_count_match_succeeds(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_seed_count_match_succeeds(tmp_path: Path, sl):
     """The matching case must land normally -- the check is a guard, not a
     universal block."""
     study = tmp_path / "study"
     study.mkdir()
     tar = _make_remote_zarr_tar_multiseed(tmp_path, seeds=(0, 1))
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study, spec_id="s", simulation_id=324, experiment_id="exp-match",
         commit="c", tar_path=tar, expected_seeds=2,
     )
@@ -536,22 +560,24 @@ def test_land_seed_count_match_succeeds(tmp_path: Path):
     assert status == "completed"
 
 
-def test_count_parquet_rows_returns_none_without_fabricating_zero(tmp_path: Path):
+@pytest.mark.plugin
+def test_count_parquet_rows_returns_none_without_fabricating_zero(tmp_path: Path, sl):
     """No history/*.pq files (or pyarrow unavailable) must come back as
     ``None`` -- never a fabricated 0 that a caller could mistake for a real,
     verified zero-step run."""
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
-    assert _count_parquet_rows(empty_dir) is None
+    assert sl._count_parquet_rows(empty_dir) is None
 
 
-def test_land_without_expected_seeds_skips_the_check(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_without_expected_seeds_skips_the_check(tmp_path: Path, sl):
     """expected_seeds is optional -- existing callers that don't know the
     requested count (or predate this fix) must be unaffected."""
     study = tmp_path / "study"
     study.mkdir()
     tar = _make_remote_zarr_tar_multiseed(tmp_path, seeds=(0, 1, 2))
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study, spec_id="s", simulation_id=325, experiment_id="exp-nocheck",
         commit="c", tar_path=tar,
     )
@@ -620,7 +646,8 @@ def _make_remote_zarr_tar_with_ptools(tmp_path: Path, names: tuple[str, ...]) ->
     return tar_path
 
 
-def test_land_into_a_study_puts_ptools_tsvs_where_the_viewer_finds_and_serves_them(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_into_a_study_puts_ptools_tsvs_where_the_viewer_finds_and_serves_them(tmp_path: Path, sl):
     """The Pathway Tools viewer globs ``<study>/**/ptools/*.tsv`` and its server
     fetches the file over HTTP from the workbench, which refuses any ``.pbg`` path:
     so a study landing must ALSO leave the TSVs inside the study directory."""
@@ -632,7 +659,7 @@ def test_land_into_a_study_puts_ptools_tsvs_where_the_viewer_finds_and_serves_th
     names = ("ptools_rna__variant=0_seed=0.tsv", "ptools_proteins__variant=0_seed=0.tsv")
     tar = _make_remote_zarr_tar_with_ptools(tmp_path, names)
 
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study, spec_id="s", simulation_id=2087, experiment_id="sim-2087-s", commit="c",
         tar_path=tar, ws_root=ws_root,
     )
@@ -651,13 +678,14 @@ def test_land_into_a_study_puts_ptools_tsvs_where_the_viewer_finds_and_serves_th
     assert not is_servable(kept.relative_to(ws_root).as_posix())
 
 
-def test_land_into_a_study_without_ptools_exports_creates_no_ptools_dir(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_into_a_study_without_ptools_exports_creates_no_ptools_dir(tmp_path: Path, sl):
     ws_root = tmp_path / "workspace"
     study = ws_root / "studies" / "s"
     study.mkdir(parents=True)
     tar = _make_remote_zarr_tar(tmp_path)
 
-    land_remote_run(
+    sl.land_remote_run(
         study, spec_id="s", simulation_id=2088, experiment_id="sim-2088-s", commit="c",
         tar_path=tar, ws_root=ws_root,
     )
@@ -665,13 +693,14 @@ def test_land_into_a_study_without_ptools_exports_creates_no_ptools_dir(tmp_path
     assert not list(study.glob("**/ptools"))
 
 
-def test_land_without_ws_root_does_not_land_ptools_anywhere(tmp_path: Path):
+@pytest.mark.plugin
+def test_land_without_ws_root_does_not_land_ptools_anywhere(tmp_path: Path, sl):
     """ws_root stays the switch for artifact landing: callers that omit it are unaffected."""
     study = tmp_path / "study"
     study.mkdir()
     tar = _make_remote_zarr_tar_with_ptools(tmp_path, ("ptools_rna__variant=0_seed=0.tsv",))
 
-    land_remote_run(
+    sl.land_remote_run(
         study, spec_id="s", simulation_id=2089, experiment_id="sim-2089-s", commit="c", tar_path=tar,
     )
 
@@ -783,6 +812,7 @@ _GOLDEN_RUN_TSVS = [
 _GOLDEN_ANALYSES_SHA = "59cefd7c7606ffa6e379372889651fc19d60cfe109a3fb442f2d6ff281138df6"
 
 
+@pytest.mark.plugin
 def test_golden_sms_landing_keeps_the_ptools_layout_bytes_and_run_id(tmp_path: Path, monkeypatch):
     import hashlib
 
@@ -795,6 +825,7 @@ def test_golden_sms_landing_keeps_the_ptools_layout_bytes_and_run_id(tmp_path: P
     assert hashlib.sha256((run_dir / "analyses.json").read_bytes()).hexdigest() == _GOLDEN_ANALYSES_SHA
 
 
+@pytest.mark.plugin
 def test_golden_sms_landing_with_an_unplain_experiment_id_makes_no_study_copy(tmp_path: Path, monkeypatch):
     run_id, ws_root = _golden_land_via_tail(tmp_path, monkeypatch, "../escape")
     study = ws_root / "studies" / "gold"
@@ -807,12 +838,13 @@ def test_golden_sms_landing_with_an_unplain_experiment_id_makes_no_study_copy(tm
 _GOLDEN_DIRECT_RUN_ID = "gold-spec__1700000000__a1e41e"
 
 
-def test_golden_land_remote_run_id_is_stable_for_fixed_provenance(tmp_path: Path, monkeypatch):
+@pytest.mark.plugin
+def test_golden_land_remote_run_id_is_stable_for_fixed_provenance(tmp_path: Path, monkeypatch, sl):
     """The run id hashes the provenance VALUES (``cr.generate_run_id``: sorted-keys JSON + the landing second).
     Any edit to a provenance value -- ``backend``, ``source``, a renamed key -- changes it."""
     _golden_env(monkeypatch)
     study = tmp_path / "study"
-    run_id = land_remote_run(
+    run_id = sl.land_remote_run(
         study, spec_id="gold-spec", simulation_id=77, experiment_id="exp-77", commit="c0ffee",
         tar_path=_make_golden_tar(tmp_path), image="img", merged_config_hash="h", s3_uri="s3://b/k",
     )
@@ -835,17 +867,26 @@ _MOVED_TO_SMS_LANDING = (
 def test_core_landing_binds_no_sms_seam():
     from vivarium_workbench.lib import remote_run_landing
     from vivarium_workbench.lib import remote_run_views as rrv
-    from vivarium_workbench_sms import sms_landing, sms_legacy
 
     gone = _MOVED_TO_SMS_LANDING + ("tarfile", "tempfile", "_time", "is_plain_name")
     assert [n for n in gone if hasattr(remote_run_landing, n)] == []
-    assert [n for n in _MOVED_TO_SMS_LANDING if not hasattr(sms_landing, n)] == []
-    assert not hasattr(sms_legacy, "land_remote_run")
     assert not hasattr(rrv, "land_remote_run")
     for kept in ("land_composite_results", "fold_analyses", "land_ptools_tsvs"):
-        assert hasattr(remote_run_landing, kept) and not hasattr(sms_landing, kept)
+        assert hasattr(remote_run_landing, kept)
 
 
+@pytest.mark.plugin
+def test_the_sms_landing_holds_the_moved_names_and_not_the_cores():
+    """The plugin's half of the check above."""
+    from vivarium_workbench_sms import sms_landing, sms_legacy
+
+    assert [n for n in _MOVED_TO_SMS_LANDING if not hasattr(sms_landing, n)] == []
+    assert not hasattr(sms_legacy, "land_remote_run")
+    for kept in ("land_composite_results", "fold_analyses", "land_ptools_tsvs"):
+        assert not hasattr(sms_landing, kept)
+
+
+@pytest.mark.plugin
 def test_plugin_reads_core_landing_through_the_module():
     """No plugin module binds a core landing helper at import time (``from ...remote_run_landing import x`` at
     module level), and none binds an ``sms_landing`` name at all: each is read as ``<module>.<name>`` at call

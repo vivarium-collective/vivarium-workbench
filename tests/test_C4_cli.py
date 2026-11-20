@@ -110,6 +110,7 @@ def test_git_pip_url_returns_git_url_for_clean_pushed_repo(tmp_path):
 # Tests for run_remote orchestration
 # ---------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_run_remote_calls_compose_submit(tmp_path):
     """run_remote calls compose_submit with the .pbg content."""
     from vivarium_workbench_sms.deployment_run import run
@@ -142,6 +143,7 @@ def test_run_remote_calls_compose_submit(tmp_path):
     assert isinstance(pbg_arg, bytes)
 
 
+@pytest.mark.plugin
 def test_run_remote_passes_git_url_as_extra_dep(tmp_path):
     """run_remote passes the workspace git URL as extra_pip_deps to compose_submit."""
     from vivarium_workbench_sms.deployment_run import run
@@ -173,6 +175,7 @@ def test_run_remote_passes_git_url_as_extra_dep(tmp_path):
     assert git_url in deps, f"Expected {git_url!r} in extra_pip_deps, got: {deps}"
 
 
+@pytest.mark.plugin
 def test_run_remote_returns_results_path(tmp_path):
     """run_remote returns the path to the downloaded results.zip."""
     from vivarium_workbench_sms.deployment_run import run
@@ -200,15 +203,19 @@ def test_run_remote_returns_results_path(tmp_path):
 # Tests for CLI subcommand registration
 # ---------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_run_remote_subcommand_exists_in_cli():
     """The 'run-remote' subcommand must be registered in cli.py."""
     from vivarium_workbench import cli
 
-    # Parse with --help should show run-remote exists (argparse raises SystemExit on --help)
-    with pytest.raises(SystemExit):
+    # Parse with --help should show run-remote exists (argparse raises SystemExit on --help: 0, where an unknown
+    # subcommand is 2 -- the plugin's subcommand, so without the plugin this is the "invalid choice" exit)
+    with pytest.raises(SystemExit) as e:
         cli.main(["run-remote", "--help"])
+    assert e.value.code == 0
 
 
+@pytest.mark.plugin
 def test_run_remote_cli_accepts_workspace_and_composite(tmp_path, monkeypatch):
     """run-remote CLI accepts --workspace and positional composite argument.
 
@@ -238,6 +245,7 @@ def _subparsers(parser):
     return next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
 
 
+@pytest.mark.plugin
 def test_run_remote_golden_namespace_and_slot():
     """The arguments, defaults and position in --help are what they were in vivarium_workbench/cli.py."""
     from vivarium_workbench import cli
@@ -297,6 +305,7 @@ def _handler(monkeypatch, tmp_path):
     return rec
 
 
+@pytest.mark.plugin
 def test_run_remote_handler_url_precedence(_handler, monkeypatch, capsys):
     from vivarium_workbench import cli
 
@@ -317,6 +326,7 @@ def test_run_remote_handler_url_precedence(_handler, monkeypatch, capsys):
     assert "Done. Results:" in capsys.readouterr().out
 
 
+@pytest.mark.plugin
 def test_run_remote_handler_exit_codes(_handler, capsys, tmp_path_factory):
     from vivarium_workbench import cli
     from vivarium_workbench_sms.sms_api_client import SmsApiError

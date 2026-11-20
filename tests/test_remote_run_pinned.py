@@ -16,6 +16,10 @@ from vivarium_workbench.lib import remote_run_views as rrv
 from vivarium_workbench_sms import remote_pipeline_views as pv
 from vivarium_workbench_sms import sms_legacy
 
+#: Pinned mode is the SMS plugin's (``remote_pinned``, its pipeline views and ``sms_legacy``): every test here needs it
+#: (docs/backend-adapters.md step P3, K2b).
+pytestmark = pytest.mark.plugin
+
 
 # Two built main entries (newest = id 69) plus a non-matching branch/repo, in the
 # shape sms-api's /core/v1/simulator/versions returns.

@@ -163,6 +163,7 @@ def _pin(monkeypatch, base_url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.plugin
 def test_remote_run_submit_returns_fast_for_large_chain_dispatch_over_real_http(
     tmp_path, inproc_client, monkeypatch, fake_sms_api
 ):
@@ -194,6 +195,7 @@ def test_remote_run_submit_returns_fast_for_large_chain_dispatch_over_real_http(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.plugin
 def test_remote_run_submit_surfaces_upstream_error_as_502_not_generic_500_over_real_http(
     tmp_path, inproc_client, monkeypatch, fake_sms_api
 ):
@@ -226,6 +228,7 @@ def test_remote_run_submit_surfaces_upstream_error_as_502_not_generic_500_over_r
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.plugin
 def test_remote_run_submit_then_poll_reflects_real_status_transition_over_real_http(
     tmp_path, inproc_client, monkeypatch, fake_sms_api
 ):

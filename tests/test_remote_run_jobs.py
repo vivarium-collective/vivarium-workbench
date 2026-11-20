@@ -1,6 +1,12 @@
+"""The SMS plugin's remote-run job manager and pipeline (``vivarium_workbench_sms.remote_run_jobs``): every test here
+needs the plugin (docs/backend-adapters.md step P3, K2b)."""
 import time
 
+import pytest
+
 from vivarium_workbench_sms.remote_run_jobs import RemoteRunManager, STEP_NAMES
+
+pytestmark = pytest.mark.plugin
 
 
 def _wait(job, timeout=5.0):

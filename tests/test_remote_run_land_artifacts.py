@@ -15,6 +15,10 @@ import pytest
 from vivarium_workbench.lib import remote_run_views as rrv
 from vivarium_workbench_sms import sms_landing, sms_legacy
 
+#: The landing and the SMS run auth are the SMS plugin's: every test here needs it (step P3, K2b; the core's own
+#: providers-off 400 is pinned in test_backend_providers.py).
+pytestmark = pytest.mark.plugin
+
 
 def _make_results_tar(dst: Path) -> Path:
     """A results tar carrying one PTools TSV and one analysis.json."""

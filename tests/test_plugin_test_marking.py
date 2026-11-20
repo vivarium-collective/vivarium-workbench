@@ -44,15 +44,11 @@ UNMARKED_PLUGIN_IMPORTERS: frozenset[str] = frozenset({
     "test_backends_startup.py",
     "test_composite_card_dispatch_table.py",
     "test_compose_composite_provenance.py",   # through test_backend_dispatch_compose
-    "test_env_worker_launcher.py",
     "test_import_order.py",                   # MODULES = CORE + _plugin_modules() at import time
-    "test_job_class_task_routing.py",
     "test_listing_facet.py",
     "test_non_root_store_roots.py",
     "test_opaque_run_ids.py",
     "test_payload_models.py",
-    "test_proxy_worker_launcher.py",
-    "test_relay_client_timeouts.py",
     "test_remote_analysis_figures_datasets.py",
     "test_remote_analysis_figures_hidden.py",
     "test_remote_build_source.py",
@@ -60,17 +56,10 @@ UNMARKED_PLUGIN_IMPORTERS: frozenset[str] = frozenset({
     "test_remote_link.py",
     "test_remote_listing_goldens.py",
     "test_remote_reconcile.py",
-    "test_remote_run_jobs.py",
-    "test_remote_run_land_artifacts.py",
-    "test_remote_run_landing.py",
-    "test_remote_run_pinned.py",
-    "test_remote_run_poll_hardening.py",
-    "test_remote_run_views_lib.py",
     "test_remote_simulations.py",
     "test_remote_study_slug_1to1.py",
     "test_remote_trace.py",
     "test_resolve_cloud_target.py",
-    "test_run_artifact_zarr_fallback.py",
     "test_simulations_swr.py",
     "test_sms_api_client.py",
     "test_sms_api_environments.py",
@@ -88,7 +77,7 @@ UNMARKED_PLUGIN_IMPORTERS: frozenset[str] = frozenset({
 #: The ratchet's ceiling: UNMARKED_PLUGIN_IMPORTERS's size when the core-only job arrived (K1). Each K2 PR that
 #: shrinks the set lowers this to the new size in the same PR; NEVER raise it -- a new module-level importer gets the
 #: mark instead.
-UNMARKED_PLUGIN_IMPORTERS_CEILING = 53
+UNMARKED_PLUGIN_IMPORTERS_CEILING = 42
 
 
 def _name(path: Path) -> str:

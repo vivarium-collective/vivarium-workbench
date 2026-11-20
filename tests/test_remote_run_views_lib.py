@@ -14,10 +14,16 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from vivarium_workbench.lib import git_status, github_auth, study_spec
 from vivarium_workbench.lib import remote_run_views as rrv
 from vivarium_workbench_sms import remote_pipeline_views as pv
 from vivarium_workbench_sms import remote_pinned, remote_run_jobs, sms_landing, sms_legacy
+
+#: Every test here drives the SMS plugin's pipeline views, pin, landing or ``sms_legacy`` (docs/backend-adapters.md
+#: step P3, K2b).
+pytestmark = pytest.mark.plugin
 
 
 # ---------------------------------------------------------------------------
