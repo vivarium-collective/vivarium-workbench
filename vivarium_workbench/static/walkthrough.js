@@ -10836,7 +10836,7 @@
     var _exportDd =
       '<span class="inv-report-wrap" style="position:relative;display:inline-flex">' +
         '<button class="btn-mini" id="inv-report-btn" aria-haspopup="true" ' +
-          'aria-label="Export" title="Export — open in the browser or download (report, notebook, figures)" onclick="_toggleInvReportMenu(event)"><span aria-hidden="true">↓</span> Export ▾</button>' +
+          'aria-label="Shortcuts" title="Shortcuts — open in the browser or download (report, notebook, figures)" onclick="_toggleInvReportMenu(event)">Shortcuts ▾</button>' +
         '<div id="inv-report-menu" role="menu" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;' +
           'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:190px;padding:4px">' +
           _sec('Report') +
@@ -11212,7 +11212,7 @@
       mountEl.innerHTML = '<p class="empty-state">No investigations declared. Author one at <code>investigations/&lt;name&gt;/investigation.yaml</code>.</p>';
       return;
     }
-    var th = [['Name', 'left'], ['Status', 'left'], ['Studies', 'right'], ['Question', 'left'], ['Links', 'left']]
+    var th = [['Name', 'left'], ['Status', 'left'], ['Studies', 'right'], ['Question', 'left'], ['Shortcuts', 'left']]
       .map(function (c) {
         return '<th style="text-align:' + c[1] + ';position:sticky;top:0;background:#f8fafc;padding:7px 10px;' +
           'font-size:0.78em;text-transform:uppercase;letter-spacing:0.03em;color:#475569;' +
@@ -15258,31 +15258,66 @@
   // Cards view) — each artifact offers open-in-browser AND download, so nothing
   // is forced to auto-download. report: open HTML | download HTML | download PDF;
   // notebook: open | download .ipynb; figures (when present): open gallery | zip.
+  // Close every open row-level Shortcuts menu (list table + card view).
+  window._closeRowShortcuts = function () {
+    var ms = document.querySelectorAll('.inv-row-shortcuts-menu');
+    for (var i = 0; i < ms.length; i++) {
+      ms[i].style.display = 'none';
+      var b = ms[i].previousElementSibling;
+      if (b && b.setAttribute) b.setAttribute('aria-expanded', 'false');
+    }
+  };
+  // Toggle a single row's Shortcuts dropdown (btn's next sibling is its menu).
+  // Mirrors the investigation-detail _toggleInvReportMenu: stopPropagation keeps
+  // the row/card's own onclick from firing, and the outside-click closer is
+  // registered on a 0ms timeout so THIS click doesn't immediately close it.
+  window._toggleRowShortcuts = function (ev, btn) {
+    if (ev) ev.stopPropagation();
+    var menu = btn.nextElementSibling;
+    if (!menu) return;
+    var isOpen = menu.style.display !== 'none' && menu.style.display !== '';
+    window._closeRowShortcuts();          // close any other open menu first
+    menu.style.display = isOpen ? 'none' : 'block';
+    btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+    if (!isOpen) {
+      setTimeout(function () {
+        document.addEventListener('click', window._closeRowShortcuts, { once: true, capture: true });
+      }, 0);
+    }
+  };
+  // LINKS cell for an investigation (used by both the List table and the cards):
+  // a single "Shortcuts ▾" button that opens the SAME grouped menu as the
+  // investigation-detail ↓ Shortcuts (Report / Notebook / Figures, each with
+  // open-in-browser + download), instead of a row of inline text links.
   window._vivInvLinksHtml = function (iset) {
     var nm = _esc(iset.name);
-    var lk = 'color:#3b82f6;text-decoration:none';
-    var lab = 'color:#94a3b8';
-    var sep = '<span style="color:#cbd5e1;margin:0 6px">·</span>';
-    var a = function (handler, text, title) {
-      return '<a href="#" title="' + title + '" style="' + lk + '" onclick="' + handler + ';return false;">' + text + '</a>';
+    var _mi = 'class="btn-mini" role="menuitem" style="display:block;width:100%;text-align:left;border:none;background:transparent"';
+    var _sec = function (t) {
+      return '<div style="padding:6px 8px 2px;font-size:0.72em;font-weight:700;text-transform:uppercase;' +
+        'letter-spacing:0.04em;color:#94a3b8">' + t + '</div>';
     };
-    var groups = [
-      '<span style="' + lab + '">report</span> ' +
-        a("window._vivReportOpen(event,'" + nm + "')", 'open', 'Open the HTML report in a new browser tab') + ' ' +
-        a("window._vivReportDownload(event,'" + nm + "','html')", 'html', 'Download the HTML report') + ' ' +
-        a("window._vivReportDownload(event,'" + nm + "','pdf')", 'pdf', 'Download the PDF report'),
-      '<span style="' + lab + '">notebook</span> ' +
-        a("window._vivNotebookOpen(event,'" + nm + "')", 'open', 'Open the runnable notebook in a new browser tab') + ' ' +
-        a("window._vivNotebookFromCard(event,'" + nm + "')", 'ipynb', 'Download the runnable .ipynb notebook'),
-    ];
+    var items =
+      _sec('Report') +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivReportOpen(event,\'' + nm + '\')">Open in browser</button>' +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivReportDownload(event,\'' + nm + '\',\'html\')">Download HTML</button>' +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivReportDownload(event,\'' + nm + '\',\'pdf\')">Download PDF</button>' +
+      _sec('Notebook') +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivNotebookOpen(event,\'' + nm + '\')">Open in browser</button>' +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivNotebookFromCard(event,\'' + nm + '\')">Download .ipynb</button>';
     if (iset.n_figures) {
-      groups.push(
-        '<span style="' + lab + '">figures</span> ' +
-          a("window._vivFiguresOpen(event,'" + nm + "')", 'open', 'See the figures in a new browser tab') + ' ' +
-          a("window._vivFiguresFromCard(event,'" + nm + "')", 'zip', 'Download all figures as a zip')
-      );
+      items +=
+        _sec('Figures') +
+          '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivFiguresOpen(event,\'' + nm + '\')">Open in browser</button>' +
+          '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivFiguresFromCard(event,\'' + nm + '\')">Download (zip)</button>';
     }
-    return groups.join(sep);
+    return '<span class="inv-row-shortcuts" style="position:relative;display:inline-flex">' +
+      '<button type="button" class="btn-mini" aria-haspopup="true" aria-expanded="false" ' +
+        'title="Shortcuts — open in the browser or download (report, notebook, figures)" ' +
+        'onclick="window._toggleRowShortcuts(event, this)">Shortcuts ▾</button>' +
+      '<div class="inv-row-shortcuts-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;' +
+        'margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);' +
+        'z-index:70;min-width:190px;padding:4px">' + items + '</div>' +
+    '</span>';
   };
   // A single study's OUTPUTS (its image figures + any embedded HTML report /
   // dashboard and its viz assets) as a zip.

@@ -129,3 +129,34 @@ def test_export_menu_supports_open_in_browser():
     assert "window._vivNotebookOpen(event)" in body      # open the notebook
     assert "Open in browser" in body
     assert "Download PDF" in body and "_downloadInvestigationReport(null," in body  # download still there
+
+
+def test_list_links_cell_is_a_shortcuts_dropdown():
+    """The list/card LINKS cell is a single 'Shortcuts ▾' button that opens the
+    SAME grouped menu as the investigation-detail Shortcuts (Report / Notebook /
+    Figures, each with open-in-browser + download) — not a row of inline text
+    links. The column header is renamed 'Shortcuts', and the old inline
+    'report / notebook / figures' label-links are gone."""
+    i = JS.index("window._vivInvLinksHtml = function")
+    body = JS[i: i + 2600]
+    # single dropdown button, not inline links
+    assert "Shortcuts ▾</button>" in body
+    assert "inv-row-shortcuts-menu" in body
+    # same grouped menu as the detail Shortcuts
+    assert "Open in browser" in body
+    assert "Download PDF" in body and "Download .ipynb" in body
+    assert "window._vivReportOpen(event," in body        # per-row name is passed
+    # old inline label-links removed
+    assert ">report</span>" not in body and ">notebook</span>" not in body
+    # column header renamed
+    assert "['Shortcuts', 'left']" in JS and "['Links', 'left']" not in JS
+    # toggle/close helpers wired
+    assert "window._toggleRowShortcuts = function" in JS
+    assert "window._closeRowShortcuts = function" in JS
+
+
+def test_detail_shortcuts_button_renamed_from_export():
+    """The investigation-detail dropdown button reads 'Shortcuts ▾' (it opens
+    links too, not only downloads), replacing the old '↓ Export ▾' label."""
+    assert "Shortcuts ▾</button>" in JS
+    assert "Export ▾</button>" not in JS
