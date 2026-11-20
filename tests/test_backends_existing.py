@@ -17,7 +17,7 @@ from vivarium_workbench_sms import remote_run_viva_v1
 from vivarium_workbench.lib import remote_run_views as rrv
 from vivarium_workbench_sms import sms_legacy
 from vivarium_workbench.lib.backends import records
-from vivarium_workbench_sms.sms_api_client import BACKEND_BASE_ENV_VARS
+from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
 
 HERE = "http://api:8000"
 ELSEWHERE = "http://other:8000"

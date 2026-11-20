@@ -11,14 +11,16 @@ import argparse
 import pytest
 
 from vivarium_workbench import cli
+from vivarium_workbench.lib import backend_config
+from vivarium_workbench.lib.backends import config as backend_cfg
 from vivarium_workbench_sms import sms_api_client as sac
 
-NAMED, VIVA, SMS = sac.BACKEND_BASE_ENV_VARS
+NAMED, VIVA, SMS = backend_config.BACKEND_BASE_ENV_VARS
 
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for v in sac.BACKEND_BASE_ENV_VARS:
+    for v in backend_config.BACKEND_BASE_ENV_VARS:
         monkeypatch.delenv(v, raising=False)
 
 
@@ -35,21 +37,21 @@ def _clean_env(monkeypatch):
     ({NAMED: "http://api:8000", SMS: "not a url"}, False),
     ({NAMED: "not a url"}, False),
 ])
-def test_check_single_backend(monkeypatch, env, ok):
+def test_check_config(monkeypatch, env, ok):
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     if ok:
-        sac.check_single_backend()
+        backend_cfg.check_config()
     else:
         with pytest.raises(sac.BackendConfigError):
-            sac.check_single_backend()
+            backend_cfg.check_config()
     sac.sms_api_base()  # never raises, whatever the environment
 
 
 def test_the_flag_value_is_checked_before_it_reaches_the_environment(monkeypatch):
     monkeypatch.setenv(SMS, "http://api:8000")
     with pytest.raises(sac.BackendConfigError) as e:
-        sac.check_single_backend("http://compose.test")
+        backend_cfg.check_config("http://compose.test")
     assert "SMS_API_BASE" in str(e.value) and "compose.test" in str(e.value)
 
 
@@ -140,7 +142,7 @@ class _Stop(BaseException):
 
 @pytest.mark.parametrize("env, expected", [({SMS: "http://api:8000"}, ["http://api:8000"]), ({}, [])])
 def test_serve_starts_the_breaker_probe_on_the_configured_url(monkeypatch, tmp_path, env, expected):
-    """Step P2: the startup probe is core config (``backend_config.start_probe(configured_base_url())``), the URL
+    """Step P2: the startup probe is core config (``backend_config.start_probe(backends.config.configured_base_url())``), the URL
     ``remote_link.start_probe()`` used; only when a backend is configured."""
     from vivarium_workbench.lib import _root, backend_config, startup, workspace_deps_views
 

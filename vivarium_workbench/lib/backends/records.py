@@ -146,14 +146,14 @@ def remote_record(kind: str, remote_id: Any, base_url: str) -> dict:
     Called once the backend has accepted (or served) the run. ``server_id`` is asked of it then, through the 30 s
     cache with the probe policy (one attempt, a short timeout, the circuit breaker): a backend that just answered
     answers this at once, and one that cannot be asked records ``null`` -- never an error."""
-    from vivarium_workbench.lib import backend_config
+    from vivarium_workbench.lib.backends import config
 
     assert kind in KINDS, kind
     return {
         "kind": kind,
         "id": str(remote_id).strip(),
         "base_url": _canonical(base_url),
-        "deployment": backend_config.deployment_name(),
+        "deployment": config.deployment_name(),
         "server_id": fetch_server_id(base_url, kind=kind) if has_identity(kind) else None,
     }
 
@@ -269,26 +269,9 @@ class Resolution:
 def configured_url(kind: str) -> Optional[str]:
     """The URL a run of ``kind`` would be asked at under the current configuration."""
     from vivarium_workbench.lib import backend_config
+    from vivarium_workbench.lib.backends import config
 
-    return backend_config.explicit_backend_base_url() if kind == "compose-api" else backend_config.configured_base_url()
-
-
-def _deployment_names_now() -> set[str]:
-    """Every deployment name the current configuration could have written on a row before step 1c: the configured
-    name, the named URL's host, each alias's host, and the default when no name is configured. Best-effort only."""
-    import os
-    from urllib.parse import urlsplit
-
-    from vivarium_workbench.lib import backend_config
-
-    names = {backend_config.deployment_name()}
-    for var in backend_config.BACKEND_BASE_ENV_VARS:
-        host = urlsplit(os.environ.get(var) or "").hostname
-        if host:
-            names.add(host)
-    if not (os.environ.get("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT") or "").strip():
-        names.add(backend_config._DEFAULT_DEPLOYMENT)
-    return names
+    return backend_config.explicit_backend_base_url() if kind == "compose-api" else config.configured_base_url()
 
 
 def _active_kinds() -> "set[str]":
@@ -412,12 +395,13 @@ def resolve_existing(ws_root: Path, remote_id: Any, *, deployment: Optional[str]
        current name proceeds (a run listed live from the configured server).
     3. Nothing stored (a run listed live, or just dispatched by this page): the id's form, current configuration.
     """
-    from vivarium_workbench.lib import backend_config, backends
+    from vivarium_workbench.lib import backends
+    from vivarium_workbench.lib.backends import config
 
     rid = str(remote_id if remote_id is not None else "").strip()
     owner = backends.for_run(rid)
     by_form = owner.name if owner else None
-    here_name = backend_config.deployment_name()
+    here_name = config.deployment_name()
     found = find_records(ws_root, rid, study_db=study_db) if rid else []
     records = [f.record for f in found if f.record]
     legacy = [f.legacy_source for f in found if f.record is None and f.legacy_source]
@@ -425,7 +409,7 @@ def resolve_existing(ws_root: Path, remote_id: Any, *, deployment: Optional[str]
         # The caller (a Runs-tab row) says which deployment it means: only rows of that deployment count.
         records = [r for r in records if r.get("deployment") == deployment]
         legacy = [src for src in legacy if src == deployment]
-        if not records and deployment not in _deployment_names_now():
+        if not records and deployment not in config.deployment_names_now():
             return Resolution(refusal=refusal(
                 rid, f"this run was dispatched to {deployment}; this workbench is configured for {here_name}",
                 dispatched_to=deployment), via="legacy-guard")
@@ -449,7 +433,7 @@ def resolve_existing(ws_root: Path, remote_id: Any, *, deployment: Optional[str]
                 via="record")
         return res
     if legacy and not (deployment and deployment == here_name):
-        names = _deployment_names_now()
+        names = config.deployment_names_now()
         if not (set(legacy) & names):
             name = sorted(set(legacy))[0]
             return Resolution(refusal=refusal(

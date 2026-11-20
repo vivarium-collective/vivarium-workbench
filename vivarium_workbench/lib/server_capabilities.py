@@ -132,7 +132,7 @@ def explicit_backend_profile() -> "dict | None":
     # Through the circuit breaker (RemoteLink), as every other call is: a connection failure opens it, and while it is
     # open this answers "unreachable" without a network call, so a dead or hung backend is not asked every few
     # seconds by every request thread. The breaker's own probe (every 30 s while ``serve`` runs, on the one URL
-    # ``backend_config.configured_base_url()`` names at start-up) or the first call after its minute is up closes it when the backend is
+    # ``backends.config.configured_base_url()`` names at start-up) or the first call after its minute is up closes it when the backend is
     # back, and the profile is read again within ``_PROFILE_FAILURE_TTL`` after that.
     profile = backend_profile(_probe_client(base))
     _PROFILE_CACHE[base] = (time.monotonic(), profile)

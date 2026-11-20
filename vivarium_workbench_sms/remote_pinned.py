@@ -115,14 +115,16 @@ def resolved_from_session_build(ws_root: Path) -> dict | None:
     }
 
 
-# The deployment name is core configuration (docs/backend-adapters.md step P1a: ``backend_config.deployment_name``).
-_DEFAULT_REMOTE_DEPLOYMENT = _backend_config._DEFAULT_DEPLOYMENT
+#: The plugin's deployment name when ``VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT`` is unset and no backend is named: the
+#: historical hardcoded value, kept so existing deployments do not change on upgrade (``SmsProvider.deployment_default``;
+#: it moved here from the core in step P3 C1). New deployments set the env explicitly (e.g. "smscdk").
+_DEFAULT_REMOTE_DEPLOYMENT = "smsvpctest"
 
 
 def remote_deployment_name() -> str:
-    """The deployment namespace a remote run targets: :func:`backend_config.deployment_name`, read at call time
-    (tests patch this function, and ``backend_config.deployment_name``)."""
-    return _backend_config.deployment_name()
+    """The deployment namespace a remote run targets: :func:`backend_config.deployment_name` with this plugin's
+    default, read at call time (tests patch this function, and ``backend_config.deployment_name``)."""
+    return _backend_config.deployment_name(default=_DEFAULT_REMOTE_DEPLOYMENT)
 
 
 def _normalize_repo(url: str) -> str:

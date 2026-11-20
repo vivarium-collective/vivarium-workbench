@@ -69,13 +69,21 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
 
     # One remote backend per process (docs/backend-adapters.md step 1c). cli.main and cmd_serve check first; this
     # covers a caller that set the environment directly and boots the app without them.
-    from vivarium_workbench.lib.backend_config import BackendConfigError, check_single_backend
+    from vivarium_workbench.lib.backend_config import BackendConfigError
+    from vivarium_workbench.lib.backends import config as backend_cfg
 
     try:
-        check_single_backend()
+        backend_cfg.check_config()
     except BackendConfigError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
+    except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
+        print(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+    # A provider alias set while no provider is active to read it (providers off, or the plugin absent) is ignored;
+    # say so (step P3 C1; step P4 refuses it).
+    for var in backend_cfg.stray_backend_env():
+        print(f"warning: {var} is set but no backend provider is active; it is ignored", file=sys.stderr)
 
     # Configure structured logging so the access-log middleware actually emits.
     # basicConfig is a no-op if the root logger is already configured.
@@ -114,14 +122,12 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     except Exception:  # noqa: BLE001
         pass
 
-    # Surface the remote viva-api config at startup so a fresh operator (or Chris
+    # Surface the remote backend config at startup so a fresh operator (or Chris
     # trying "switch to remote") sees immediately whether the endpoint is reachable.
-    # Only probe when VIVA_API_BASE/SMS_API_BASE is explicitly set — a local-only
-    # user hasn't opted into remote and shouldn't pay a probe delay. Best-effort:
-    # never blocks/raises.
-    from vivarium_workbench.lib.backend_config import backend_configured
-
-    if backend_configured():
+    # Only probe when a backend is configured (named, or an active provider's own
+    # setting: backends.config.backend_configured) — a local-only user hasn't opted
+    # into remote and shouldn't pay a probe delay. Best-effort: never blocks/raises.
+    if backend_cfg.backend_configured():
         # A backend named with --backend-base-url: say which dispatch route its
         # capabilities give this workspace (best-effort; never blocks or raises).
         try:
@@ -161,7 +167,9 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
         # The breaker and its target are core config (step P2): the configured URL, the one it always probed.
         try:
             from vivarium_workbench.lib import backend_config
-            backend_config.start_probe(backend_config.configured_base_url())
+            _base = backend_cfg.configured_base_url()
+            if _base:
+                backend_config.start_probe(_base)
         except Exception as e:  # noqa: BLE001
             print(f"warning: remote-link probe failed to start: {e}", file=sys.stderr)
 

@@ -18,7 +18,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
-from vivarium_workbench.lib import backend_config, backends, path_safety, remote_run_compose
+from vivarium_workbench.lib import backends, path_safety, remote_run_compose
+from vivarium_workbench.lib.backends import config as backend_cfg
 import vivarium_workbench.lib.backends.records as records
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ def remote_run_config(ws_root: Path) -> tuple[dict, int]:
     if chosen is not None and chosen.builds is not None:
         body = chosen.builds.pin(ws_root)
     else:
-        body = {"pinned": False, "deployment": backend_config.deployment_name()}
+        body = {"pinned": False, "deployment": backend_cfg.deployment_name()}
     if backend is not None:
         body["backend"] = backend
     return body, 200

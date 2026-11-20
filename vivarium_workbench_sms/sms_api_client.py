@@ -8,6 +8,7 @@ base_url (the SSM tunnel, default http://localhost:8080).
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import time
@@ -22,24 +23,66 @@ from urllib.request import Request, urlopen
 # The generic backend configuration lives in the core (docs/backend-adapters.md step P1a); these names stay
 # importable from here for SMS code and tests.
 from vivarium_workbench.lib import backend_config as _backend_config
-from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS as BACKEND_BASE_ENV_VARS
-from vivarium_workbench.lib.backend_config import DEFAULT_BACKEND_BASE as DEFAULT_BACKEND_BASE
 from vivarium_workbench.lib.backend_config import BackendConfigError as BackendConfigError
-from vivarium_workbench.lib.backend_config import backend_configured as backend_configured
-from vivarium_workbench.lib.backend_config import check_single_backend as check_single_backend
 from vivarium_workbench.lib.backend_config import explicit_backend_base_url as explicit_backend_base_url
 from vivarium_workbench.lib.backend_config import normalize_backend_base_url as normalize_backend_base_url
 from vivarium_workbench.lib.backend_config import IDENTITY_HEADER as IDENTITY_HEADER
 from vivarium_workbench.lib.backend_config import caller_identity as caller_identity
 from vivarium_workbench.lib.backend_config import _http_error_detail as _http_error_detail
 
+#: The plugin's own names for its backend, after the core's named URL, highest precedence first (step P3 C1: they
+#: moved here from the core). ``VIVA_API_BASE`` is the backend repo's current name, ``SMS_API_BASE`` the legacy one
+#: (sms-api -> viva-api). ``backend_config.BACKEND_BASE_ENV_VARS`` lists them too, only for the core's warning about
+#: an alias no active provider reads.
+ALIAS_ENV_VARS = ("VIVA_API_BASE", "SMS_API_BASE")
+#: The SSM tunnel: the URL asked when neither a backend is named nor an alias is set.
+DEFAULT_BACKEND_BASE = "http://localhost:8080"
+
 
 def sms_api_base() -> str:
-    """Base URL of the backend (viva-api / viva-core; nee sms-api): :func:`backend_config.configured_base_url`.
+    """Base URL of the backend (viva-api / viva-core; nee sms-api).
 
-    Kept as a function (not a re-export) because callers and tests patch it here; it reads the core's at call time.
+    Precedence: the named backend (``VIVARIUM_WORKBENCH_BACKEND_BASE_URL``, what ``serve --backend-base-url`` sets;
+    ``backend_config.explicit_backend_base_url``) > ``VIVA_API_BASE`` > ``SMS_API_BASE`` > ``http://localhost:8080``
+    (the SSM tunnel). The single source of truth for this lookup: ``SmsProvider.base_url`` and the plugin's modules
+    (``remote_simulations`` and ``sms_legacy``, under their ``_sms_api_base`` name) read it at call time; tests patch
+    it here.
+
+    Exactly one backend is configured per process (``SmsProvider.check_config``, at process entry), so a named backend
+    and an alias, when both are set, are the same URL. Reads the environment only: no network call, and it cannot fail.
     """
-    return _backend_config.configured_base_url()
+    named = _backend_config.explicit_backend_base_url()
+    alias = next((v for v in (os.environ.get(n) for n in ALIAS_ENV_VARS) if v), None)
+    return named or alias or DEFAULT_BACKEND_BASE
+
+
+def alias_configured() -> bool:
+    """Whether one of :data:`ALIAS_ENV_VARS` is set (the operator opted into this backend without naming it)."""
+    return any(os.environ.get(v) for v in ALIAS_ENV_VARS)
+
+
+def check_aliases(named: "str | None") -> None:
+    """The plugin's half of the one-backend rule (``SmsProvider.check_config``; moved verbatim from the core's
+    ``check_single_backend``, step P3 C1): a backend named with ``--backend-base-url`` /
+    ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL`` (``named``, already validated by the core) must equal every alias that is
+    also set, compared after normalising. With no backend named, the aliases are left alone: they are the one
+    backend. Reads the environment only; no network call. Raises :class:`BackendConfigError`.
+    """
+    if not named:
+        return
+    want = _backend_config.canonical_url(named)
+    for var in ALIAS_ENV_VARS:
+        value = os.environ.get(var)
+        if not value:
+            continue
+        try:
+            got = _backend_config.canonical_url(value)
+        except ValueError as e:
+            raise BackendConfigError(f"{var}: {e} (a backend is also named: {named})") from e
+        if got != want:
+            raise BackendConfigError(
+                f"two remote backends are configured: the named backend {named} and {var}={value}. "
+                f"A workbench talks to one backend; unset {var} or name the same URL.")
 
 
 #: ``SmsApiError`` IS the core's :class:`backend_config.BackendError` (an alias, not a subclass; step P1a), so every

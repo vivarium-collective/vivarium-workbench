@@ -323,7 +323,7 @@ def test_for_run_owner_is_unique(run_id, owner):
 def submit_world(monkeypatch, tmp_path):
     """Its own setup: a named backend comes from a stubbed profile, not from the ``calls`` fixture's patches."""
     from vivarium_workbench.lib import server_capabilities as sc
-    from vivarium_workbench_sms.sms_api_client import BACKEND_BASE_ENV_VARS
+    from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
 
     for v in BACKEND_BASE_ENV_VARS:
         monkeypatch.delenv(v, raising=False)

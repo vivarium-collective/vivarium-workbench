@@ -191,11 +191,11 @@ def test_submit_gate_401_when_no_session_and_not_pinned(monkeypatch, tmp_path):
 
 def test_remote_run_config_off(monkeypatch, tmp_path):
     """Nothing pinned and no session build: no backend with builds is selected, so the core answers with the
-    configured deployment name (``backend_config.deployment_name``; step P2 Builds B3) and SMS is not asked."""
-    from vivarium_workbench.lib import backend_config
+    configured deployment name (``backends.config.deployment_name``; step P2 Builds B3, P3 C1) and SMS is not asked."""
+    from vivarium_workbench.lib.backends import config as backend_cfg
 
     monkeypatch.setattr(rp, "pinned_config", lambda: None)
-    monkeypatch.setattr(backend_config, "deployment_name", lambda: "smscdk")
+    monkeypatch.setattr(backend_cfg, "deployment_name", lambda: "smscdk")
     monkeypatch.setattr(rp, "remote_deployment_name", lambda: pytest.fail("SMS's pin was asked with nothing pinned"))
     body, status = rrv.remote_run_config(tmp_path)
     assert status == 200

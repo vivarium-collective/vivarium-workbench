@@ -71,10 +71,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
             print(f"ERROR: --backend-base-url: {e}", file=sys.stderr)
             return 2
 
-    from vivarium_workbench.lib.backend_config import BackendConfigError, check_single_backend
+    from vivarium_workbench.lib.backend_config import BackendConfigError
+    from vivarium_workbench.lib.backends import config as backend_cfg
     from vivarium_workbench.lib.env_worker_launcher import check_worker_config
     try:
-        check_single_backend(getattr(args, "backend_base_url", None))
+        backend_cfg.check_config(getattr(args, "backend_base_url", None))
         # Hosted env workers asked for but no provider supplies them: refuse BEFORE the render, the server-info
         # write and detaching, so the operator sees why and nothing is left behind. serve_fastapi checks again
         # (direct callers; the "env workers: PROXY ..." log line once logging is configured). No network call.
@@ -1430,7 +1431,7 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
 
 
 #: Subcommands that can dispatch to, or look runs up on, a remote backend: they refuse a process configured for two
-#: (``backend_config.check_single_backend``) or asking for hosted workers no provider supplies. The others do not
+#: (``backends.config.check_config``) or asking for hosted workers no provider supplies. The others do not
 #: dispatch or look up runs (a few may still read the configured URL for a hosted env worker, unchanged), so a stale
 #: alias in the shell must not stop them. A provider's subcommands say which they are (``Command.uses_backend``, see
 #: :func:`_backend_commands`). ``tests/test_backends_startup.py`` requires every subcommand to be in exactly one set.
@@ -1463,11 +1464,29 @@ def _backend_commands(commands: "Sequence[Command]") -> "frozenset[str]":
     return BACKEND_COMMANDS | {c.name for c in commands if c.uses_backend}
 
 
+#: Appended to argparse's "invalid choice" when no provider added subcommands (providers off, the plugin absent, or
+#: a provider that failed to load): the command asked for may be a provider's. It names no command (step P3 C1).
+NO_PROVIDER_HINT = "provider subcommands are unavailable: no backend provider is active"
+
+
+class _Parser(argparse.ArgumentParser):
+    """``argparse.ArgumentParser`` that adds :data:`NO_PROVIDER_HINT` to an unknown subcommand's error when no
+    provider subcommands were added."""
+
+    no_provider_hint = False
+
+    def error(self, message: str):  # type: ignore[override]
+        if self.no_provider_hint and "invalid choice" in message:
+            message = f"{message}\n({NO_PROVIDER_HINT})"
+        super().error(message)
+
+
 def _build_parser(commands: "Sequence[Command] | None" = None) -> argparse.ArgumentParser:
     """The CLI parser; ``commands`` are the providers' subcommands (default: :func:`_provider_commands`)."""
     if commands is None:
         commands = _provider_commands()
-    parser = argparse.ArgumentParser(prog="vivarium-workbench")
+    parser = _Parser(prog="vivarium-workbench")
+    parser.no_provider_hint = not commands
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_serve = sub.add_parser("serve", help="Serve the dashboard for a workspace")
@@ -1934,12 +1953,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser(commands)
     args = parser.parse_args(argv)
     from vivarium_workbench.lib.errors import APIError
-    from vivarium_workbench.lib.backend_config import BackendConfigError, check_single_backend
+    from vivarium_workbench.lib.backend_config import BackendConfigError
+    from vivarium_workbench.lib.backends import config as backend_cfg
 
     if args.cmd in _backend_commands(commands):
         try:
             # serve's --backend-base-url replaces the named env var for that process, so it is the one compared
-            check_single_backend(getattr(args, "backend_base_url", None))
+            backend_cfg.check_config(getattr(args, "backend_base_url", None))
             # Hosted env workers asked for but no provider supplies them (step P2): refuse, never run Local. serve
             # checks in cmd_serve / serve_fastapi instead, once per process (after logging is set up).
             if args.cmd != "serve":

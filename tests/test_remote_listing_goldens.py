@@ -87,7 +87,7 @@ def fake(monkeypatch):
     monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.SmsApiClient", _Fake)
     monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.sms_api_base", lambda: BASE)
     monkeypatch.setattr("vivarium_workbench.lib.git_status.remote_repo_url", lambda ws: REPO)
-    monkeypatch.setattr("vivarium_workbench.lib.backend_config.deployment_name", lambda: "golden-dep")
+    monkeypatch.setattr("vivarium_workbench.lib.backend_config.deployment_name", lambda default=None: "golden-dep")
     for c in (rs._REMOTE_CACHE, rs._REMOTE_META):
         c.clear()
     si.clear_build_cache()

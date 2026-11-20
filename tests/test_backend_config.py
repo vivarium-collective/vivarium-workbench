@@ -42,12 +42,22 @@ def test_remote_link_defaults_to_the_sms_endpoint(monkeypatch):
 
 
 @pytest.mark.parametrize("name", [
-    "BACKEND_BASE_ENV_VARS", "DEFAULT_BACKEND_BASE", "BackendConfigError", "backend_configured",
-    "check_single_backend", "explicit_backend_base_url", "normalize_backend_base_url", "IDENTITY_HEADER",
+    "BackendConfigError", "explicit_backend_base_url", "normalize_backend_base_url", "IDENTITY_HEADER",
     "caller_identity", "_http_error_detail",
 ])
 def test_reexports_are_the_core_objects(name):
     assert getattr(sac, name) is getattr(bc, name)
+
+
+def test_the_config_names_are_not_reexported():
+    """Step P3 C1: the alias names, the tunnel default and the one-backend check are the plugin's own (or the
+    core's ``backends.config``); the old re-exports are gone, not aliased."""
+    for name in ("BACKEND_BASE_ENV_VARS", "backend_configured", "check_single_backend"):
+        assert not hasattr(sac, name), name
+    assert not hasattr(bc, "DEFAULT_BACKEND_BASE") and not hasattr(bc, "check_single_backend")
+    assert not hasattr(bc, "backend_configured")
+    assert sac.DEFAULT_BACKEND_BASE == "http://localhost:8080"
+    assert bc.BACKEND_BASE_ENV_VARS == (bc.BACKEND_BASE_ENV, *sac.ALIAS_ENV_VARS)  # the core's warning list agrees
 
 
 # --- the moved functions behave as before --------------------------------------------------------------------------
@@ -59,17 +69,24 @@ def test_reexports_are_the_core_objects(name):
     ({"VIVARIUM_WORKBENCH_BACKEND_BASE_URL": "http://named:1", "VIVA_API_BASE": "http://viva:1"}, "http://named:1"),
 ])
 def test_configured_base_url_precedence(monkeypatch, env, expected):
+    from vivarium_workbench.lib.backends import config
+
     for var in bc.BACKEND_BASE_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
-    assert bc.configured_base_url() == expected
+    assert config.configured_base_url() == expected
     assert sac.sms_api_base() == expected
+    # the core alone knows only the named backend (step P3 C1)
+    assert bc.configured_base_url() == env.get("VIVARIUM_WORKBENCH_BACKEND_BASE_URL")
 
 
-def test_sms_api_base_reads_the_core_at_call_time(monkeypatch):
-    monkeypatch.setattr(bc, "configured_base_url", lambda: "http://patched:1")
-    assert sac.sms_api_base() == "http://patched:1"
+def test_the_provider_base_url_reads_sms_api_base_at_call_time(monkeypatch):
+    from vivarium_workbench.lib.backends import config
+
+    monkeypatch.delenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", raising=False)
+    monkeypatch.setattr(sac, "sms_api_base", lambda: "http://patched:1")
+    assert config.configured_base_url() == "http://patched:1"
 
 
 @pytest.mark.parametrize("env, named, expected", [
@@ -79,31 +96,40 @@ def test_sms_api_base_reads_the_core_at_call_time(monkeypatch):
     ({"VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT": "smscdk"}, "https://sms.cam.uchc.edu", "smscdk"),
 ])
 def test_deployment_name(monkeypatch, env, named, expected):
+    from vivarium_workbench.lib.backends import config
+
     monkeypatch.delenv("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT", raising=False)
     monkeypatch.delenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", raising=False)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     if named:
         monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", named)
-    assert bc.deployment_name() == expected
+    assert config.deployment_name() == expected
     assert remote_pinned.remote_deployment_name() == expected
-    assert remote_pinned._DEFAULT_REMOTE_DEPLOYMENT == bc._DEFAULT_DEPLOYMENT == "smsvpctest"
+    assert remote_pinned._DEFAULT_REMOTE_DEPLOYMENT == "smsvpctest"
+    # the core's own default is neutral (step P3 C1); the plugin's default is passed in
+    assert bc._DEFAULT_DEPLOYMENT == "default"
+    assert bc.deployment_name() == (expected if expected != "smsvpctest" else "default")
 
 
 def test_remote_deployment_name_reads_the_core_at_call_time(monkeypatch):
-    monkeypatch.setattr(bc, "deployment_name", lambda: "patched")
-    assert remote_pinned.remote_deployment_name() == "patched"
+    monkeypatch.setattr(bc, "deployment_name", lambda default=None: f"patched-{default}")
+    assert remote_pinned.remote_deployment_name() == "patched-smsvpctest"
 
 
-def test_check_single_backend(monkeypatch):
+def test_check_config(monkeypatch):
+    from vivarium_workbench.lib.backends import config
+
     for var in bc.BACKEND_BASE_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "http://Named:1/")
     monkeypatch.setenv("SMS_API_BASE", "http://named:1")
-    bc.check_single_backend()  # same URL after normalising
+    config.check_config()  # same URL after normalising
+    bc.named_backend()  # the core half: the named URL is valid
     monkeypatch.setenv("SMS_API_BASE", "http://other:1")
     with pytest.raises(bc.BackendConfigError):
-        bc.check_single_backend()
+        config.check_config()
+    assert bc.named_backend() == "http://Named:1/"  # the core half never reads an alias
 
 
 def test_canonical_url():

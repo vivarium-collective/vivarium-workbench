@@ -16,9 +16,9 @@ from pathlib import Path
 import pytest
 
 from vivarium_workbench import cli
+from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
+from vivarium_workbench.lib.backends import config as backend_cfg
 from vivarium_workbench_sms import sms_api_client as sac
-
-BACKEND_BASE_ENV_VARS = sac.BACKEND_BASE_ENV_VARS
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def clean_env(monkeypatch):
 
 def test_default_is_localhost(clean_env):
     assert sac.sms_api_base() == "http://localhost:8080"
-    assert sac.backend_configured() is False
+    assert backend_cfg.backend_configured() is False
 
 
 def test_aliases_still_resolve_in_their_old_order(clean_env):
@@ -38,7 +38,7 @@ def test_aliases_still_resolve_in_their_old_order(clean_env):
     assert sac.sms_api_base() == "http://alias"
     clean_env.setenv("VIVA_API_BASE", "http://viva")
     assert sac.sms_api_base() == "http://viva"
-    assert sac.backend_configured() is True
+    assert backend_cfg.backend_configured() is True
 
 
 def test_new_env_beats_aliases(clean_env):

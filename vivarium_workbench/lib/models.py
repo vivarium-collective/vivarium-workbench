@@ -1317,7 +1317,7 @@ class RemoteHealth(BaseModel):
     """
 
     configured: bool
-    base_url: str
+    base_url: str | None  # None: no URL to ask (no backend named, no active provider supplies one)
     reachable: bool
     version: str | None = None
     error: str | None = None

@@ -220,9 +220,9 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
     # Where it runs, recorded in the manifest -- never in params, which a re-run sends back as the composite's
     # inputs. The run lands into this workspace's store, so without this its Origin would read "local".
     if plan.target == "deployment":
-        from vivarium_workbench.lib import backend_config
+        from vivarium_workbench.lib.backends import config as backend_cfg
 
-        manifest["ran_on"] = backend_config.deployment_name()
+        manifest["ran_on"] = backend_cfg.deployment_name()
         if on_compose:
             # compose-api runs its environment's image, never this checkout; the image is recorded when the run lands.
             from vivarium_workbench.lib import remote_run_compose

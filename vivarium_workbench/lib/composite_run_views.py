@@ -174,7 +174,7 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
     # in the Runs tab through the backend's listing facet.
     if run_id.startswith(REMOTE_RUN_PREFIX):
         from vivarium_workbench.lib import remote_run_views as _rrv
-        from vivarium_workbench.lib.backend_config import deployment_name as remote_deployment_name
+        from vivarium_workbench.lib.backends.config import deployment_name as remote_deployment_name
 
         # Opaque run ids: the suffix is the run's id on its backend, whatever its form, passed on as a string;
         # remote_run_status routes it by its record. An integer spelling is normalised as every route's query
