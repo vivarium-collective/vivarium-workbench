@@ -761,6 +761,7 @@ body.focus-mode.focus-composite-explore .page.active{
 /* Left rail ----------------------------------------------------------------- */
 .viv-rail{
   width:var(--rail-w, 240px); flex:0 0 var(--rail-w, 240px);
+  max-width: 320px;   /* hard cap matching _RAIL_MAX (walkthrough.js) so no path can widen the rail past the JS clamp, incl. a stale width across collapse/reopen */
   display:flex; flex-direction:column;
   background:#fafafa; border-right:1px solid #e5e7eb;
   padding:16px 0 8px;
