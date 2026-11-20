@@ -6891,3 +6891,33 @@ body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]{
 .vp-detail { background: #f8fafc; padding: 6px; overflow-x: auto; font-size: 0.85em; }
 .vp-viol { border: 1px solid #ef4444; background: #fef2f2; padding: 6px 10px; border-radius: 6px; margin-top: 8px; }
 .vp-ok { color: #065f46; margin-top: 8px; }
+
+/* ---- Model Definition panel (Model tab — model-forward contract above the loom) ---- */
+.mdef-panel{ border:1px solid var(--border,#e5e7eb); border-radius:10px;
+  background:var(--surface,#fff); padding:14px 16px; margin:0 0 14px; }
+.mdef-hd{ display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.mdef-name{ font-size:0.92em; background:var(--surface-2,#f6f8fa); padding:1px 7px; border-radius:5px; }
+.mdef-kind{ font-size:0.72em; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted,#64748b); }
+.mdef-desc{ margin:8px 0 2px; font-size:0.9em; line-height:1.5; color:var(--text,#1f2937); }
+.mdef-sect{ margin-top:14px; }
+.mdef-sect-lbl{ font-size:0.72em; text-transform:uppercase; letter-spacing:0.05em;
+  color:var(--text-muted,#64748b); font-weight:600; margin-bottom:6px; }
+.mdef-proc{ border-left:3px solid var(--accent,#6366f1); padding:4px 0 4px 12px; margin:8px 0; }
+.mdef-proc-hd{ font-size:0.95em; }
+.mdef-cls{ font-size:0.82em; color:var(--text-muted,#64748b); font-family:ui-monospace,SFMono-Regular,monospace; }
+.mdef-sig{ font-size:0.85em; color:var(--text,#334155); margin:3px 0 6px; font-style:italic; }
+.mdef-io{ margin-top:2px; }
+.mdef-io-row{ display:flex; gap:8px; align-items:baseline; margin:2px 0; font-size:0.84em; }
+.mdef-io-lbl{ flex:0 0 46px; color:var(--text-muted,#94a3b8); text-align:right; font-size:0.9em; }
+.mdef-io-ports{ display:flex; flex-wrap:wrap; gap:4px 10px; }
+.mdef-port code, .mdef-io-ports code, .mdef-store-row code{
+  background:var(--surface-2,#f1f5f9); padding:0 4px; border-radius:3px; }
+.mdef-store-ref{ color:var(--accent,#6366f1); font-family:ui-monospace,SFMono-Regular,monospace; font-size:0.95em; }
+.mdef-stores{ display:flex; flex-direction:column; gap:3px; }
+.mdef-store-row{ font-size:0.85em; }
+.mdef-store-row code{ margin-right:3px; }
+.mdef-params{ display:flex; flex-direction:column; gap:6px; }
+.mdef-param{ font-size:0.85em; }
+.mdef-ptype{ color:var(--text-muted,#64748b); font-size:0.9em; }
+.mdef-pdesc{ font-size:0.92em; margin:1px 0 0 2px; }
+.mdef-req{ margin-top:10px; font-size:0.78em; }

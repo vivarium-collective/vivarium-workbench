@@ -1562,6 +1562,131 @@
       .catch(function () { if (pre) pre.textContent = ref + ' (could not load config)'; });
   }
 
+  // ---- Model Definition panel (model-forward contract/math/symbols) --------
+  // Renders the study's composite AS A MODEL — above the loom box — from
+  // /api/composite-resolve: each process's typed interface (the ports it reads
+  // and writes = the model's symbols), its transformation signature from the doc
+  // (the "math"), the shared stores (state variables), and the typed parameters.
+  // Degrades to nothing if resolve is unavailable (published snapshot, unbuilt).
+  function _mdClassName(addr) {
+    addr = String(addr || ''); var i = addr.indexOf(':');
+    return i >= 0 ? addr.slice(i + 1) : addr;
+  }
+  function _mdSig(doc) {           // first line of the process doc = its transformation signature
+    var first = String(doc || '').trim().split('\n')[0].trim();
+    return first.length > 180 ? first.slice(0, 177) + '…' : first;
+  }
+  function _mdPorts(obj, arrow) {  // {port: [store, key]} -> "port arrow store.key" chips
+    var ks = Object.keys(obj || {});
+    if (!ks.length) return '<span class="muted">—</span>';
+    return ks.map(function (port) {
+      var w = obj[port]; var path = Array.isArray(w) ? w.join('.') : String(w);
+      return '<span class="mdef-port"><code>' + _esc(port) + '</code> ' + arrow +
+        ' <span class="mdef-store-ref">' + _esc(path) + '</span></span>';
+    }).join('');
+  }
+  function _modelDefHtml(d) {
+    d = d || {};
+    var state = (d.state && typeof d.state === 'object') ? d.state : {};
+    var procNames = Object.keys(state).filter(function (k) {
+      var n = state[k];
+      if (!(n && typeof n === 'object' && (n._type === 'process' || n.address))) return false;
+      return !/emitter/i.test(String(n.address || '') + ' ' + k);   // emitters are plumbing, not model
+    });
+    var params = (d.parameters && typeof d.parameters === 'object') ? d.parameters : {};
+    if (!procNames.length && !Object.keys(params).length) return '';
+
+    // Shared stores = the model's state variables (the symbols the processes exchange).
+    var stores = {};
+    procNames.forEach(function (pn) {
+      var p = state[pn] || {};
+      ['inputs', 'outputs'].forEach(function (io) {
+        var m = p[io] || {};
+        Object.keys(m).forEach(function (port) {
+          var w = m[port];
+          if (Array.isArray(w) && w.length) {
+            var s = stores[w[0]] || (stores[w[0]] = {});
+            if (w.length >= 2) s[w[1]] = true;
+          }
+        });
+      });
+    });
+
+    var procHtml = procNames.map(function (pn) {
+      var p = state[pn] || {};
+      var sig = _mdSig(p.doc);
+      var cfg = (p.config && typeof p.config === 'object') ? p.config : {};
+      var cfgStr = Object.keys(cfg).map(function (k) {
+        return '<code>' + _esc(k) + '</code> = ' + _esc(JSON.stringify(cfg[k]));
+      }).join(' · ');
+      return '<div class="mdef-proc">' +
+        '<div class="mdef-proc-hd"><strong>' + _esc(pn) + '</strong>' +
+          (p.address ? ' <span class="mdef-cls">' + _esc(_mdClassName(p.address)) + '</span>' : '') + '</div>' +
+        (sig ? '<div class="mdef-sig">' + _esc(sig) + '</div>' : '') +
+        '<div class="mdef-io"><div class="mdef-io-row"><span class="mdef-io-lbl">reads</span><span class="mdef-io-ports">' +
+          _mdPorts(p.inputs, '←') + '</span></div>' +
+        '<div class="mdef-io-row"><span class="mdef-io-lbl">writes</span><span class="mdef-io-ports">' +
+          _mdPorts(p.outputs, '→') + '</span></div></div>' +
+        (cfgStr ? '<div class="mdef-io-row"><span class="mdef-io-lbl">config</span><span class="mdef-io-ports">' + cfgStr + '</span></div>' : '') +
+        '</div>';
+    }).join('');
+
+    var storeHtml = Object.keys(stores).sort().map(function (sn) {
+      var keys = Object.keys(stores[sn]).sort().map(function (k) { return '<code>' + _esc(k) + '</code>'; }).join(' ');
+      return '<div class="mdef-store-row"><span class="mdef-store-ref">' + _esc(sn) + '</span> ' + keys + '</div>';
+    }).join('');
+
+    var paramHtml = Object.keys(params).map(function (pn) {
+      var p = params[pn] || {};
+      var meta = [p.type, (p.default !== undefined ? 'default ' + JSON.stringify(p.default) : null)]
+        .filter(Boolean).join(' · ');
+      return '<div class="mdef-param"><code>' + _esc(pn) + '</code>' +
+        (meta ? ' <span class="mdef-ptype">' + _esc(meta) + '</span>' : '') +
+        (p.description ? '<div class="muted mdef-pdesc">' + _esc(p.description) + '</div>' : '') + '</div>';
+    }).join('');
+
+    var requires = Array.isArray(d.requires) && d.requires.length
+      ? '<div class="mdef-req muted">requires ' + d.requires.map(_esc).join(', ') + '</div>' : '';
+
+    return '<div class="mdef-panel">' +
+      '<div class="mdef-hd"><span class="overview-label" style="margin:0">Model definition</span>' +
+        (d.name ? '<code class="mdef-name">' + _esc(d.name) + '</code>' : '') +
+        (d.kind ? '<span class="mdef-kind">' + _esc(d.kind) + '</span>' : '') + '</div>' +
+      (d.description ? '<p class="mdef-desc">' + _esc(d.description) + '</p>' : '') +
+      (procHtml ? '<div class="mdef-sect"><div class="mdef-sect-lbl">Processes · ' + procNames.length + '</div>' + procHtml + '</div>' : '') +
+      (storeHtml ? '<div class="mdef-sect"><div class="mdef-sect-lbl">State variables — shared stores</div><div class="mdef-stores">' + storeHtml + '</div></div>' : '') +
+      (paramHtml ? '<div class="mdef-sect"><div class="mdef-sect-lbl">Parameters</div><div class="mdef-params">' + paramHtml + '</div></div>' : '') +
+      requires + '</div>';
+  }
+  function _renderModelDefinition(mount, fallbackId, _tries) {
+    if (!mount) return;
+    _tries = _tries || 0;
+    // composite-resolve needs the FULL module address; study.baseline[].composite is
+    // the short name. The loom card carries the resolved full address as data-address,
+    // so wait briefly for it to mount, then use it (fall back to the short id).
+    var card = mount.querySelector('[data-address]');
+    var fullId = card && card.getAttribute('data-address');
+    if (!fullId && _tries < 25) {
+      return void setTimeout(function () { _renderModelDefinition(mount, fallbackId, _tries + 1); }, 120);
+    }
+    var compositeId = fullId || fallbackId;
+    if (!compositeId) return;
+    fetch('/api/composite-resolve?id=' + encodeURIComponent(compositeId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || d.error) return;
+        var html = _modelDefHtml(d);
+        if (!html) return;
+        var slot = document.getElementById('model-definition-panel');
+        if (!slot) {
+          slot = document.createElement('div'); slot.id = 'model-definition-panel';
+          mount.insertBefore(slot, mount.firstChild);   // above the loom card(s)
+        }
+        slot.innerHTML = html;
+      })
+      .catch(function () { /* resolve unavailable (snapshot / unbuilt) — no panel */ });
+  }
+
   function _loadModelCards(force) {
     var mount = document.getElementById('model-composite-cards');
     if (!mount) return;
@@ -1668,6 +1793,9 @@
     var _studyCfgRef = (mount.getAttribute('data-study-config') || '').trim();
     var _hasStudyCfg = !!_studyCfgRef;
     if (_hasStudyCfg) _renderStudyConfigPanel(mount, _studyCfgRef, _esc0);
+    // Model-forward: render the composite AS A MODEL (contract/ports/math/symbols)
+    // above the loom card(s). Uses the primary (baseline) composite.
+    if (order.length) _renderModelDefinition(mount, order[0]);
     order.forEach(function (id) {
       var entry = byId[id];
       var wrap = document.createElement('div');
