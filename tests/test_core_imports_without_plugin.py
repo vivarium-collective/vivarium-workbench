@@ -379,3 +379,38 @@ def test_the_trace_answers_without_the_plugin(monkeypatch):
         "none": [400, "give exactly one of simulation_id, composite_run_id, compose_id"],
         "plugin": [],
     }
+
+
+_LISTING_PROBE = textwrap.dedent('''
+    import json, sys, tempfile
+    from pathlib import Path
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import backends, investigations_index, simulations_index
+
+    ws = Path(tempfile.mkdtemp())
+    (ws / "workspace.yaml").write_text("name: ws\\nremote_run_study_map:\\n  - {pattern: x, study: s}\\n")
+    data = simulations_index.build_simulations_data(ws)
+    simulations_index.forget_remote_listings()
+    print("@@RESULT@@" + json.dumps({
+        "has_remote": "remote" in data,
+        "offering": [b.name for b in backends.offering("listing")],
+        "stats": investigations_index._remote_study_run_stats(ws),
+        "plugin": sorted(m for m in sys.modules if m.startswith("vivarium_workbench_sms")),
+    }, sort_keys=True))
+''')
+
+
+def test_the_remote_listing_answers_without_the_plugin():
+    """Step P2 Remote tab R1: with the plugin absent (the env-worker pod) no backend offers ``listing``, so the
+    Simulations index is local-only with no ``remote`` state, the refresh flush is a no-op, the study cards count no
+    remote runs even with a ``remote_run_study_map``, and no plugin module is imported."""
+    proc = subprocess.run([sys.executable, "-c", _LISTING_PROBE], capture_output=True, text=True, timeout=300)
+    expected = json.dumps({"has_remote": False, "offering": [], "plugin": [], "stats": {}}, sort_keys=True)
+    assert "@@RESULT@@" + expected in proc.stdout, (proc.stdout[-2000:], proc.stderr[-2000:])

@@ -25,6 +25,8 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
+from vivarium_workbench.lib import remote_study_map
+
 
 # ---------------------------------------------------------------------------
 # sys.path helper (mirrors visualization_classes.py / composite_resolve.py)
@@ -89,21 +91,21 @@ def _remote_study_run_stats(ws_root: Path) -> dict:
     ``s3://`` uri, so it has no local ``runs.db``/``study.yaml`` entry). Without
     this the study card's ``n_runs`` stays 0 — and its Last-run stays blank —
     even when the study's runs completed remotely and are study-tagged (via the
-    workspace ``remote_run_study_map``). Gated on that map so only workspaces
-    that opted into remote-run association pay the sms-api fetch.
+    workspace ``remote_run_study_map``, :mod:`remote_study_map`). Gated on that
+    map so only workspaces that opted into remote-run association pay the fetch.
 
-    Uses the STALE-WHILE-REVALIDATE fetch (``list_remote_simulations_swr``): the
-    sms-api round-trip can take ~minutes over a laggy tunnel, and the study index
-    must not block on it. A cold render returns no remote stats and kicks a
-    background refresh; the counts/last-run populate on a subsequent load once the
-    cache warms. Best-effort — never raises.
+    The rows come from the backends' ``listing`` facets, non-fresh
+    (``simulations_index.list_remote_runs``; step P2 Remote tab R1): the
+    round-trip can take ~minutes over a laggy tunnel, and the study index must not
+    block on it. A cold render returns no remote stats and kicks a background
+    refresh; the counts/last-run populate on a subsequent load once the cache
+    warms. Best-effort — never raises.
     """
     try:
-        from vivarium_workbench_sms.remote_simulations import (
-            _load_remote_study_map, list_remote_simulations_swr)
-        if not _load_remote_study_map(ws_root):
+        if not remote_study_map.load_rules(ws_root):
             return {}
-        rows = list_remote_simulations_swr(ws_root)
+        from vivarium_workbench.lib import simulations_index
+        rows = simulations_index.list_remote_runs(ws_root)
     except Exception:
         return {}
     stats: dict = {}

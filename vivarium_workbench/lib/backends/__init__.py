@@ -175,6 +175,30 @@ class BuildFacet(Protocol):
         ...
 
 
+class ListingFacet(Protocol):
+    """Optional (§2.1, step P2 Remote tab R1): the runs this backend's server has, merged into ``/api/simulations``
+    beside the local ones (and counted on the study cards). Rows are shaped like ``simulations_index`` rows (the
+    ``SimRow`` fields, with ``remote_origin``: ``{deployment, simulation_id, experiment_id, ...}``) and carry
+    ``study_slug`` (and ``studies``, ``investigation_slug``) when the backend knows the run's study. The core dedups
+    them by ``run_id`` against the local rows and across backends, first seen wins.
+
+    Found by facet presence (:func:`offering`), never by :func:`active` or a profile: the listing path must not
+    block on the network (#1106). No method blocks unless ``fresh``; none raises for an unreachable server."""
+
+    def list_runs(self, ws_root: Path, *, fresh: bool = False) -> "list[dict]":
+        """``fresh=False``: what the backend's cache holds now (a refresh may start in the background).
+        ``fresh=True`` (``?refresh=true``): a bounded blocking fetch."""
+        ...
+
+    def state(self, ws_root: Path) -> "dict | None":
+        """Where the rows came from (``RemoteSourceState``: ``{state, as_of, error}``), or ``None``."""
+        ...
+
+    def invalidate(self) -> None:
+        """Forget the cached rows and their provenance (``?refresh=true``, before the fresh fetch)."""
+        ...
+
+
 @dataclass(frozen=True)
 class Backend:
     """One backend: its run facet and the optional facets below (§2.1; the rest come with later steps).
@@ -187,7 +211,8 @@ class Backend:
     ``artifacts`` / ``analyses`` (optional, :class:`ArtifactFacet` / :class:`AnalysisFacet`): a backend without one
     refuses those operations on its runs (409 ``not-sms`` until P3 renames the literal).
 
-    ``builds`` (optional) runs the workspace as the backend's own build (:class:`BuildFacet`)."""
+    ``builds`` (optional) runs the workspace as the backend's own build (:class:`BuildFacet`).
+    ``listing`` (optional, :class:`ListingFacet`): the server's runs, listed beside the local ones."""
 
     name: str
     runs: RunFacet
@@ -196,6 +221,7 @@ class Backend:
     artifacts: Optional[ArtifactFacet] = None
     analyses: Optional[AnalysisFacet] = None
     builds: Optional[BuildFacet] = None
+    listing: Optional[ListingFacet] = None
 
 
 COMPOSE = Backend("compose-api", ComposeApiRuns(), identity=compose_health_identity)
@@ -262,10 +288,11 @@ def unrouted() -> "Backend | None":
     return next((b for b in _registry().values() if b.unrouted is not None), None)
 
 
-def offering(facet: 'Literal["artifacts", "analyses"]') -> "tuple[Backend, ...]":
+def offering(facet: 'Literal["artifacts", "analyses", "listing"]') -> "tuple[Backend, ...]":
     """The active backends that declare the optional ``facet``, compose-api first and then the providers' in registry
-    order: for a request that names no run at all (the study gallery). Empty with providers off. Should compose-api
-    ever declare one, it comes first; §2.6 revisits the order with the generic listing."""
+    order: for a request that names no run at all (the study gallery, the remote-runs listing). A registry read: no
+    profile, no network. Empty with providers off. Should compose-api ever declare one, it comes first; §2.6
+    revisits the order with the generic listing."""
     return tuple(b for b in (COMPOSE, *_registry().values()) if getattr(b, facet) is not None)
 
 

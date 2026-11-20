@@ -953,15 +953,13 @@ def create_app() -> FastAPI:
         ``?refresh=true`` bypasses the remote-runs cache for a fresh sms-api pull.
         """
         from vivarium_workbench.lib.simulations_index import (
-            build_simulations_data_cached, clear_build_cache)
+            build_simulations_data_cached, clear_build_cache, forget_remote_listings)
         from vivarium_workbench.lib.composite_lookup import (
             known_composite_ids,
             annotate_composite_registered,
         )
         if refresh:
-            from vivarium_workbench_sms import remote_simulations as _rs
-            _rs._REMOTE_CACHE.clear()
-            _rs._REMOTE_META.clear()
+            forget_remote_listings()
             clear_build_cache()
         data = build_simulations_data_cached(ws, include_remote=include_remote,
                                              fresh=refresh)

@@ -171,7 +171,7 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
     # run_simulation has no local run row — its state lives on sms-api. The loom
     # polls this endpoint with the synthetic "remote-sim-<id>" run_id; map it to
     # the sms-api simulation status so the run bar shows running -> completed. The
-    # run itself surfaces in the Simulations/Runs tab via remote_simulations.
+    # run itself surfaces in the Simulations/Runs tab via the backend's listing facet.
     if run_id.startswith("remote-sim-"):
         # Opaque run ids: the suffix is the remote run's id, whatever its form; remote_run_status routes it by its
         # record. An integer suffix stays an int, so an SMS simulation is asked and answered exactly as before.
