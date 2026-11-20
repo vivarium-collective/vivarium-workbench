@@ -15,6 +15,7 @@ from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib import remote_run_compose
 from vivarium_workbench_sms import remote_run_viva_v1
 from vivarium_workbench.lib import remote_run_views as rrv
+from vivarium_workbench_sms import sms_legacy
 from vivarium_workbench.lib.backends import records
 from vivarium_workbench_sms.sms_api_client import BACKEND_BASE_ENV_VARS
 
@@ -67,9 +68,9 @@ def asked(monkeypatch):
                 return {"status": "running", "terminal": False, "cancelled": True, "database_id": 1}
             return fn
 
-    monkeypatch.setattr(rrv, "SmsApiClient", Client)
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: HERE)
-    monkeypatch.setattr(rrv, "_run_auth_ok", lambda: True)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", Client)
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: HERE)
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
     return seen
 
 

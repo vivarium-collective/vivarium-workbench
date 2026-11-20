@@ -235,10 +235,10 @@ def test_status_without_capability_is_legacy(monkeypatch):
 
 
 def test_ready_is_terminal_ok_for_every_build_poll():
-    from vivarium_workbench.lib import remote_run_views
+    from vivarium_workbench_sms import sms_legacy
     from vivarium_workbench_sms import remote_run_jobs
     assert "ready" in remote_run_jobs._TERMINAL_OK
-    assert "ready" in remote_run_views._TERMINAL_OK
+    assert "ready" in sms_legacy._TERMINAL_OK
 
 
 # -- listing ----------------------------------------------------------------

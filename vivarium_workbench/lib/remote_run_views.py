@@ -9,18 +9,21 @@ submit is visible to the status GET.  No ``import server`` here.
 ``remote_run_start(ws_root, body)`` returns ``(body, status)`` — the FastAPI
 route wraps every path (incl. the 202 success) in ``JSONResponse``.
 
-The externals — ``manager``, ``PipelineCtx``, ``run_remote_pipeline``,
-``land_remote_run``, ``SmsApiClient``, ``load_spec``, ``github_auth`` — are
-bound at MODULE level so tests monkeypatch them with fakes and never touch a
-real network / git / auth service.  ``_sms_api_base`` is REUSED from
-:mod:`lib.workspace_deps_views` (no new copy); the git/study helpers come from
-:mod:`lib.git_status` / :mod:`lib.study_spec`.
+The pipeline externals — ``manager``, ``PipelineCtx``, ``run_remote_pipeline``,
+``github_auth`` — are bound at MODULE level so tests monkeypatch them with fakes
+and never touch a real network / git / auth service. The SMS seams
+(``SmsApiClient``, ``SmsApiError``, ``_sms_api_base``, ``load_spec``,
+``_run_auth_ok``, ``land_remote_run``) and constants live in
+:mod:`vivarium_workbench_sms.sms_legacy` (step P2, Runs a1) and are read through
+that module at call time: one patch target per name, none bound here. The
+lifecycle requests no run record routes go to the backend's ``unrouted`` facet
+(``backends.unrouted()``); with providers off the core answers them itself.
 """
 
 from __future__ import annotations
 
 import subprocess
-import time  # noqa: F401 -- tests patch rrv.time.sleep; the shared module reaches backends.sms_legacy
+import time
 import warnings
 from pathlib import Path
 
@@ -30,55 +33,17 @@ from vivarium_workbench_sms import remote_pinned
 from vivarium_workbench.lib import backends, remote_run_compose
 from vivarium_workbench_sms import sms_legacy
 from vivarium_workbench.lib import study_spec
-from vivarium_workbench.lib.investigations import load_spec
 from vivarium_workbench_sms.remote_run_jobs import (
     PipelineCtx,
     manager,
     run_remote_pipeline,
 )
-from vivarium_workbench.lib.remote_run_landing import land_remote_run
-from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
-from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
-
-# sms-api JobStatus terminal sets (relocated here from remote_run_jobs, which R5
-# deletes). The thin client maps a raw sms-api status into a UI phase.
-#
-# These mirror sms-api's ACTUAL JobStatus vocabulary, which is
-# COMPLETED / FAILED / CANCELLED plus the non-terminal states. A "partial"
-# entry was added defensively in #1045 for viva-api#609's then-planned PARTIAL
-# status and kept in #1046 on the grounds that it cost nothing; it is removed
-# here because viva-api dropped that status before merging, so the value can
-# never arrive, and a set that lists states the API cannot produce invites the
-# reader to believe it can. If a partial-run status ever genuinely lands, add
-# it back together with the sms-api change that produces it.
-# "ready" is an environment's terminal-OK status (/viva/v1/environments, W2):
-# without it a build poll against a W2 server never ends.
-_TERMINAL_OK = {"completed", "done", "succeeded", "ready"}
-_TERMINAL_BAD = {"failed", "cancelled", "error"}
-
-# Real completion signal now exists (GET /api/v1/analyses/{id}/status, S3-exists
-# probe server-side) for Ray-backend triggers -- poll it instead of blindly
-# sleeping. Interval/attempts sized to cover a cold image pull of the multi-GB
-# v2ecoli image plus the analysis script's own (fast) run, without polling so
-# tightly it hammers sms-api. _ANALYSIS_LAND_WAIT_SECONDS is the fallback for
-# simulators where no database_id comes back at all (shouldn't happen for
-# Ray-backend triggers post gap-3, kept only as a safety net).
-_ANALYSIS_POLL_INTERVAL_SECONDS = 10
-_ANALYSIS_POLL_MAX_ATTEMPTS = 30  # ~5 min ceiling
-_ANALYSIS_LAND_WAIT_SECONDS = 90
-_ANALYSIS_TERMINAL_STATUSES = {"completed", "failed"}
 
 
-
-
-def _run_auth_ok() -> bool:
-    """Gate for submit/land. A GitHub session satisfies it (stock build-first
-    flow). Pinned mode ALSO satisfies it: those calls push nothing to GitHub, so
-    requiring a human token would be neither production-grade nor reproducible —
-    the operator authorizes remote runs declaratively by enabling pinned mode."""
-    return (
-        github_auth.current_session() is not None or remote_pinned.is_pinned_enabled()
-    )
+def _sms_client() -> "sms_legacy.SmsApiClient":
+    """A client on the SMS host, built from ``sms_legacy``'s seams at call time (tests patch them there). Used by the
+    SMS views still here and the figure routes (transitional: Runs a2, Analyses)."""
+    return sms_legacy.SmsApiClient(sms_legacy._sms_api_base())
 
 
 def remote_run_start(ws_root: Path, body: dict) -> tuple[dict, int]:
@@ -113,7 +78,7 @@ def remote_run_start(ws_root: Path, body: dict) -> tuple[dict, int]:
     spec_path = study_spec.study_spec_path(ws_root, study)
     if spec_path is None or not spec_path.is_file():
         return {"error": f"study {study!r} not found"}, 404
-    spec = load_spec(spec_path)
+    spec = sms_legacy.load_spec(spec_path)
     observables = study_spec.collect_study_observables(spec)
 
     branch = subprocess.run(
@@ -124,7 +89,7 @@ def remote_run_start(ws_root: Path, body: dict) -> tuple[dict, int]:
         timeout=5,
     ).stdout.strip()
 
-    client = SmsApiClient(_sms_api_base())
+    client = _sms_client()
     # spec_id = the study's baseline COMPOSITE ref (what local runs use:
     # _post_study_run_baseline_for_test -> entry.get("composite")), NOT the
     # baseline entry's `name` (which is the study slug). Falls back to the
@@ -143,7 +108,7 @@ def remote_run_start(ws_root: Path, body: dict) -> tuple[dict, int]:
         run_parca=bool(body.get("run_parca", True)),
         client=client,
         push_and_sha=lambda: git_status.remote_push_and_sha(ws_root),
-        land=land_remote_run,
+        land=sms_legacy.land_remote_run,
     )
     job = manager.submit(study, lambda j: run_remote_pipeline(j, ctx))
     return {"job_id": job.job_id}, 202
@@ -196,7 +161,7 @@ def remote_run_build_start(ws_root: Path, body: dict) -> tuple[dict, int]:
         return resolved  # type: ignore[return-value]
     repo_url, branch = resolved  # type: ignore[misc]
     commit = git_status.remote_push_and_sha(ws_root)
-    client = SmsApiClient(_sms_api_base())
+    client = _sms_client()
     uploaded = client.upload_simulator(
         {"git_commit_hash": commit, "git_repo_url": repo_url, "git_branch": branch}
     )
@@ -234,12 +199,12 @@ def remote_run_pinned_build_start(ws_root: Path, body: dict) -> tuple[dict, int]
     cfg = remote_pinned.pinned_config()
     if cfg is None:
         return {"error": "pinned remote runs are not enabled"}, 409
-    client = SmsApiClient(_sms_api_base())
+    client = _sms_client()
     try:
         resolved = remote_pinned.resolve_pinned_build(client, cfg.repo_url, cfg.branch)
     except remote_pinned.NoPinnedBuildError as e:
         return {"error": str(e)}, 404
-    except SmsApiError as e:
+    except sms_legacy.SmsApiError as e:
         return {"error": f"sms-api unreachable: {e}", "reachable": False}, 502
     return {
         "simulator_id": resolved["simulator_id"],
@@ -303,11 +268,11 @@ def _remote_run_config(ws_root: Path) -> tuple[dict, int]:
     }
     try:
         resolved = remote_pinned.resolve_pinned_build(
-            SmsApiClient(_sms_api_base()), cfg.repo_url, cfg.branch
+            _sms_client(), cfg.repo_url, cfg.branch
         )
         out["commit"] = resolved["commit"]
         out["simulator_id"] = resolved["simulator_id"]
-    except (remote_pinned.NoPinnedBuildError, SmsApiError) as e:
+    except (remote_pinned.NoPinnedBuildError, sms_legacy.SmsApiError) as e:
         out["build_error"] = str(e)
     return out, 200
 
@@ -350,9 +315,29 @@ def remote_run_submit(ws_root: Path, body: dict) -> tuple[dict, int]:
         # One decision (backends.active, which backends.resolve_run_target also reads): patching
         # backends.resolve_run_target does not steer this submit; patch backends.active / backends.select.
         chosen = backends.active(ws_root)
-        if chosen is backends.COMPOSE or chosen is backends.VIVA_CORE:
+        if chosen is not None and chosen.unrouted is None:
             return chosen.runs.submit(ws_root, body)
-    return sms_legacy.submit_tail(ws_root, body)
+    # A simulator id, or a backend with an ``unrouted`` facet (SMS: a session build or pin), or nothing named: the
+    # unrouted backend answers, its login check first (401 before 400).
+    ub = backends.unrouted()
+    if ub is not None and ub.unrouted is not None:
+        return ub.unrouted.submit(ws_root, body)
+    if body.get("simulator_id"):  # providers off: no installed provider serves builds
+        return _not_installed("", "a simulator id names a build, and no installed provider serves builds in this "
+                                  "workbench")
+    return {"error": "no remote backend was named (serve --backend-base-url)", "reason": "no-backend"}, 409
+
+
+def _not_installed(rid: str, error: str) -> tuple[dict, int]:
+    """Providers off: the request names something (a run no active backend owns, a build or an analysis) that only an
+    installed provider could answer. Refused like a record whose provider is not active (terminal 409)."""
+    from vivarium_workbench.lib.backends.records import refusal
+
+    return refusal(rid, error, reason="backend-not-installed", phase="backend-not-installed")
+
+
+def _unowned(rid: str) -> tuple[dict, int]:
+    return _not_installed(rid, f"run {rid} belongs to no backend an installed provider serves in this workbench")
 
 
 def _first_id(params: dict, keys: "tuple[str, ...]") -> str:
@@ -448,7 +433,10 @@ def remote_run_land(ws_root: Path, body: dict) -> tuple[dict, int]:
     if isinstance(chosen, tuple):
         return chosen  # the run belongs to another backend: refused, nothing asked of the configured one
     if chosen is None:
-        return sms_legacy.land_tail(ws_root, _no_id(body))  # no id: today's exact answers (401 before 400)
+        ub = backends.unrouted()
+        if ub is not None and ub.unrouted is not None:
+            return ub.unrouted.land(ws_root, _no_id(body))  # no id: the backend's exact answers (401 before 400)
+        return _unowned(rid) if rid else ({"error": "study and simulation_id are required"}, 400)
     return chosen.runs.land(ws_root, {**body, "simulation_id": rid})
 
 
@@ -466,7 +454,7 @@ def remote_run_land_artifacts(ws_root: Path, body: dict) -> tuple[dict, int]:
     Body: ``{simulation_id, run_id}``. Idempotent.
     """
     body = body or {}
-    if not _run_auth_ok():
+    if not sms_legacy._run_auth_ok():
         return {"error": "not authenticated"}, 401
     sim_id = body.get("simulation_id")
     run_id = (body.get("run_id") or "").strip()
@@ -477,10 +465,10 @@ def remote_run_land_artifacts(ws_root: Path, body: dict) -> tuple[dict, int]:
         return refused
     from vivarium_workbench.lib.remote_run_landing import land_remote_simulation_artifacts
 
-    client = SmsApiClient(_sms_api_base())
+    client = _sms_client()
     try:
         result = land_remote_simulation_artifacts(ws_root, int(sim_id), run_id, client=client)
-    except SmsApiError as e:
+    except sms_legacy.SmsApiError as e:
         return {"error": f"land failed: sms-api unavailable: {e}"}, 502
     except Exception as e:  # noqa: BLE001 — surface a shaped error, never a 500 traceback page
         return {"error": f"land failed: {type(e).__name__}: {e}"}, 500
@@ -514,7 +502,7 @@ def remote_run_analysis(ws_root: Path, body: dict) -> tuple[dict, int]:
     Returns ``({analysis_id, analysis_name, simulation_id, phase}, 202)``.
     """
     body = body or {}
-    if not _run_auth_ok():
+    if not sms_legacy._run_auth_ok():
         return {"error": "not authenticated"}, 401
     sim_id = body.get("simulation_id")
     if not sim_id:
@@ -532,14 +520,14 @@ def remote_run_analysis(ws_root: Path, body: dict) -> tuple[dict, int]:
             return {"error": f"study {study!r} not found"}, 404
         from vivarium_workbench.lib.study_run_post import build_analysis_options
 
-        modules, analysis_errors = build_analysis_options(load_spec(spec_path).get("analyses") or [], ws_root)
+        modules, analysis_errors = build_analysis_options(sms_legacy.load_spec(spec_path).get("analyses") or [], ws_root)
         for err in analysis_errors:
             warnings.warn(f"remote_run_analysis: {study!r} analysis config: {err.get('error')}")
 
-    client = SmsApiClient(_sms_api_base())
+    client = _sms_client()
     try:
         triggered = client.run_analysis(int(sim_id), modules)
-    except SmsApiError as e:
+    except sms_legacy.SmsApiError as e:
         # Unlike the land-time trigger (best-effort, must never block landing),
         # this IS the requested action — a failure has to reach the operator.
         status = 401 if getattr(e, "status", None) == 401 else 502
@@ -567,16 +555,29 @@ def remote_run_status(params: dict, *, ws_root: Path) -> tuple[dict, int]:
     status into a UI ``phase``."""
     params = params or {}
     # Step 1c-2: the run's id (``run_id``, else ``simulation_id``) is looked up in its record, which names the
-    # backend that ran it. An SMS simulation, or no run id, goes to the SMS half with the build/analysis ids it may
-    # carry (their precedence there is unchanged: analysis, then simulation, then simulator).
+    # backend that ran it. A run of a backend with an ``unrouted`` facet (an SMS simulation), or no run id, goes to
+    # that facet with the build/analysis ids it may carry (their precedence there is unchanged: analysis, then
+    # simulation, then simulator) -- ``runs.status(rid)`` would drop them.
     rid = _first_id(params, ("run_id", "simulation_id"))
     chosen = backends.for_existing(ws_root, rid, deployment=params.get("deployment"),
                                    study=params.get("study")) if rid else None
     if isinstance(chosen, tuple):
         return chosen
-    if chosen is backends.COMPOSE or chosen is backends.VIVA_CORE:
+    if chosen is not None and chosen.unrouted is None:
         return chosen.runs.status(rid)
-    return sms_legacy.status_tail({**params, "simulation_id": rid} if rid else _no_id(params))
+    ub = backends.unrouted()
+    if ub is not None and ub.unrouted is not None:
+        return ub.unrouted.status({**params, "simulation_id": rid} if rid else _no_id(params))
+    # Providers off.
+    if rid:
+        return _unowned(rid)
+    if params.get("analysis_id"):
+        return _not_installed("", "an analysis id names an SMS analysis, and no installed provider serves analyses "
+                                  "in this workbench")
+    if params.get("simulator_id"):
+        return _not_installed("", "a simulator id names a build, and no installed provider serves builds in this "
+                                  "workbench")
+    return {"error": "simulator_id, simulation_id or analysis_id required"}, 400
 
 
 def remote_run_chain_progress(params: dict, *, ws_root: Path) -> tuple[dict, int]:
@@ -598,7 +599,10 @@ def remote_run_chain_progress(params: dict, *, ws_root: Path) -> tuple[dict, int
     if isinstance(chosen, tuple):
         return chosen
     if chosen is None:
-        return sms_legacy.chain_progress_tail(_no_id(params))  # no id: today's 400
+        ub = backends.unrouted()
+        if ub is not None and ub.unrouted is not None:
+            return ub.unrouted.progress(_no_id(params))  # no id: the backend's own 400
+        return _unowned(rid) if rid else ({"error": "simulation_id required"}, 400)
     return chosen.runs.progress(rid)
 
 
@@ -626,5 +630,8 @@ def remote_run_cancel(body: dict, *, ws_root: Path) -> tuple[dict, int]:
     if isinstance(chosen, tuple):
         return chosen
     if chosen is None:
-        return sms_legacy.cancel_tail(_no_id(body))  # no id: today's 400
+        ub = backends.unrouted()
+        if ub is not None and ub.unrouted is not None:
+            return ub.unrouted.cancel(_no_id(body))  # no id: the backend's own 400
+        return _unowned(rid) if rid else ({"error": "simulation_id required"}, 400)
     return chosen.runs.cancel(rid)

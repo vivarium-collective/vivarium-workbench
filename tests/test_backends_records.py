@@ -544,14 +544,14 @@ def test_sms_submit_and_land_record_the_clients_url(monkeypatch, tmp_path):
 
     spec = tmp_path / "study.yaml"
     spec.write_text("baseline: [{composite: c}]\n")
-    monkeypatch.setattr(rrv, "SmsApiClient", Client)
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://configured")
-    monkeypatch.setattr(rrv, "_run_auth_ok", lambda: True)
-    monkeypatch.setattr(rrv, "load_spec", lambda p: {"baseline": [{"composite": "c"}]})
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", Client)
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://configured")
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
+    monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [{"composite": "c"}]})
     monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec)
     monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
     monkeypatch.setattr(rrv.study_spec, "collect_study_observables", lambda s: [])
-    monkeypatch.setattr(rrv, "land_remote_run", lambda *a, **k: seen.update(k) or "r1")
+    monkeypatch.setattr(sms_legacy, "land_remote_run", lambda *a, **k: seen.update(k) or "r1")
 
     assert sms_legacy.submit_tail(tmp_path, {"study": "s", "simulator_id": 1, "num_generations": 1,
                                              "num_seeds": 1})[1] == 202

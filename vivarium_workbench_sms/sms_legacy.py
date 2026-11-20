@@ -3,12 +3,14 @@
 Moved verbatim from ``remote_run_views`` in step 1a: the legacy tails of ``remote_run_land``,
 ``remote_run_status``, ``remote_run_chain_progress`` and ``remote_run_cancel``, plus their two helpers;
 step 1b added the SMS half of ``remote_run_submit``. Each
-view keeps its own routing and calls the matching ``*_tail`` here once it has decided the request is SMS's.
+view keeps its own routing and calls the matching ``*_tail`` here once it has decided the request is SMS's
+(through ``runs``, or ``unrouted`` for a request that names no run: :class:`SmsLegacyUnrouted`).
 
-Every name tests patch on ``remote_run_views`` (``SmsApiClient``, ``_sms_api_base``, ``load_spec``,
-``_run_auth_ok``, ``land_remote_run``) and the constants defined there are read through that module at call
-time, so the move changes no behaviour and no test. It moves to the SMS plugin package in step P1b; it is
-deleted only if the plugin itself leaves ``/api/v1`` (out of scope, Appendix A).
+Step P2 (Runs a1) moved the SMS constants and the login check (``_run_auth_ok``) here from ``remote_run_views``. The
+seams tests patch (``SmsApiClient``, ``SmsApiError``, ``_sms_api_base``, ``load_spec``, ``_run_auth_ok``,
+``land_remote_run``) are this module's own globals, read at call time; the SMS code still in ``remote_run_views``
+reads them through this module too, so each has exactly one patch target. It is deleted only if the plugin itself
+leaves ``/api/v1`` (out of scope, Appendix A).
 """
 
 from __future__ import annotations
@@ -18,22 +20,62 @@ import time
 import warnings
 from pathlib import Path
 
-from vivarium_workbench.lib import study_spec
-from vivarium_workbench_sms import remote_pinned
+from vivarium_workbench.lib import github_auth, study_spec
+from vivarium_workbench.lib.investigations import load_spec
+from vivarium_workbench.lib.remote_run_landing import land_remote_run
+from vivarium_workbench_sms import remote_pinned, sms_api_client
 from vivarium_workbench.lib.backends.records import remote_record as _remote_record
 from vivarium_workbench_sms.sms_api_client import DOWNLOAD_TIMEOUT, SmsApiClient, SmsApiError
+
+# sms-api JobStatus terminal sets (relocated here from remote_run_jobs, which R5
+# deletes). The thin client maps a raw sms-api status into a UI phase.
+#
+# These mirror sms-api's ACTUAL JobStatus vocabulary, which is
+# COMPLETED / FAILED / CANCELLED plus the non-terminal states. A "partial"
+# entry was added defensively in #1045 for viva-api#609's then-planned PARTIAL
+# status and kept in #1046 on the grounds that it cost nothing; it is removed
+# here because viva-api dropped that status before merging, so the value can
+# never arrive, and a set that lists states the API cannot produce invites the
+# reader to believe it can. If a partial-run status ever genuinely lands, add
+# it back together with the sms-api change that produces it.
+# "ready" is an environment's terminal-OK status (/viva/v1/environments, W2):
+# without it a build poll against a W2 server never ends.
+_TERMINAL_OK = {"completed", "done", "succeeded", "ready"}
+_TERMINAL_BAD = {"failed", "cancelled", "error"}
+
+# Real completion signal now exists (GET /api/v1/analyses/{id}/status, S3-exists
+# probe server-side) for Ray-backend triggers -- poll it instead of blindly
+# sleeping. Interval/attempts sized to cover a cold image pull of the multi-GB
+# v2ecoli image plus the analysis script's own (fast) run, without polling so
+# tightly it hammers sms-api. _ANALYSIS_LAND_WAIT_SECONDS is the fallback for
+# simulators where no database_id comes back at all (shouldn't happen for
+# Ray-backend triggers post gap-3, kept only as a safety net).
+_ANALYSIS_POLL_INTERVAL_SECONDS = 10
+_ANALYSIS_POLL_MAX_ATTEMPTS = 30  # ~5 min ceiling
+_ANALYSIS_LAND_WAIT_SECONDS = 90
+_ANALYSIS_TERMINAL_STATUSES = {"completed", "failed"}
+
+
+def _sms_api_base() -> str:
+    """Base URL of the viva-api (nee sms-api): :func:`sms_api_client.sms_api_base`, read through its module at call
+    time (tests patch it there, or this function here)."""
+    return sms_api_client.sms_api_base()
+
+
+def _run_auth_ok() -> bool:
+    """Gate for submit/land. A GitHub session satisfies it (stock build-first
+    flow). Pinned mode ALSO satisfies it: those calls push nothing to GitHub, so
+    requiring a human token would be neither production-grade nor reproducible —
+    the operator authorizes remote runs declaratively by enabling pinned mode."""
+    return (
+        github_auth.current_session() is not None or remote_pinned.is_pinned_enabled()
+    )
 
 
 def _poll_analysis_until_terminal(client: SmsApiClient, database_id: int) -> None:
     """Poll GET /api/v1/analyses/{id}/status until COMPLETED/FAILED or the attempt
     ceiling is reached. A miss just means the analysis isn't folded into THIS
     landing -- landing again later picks it up (see land_remote_run)."""
-    # Seams: read through remote_run_views at call time, so tests that patch them there still reach this code
-    # (TODO: retarget those tests when the remaining SMS views move here, then import directly).
-    from vivarium_workbench.lib import remote_run_views as _rrv
-    _ANALYSIS_POLL_MAX_ATTEMPTS = _rrv._ANALYSIS_POLL_MAX_ATTEMPTS
-    _ANALYSIS_TERMINAL_STATUSES = _rrv._ANALYSIS_TERMINAL_STATUSES
-    _ANALYSIS_POLL_INTERVAL_SECONDS = _rrv._ANALYSIS_POLL_INTERVAL_SECONDS
     for _ in range(_ANALYSIS_POLL_MAX_ATTEMPTS):
         try:
             status = client.analysis_status(database_id)
@@ -86,15 +128,6 @@ def _resolve_execution_provenance(client: SmsApiClient, simulation_id: int) -> d
 
 def land_tail(ws_root: Path, body: dict) -> tuple[dict, int]:
     """The SMS half of ``remote_run_views.remote_run_land``, moved verbatim."""
-    # Seams: read through remote_run_views at call time, so tests that patch them there still reach this code
-    # (TODO: retarget those tests when the remaining SMS views move here, then import directly).
-    from vivarium_workbench.lib import remote_run_views as _rrv
-    _run_auth_ok = _rrv._run_auth_ok
-    load_spec = _rrv.load_spec
-    SmsApiClient = _rrv.SmsApiClient
-    _sms_api_base = _rrv._sms_api_base
-    land_remote_run = _rrv.land_remote_run
-    _ANALYSIS_LAND_WAIT_SECONDS = _rrv._ANALYSIS_LAND_WAIT_SECONDS
     if not _run_auth_ok():
         return {"error": "not authenticated"}, 401
     study = (body.get("study") or "").strip()
@@ -177,13 +210,6 @@ def land_tail(ws_root: Path, body: dict) -> tuple[dict, int]:
 
 def status_tail(params: dict) -> tuple[dict, int]:
     """The SMS half of ``remote_run_views.status``, moved verbatim."""
-    # Seams: read through remote_run_views at call time, so tests that patch them there still reach this code
-    # (TODO: retarget those tests when the remaining SMS views move here, then import directly).
-    from vivarium_workbench.lib import remote_run_views as _rrv
-    SmsApiClient = _rrv.SmsApiClient
-    _sms_api_base = _rrv._sms_api_base
-    _TERMINAL_OK = _rrv._TERMINAL_OK
-    _TERMINAL_BAD = _rrv._TERMINAL_BAD
     sim_id = params.get("simulation_id")
     sm_id = params.get("simulator_id")
     an_id = params.get("analysis_id")
@@ -261,13 +287,6 @@ def status_tail(params: dict) -> tuple[dict, int]:
 
 def chain_progress_tail(params: dict) -> tuple[dict, int]:
     """The SMS half of ``remote_run_views.chain_progress``, moved verbatim."""
-    # Seams: read through remote_run_views at call time, so tests that patch them there still reach this code
-    # (TODO: retarget those tests when the remaining SMS views move here, then import directly).
-    from vivarium_workbench.lib import remote_run_views as _rrv
-    SmsApiClient = _rrv.SmsApiClient
-    _sms_api_base = _rrv._sms_api_base
-    _TERMINAL_OK = _rrv._TERMINAL_OK
-    _TERMINAL_BAD = _rrv._TERMINAL_BAD
     sim_id = params.get("simulation_id")
     if not sim_id:
         return {"error": "simulation_id required"}, 400
@@ -311,11 +330,6 @@ def chain_progress_tail(params: dict) -> tuple[dict, int]:
 
 def cancel_tail(body: dict) -> tuple[dict, int]:
     """The SMS half of ``remote_run_views.cancel``, moved verbatim."""
-    # Seams: read through remote_run_views at call time, so tests that patch them there still reach this code
-    # (TODO: retarget those tests when the remaining SMS views move here, then import directly).
-    from vivarium_workbench.lib import remote_run_views as _rrv
-    SmsApiClient = _rrv.SmsApiClient
-    _sms_api_base = _rrv._sms_api_base
     sim_id = body.get("simulation_id")
     if not sim_id:
         return {"error": "simulation_id required"}, 400
@@ -336,13 +350,6 @@ def cancel_tail(body: dict) -> tuple[dict, int]:
 
 def submit_tail(ws_root: Path, body: dict) -> tuple[dict, int]:
     """The SMS half of ``remote_run_views.remote_run_submit``, moved verbatim (step 1b)."""
-    # Seams: read through remote_run_views at call time, so tests that patch them there still reach this code
-    # (TODO: retarget those tests when the remaining SMS views move here, then import directly).
-    from vivarium_workbench.lib import remote_run_views as _rrv
-    _run_auth_ok = _rrv._run_auth_ok
-    load_spec = _rrv.load_spec
-    SmsApiClient = _rrv.SmsApiClient
-    _sms_api_base = _rrv._sms_api_base
     if not _run_auth_ok():
         return {"error": "not authenticated"}, 401
     study = (body.get("study") or "").strip()
@@ -487,3 +494,23 @@ class SmsLegacyRuns:
 
     def trace(self, run_id: str) -> "tuple[bytes | dict, int, str]":
         raise NotImplementedError("SMS simulation traces are served by remote_trace.fetch_trace")
+
+
+class SmsLegacyUnrouted:
+    """The ``unrouted`` facet (step P2, Runs a1): the tails above for the lifecycle requests the core cannot route by
+    a run's record (no run id, or a build / analysis id riding along). Their own login check runs first."""
+
+    def submit(self, ws_root: Path, body: dict) -> tuple[dict, int]:
+        return submit_tail(ws_root, body)
+
+    def land(self, ws_root: Path, body: dict) -> tuple[dict, int]:
+        return land_tail(ws_root, body)
+
+    def status(self, params: dict) -> tuple[dict, int]:
+        return status_tail(params)
+
+    def progress(self, params: dict) -> tuple[dict, int]:
+        return chain_progress_tail(params)
+
+    def cancel(self, params: dict) -> tuple[dict, int]:
+        return cancel_tail(params)

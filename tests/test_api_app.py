@@ -4619,6 +4619,7 @@ class TestRemoteRunStartRoute:
 
     def test_happy_path_202(self, client, tmp_path, monkeypatch):
         from vivarium_workbench.lib import remote_run_views as rrv
+        from vivarium_workbench_sms import sms_legacy
 
         class _Job:
             job_id = "JX"
@@ -4632,14 +4633,14 @@ class TestRemoteRunStartRoute:
         spec_file.write_text("baseline: []\n")
         monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
         monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
-        monkeypatch.setattr(rrv, "load_spec", lambda p: {"baseline": [], "readouts": []})
+        monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [], "readouts": []})
         import subprocess as _sp
         monkeypatch.setattr(
             rrv.subprocess, "run",
             lambda *a, **k: _sp.CompletedProcess(args=[], returncode=0, stdout="feature/x\n"),
         )
-        monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: object())
-        monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+        monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: object())
+        monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
 
         def _submit(study, worker_fn):
             captured["study"] = study
@@ -4656,6 +4657,8 @@ class TestRemoteRunStartRoute:
 
     def _wire_happy(self, rrv, tmp_path, monkeypatch, captured):
         """Monkeypatch every external for a happy submit; capture PipelineCtx kwargs."""
+        from vivarium_workbench_sms import sms_legacy
+
         class _Job:
             job_id = "JX"
         monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
@@ -4665,14 +4668,14 @@ class TestRemoteRunStartRoute:
         spec_file.write_text("baseline: []\n")
         monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
         monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
-        monkeypatch.setattr(rrv, "load_spec", lambda p: {"baseline": [], "readouts": []})
+        monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [], "readouts": []})
         import subprocess as _sp
         monkeypatch.setattr(
             rrv.subprocess, "run",
             lambda *a, **k: _sp.CompletedProcess(args=[], returncode=0, stdout="feature/x\n"),
         )
-        monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: object())
-        monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+        monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: object())
+        monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
 
         def _ctx(**kwargs):
             captured.update(kwargs)

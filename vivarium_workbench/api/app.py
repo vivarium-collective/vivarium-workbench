@@ -7902,7 +7902,7 @@ def create_app() -> FastAPI:
         refused = _remote_run_views._sms_only(ws, rid, {"deployment": deployment, "study": study})
         if refused is not None:  # step 1c-2: another backend's run is never asked about here
             return JSONResponse(status_code=refused[1], content=refused[0])
-        client = _remote_run_views.SmsApiClient(_remote_run_views._sms_api_base())
+        client = _remote_run_views._sms_client()
         return JSONResponse(content=_remote_analysis_figures.list_remote_analysis_figures(
             client, int(rid)))  # _sms_only passed: an SMS simulation, an integer
 
@@ -7916,7 +7916,7 @@ def create_app() -> FastAPI:
         fetched lazily through /api/remote-analysis-figure."""
         if not study:
             return JSONResponse(status_code=400, content={"error": "study required"})
-        client = _remote_run_views.SmsApiClient(_remote_run_views._sms_api_base())
+        client = _remote_run_views._sms_client()
         return JSONResponse(content=_remote_analysis_figures.study_remote_figures(
             ws, client, study, max_sims=max(1, min(int(limit or 10), 30))))
 
@@ -7938,7 +7938,7 @@ def create_app() -> FastAPI:
                                                 memo=True)
         if refused is not None:  # step 1c-2: another backend's run is never asked about here
             return JSONResponse(status_code=refused[1], content=refused[0])
-        client = _remote_run_views.SmsApiClient(_remote_run_views._sms_api_base())
+        client = _remote_run_views._sms_client()
         got = _remote_analysis_figures.fetch_by_analysis(client, int(rid), analysis, path)
         if not got:
             return Response(content=b'{"error":"not found"}', status_code=404,

@@ -12,6 +12,7 @@ import pytest
 
 from vivarium_workbench_sms import remote_pinned as rp
 from vivarium_workbench.lib import remote_run_views as rrv
+from vivarium_workbench_sms import sms_legacy
 
 
 # Two built main entries (newest = id 69) plus a non-matching branch/repo, in the
@@ -150,8 +151,8 @@ def test_pinned_build_start_returns_built_phase(monkeypatch, tmp_path):
             repo_url="https://github.com/vivarium-collective/v2ecoli", branch="main"
         ),
     )
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: _FakeClient())
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: _FakeClient())
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
     body, status = rrv.remote_run_pinned_build_start(tmp_path, {"study": "s"})
     assert status == 202
     assert body["phase"] == "built"
@@ -202,8 +203,8 @@ def test_remote_run_config_on_resolves_commit(monkeypatch, tmp_path):
             repo_url="https://github.com/vivarium-collective/v2ecoli", branch="main"
         ),
     )
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: _FakeClient())
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: _FakeClient())
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
     body, status = rrv.remote_run_config(tmp_path)
     assert status == 200
     assert body["pinned"] is True
@@ -219,8 +220,8 @@ def test_remote_run_config_on_degrades_on_missing_build(monkeypatch, tmp_path):
             repo_url="https://github.com/nobody/nothing", branch="main"
         ),
     )
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: _FakeClient())
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: _FakeClient())
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
     body, status = rrv.remote_run_config(tmp_path)
     assert status == 200
     assert body["pinned"] is True
@@ -307,8 +308,8 @@ def test_pinned_build_start_falls_back_to_static_pin_when_unswitched(
             repo_url="https://github.com/vivarium-collective/v2ecoli", branch="main"
         ),
     )
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: _FakeClient())
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: _FakeClient())
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
     body, status = rrv.remote_run_pinned_build_start(tmp_path, {"study": "s"})
     assert status == 202
     assert body["simulator_id"] == 69

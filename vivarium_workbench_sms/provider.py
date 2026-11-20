@@ -38,12 +38,13 @@ class SmsProvider:
         with self._lock:
             if self._backends is None:
                 from vivarium_workbench.lib.backends import Backend
-                from vivarium_workbench_sms.sms_legacy import SmsLegacyRuns
+                from vivarium_workbench_sms.sms_legacy import SmsLegacyRuns, SmsLegacyUnrouted
                 from vivarium_workbench_sms.viva_core import VivaCoreRuns, viva_health_identity
 
                 self._backends = (
                     Backend("viva-core", VivaCoreRuns(), identity=viva_health_identity),
-                    Backend("sms-legacy", SmsLegacyRuns(), identity=viva_health_identity),  # the same viva-api
+                    Backend("sms-legacy", SmsLegacyRuns(), identity=viva_health_identity,  # the same viva-api
+                            unrouted=SmsLegacyUnrouted()),
                 )
             return self._backends
 

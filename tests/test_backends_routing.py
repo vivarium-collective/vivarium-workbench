@@ -13,8 +13,8 @@ Observation points that work both before and after the move:
 
 * compose-api / viva-core: recorders on ``remote_run_compose.X`` / ``remote_run_viva_v1.X`` (the adapters call
   through the module attribute at call time);
-* the legacy SMS path: a recording fake ``remote_run_views.SmsApiClient`` (the moved code reads it through
-  ``remote_run_views`` at call time).
+* the legacy SMS path: a recording fake ``sms_legacy.SmsApiClient`` (the SMS code reads it through ``sms_legacy``
+  at call time).
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ import pytest
 from vivarium_workbench.lib import remote_run_compose
 from vivarium_workbench_sms import remote_pinned, remote_run_viva_v1
 from vivarium_workbench.lib import remote_run_views as rrv
+from vivarium_workbench_sms import sms_legacy
 from vivarium_workbench.lib import remote_trace
 
 
@@ -75,15 +76,15 @@ def calls(monkeypatch, tmp_path):
                 return {"status": "running", "database_id": 1}
             return fn
 
-    monkeypatch.setattr(rrv, "SmsApiClient", FakeClient)
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
-    monkeypatch.setattr(rrv, "_run_auth_ok", lambda: True)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", FakeClient)
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
     spec_file = tmp_path / "study.yaml"
     spec_file.write_text("baseline: [{composite: c}]\n")
     monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
     monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
-    monkeypatch.setattr(rrv, "load_spec", lambda p: {"baseline": [{"composite": "c"}]})
-    monkeypatch.setattr(rrv, "land_remote_run", lambda *a, **k: rec.append(("sms", "land_remote_run", None)) or "r1")
+    monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [{"composite": "c"}]})
+    monkeypatch.setattr(sms_legacy, "land_remote_run", lambda *a, **k: rec.append(("sms", "land_remote_run", None)) or "r1")
     return rec
 
 
@@ -94,7 +95,7 @@ def _first(calls):
 # --- land ------------------------------------------------------------------------------------------------------
 
 def test_land_compose_id_goes_to_compose_without_gate_or_auth(calls, monkeypatch, tmp_path):
-    monkeypatch.setattr(rrv, "_run_auth_ok", lambda: False)
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: False)
     assert rrv.remote_run_land(tmp_path, {"simulation_id": "compose-7"}) == ({"via": "compose", "method": "land"}, 200)
     assert calls == [("compose", "land", {"simulation_id": "compose-7"})]
 
@@ -108,7 +109,7 @@ def test_land_compose_id_in_run_id_only_is_compose(calls, tmp_path):
 def test_land_viva_id_goes_to_viva_whatever_is_named(calls, monkeypatch, tmp_path):
     # step 1c-2 (deliberate change): no named-backend gate in the view (viva-core land refuses 409 no-backend
     # itself when nothing is named); it was 401 / a ValueError (500) through the SMS path
-    monkeypatch.setattr(rrv, "_run_auth_ok", lambda: False)
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: False)
     rrv.remote_run_land(tmp_path, {"study": "s", "simulation_id": "simulation-D55"})
     assert _first(calls) == ("viva", "land")
 
@@ -176,9 +177,9 @@ def test_status_legacy_client_error_is_502_shape(calls, monkeypatch):
             pass
 
         def simulation_status(self, sid):
-            raise rrv.SmsApiError("down", status=503)
+            raise sms_legacy.SmsApiError("down", status=503)
 
-    monkeypatch.setattr(rrv, "SmsApiClient", Boom)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", Boom)
     body, status = rrv.remote_run_status({"simulation_id": 5}, ws_root=_WS)
     assert status == 502 and body["phase"] == "unreachable" and body["reachable"] is False
 
@@ -237,9 +238,9 @@ def test_cancel_legacy_errors(calls, monkeypatch, msg, code):
             pass
 
         def cancel_simulation(self, sid):
-            raise rrv.SmsApiError(msg)
+            raise sms_legacy.SmsApiError(msg)
 
-    monkeypatch.setattr(rrv, "SmsApiClient", Boom)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", Boom)
     assert rrv.remote_run_cancel({"simulation_id": 5}, ws_root=_WS)[1] == code
 
 
@@ -340,15 +341,15 @@ def submit_world(monkeypatch, tmp_path):
             rec.append(("sms", "run_simulation"))
             return {"database_id": 77}
 
-    monkeypatch.setattr(rrv, "SmsApiClient", FakeClient)
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
-    monkeypatch.setattr(rrv, "_run_auth_ok", lambda: True)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", FakeClient)
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
     spec_file = tmp_path / "study.yaml"
     spec_file.write_text("baseline: [{composite: c}]\n")
     monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
     monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
     monkeypatch.setattr(rrv.study_spec, "collect_study_observables", lambda spec: [])
-    monkeypatch.setattr(rrv, "load_spec", lambda p: {"baseline": [{"composite": "c"}]})
+    monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [{"composite": "c"}]})
 
     def name(kind):
         profiles = {
