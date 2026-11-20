@@ -13,7 +13,8 @@ core's ``api.deps.bind_session``, shared with the core's ``/api/source/switch``.
 ``create_app`` includes the router just before the SPA catch-all and refuses a path it already serves
 (``api.app._include_provider_routers``). The app-wide guards (CSRF/origin, Host, session, the plain-identifier
 dependency, the error envelope) apply to these routes as to the core's. A read-only deployment keeps the paths in
-``READONLY_ALLOWED`` (and every GET); ``remote-run-pinned-build`` is dropped there, as before.
+``READONLY_ALLOWED`` (and every GET); ``remote-run-pinned-build`` is dropped there, as before. The built-in AI never
+sees the paths in ``AI_EXCLUDED`` (step P2 Routes Rt2).
 
 The route bodies read the views (``remote_pipeline_views``, ``source_build_views``), ``remote_run_jobs.manager`` and
 ``api.deps``' ``session_key_of`` / ``bind_session`` through their modules at call time, so a patch on those modules
@@ -52,6 +53,12 @@ from vivarium_workbench_sms import source_build_views as _source_build_views
 #: allowlist before step P2 Builds B3.
 READONLY_ALLOWED = frozenset({"/api/remote-run-start", "/api/remote-run-build",
                               "/api/source/build-remote", "/api/source/switch-build"})
+
+#: Its paths the built-in AI must never see or call (``ProviderRouter.ai_excluded``, step P2 Routes Rt2): the legacy
+#: pipeline and the thin client's build phase push the workspace branch to origin before building. They were on
+#: ``lib/ai_tools.EXCLUDED_PATHS`` before. The ``/api/source/*`` routes are already out of the AI's reach by the
+#: core's own ``/api/source/`` prefix rule (switching what the server is bound to), so they are not repeated here.
+AI_EXCLUDED = frozenset({"/api/remote-run-start", "/api/remote-run-build"})
 
 
 def build_router() -> APIRouter:

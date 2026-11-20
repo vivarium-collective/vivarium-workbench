@@ -78,11 +78,14 @@ class Command:
 class ProviderRouter:
     """Routes only a provider serves (``Provider.router``). ``create_app`` adds ``router``'s routes to the app, flat,
     just before the SPA catch-all (``api.app._include_provider_routers``): a path and method the app already serves is
-    refused, and so is a ``readonly_allowed`` path that is not one of ``router``'s own routes. ``readonly_allowed`` is
-    the POST/DELETE paths a read-only deployment keeps (GETs are always kept)."""
+    refused, and so is a ``readonly_allowed`` or ``ai_excluded`` path that is not one of ``router``'s own routes.
+    ``readonly_allowed`` is the POST/DELETE paths a read-only deployment keeps (GETs are always kept); ``ai_excluded``
+    is the paths the built-in AI must never see or call (they push to git; ``lib/ai_tools.excluded_paths`` adds them to
+    its own ``EXCLUDED_PATHS``)."""
 
     router: "APIRouter"
     readonly_allowed: frozenset[str]
+    ai_excluded: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)

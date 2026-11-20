@@ -644,14 +644,14 @@ def test_with_providers_off_the_sms_only_routes_are_absent(providers_off, tmp_pa
     assert r.status_code == status
 
 
-def _fake_provider(router, readonly_allowed=frozenset()):
+def _fake_provider(router, readonly_allowed=frozenset(), ai_excluded=frozenset()):
     from vivarium_workbench.lib.backends.provider import ProviderRouter
 
     class Fake:
         name = "fake"
 
         def router(self):
-            return ProviderRouter(router, frozenset(readonly_allowed))
+            return ProviderRouter(router, frozenset(readonly_allowed), frozenset(ai_excluded))
 
     return Fake()
 
@@ -679,6 +679,40 @@ def test_a_provider_cannot_allowlist_a_path_that_is_not_its_own(monkeypatch):
                         lambda: (_fake_provider(r, {"/api/fake-own", "/api/study-create"}),))
     with pytest.raises(RuntimeError, match="not its own"):
         appmod.create_app()
+
+
+def test_a_provider_cannot_ai_exclude_a_path_that_is_not_its_own(monkeypatch):
+    """Step P2 Routes Rt2: ``ProviderRouter.ai_excluded`` speaks only for the provider's own routes."""
+    from fastapi import APIRouter
+
+    from vivarium_workbench.api import app as appmod
+
+    r = APIRouter()
+    r.post("/api/fake-own")(lambda: None)
+    monkeypatch.setattr(provider_mod, "providers",
+                        lambda: (_fake_provider(r, ai_excluded={"/api/fake-own", "/api/study-create"}),))
+    with pytest.raises(RuntimeError, match="AI-excluded paths that are not its own"):
+        appmod.create_app()
+
+
+def test_a_provider_ai_excluded_path_leaves_the_ai_index(monkeypatch):
+    pytest.importorskip("pydantic_ai")
+    from fastapi import APIRouter
+
+    from vivarium_workbench.api import app as appmod
+    from vivarium_workbench.lib import ai_tools
+
+    r = APIRouter()
+    r.post("/api/fake-pushes")(lambda: None)
+    r.post("/api/fake-local")(lambda: None)
+    monkeypatch.setattr(provider_mod, "providers",
+                        lambda: (_fake_provider(r, ai_excluded={"/api/fake-pushes"}),))
+    app = appmod.create_app()
+    assert app.state.provider_ai_excluded == frozenset({"/api/fake-pushes"})
+    served = {(e["method"], e["path"]) for e in ai_tools.build_index(app).values()}
+    assert ("POST", "/api/fake-local") in served
+    assert ("POST", "/api/fake-pushes") not in served
+    assert "/api/fake-pushes" in ai_tools.capabilities(app)["excluded"]
 
 
 # --- step P2 Builds B2: the card's dispatch and the dispatch preflight ----------------------------------------------
