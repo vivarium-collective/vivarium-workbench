@@ -535,6 +535,52 @@ def test_inputs_download_base_builds_github_raw_url(tmp_path, monkeypatch):
     assert pub._inputs_download_base(ws) == ""
 
 
+def test_inputs_download_base_honors_layout_content_root(tmp_path, monkeypatch):
+    """When workspace.yaml is the repo root but a ``layout:`` map pushes content
+    under ``workspace/``, the raw base must include that layout prefix — declared
+    input paths (``investigations/...``) are content-root-relative, so a base
+    without it 404s every input download on GitHub Pages."""
+    import vivarium_workbench.publish as pub
+
+    # Repo root IS the workspace root (workspace.yaml here), but the layout map
+    # redirects investigations/studies under ``workspace/``.
+    ws = tmp_path / "repo"
+    (ws / "workspace" / "investigations").mkdir(parents=True)
+    (ws / "workspace.yaml").write_text(
+        "name: demo\n"
+        "layout:\n"
+        "  studies: workspace/studies\n"
+        "  investigations: workspace/investigations\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "vivarium_workbench.lib.report._detect_github_repo",
+        lambda _r: "INFLECT-Praenora/inflect-sim-core",
+    )
+
+    def _fake_run(args, **kw):
+        class R:
+            returncode = 0
+            stdout = ""
+        r = R()
+        if "--abbrev-ref" in args and "HEAD" in args:
+            r.stdout = "main\n"
+        elif "--show-toplevel" in args:
+            r.stdout = str(ws) + "\n"  # ws_root == git toplevel -> git prefix ""
+        return r
+    monkeypatch.setattr(pub.subprocess, "run", _fake_run)
+
+    base = pub._inputs_download_base(ws)
+    assert base == (
+        "https://github.com/INFLECT-Praenora/inflect-sim-core/raw/main/workspace"
+    )
+    # the declared, content-root-relative input path now resolves to the real file
+    assert base + "/investigations/x/sources/model.xml" == (
+        "https://github.com/INFLECT-Praenora/inflect-sim-core/raw/main/"
+        "workspace/investigations/x/sources/model.xml"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Task 5 (full-surface): repo switcher → static repo label
 # ---------------------------------------------------------------------------

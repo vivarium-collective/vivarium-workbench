@@ -85,10 +85,19 @@ def _inputs_download_base(ws_root: Path) -> str:
     GitHub Pages).
 
     Returns ``https://github.com/<owner>/<repo>/raw/<branch>[/<prefix>]`` where
-    ``<prefix>`` is the workspace directory relative to the repo root (e.g.
-    ``workspace``), so ``<base>/<workspace-relative path>`` is the file's
-    canonical repo URL. Returns ``""`` when the workspace has no GitHub
-    ``origin`` remote — the frontend then falls back to the live ``'/' + path``.
+    ``<prefix>`` locates the workspace CONTENT root inside the repo, so
+    ``<base>/<declared input path>`` is the file's canonical repo URL. The
+    prefix has two parts, either of which may be empty:
+      * the workspace directory relative to the repo root (e.g. ``workspace``
+        when ``workspace.yaml`` lives in a subdir), and
+      * the ``layout:`` content root — declared input paths
+        (``investigation.yaml`` ``inputs.*.path``) are relative to the workspace
+        content root, which a ``layout:`` map can push below ws_root (e.g.
+        ``investigations -> workspace/investigations``). Without this part every
+        input download 404s on a workspace whose ``workspace.yaml`` sits at the
+        repo root but redirects content under ``workspace/``.
+    Returns ``""`` when the workspace has no GitHub ``origin`` remote — the
+    frontend then falls back to the live ``'/' + path``.
     """
     try:
         from vivarium_workbench.lib.report import _detect_github_repo
@@ -115,7 +124,8 @@ def _inputs_download_base(ws_root: Path) -> str:
     # snapshot is a point-in-time view of this branch.
     branch = _git("rev-parse", "--abbrev-ref", "HEAD") or "main"
 
-    # Workspace directory relative to the repo root (e.g. "workspace").
+    # Workspace directory relative to the repo root (e.g. "workspace" when the
+    # workspace lives in a subdir; "" when workspace.yaml is the repo root).
     prefix = ""
     top = _git("rev-parse", "--show-toplevel")
     if top:
@@ -125,8 +135,27 @@ def _inputs_download_base(ws_root: Path) -> str:
         except Exception:
             prefix = ""
 
+    # `layout:` content root: declared input paths are relative to the workspace
+    # content root, which a layout map can push below ws_root. Derive it from the
+    # canonical resolver — the parent of the investigations layout dir, relative
+    # to ws_root (e.g. "workspace/investigations" -> "workspace"; flat -> "").
+    layout_prefix = ""
+    try:
+        from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+        inv_rel = (
+            WorkspacePaths.load(ws_root).dir("investigations").resolve()
+            .relative_to(Path(ws_root).resolve())
+        )
+        layout_prefix = inv_rel.parent.as_posix()
+        if layout_prefix == ".":
+            layout_prefix = ""
+    except Exception:
+        layout_prefix = ""
+
+    full_prefix = "/".join(p for p in (prefix, layout_prefix) if p)
+
     base = f"https://github.com/{repo}/raw/{branch}"
-    return base + ("/" + prefix if prefix else "")
+    return base + ("/" + full_prefix if full_prefix else "")
 
 
 def _normalize_base_path(base_path: str) -> str:
