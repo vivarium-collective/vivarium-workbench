@@ -2,13 +2,17 @@
 
 The models in ``lib/models.py`` are the single source of truth for the
 dashboard's client/server JSON contract. This derives a matching
-``static/types/domain.generated.d.ts`` so the browser-side code — and
+``static/types/domain.generated.d.ts`` (the core's types, then each backend
+provider's ``payload_types()``: the wire models of the routes only it serves,
+docs/backend-adapters.md step P3 M1) so the browser-side code — and
 colleagues reading it — get types generated FROM the Python models rather than
 hand-copied out of them (which is how the earlier hand-written TS drifted:
 started_at typed as string when it is really an epoch float).
 
 Run:  python -m vivarium_workbench.lib.generate_ts
 A test (tests/test_generate_ts.py) asserts the committed file is up to date.
+The committed file carries the provider sections, so ``main()`` refuses to
+write it while providers are off (or the plugin is absent).
 
 Intentionally dependency-free (no npm / json-schema tooling): the model
 vocabulary is small and fixed (str/int/float/bool, Optional, Literal, list,
@@ -26,12 +30,12 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from vivarium_workbench.lib import models as _models
+from vivarium_workbench.lib.backends import provider as _provider
 
 # Named Literal aliases to preserve in the output. pydantic inlines these in
 # field annotations, so we re-attach the name by matching the value set.
 _ALIASES: dict[str, object] = {
     "EmitterKind": _models.EmitterKind,
-    "RemoteJobStatus": _models.RemoteJobStatus,
 }
 
 # Models to emit, in a readable order (interface order is cosmetic in TS).
@@ -40,8 +44,6 @@ _MODELS: list[type[BaseModel]] = [
     _models.StudyRef,
     _models.SimRow,
     _models.SimulationsPayload,
-    _models.RemoteRunStep,
-    _models.RemoteRunJob,
     _models.ChartPayload,
     _models.StudyChartsPayload,
     _models.InvestigationSummary,
@@ -124,7 +126,6 @@ _MODELS: list[type[BaseModel]] = [
     _models.ComparisonBucketCount,
     _models.StudyComparison,
     # Workspace & source models
-    _models.SourceBuilds,
     _models.WorkspacesList,
     _models.SystemDepsCheck,
     # Job status model (in-memory manager polling)
@@ -132,10 +133,6 @@ _MODELS: list[type[BaseModel]] = [
     # Source-switch (in-process workspace re-point) response models
     _models.SourceSwitchSource,
     _models.SourceSwitchResponse,
-    # C-state-3b: source build-remote response (switch-build reuses SourceSwitchResponse)
-    _models.BuildRemoteResponse,
-    # C-state-3c: remote-run submit response
-    _models.RemoteRunStartResponse,
     # C-state-3e: GitHub device-flow auth (5 routes, pass-through payload)
     _models.AuthPayload,
     # C-state-3f: git-subprocess commit/push routes
@@ -163,11 +160,6 @@ OUTPUT_PATH = (
     Path(__file__).resolve().parent.parent / "static" / "types" / "domain.generated.d.ts"
 )
 
-_ALIAS_BY_VALUES = {
-    frozenset(typing.get_args(tp)): name for name, tp in _ALIASES.items()
-}
-
-
 def _ts_literal(value: object) -> str:
     if isinstance(value, str):
         return "'" + value.replace("'", "\\'") + "'"
@@ -176,13 +168,13 @@ def _ts_literal(value: object) -> str:
     return str(value)
 
 
-def _ts_type(tp: object) -> str:
+def _ts_type(tp: object, alias_by_values: dict[frozenset, str]) -> str:
     origin = typing.get_origin(tp)
 
     # Literal -> named alias if the value set matches one, else an inline union.
     if origin is typing.Literal:
         values = list(typing.get_args(tp))
-        alias = _ALIAS_BY_VALUES.get(frozenset(values))
+        alias = alias_by_values.get(frozenset(values))
         if alias is not None:
             return alias
         return " | ".join(_ts_literal(v) for v in values)
@@ -190,7 +182,7 @@ def _ts_type(tp: object) -> str:
     # Union / Optional (X | None) -> "X | null".
     if origin is typing.Union or origin is _pytypes.UnionType:
         parts = [
-            "null" if arg is type(None) else _ts_type(arg)
+            "null" if arg is type(None) else _ts_type(arg, alias_by_values)
             for arg in typing.get_args(tp)
         ]
         return " | ".join(parts)
@@ -201,7 +193,7 @@ def _ts_type(tp: object) -> str:
     # "StudyRef | (string[])", which the bare "StudyRef | string[]" means.
     if origin in (list, typing.List):
         (inner,) = typing.get_args(tp)
-        inner_ts = _ts_type(inner)
+        inner_ts = _ts_type(inner, alias_by_values)
         inner_origin = typing.get_origin(inner)
         is_union = inner_origin is typing.Union or inner_origin is _pytypes.UnionType
         # A Literal with >1 value (and no named alias) also renders as a union.
@@ -214,7 +206,7 @@ def _ts_type(tp: object) -> str:
     # dict[str, Any] -> Record<string, any>.
     if origin in (dict, typing.Dict) or tp is dict:
         args = typing.get_args(tp)
-        val_ts = _ts_type(args[1]) if len(args) == 2 else "any"
+        val_ts = _ts_type(args[1], alias_by_values) if len(args) == 2 else "any"
         return f"Record<string, {val_ts}>"
 
     # Primitives.
@@ -232,7 +224,7 @@ def _ts_type(tp: object) -> str:
     # payloads (e.g. AnalysisToolsPayload.tools: list[dict]).
     if tp is dict or origin in (dict, typing.Dict):
         args = typing.get_args(tp)
-        value_ts = _ts_type(args[1]) if len(args) == 2 else "any"
+        value_ts = _ts_type(args[1], alias_by_values) if len(args) == 2 else "any"
         return f"Record<string, {value_ts}>"
 
     # Nested model -> reference by name.
@@ -242,31 +234,60 @@ def _ts_type(tp: object) -> str:
     raise TypeError(f"generate_ts: unhandled annotation {tp!r}")
 
 
-def _emit_interface(model: type[BaseModel]) -> str:
+def _emit_interface(model: type[BaseModel], alias_by_values: dict[frozenset, str]) -> str:
     lines = [f"export interface {model.__name__} {{"]
     for name, field in model.model_fields.items():
         # model_dump() always includes every key, so no optional `?` properties;
         # nullability is expressed as `| null` from the Optional annotation.
-        lines.append(f"  {name}: {_ts_type(field.annotation)};")
+        lines.append(f"  {name}: {_ts_type(field.annotation, alias_by_values)};")
     lines.append("}")
     return "\n".join(lines)
 
 
+def _sections() -> list[tuple[str | None, dict[str, object], list[type[BaseModel]]]]:
+    """``(provider name, aliases, models)``: the core's (name ``None``), then each active provider's
+    ``payload_types()``, in provider order."""
+    sections: list[tuple[str | None, dict[str, object], list[type[BaseModel]]]] = [(None, _ALIASES, _MODELS)]
+    for p in _provider.providers():
+        types = p.payload_types()
+        if types is not None:
+            sections.append((p.name, dict(types.aliases), list(types.models)))
+    return sections
+
+
 def generate_ts() -> str:
-    """Return the full TypeScript declaration text for the payload models."""
+    """Return the full TypeScript declaration text for the payload models: the
+    core's, then each active provider's (none while providers are off)."""
+    sections = _sections()
+    # Computed per call: the aliases depend on which providers are active.
+    alias_by_values = {
+        frozenset(typing.get_args(tp)): name
+        for _, aliases, _ in sections for name, tp in aliases.items()
+    }
     blocks = [
-        "// AUTO-GENERATED from vivarium_workbench/lib/models.py — do not edit by hand.\n"
-        "// Regenerate: python -m vivarium_workbench.lib.generate_ts"
+        "// AUTO-GENERATED from vivarium_workbench/lib/models.py and each backend provider's\n"
+        "// payload_types() — do not edit by hand.\n"
+        "// Regenerate (providers on): python -m vivarium_workbench.lib.generate_ts"
     ]
-    for name, tp in _ALIASES.items():
-        union = " | ".join(_ts_literal(v) for v in typing.get_args(tp))
-        blocks.append(f"export type {name} = {union};")
-    for model in _MODELS:
-        blocks.append(_emit_interface(model))
+    for provider_name, aliases, models in sections:
+        if provider_name is not None:
+            blocks.append(f"// Backend provider '{provider_name}': its payload_types().")
+        for name, tp in aliases.items():
+            union = " | ".join(_ts_literal(v) for v in typing.get_args(tp))
+            blocks.append(f"export type {name} = {union};")
+        for model in models:
+            blocks.append(_emit_interface(model, alias_by_values))
     return "\n\n".join(blocks) + "\n"
 
 
 def main() -> None:
+    # The committed file carries the provider sections; written with providers
+    # off it would silently drop them.
+    if not _provider.providers():
+        raise SystemExit(
+            "generate_ts: no backend provider is active (providers off, or the plugin is not installed); "
+            f"refusing to write {OUTPUT_PATH}, which would lack the provider sections"
+        )
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(generate_ts(), encoding="utf-8")
     print(f"wrote {OUTPUT_PATH}")

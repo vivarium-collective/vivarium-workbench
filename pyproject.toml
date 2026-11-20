@@ -486,6 +486,7 @@ files = [
     "vivarium_workbench_sms/sms_landing.py",
     "vivarium_workbench_sms/analyses.py",
     "vivarium_workbench_sms/routes.py",
+    "vivarium_workbench_sms/models.py",
     "vivarium_workbench_sms/remote_pipeline_views.py",
     "vivarium_workbench/lib/auth_views.py",
     "vivarium_workbench/lib/git_commit_views.py",

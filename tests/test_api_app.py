@@ -2734,8 +2734,11 @@ class TestSourceBuildsRoute:
         assert body["error"] == "connection refused"
 
     def test_source_builds_in_openapi(self, client):
+        # The SMS plugin's model (vivarium_workbench_sms.models, step P3 M1), served under the same schema name.
+        from vivarium_workbench_sms.models import SourceBuilds
+
         components = client.get("/openapi.json").json()["components"]["schemas"]
-        assert "SourceBuilds" in components
+        assert components[SourceBuilds.__name__]["properties"].keys() == SourceBuilds.model_fields.keys()
 
 
 class TestWorkspacesRoute:
@@ -4470,8 +4473,11 @@ class TestSourceBuildRemoteRoute:
         paths = client.get("/openapi.json").json()["paths"]
         assert "/api/source/build-remote" in paths
         assert "post" in paths["/api/source/build-remote"]
+        # The SMS plugin's model (vivarium_workbench_sms.models, step P3 M1), served under the same schema name.
+        from vivarium_workbench_sms.models import BuildRemoteResponse
+
         schemas = client.get("/openapi.json").json()["components"]["schemas"]
-        assert "BuildRemoteResponse" in schemas
+        assert schemas[BuildRemoteResponse.__name__]["properties"].keys() == BuildRemoteResponse.model_fields.keys()
 
 
 class TestSourceSwitchBuildRoute:
@@ -4707,8 +4713,11 @@ class TestRemoteRunStartRoute:
         paths = client.get("/openapi.json").json()["paths"]
         assert "/api/remote-run-start" in paths
         assert "post" in paths["/api/remote-run-start"]
+        # The SMS plugin's model (vivarium_workbench_sms.models, step P3 M1), served under the same schema name.
+        from vivarium_workbench_sms.models import RemoteRunStartResponse
+
         schemas = client.get("/openapi.json").json()["components"]["schemas"]
-        assert "RemoteRunStartResponse" in schemas
+        assert schemas[RemoteRunStartResponse.__name__]["properties"].keys() == RemoteRunStartResponse.model_fields.keys()
 
 
 # ===========================================================================

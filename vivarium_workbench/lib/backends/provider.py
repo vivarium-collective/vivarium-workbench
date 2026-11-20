@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     import argparse
 
     from fastapi import APIRouter
+    from pydantic import BaseModel
 
     from vivarium_workbench.lib.backend_config import OpenApiProbe
     from vivarium_workbench.lib.backends import Backend
@@ -97,6 +98,16 @@ class Detached:
     build_ref: "dict | None" = None
 
 
+@dataclass(frozen=True)
+class PayloadTypes:
+    """A provider's wire models, for the core's TypeScript generator (``Provider.payload_types``, step P3 M1).
+    ``lib/generate_ts.py`` emits them after the core's own types: ``aliases`` are the named ``Literal`` types to keep by
+    name (TypeScript alias name -> the ``Literal``), ``models`` the interfaces, in output order."""
+
+    aliases: "dict[str, object]"
+    models: "list[type[BaseModel]]"
+
+
 class Provider(Protocol):
     """What a backend plugin registers. Only the methods a step needs exist; later steps add theirs (§2.1)."""
 
@@ -142,6 +153,12 @@ class Provider(Protocol):
     def router(self) -> "Optional[ProviderRouter]":
         """Routes only this provider serves, or ``None``. Built on every call (``create_app`` calls it once per app),
         so FastAPI and the route models load only in a process that builds an app, never in an env worker."""
+        ...
+
+    # -- P3 M1 --
+    def payload_types(self) -> "Optional[PayloadTypes]":
+        """Its own wire models (the routes it serves), for ``lib/generate_ts.py``, or ``None``. Built on every call, so
+        the models load only in a process that generates the types."""
         ...
 
 
