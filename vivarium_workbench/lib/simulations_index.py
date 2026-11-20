@@ -1544,18 +1544,25 @@ def _emitter_tag(emitter) -> str:
     return emitter.lower() if isinstance(emitter, str) else ""
 
 
-def _listings() -> list:
-    """The listing facets of ``backends.offering("listing")`` (step P2 Remote tab R1), in its order: found by facet
-    presence, a registry read -- never ``active()``, a profile or a record, any of which could block (#1106). Empty
-    when no backend lists runs (providers off, the plugin absent) or a broken provider makes the registry raise."""
+def _listing_backends() -> list:
+    """``(kind, listing facet)`` of every backend in ``backends.offering("listing")`` (step P2 Remote tab R1), in its
+    order: found by facet presence, a registry read -- never ``active()``, a profile or a record, any of which could
+    block (#1106). Empty when no backend lists runs (providers off, the plugin absent) or a broken provider makes the
+    registry raise."""
     try:
         from vivarium_workbench.lib import backends
-        return [b.listing for b in backends.offering("listing") if b.listing is not None]
+        return [(b.name, b.listing) for b in backends.offering("listing") if b.listing is not None]
     except Exception:  # noqa: BLE001 -- the listing then stays local
         return []
 
 
-def list_remote_runs(ws_root: Path, *, fresh: bool = False, local: "list | None" = None) -> list:
+def _listings() -> list:
+    """The listing facets of :func:`_listing_backends`, in its order."""
+    return [listing for _kind, listing in _listing_backends()]
+
+
+def list_remote_runs(ws_root: Path, *, fresh: bool = False, local: "list | None" = None,
+                     kinds: "dict | None" = None) -> list:
     """The runs every backend's ``listing`` facet reports (:func:`_listings`), deduped by ``run_id`` against the
     ``local`` rows and across backends: a run_id already listed is not listed again (one backend's own rows are kept
     as it gave them). ``[]`` when no backend lists runs or its server is unreachable. Shared by the Simulations-DB
@@ -1563,30 +1570,78 @@ def list_remote_runs(ws_root: Path, *, fresh: bool = False, local: "list | None"
 
     By default each listing answers from its cache without blocking (stale-while-revalidate: a cold/slow/wedged
     tunnel can never pin the request thread). ``fresh=True`` (threaded from ``?refresh=true``) asks for the bounded
-    blocking fetch."""
+    blocking fetch.
+
+    ``kinds`` (optional, filled in): each listed row's ``run_id`` -> the kind of the backend that listed it (step P3
+    F0: a listed run's features are its listing backend's)."""
     per_backend: list = []
-    for listing in _listings():
+    for kind, listing in _listing_backends():
         try:
-            per_backend.append(listing.list_runs(ws_root, fresh=fresh) or [])
+            per_backend.append((kind, listing.list_runs(ws_root, fresh=fresh) or []))
         except Exception:  # noqa: BLE001 -- one bad listing never hides another, nor the local rows
             pass
     have = {s.get("run_id") for s in (local or []) if isinstance(s, dict)}
     extra: list = []
-    for remote in per_backend:
+    for kind, remote in per_backend:
         mine = [r for r in remote if r.get("run_id") not in have]
         have.update(r.get("run_id") for r in mine)
+        if kinds is not None:
+            kinds.update((r.get("run_id"), kind) for r in mine)
         extra += mine
     return extra
 
 
-def _append_remote_simulations(sims: list, ws_root: Path, *, fresh: bool = False) -> list:
+def _append_remote_simulations(sims: list, ws_root: Path, *, fresh: bool = False,
+                               kinds: "dict | None" = None) -> list:
     """Append the backends' listed runs (:func:`list_remote_runs`) to the local Simulations-DB rows -- single source
     for the local+remote merge, shared by ``build_simulations_data`` and the ``/api/simulations`` handler. No-op
     when no backend lists runs or its server is unreachable."""
     # Dedup: a landed remote run is already a local row (same run_id/experiment_id)
     # — don't list it twice. Keep the local (richer, has store/analyses) copy.
-    extra = list_remote_runs(ws_root, fresh=fresh, local=sims)
+    extra = list_remote_runs(ws_root, fresh=fresh, local=sims, kinds=kinds)
     return list(sims) + extra if extra else sims
+
+
+def _record_kind(rec: "dict | None") -> "str | None":
+    """The ``kind`` of a folded run record's ``params.remote`` block (``lib/backends/records.py``), or ``None``."""
+    params = rec.get("params") if isinstance(rec, dict) else None
+    remote = params.get("remote") if isinstance(params, dict) else None
+    kind = remote.get("kind") if isinstance(remote, dict) else None
+    return kind if isinstance(kind, str) and kind else None
+
+
+def _annotate_run_features(sims: list, folded: dict, listed_kinds: dict) -> None:
+    """Step P3 F0: give every row that has a ``remote_origin`` its run's features, ``remote_origin.features`` (sorted;
+    ``backends.features.run_features``) -- one pass over the merged list, so JSONL rows (``remote-pending-``
+    placeholders included) and listed rows are covered alike. The run's backend is, in order: the backend that listed
+    it, the kind its record names (``params.remote.kind``), the backend that owns its ``simulation_id``'s form.
+
+    Registry reads only (#1106): no record lookup, profile or network call. ``remote_origin`` is replaced by a copy
+    (a listed row may be a listing cache's own dict). Never raises: a row it cannot place gets ``[]``."""
+    import vivarium_workbench.lib.backends.features as _features
+
+    by_kind: dict = {}
+
+    def _for(kind: "str | None") -> list:
+        if kind not in by_kind:
+            try:
+                by_kind[kind] = sorted(_features.run_features(kind))
+            except Exception:  # noqa: BLE001 -- a broken registry declares nothing
+                by_kind[kind] = []
+        return by_kind[kind]
+
+    for row in sims:
+        ro = row.get("remote_origin") if isinstance(row, dict) else None
+        if not isinstance(ro, dict):
+            continue
+        rid = row.get("run_id")
+        kind = listed_kinds.get(rid) or _record_kind(folded.get(rid))
+        if kind is None:
+            try:
+                kind = _features.kind_by_id_form(ro.get("simulation_id"))
+            except Exception:  # noqa: BLE001
+                kind = None
+        row["remote_origin"] = {**ro, "features": list(_for(kind))}
 
 
 def _remote_listing_state(ws_root: Path) -> "dict | None":
@@ -2173,8 +2228,9 @@ def _build_simulations_data(ws_root: Path, include_remote: bool = True,
               reverse=True)
 
     remote_state: dict | None = None
+    listed_kinds: dict = {}
     if include_remote:
-        sims = _append_remote_simulations(sims, ws_root, fresh=fresh)
+        sims = _append_remote_simulations(sims, ws_root, fresh=fresh, kinds=listed_kinds)
         # Re-sort the MERGED local+remote list. _append_remote_simulations appends
         # remote rows AFTER the local-only sort above, so without this a just-
         # dispatched cloud run (a remote row) lands at the bottom instead of the
@@ -2189,6 +2245,9 @@ def _build_simulations_data(ws_root: Path, include_remote: bool = True,
         # "as of HH:MM (refreshing…)" instead of a spinner. Best-effort: a
         # failure here must never break the local listing.
         remote_state = _remote_listing_state(ws_root)
+
+    # Each remote row's own features (step P3 F0), in one pass over the merged list.
+    _annotate_run_features(sims, folded, listed_kinds)
 
     # Capability-matched analysis tools + their launch URLs, per row (Simulations
     # DB "launch into tool" affordance). Best-effort at every layer already

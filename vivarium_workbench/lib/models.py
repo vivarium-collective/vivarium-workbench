@@ -37,6 +37,21 @@ class RemoteOrigin(BaseModel):
     experiment_id: Optional[str] = None
     backend: Optional[str] = None       # e.g. "ray"
     s3_uri: Optional[str] = None
+    # The run's own features (step P3 F0): the optional facets of the backend that ran it, among "artifacts" and
+    # "analyses" (``lib/backends/features.run_features``). They only hide optional controls on the row.
+    features: list[str] = []
+
+
+class BackendFeatures(BaseModel):
+    """``GET /api/backend/features`` payload (step P3 F0, ``lib/backends/features.process_features``).
+
+    The features this process's active backends declare, sorted: the optional facets some active backend has
+    (``listing``, ``artifacts``, ``analyses``, ``builds``) and each provider's own UI features. Empty with providers
+    off or the plugin absent. A registry read: no network call. Features only hide optional controls; no dispatch or
+    run-target decision reads them.
+    """
+
+    features: list[str]
 
 
 class StudyRef(BaseModel):

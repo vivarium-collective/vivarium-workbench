@@ -161,6 +161,13 @@ class Provider(Protocol):
         the models load only in a process that generates the types."""
         ...
 
+    # -- P3 F0 --
+    def features(self) -> frozenset[str]:
+        """The UI features this provider adds that no facet implies (``backends.features.process_features``; the facet
+        features come from its backends' facets). Features only hide optional controls; nothing that decides where a
+        run goes reads them. No network call; never raises."""
+        ...
+
 
 _lock = threading.RLock()
 _providers: "Optional[tuple[Provider, ...]]" = None

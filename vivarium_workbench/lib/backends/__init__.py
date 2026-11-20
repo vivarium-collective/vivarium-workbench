@@ -295,7 +295,7 @@ def unrouted() -> "Backend | None":
     return next((b for b in _registry().values() if b.unrouted is not None), None)
 
 
-def offering(facet: 'Literal["artifacts", "analyses", "listing"]') -> "tuple[Backend, ...]":
+def offering(facet: 'Literal["artifacts", "analyses", "listing", "builds"]') -> "tuple[Backend, ...]":
     """The active backends that declare the optional ``facet``, compose-api first and then the providers' in registry
     order: for a request that names no run at all (the study gallery, the remote-runs listing). A registry read: no
     profile, no network. Empty with providers off. Should compose-api ever declare one, it comes first; §2.6

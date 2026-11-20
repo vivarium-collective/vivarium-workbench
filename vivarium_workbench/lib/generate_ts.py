@@ -41,6 +41,7 @@ _ALIASES: dict[str, object] = {
 # Models to emit, in a readable order (interface order is cosmetic in TS).
 _MODELS: list[type[BaseModel]] = [
     _models.RemoteOrigin,
+    _models.BackendFeatures,
     _models.StudyRef,
     _models.SimRow,
     _models.SimulationsPayload,
