@@ -225,7 +225,7 @@ def test_the_pages_send_where_the_run_went():
     detail = (static / "study-detail.js").read_text(encoding="utf-8")
     assert "{ simulation_id: runId, study: studyName() }" in detail  # cancel
     assert "'&study=' + encodeURIComponent(studyName() || '')" in detail  # chain progress
-    assert "d.phase === 'other-backend' || d.phase === 'not-offered' || d.phase === 'not-sms'" in detail
+    assert "d.phase === 'other-backend' || d.phase === 'not-offered')" in detail
     sim = (static / "sim-table.js").read_text(encoding="utf-8")
     assert sim.count("_rowWhere(btn)") >= 3 and "_whereQuery(where)" in sim
 

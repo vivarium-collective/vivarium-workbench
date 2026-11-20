@@ -117,11 +117,10 @@ jobs:
     # tests/conftest.py then ignores the test modules that import the plugin at module level and strict-xfails the
     # tests marked `plugin` (a pass is a failure: the mark is stale). See tests/test_plugin_test_marking.py.
     #
-    # NON-BLOCKING for now (continue-on-error): step P3's K2 PRs convert the tests that still fail here. Step Z (K3)
-    # removes continue-on-error and `core-only` becomes a required check (Jim, 2026-11-20).
+    # BLOCKING since step P3 Z (K3): continue-on-error is gone, so a failing shard fails the `core-only` check below
+    # (Jim, 2026-11-20: it becomes a required check in branch protection).
     name: core-only ${{ matrix.group }}/4
     runs-on: ubuntu-latest
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -161,34 +160,18 @@ jobs:
         run: uv run --frozen --no-sync bash scripts/pytest_gate.sh
 
   core-only-result:
-    # The stable check name for branch protection (like `suite`); required once step P3 ends.
-    #
-    # It reads the shards' real conclusions from the API rather than `needs.core-only.result`: with job-level
-    # continue-on-error, `needs.<job>.result` is `success` even when every shard failed, so the K1 check would be
-    # green while it enforces nothing. It reports red until step P3's K2 PRs finish converting the tests, but it
-    # does not gate merges until branch protection requires it (end of P3, step Z / K3, which also removes the
-    # continue-on-error here and on the shards).
+    # The stable check name for branch protection (like `suite`). Until step P3 Z (K3) the shards ran with
+    # continue-on-error, so this job read their real conclusions from the API (`needs.<job>.result` is `success` under
+    # continue-on-error even when every shard failed); with continue-on-error gone it reads `needs` like `suite`.
     name: core-only
     needs: core-only
     if: always()
     runs-on: ubuntu-latest
-    continue-on-error: true
-    permissions:
-      actions: read
     steps:
       - name: Check core-only shard results
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          conclusions="$(gh api --paginate "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}/jobs" \
-            --jq '.jobs[] | select(.name | test("^core-only [0-9]+/[0-9]+$")) | "\(.name)=\(.conclusion)"')"
-          echo "$conclusions"
-          if [[ -z "$conclusions" ]]; then
-            echo "::error::no core-only shard jobs found"; exit 1
-          fi
-          if grep -qv '=success$' <<<"$conclusions"; then
-            echo "::error::one or more core-only shards failed (needs.result: ${{ needs.core-only.result }})"
+          if [[ "${{ needs.core-only.result }}" != "success" ]]; then
+            echo "::error::one or more core-only shards failed (${{ needs.core-only.result }})"
             exit 1
           fi
           echo "all core-only shards passed"
