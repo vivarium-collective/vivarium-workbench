@@ -112,7 +112,13 @@ def run(
     # local git, pinned by construction to the commit sms-api built + keyed its ParCa cache
     # by. Local dev (unpinned) keeps the clean+pushed git_pip_url path.
     cfg = remote_pinned.pinned_config()
-    if build_ref and build_ref.get("commit") and build_ref.get("repo_url"):
+    pip_url: "str | None"
+    if via_viva_v1 and "id" in remote_run_viva_v1.backend_environment():
+        # A viva-core environment id runs its prebuilt image: nothing is shipped from the workspace's git tree
+        # (viva_v1_document_options drops extra_pip_deps for it), so neither git_pip_url's clean+pushed check nor
+        # the pinned deps apply (step P2 Builds B2b, Finding F).
+        pip_url = None
+    elif build_ref and build_ref.get("commit") and build_ref.get("repo_url"):
         # Explicit build target: a Cloud Run against a SELECTED registered build
         # (the Environment picker's chosen build). Run against THAT build's
         # already-pushed commit — NOT the local working tree — so no clean/pushed
@@ -131,7 +137,7 @@ def run(
         pip_url = f"git+{repo}.git@{resolved['commit']}"
     else:
         pip_url = remote_run.git_pip_url(ws_root)
-    extra_pip_deps = [pip_url, *remote_run.workspace_pinned_deps(ws_root)]
+    extra_pip_deps = [pip_url, *remote_run.workspace_pinned_deps(ws_root)] if pip_url is not None else []
 
     # Pre-spend preflight: validate the composite-id + overrides request LOCALLY
     # before committing any GovCloud spend. Turns ~15 silent wrong-but-successful

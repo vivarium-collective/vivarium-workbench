@@ -412,10 +412,8 @@ def test_an_environment_id_with_a_clean_tree_runs_a_document_on_both_sides(world
         ("document",), ("document",))
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Finding F (plan P2 Builds, open question 3): for an id: environment the card skips the git preflight and "
-    "launches, while /api/remote-dispatch-preflight always runs it and answers not ready. Builds B2 keeps both "
-    "behaviours; the fix (rule A plus a non-blocking warning) is PR B2b"))
 def test_an_environment_id_with_a_dirty_tree_takes_the_same_decision(world, monkeypatch, inproc_client):
+    """Finding F, fixed in Builds B2b (rule A plus a non-blocking warning): an ``id:`` environment ships nothing
+    from git, so both sides launch a document; the preflight only warns about the dirty tree."""
     preflight, card = _same_decision(world, monkeypatch, inproc_client, "viva", "none", "dirty", "id:env-1")
-    assert preflight == card
+    assert preflight == card == ("document",)
