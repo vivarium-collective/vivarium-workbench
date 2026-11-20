@@ -478,6 +478,24 @@ def test_with_providers_off_no_backend_offers_artifacts_or_analyses(providers_of
     assert backends.offering("artifacts") == () and backends.offering("analyses") == ()
 
 
+# --- the optional listing facet (step P2, Remote tab R1) -------------------------------------------------------------
+
+def test_only_sms_legacy_offers_the_listing_facet():
+    from vivarium_workbench_sms.remote_simulations import SmsListing
+
+    sms = backends.SMS_LEGACY
+    assert isinstance(sms.listing, SmsListing)
+    for method in ("list_runs", "state", "invalidate"):
+        assert callable(getattr(sms.listing, method)), method
+    for backend in (backends.COMPOSE, backends.VIVA_CORE, *backends._SENTINELS.values()):
+        assert backend.listing is None, backend.name
+    assert backends.offering("listing") == (sms,)
+
+
+def test_with_providers_off_no_backend_offers_the_listing(providers_off):
+    assert backends.offering("listing") == ()
+
+
 # --- the optional batch status (step P2, Runs c2) ---------------------------------------------------------------------
 
 def test_only_sms_legacy_declares_the_optional_batch_status():

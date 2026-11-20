@@ -32,6 +32,9 @@ CORE = [
     "vivarium_workbench.lib.startup",
     "vivarium_workbench.lib.remote_run",
     "vivarium_workbench.lib.run_runner",
+    "vivarium_workbench.lib.simulations_index",
+    "vivarium_workbench.lib.investigations_index",
+    "vivarium_workbench.lib.remote_study_map",
 ]
 
 
