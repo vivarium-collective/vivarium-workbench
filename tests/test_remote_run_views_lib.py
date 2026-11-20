@@ -14,8 +14,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from vivarium_workbench.lib import git_status, github_auth
 from vivarium_workbench.lib import remote_run_views as rrv
 from vivarium_workbench_sms import remote_pipeline_views as pv
