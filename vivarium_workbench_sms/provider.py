@@ -5,7 +5,8 @@
 * ``select()``: a run of the session's own build (``.viv-build.json``) or of a pinned deployment is SMS's;
 * ``recognise()``: the viva-core half of the capability probe (``server_capabilities.backend_profile``);
 * ``worker_launcher()``: viva-api's hosted env-worker launcher (proxy or dial-back), when the deployment asks for one;
-* ``probe_client()``: the client the capability probe reads a named backend with (``SmsApiClient``, probe class).
+* ``probe_client()``: the client the capability probe reads a named backend with (``SmsApiClient``, probe class);
+* ``cli()``: its subcommands (``run-remote``, ``vivarium_workbench_sms/cli.py``).
 
 The core finds this module by importing it (until step P4's entry point) and reads ``PROVIDER``.
 """
@@ -20,6 +21,7 @@ from vivarium_workbench.lib.backends.provider import Recognised
 
 if TYPE_CHECKING:
     from vivarium_workbench.lib.backends import Backend
+    from vivarium_workbench.lib.backends.provider import Command
     from vivarium_workbench.lib.env_worker_launcher import WorkerLauncher
     from vivarium_workbench_sms.sms_api_client import SmsApiClient
 
@@ -96,6 +98,12 @@ class SmsProvider:
         from vivarium_workbench_sms import sms_api_client as sac
 
         return sac.SmsApiClient.for_("probe", base_url)
+
+    def cli(self) -> "tuple[Command, ...]":
+        """``run-remote`` (``vivarium_workbench_sms/cli.py``, step P2), built fresh on every call."""
+        from vivarium_workbench_sms import cli as _cli  # lazy, like backends()
+
+        return _cli.commands()
 
 
 PROVIDER = SmsProvider()

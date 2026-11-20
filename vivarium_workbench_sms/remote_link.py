@@ -23,8 +23,9 @@ microsecond failure instead of a minute-and-a-half one:
 
 The breaker is a **no-op-safe default**: a link whose state is ``"unknown"`` (the
 probe has never run) never blocks a request. Threads are opt-in — nothing here
-spawns one until :meth:`RemoteLink.start` (or :func:`start_probe`) is called, so
-tests and the CLI stay single-threaded unless they ask otherwise.
+spawns one until :meth:`RemoteLink.start` (or ``backend_config.start_probe``, which
+``serve`` calls on the configured URL) is called, so tests and the CLI stay
+single-threaded unless they ask otherwise.
 
 Since step P1a (docs/backend-adapters.md) the breaker itself is the core's (:mod:`backend_config`: ``RemoteLink``,
 ``CircuitOpen``, the per-URL registry). This module keeps what is SMS-specific: the default URL (the configured
@@ -90,10 +91,3 @@ def link(base_url: Optional[str] = None) -> RemoteLink:
 
     The registry is the core's (:func:`backend_config.link`); this only supplies the SMS default."""
     return _backend_config.link(base_url or sms_api_base())
-
-
-def start_probe(base_url: Optional[str] = None) -> RemoteLink:
-    """Start (idempotently) the background probe for ``base_url``'s link (default: the configured endpoint)."""
-    lk = link(base_url)
-    lk.start()
-    return lk

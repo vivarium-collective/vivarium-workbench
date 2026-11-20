@@ -26,6 +26,8 @@ CORE = [
     "vivarium_workbench.lib.workspace_deps_views",
     "vivarium_workbench.lib.env_worker_launcher",
     "vivarium_workbench.api.app",
+    "vivarium_workbench.cli",
+    "vivarium_workbench.lib.startup",
 ]
 
 

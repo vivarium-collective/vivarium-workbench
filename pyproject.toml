@@ -288,7 +288,6 @@ ignore_imports = [
     "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_run_jobs",
     "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_simulations",
     "vivarium_workbench.api.app -> vivarium_workbench_sms.source_build_views",
-    "vivarium_workbench.cli -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.backends.provider -> vivarium_workbench_sms.provider",  # the registry (P4: entry point)
     "vivarium_workbench.lib.composite_resolve -> vivarium_workbench_sms.remote_simulations",
     "vivarium_workbench.lib.composite_state_views -> vivarium_workbench_sms.remote_simulations",
@@ -307,7 +306,6 @@ ignore_imports = [
     "vivarium_workbench.lib.run_jobs -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.simulations_index -> vivarium_workbench_sms.remote_simulations",
     "vivarium_workbench.lib.simulations_index -> vivarium_workbench_sms.sms_api_client",
-    "vivarium_workbench.lib.startup -> vivarium_workbench_sms.remote_link",
     "vivarium_workbench.lib.study_runs -> vivarium_workbench_sms.remote_pinned",
     "vivarium_workbench.lib.study_runs -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.workspace_deps_views -> vivarium_workbench_sms.remote_build_source",
@@ -503,6 +501,7 @@ files = [
     "vivarium_workbench/lib/remote_trace.py",
     "vivarium_workbench/lib/perfetto_ui.py",
     "vivarium_workbench_sms/remote_link.py",
+    "vivarium_workbench_sms/cli.py",
     "vivarium_workbench/lib/test_run_views.py",
     "vivarium_workbench/lib/comparative_runs.py",
     "vivarium_workbench/lib/run_unblocked_views.py",

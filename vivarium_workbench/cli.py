@@ -9,9 +9,13 @@ import sys
 import time
 import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING, Sequence
 
 import yaml
 import psutil
+
+if TYPE_CHECKING:
+    from vivarium_workbench.lib.backends.provider import Command
 
 
 def _pick_free_port() -> int:
@@ -552,45 +556,6 @@ def _load_manifest(source: str) -> dict:
     if source.startswith("file://"):
         source = source[len("file://"):]
     return json.loads(Path(source).read_text())
-
-
-def cmd_run_remote(args: argparse.Namespace) -> int:
-    """CLI handler for the run-remote subcommand.
-
-    Validates the workspace git tree is clean and pushed, exports the named
-    composite to a .pbg document, submits it to sms-api, polls until
-    completion, and lands results.zip in the workspace.
-    """
-    from vivarium_workbench.lib.remote_run import run_remote
-    from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
-    from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
-
-    workspace = Path(args.workspace).resolve()
-    if not (workspace / "workspace.yaml").is_file():
-        print(f"ERROR: not a workspace (no workspace.yaml): {workspace}", file=sys.stderr)
-        return 2
-
-    base_url = getattr(args, "sms_api_url", None) or _sms_api_base()
-    client = SmsApiClient(base_url)
-
-    dest = Path(args.dest) if getattr(args, "dest", None) else None
-
-    try:
-        results = run_remote(
-            workspace,
-            args.composite,
-            client=client,
-            poll_interval=getattr(args, "poll_interval", 10.0),
-            dest=dest,
-        )
-        print(f"Done. Results: {results}")
-        return 0
-    except RuntimeError as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
-    except SmsApiError as e:
-        print(f"ERROR (sms-api): {e}", file=sys.stderr)
-        return 1
 
 
 def cmd_sync(args) -> int:
@@ -1465,9 +1430,11 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
 
 
 #: Subcommands that can dispatch to, or look runs up on, a remote backend: they refuse a process configured for two
-#: (``sms_api_client.check_single_backend``). The others do not dispatch or look up runs (a few may still read the
-#: configured URL for a hosted env worker, unchanged), so a stale alias in the shell must not stop them. ``tests/test_backends_startup.py`` requires every subcommand to be in exactly one set.
-BACKEND_COMMANDS = frozenset({"serve", "server-restart", "run", "rerun", "run-composite", "run-remote"})
+#: (``backend_config.check_single_backend``) or asking for hosted workers no provider supplies. The others do not
+#: dispatch or look up runs (a few may still read the configured URL for a hosted env worker, unchanged), so a stale
+#: alias in the shell must not stop them. A provider's subcommands say which they are (``Command.uses_backend``, see
+#: :func:`_backend_commands`). ``tests/test_backends_startup.py`` requires every subcommand to be in exactly one set.
+BACKEND_COMMANDS = frozenset({"serve", "server-restart", "run", "rerun", "run-composite"})
 NO_BACKEND_COMMANDS = frozenset({
     "add-dashboard", "audit", "catalog-add", "compose-entry", "doctor", "gen-readme", "logs", "migrate-artifacts",
     "migrate-fields", "migrate-investigations", "migrate-studies", "prepare-investigation", "render-loom",
@@ -1476,7 +1443,29 @@ NO_BACKEND_COMMANDS = frozenset({
 })
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _provider_commands() -> "tuple[Command, ...]":
+    """The active providers' subcommands (step P2 CLI). A provider that fails to load costs only its own subcommands,
+    with a warning: it must not take ``doctor``, ``migrate-*`` or ``gen-readme`` down with it. (The backend commands
+    still refuse to start on it: ``check_worker_config`` asks the providers again.)"""
+    from vivarium_workbench.lib.backends import provider as _provider
+
+    try:
+        return tuple(c for p in _provider.providers() for c in p.cli())
+    except Exception as e:  # noqa: BLE001 - see docstring
+        print(f"warning: backend provider failed to load ({type(e).__name__}: {e}); its subcommands are unavailable",
+              file=sys.stderr)
+        return ()
+
+
+def _backend_commands(commands: "Sequence[Command]") -> "frozenset[str]":
+    """:data:`BACKEND_COMMANDS` plus the provider subcommands that reach a backend (``Command.uses_backend``)."""
+    return BACKEND_COMMANDS | {c.name for c in commands if c.uses_backend}
+
+
+def _build_parser(commands: "Sequence[Command] | None" = None) -> argparse.ArgumentParser:
+    """The CLI parser; ``commands`` are the providers' subcommands (default: :func:`_provider_commands`)."""
+    if commands is None:
+        commands = _provider_commands()
     parser = argparse.ArgumentParser(prog="vivarium-workbench")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -1658,30 +1647,13 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Override dashboard URL (default: auto-detect)")
     p_prep.set_defaults(func=cmd_prepare_investigation)
 
-    p_remote = sub.add_parser(
-        "run-remote",
-        help="Export a composite and run it on sms-api (requires pushed git tree)",
-    )
-    p_remote.add_argument(
-        "--workspace", default=".", help="Path to workspace root (default: cwd)"
-    )
-    p_remote.add_argument(
-        "composite",
-        help="Composite id (e.g. pbg_my_ws.composites.my_composite)",
-    )
-    p_remote.add_argument(
-        "--sms-api-url", default=None,
-        help="Override the sms-api base URL (default: from workspace config or http://localhost:8080)",
-    )
-    p_remote.add_argument(
-        "--poll-interval", type=float, default=10.0,
-        help="Seconds between status polls (default: 10)",
-    )
-    p_remote.add_argument(
-        "--dest", default=None,
-        help="Directory for the landed results.zip (default: <workspace>/.pbg/remote-results/)",
-    )
-    p_remote.set_defaults(func=cmd_run_remote)
+    # The providers' subcommands (step P2 CLI: the SMS provider's ``run-remote``), at the slot ``run-remote`` had.
+    for c in commands:
+        if c.name in sub.choices or c.name in BACKEND_COMMANDS | NO_BACKEND_COMMANDS:
+            raise RuntimeError(f"provider subcommand {c.name!r} collides with a core subcommand")
+        p_provided = sub.add_parser(c.name, help=c.help)
+        c.configure(p_provided)
+        p_provided.set_defaults(func=c.run)
 
     p_sync = sub.add_parser(
         "sync",
@@ -1957,12 +1929,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
+    commands = _provider_commands()
+    parser = _build_parser(commands)
     args = parser.parse_args(argv)
     from vivarium_workbench.lib.errors import APIError
     from vivarium_workbench.lib.backend_config import BackendConfigError, check_single_backend
 
-    if args.cmd in BACKEND_COMMANDS:
+    if args.cmd in _backend_commands(commands):
         try:
             # serve's --backend-base-url replaces the named env var for that process, so it is the one compared
             check_single_backend(getattr(args, "backend_base_url", None))
