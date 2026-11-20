@@ -919,14 +919,33 @@ h1.study-title .study-name>.ie-pencil{right:4px;top:6px}
 
 {# ─── Model tab (Design): composition + Readouts ────────────────────────────── #}
 <section class="study-tab-panel" data-kind="compose" id="panel-compose" hidden>
-  <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
-    <h2 class="overview-label" style="margin:0">Model composition</h2>
-    {# Download the runnable notebook for this study's investigation (includes
-       this study, with its composite + exposed parameters). Lives in the Model
-       tab — where the composition/params are — rather than the header. #}
-    <button type="button" class="btn-mini" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')" title="Download a runnable Jupyter notebook for THIS study — its composite + editable parameters + figures">↓ notebook</button>
+  {# Sub-tabs within the Model tab: Composition | Variants | Interventions |
+     Readouts. (The redundant "MODEL COMPOSITION" heading row was dropped — the
+     tabs are the label.) The ↓ notebook download moves onto the tab row,
+     right-aligned. Composition is the composite/params surface; the other
+     three used to be stacked below it and are now their own panes. Mirrors
+     the Simulations sim-subtab pattern — _setModelSubtab() in study-detail.js
+     just toggles which .model-subpanel is visible (all server-rendered at
+     load, so their JS hooks bind unchanged). #}
+  <div class="model-subtabs" role="tablist" aria-label="Model sections">
+    <button type="button" class="model-subtab active" data-modelsub="composition" role="tab" aria-selected="true" onclick="_setModelSubtab('composition')">Composition</button>
+    <button type="button" class="model-subtab" data-modelsub="loom" role="tab" aria-selected="false" onclick="_setModelSubtab('loom')">Loom</button>
+    <button type="button" class="model-subtab" data-modelsub="variants" role="tab" aria-selected="false" onclick="_setModelSubtab('variants')">Variants{% if study.variants %} <span class="model-subtab-count">{{ study.variants | length }}</span>{% endif %}</button>
+    <button type="button" class="model-subtab" data-modelsub="interventions" role="tab" aria-selected="false" onclick="_setModelSubtab('interventions')">Interventions{% if study.interventions %} <span class="model-subtab-count">{{ study.interventions | length }}</span>{% endif %}</button>
+    <button type="button" class="model-subtab" data-modelsub="readouts" role="tab" aria-selected="false" onclick="_setModelSubtab('readouts')">Readouts</button>
   </div>
 
+  {# Loom subpane — the interactive bigraph, mounted directly (no "Explore
+     composite" click, no scrolling to the composite card). Lazy: the iframe
+     is heavy, so _mountModelLoom() builds it only when this tab is first
+     opened (from _setModelSubtab in study-detail.js). #}
+  <div class="model-subpanel" data-modelsubpanel="loom" hidden>
+    <div id="model-loom-mount" class="model-loom-mount">
+      <div class="viv-loading"><span class="viv-loading-spin" aria-hidden="true"></span><span>Loading the interactive model diagram…</span></div>
+    </div>
+  </div>
+
+  <div class="model-subpanel active" data-modelsubpanel="composition">
   {# Study-spine reorg (spec/plan Task 6): the study's ACTUAL composite(s),
      rendered as the SAME rich card the Modules/Composites view uses — full
      semantic detail (description, config schema, declared observables) at
@@ -1299,97 +1318,121 @@ h1.study-title .study-name>.ie-pencil{right:4px;top:6px}
   {% if not _has_build and _is_v3 %}
   <p class="empty-message">Nothing to compose yet.</p>
   {% endif %}
+  </div>{# /composition subpanel #}
 
-  {# Variants authoring (issue #1618, blocker B). A study created in the GUI
-     carries a top-level `variants[]` list (what study-variant-add writes);
-     nothing rendered it before, and there was no form to add one. This lists
-     those variants with Run/Delete and offers an add form. The v4
-     conditions.variants table above is a separate, derived surface. #}
+  {# Variants authoring (issue #1618, blocker B) — now its own Model subpane.
+     Clean card list + a labelled add card. Hooks preserved: form class
+     study-variant-add-form + _submitStudyVariantAdd, row buttons
+     study-variant-run / study-variant-del with data-variant. #}
+  <div class="model-subpanel" data-modelsubpanel="variants" hidden>
   <div class="overview-section" id="study-variants-section">
-    <h3>Variants <span class="muted" style="font-size:0.85em;font-weight:normal">— perturbations of the baseline to compare</span></h3>
+    <p class="msub-intro">A <strong>variant</strong> is a copy of a baseline model with a few parameters changed, run and compared against the baseline. Everything else stays fixed.</p>
     {% if study.variants %}
-    <table class="cond-table" style="margin-bottom:10px">
-      <thead><tr><th>Variant</th><th>Base</th><th>Parameter overrides</th><th></th></tr></thead>
-      <tbody>
-        {% for v in study.variants %}
-        <tr>
-          <td><code>{{ v.name or '?' }}</code></td>
-          <td>{% if v.base_composite %}<code>{{ v.base_composite }}</code>{% else %}<em class="muted">(inherits baseline)</em>{% endif %}</td>
-          <td>
-            {% set _ovr = v.parameter_overrides or v.params or {} %}
-            {% if _ovr %}{% for k, val in _ovr.items() %}<div><span class="cond-pill-k">{{ k }}</span>=<code>{{ val }}</code></div>{% endfor %}{% else %}<em class="muted">(none)</em>{% endif %}
-          </td>
-          <td style="white-space:nowrap">
-            <button type="button" class="action-btn study-variant-run" data-variant="{{ v.name }}" style="font-size:0.78em" title="Run this variant">▶ Run</button>
-            <button type="button" class="action-btn study-variant-del" data-variant="{{ v.name }}" style="font-size:0.78em" title="Delete variant">✕</button>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="var-list">
+      {% for v in study.variants %}
+      <div class="var-card">
+        <div class="var-card-main">
+          <div class="var-card-head">
+            <code class="var-name">{{ v.name or '?' }}</code>
+            <span class="var-base">based on {% if v.base_composite %}<code>{{ v.base_composite }}</code>{% else %}the baseline{% endif %}</span>
+          </div>
+          {% set _ovr = v.parameter_overrides or v.params or {} %}
+          <div class="var-overrides">
+            {% if _ovr %}{% for k, val in _ovr.items() %}<span class="ovr-chip"><span class="ovr-k">{{ k }}</span><span class="ovr-eq">=</span><span class="ovr-v">{{ val }}</span></span>{% endfor %}{% else %}<span class="var-nochange">no overrides — identical to the baseline</span>{% endif %}
+          </div>
+        </div>
+        <div class="var-card-actions">
+          <button type="button" class="action-btn study-variant-run" data-variant="{{ v.name }}" title="Run this variant">▶ Run</button>
+          <button type="button" class="icon-btn study-variant-del" data-variant="{{ v.name }}" title="Delete variant" aria-label="Delete variant {{ v.name }}">✕</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
     {% else %}
-    <p class="muted" style="font-size:0.88em;margin:0 0 10px">No variants yet — add one to perturb the baseline and compare against it.</p>
+    <div class="msub-empty">No variants yet. Add one below to perturb the baseline and compare against it.</div>
     {% endif %}
     {% if study.baseline %}
-    <form class="study-variant-add-form" onsubmit="return _submitStudyVariantAdd(this)" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
-      <label style="font-size:0.78em;color:#475569">Name<br>
-        <input name="name" required pattern="[a-zA-Z0-9_-]+" placeholder="hi-dnaa"
-               style="font-family:monospace;font-size:0.82em;padding:3px 6px;min-width:130px"></label>
-      <label style="font-size:0.78em;color:#475569">Base<br>
-        <select name="base_composite" style="font-size:0.82em;padding:3px 6px">
-          {% for b in study.baseline %}<option value="{{ b.name }}">{{ b.name }}</option>{% endfor %}
-        </select></label>
-      <label style="font-size:0.78em;color:#475569">Parameter overrides (JSON)<br>
-        <input name="overrides" placeholder='{"k_synth": 2.0}'
-               style="font-family:monospace;font-size:0.82em;padding:3px 6px;min-width:180px"></label>
-      <button type="submit" class="action-btn" style="font-size:0.82em">+ Add variant</button>
+    <form class="study-variant-add-form msub-addcard" onsubmit="return _submitStudyVariantAdd(this)">
+      <div class="msub-addcard-title">Add a variant</div>
+      <div class="msub-field-grid">
+        <label class="msub-field">
+          <span class="msub-lbl">Name</span>
+          <input name="name" required pattern="[a-zA-Z0-9_-]+" placeholder="hi-dnaa" class="msub-input mono">
+          <span class="msub-hint">letters, numbers, - and _</span>
+        </label>
+        <label class="msub-field">
+          <span class="msub-lbl">Based on</span>
+          <select name="base_composite" class="msub-input">
+            {% for b in study.baseline %}<option value="{{ b.name }}">{{ b.name }}</option>{% endfor %}
+          </select>
+          <span class="msub-hint">the baseline this variant perturbs</span>
+        </label>
+        <label class="msub-field msub-field-wide">
+          <span class="msub-lbl">Parameter overrides</span>
+          <input name="overrides" placeholder='{"k_synth": 2.0}' class="msub-input mono">
+          <span class="msub-hint">JSON object of parameter → value; leave blank for none</span>
+        </label>
+      </div>
+      <div class="msub-addcard-foot">
+        <button type="submit" class="action-btn primary">+ Add variant</button>
+        <span class="study-variant-add-status msub-status"></span>
+      </div>
     </form>
-    <div class="study-variant-add-status muted" style="font-size:0.8em;margin-top:4px"></div>
     {% else %}
-    <p class="muted" style="font-size:0.84em">Choose a model (baseline) first — a variant perturbs a baseline entry.</p>
+    <div class="msub-empty">Choose a model (baseline) in the <strong>Composition</strong> tab first — a variant perturbs a baseline entry.</div>
     {% endif %}
   </div>
+  </div>{# /variants subpanel #}
 
-  {# Interventions authoring (issue #1618, blocker B). Interventions are named,
-     described perturbations the study applies; the endpoints existed with no UI
-     and nothing rendered the list. Mirrors the Variants section above. #}
+  {# Interventions authoring (issue #1618, blocker B) — now its own Model
+     subpane. Hooks preserved: study-intervention-add-form +
+     _submitStudyInterventionAdd, row button study-intervention-del data-name. #}
+  <div class="model-subpanel" data-modelsubpanel="interventions" hidden>
   <div class="overview-section" id="study-interventions-section">
-    <h3>Interventions <span class="muted" style="font-size:0.85em;font-weight:normal">— named perturbations applied in this study</span></h3>
+    <p class="msub-intro">An <strong>intervention</strong> is a named, described perturbation applied in this study (e.g. a knockout) — the conceptual change you are testing, documented alongside the model.</p>
     {% if study.interventions %}
-    <table class="cond-table" style="margin-bottom:10px">
-      <thead><tr><th>Intervention</th><th>Description</th><th></th></tr></thead>
-      <tbody>
-        {% for iv in study.interventions %}
-        <tr>
-          <td><code>{{ iv.name or '?' }}</code></td>
-          <td>{{ iv.description or '' }}</td>
-          <td style="white-space:nowrap">
-            <button type="button" class="action-btn study-intervention-del" data-name="{{ iv.name }}" style="font-size:0.78em" title="Delete intervention">✕</button>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="var-list">
+      {% for iv in study.interventions %}
+      <div class="var-card">
+        <div class="var-card-main">
+          <div class="var-card-head"><code class="var-name">{{ iv.name or '?' }}</code></div>
+          <div class="iv-desc">{% if iv.description %}{{ iv.description }}{% else %}<span class="var-nochange">no description</span>{% endif %}</div>
+        </div>
+        <div class="var-card-actions">
+          <button type="button" class="icon-btn study-intervention-del" data-name="{{ iv.name }}" title="Delete intervention" aria-label="Delete intervention {{ iv.name }}">✕</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
     {% else %}
-    <p class="muted" style="font-size:0.88em;margin:0 0 10px">No interventions yet.</p>
+    <div class="msub-empty">No interventions yet. Add one below.</div>
     {% endif %}
-    <form class="study-intervention-add-form" onsubmit="return _submitStudyInterventionAdd(this)" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
-      <label style="font-size:0.78em;color:#475569">Name<br>
-        <input name="name" required pattern="[a-zA-Z0-9_-]+" placeholder="knockout-dnaA"
-               style="font-family:monospace;font-size:0.82em;padding:3px 6px;min-width:140px"></label>
-      <label style="font-size:0.78em;color:#475569;flex:1;min-width:200px">Description<br>
-        <input name="description" placeholder="what the intervention does"
-               style="width:100%;font-size:0.82em;padding:3px 6px"></label>
-      <button type="submit" class="action-btn" style="font-size:0.82em">+ Add intervention</button>
+    <form class="study-intervention-add-form msub-addcard" onsubmit="return _submitStudyInterventionAdd(this)">
+      <div class="msub-addcard-title">Add an intervention</div>
+      <div class="msub-field-grid">
+        <label class="msub-field">
+          <span class="msub-lbl">Name</span>
+          <input name="name" required pattern="[a-zA-Z0-9_-]+" placeholder="knockout-dnaA" class="msub-input mono">
+          <span class="msub-hint">letters, numbers, - and _</span>
+        </label>
+        <label class="msub-field msub-field-wide">
+          <span class="msub-lbl">Description</span>
+          <input name="description" placeholder="what the intervention does" class="msub-input">
+          <span class="msub-hint">a short, human-readable summary</span>
+        </label>
+      </div>
+      <div class="msub-addcard-foot">
+        <button type="submit" class="action-btn primary">+ Add intervention</button>
+        <span class="study-intervention-add-status msub-status"></span>
+      </div>
     </form>
-    <div class="study-intervention-add-status muted" style="font-size:0.8em;margin-top:4px"></div>
   </div>
-
-
+  </div>{# /interventions subpanel #}
 
   {# Readouts (Phase 1): the emit CONTRACT, re-homed from its own tab into
      Model. Loaders _loadReadouts() + _loadReadoutsDownloadPointer() and all
      ids (#readouts-emitter / #readouts-download / #readouts-table) unchanged. #}
+  <div class="model-subpanel" data-modelsubpanel="readouts" hidden>
   <div class="overview-section" id="model-readouts-section">
     <h3>Readouts</h3>
 
@@ -1420,6 +1463,7 @@ h1.study-title .study-name>.ie-pencil{right:4px;top:6px}
     {% endif %}
   </div>
   </div>
+  </div>{# /readouts subpanel #}
 
 </section>
 
