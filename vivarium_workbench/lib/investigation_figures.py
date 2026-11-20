@@ -311,6 +311,12 @@ _GALLERY_CSS = (
 )
 
 
+# A fixed top-right "download this page as .html" control for the standalone
+# gallery — so the HTML can be saved without hunting for an Export menu. Prefers
+# the current URL's served bytes; falls back to serializing the live DOM.
+_GALLERY_DL_BTN = r"""<button id="dl-html-btn" onclick="__dlPageHtml()" title="Download this figure gallery as a self-contained .html file" style="position:fixed;top:14px;right:16px;z-index:50;font:inherit;font-size:12.5px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--soft);border-radius:8px;padding:7px 11px;box-shadow:0 2px 8px rgba(0,0,0,0.08);white-space:nowrap">&#8595; HTML</button><script>function __dlPageHtml(){var name=(document.title||'figures').replace(/[^\w.-]+/g,'_')||'figures';try{var html='<!doctype html>\n'+document.documentElement.outerHTML;var b=new Blob([html],{type:'text/html'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name+'.html';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},4000);}catch(e){}}</script>"""
+
+
 def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[str], list[tuple[str, str, bool]]]]) -> str:
     """One navigable ``index.html`` for a figures export. ``groups`` is an ordered
     list of ``(heading, subtitle_or_None, [(arcname, label, is_html), …])``. Each
@@ -345,7 +351,66 @@ def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[s
             f'<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel=stylesheet>'
             f'<style>{_GALLERY_CSS}</style></head><body><div class="wrap">'
             f'<nav><h1>Figures</h1><p class="sub">{n_fig} figures &middot; {len(groups)} studies</p>'
-            + "".join(nav) + '</nav><main>' + hdr + "".join(body) + '</main></div></body></html>')
+            + "".join(nav) + '</nav><main>' + hdr + "".join(body) + '</main></div>'
+            + _GALLERY_DL_BTN + '</body></html>')
+
+
+def build_figures_gallery_page(ws_root, name: str) -> Optional[str]:
+    """A STANDALONE (self-contained) HTML figure gallery for one investigation —
+    every member study's figure files embedded inline as ``data:`` URIs, grouped
+    by study, so the page opens in the browser with no further requests. Reuses
+    :func:`figures_gallery_index_html` (the same gallery the zip ships). Returns
+    ``None`` when the investigation has no displayable figures. Backs
+    ``GET /api/investigation/<slug>/figures.html`` (the "open figures in the
+    browser" action)."""
+    import base64
+
+    _MIME = {
+        ".svg": "image/svg+xml", ".png": "image/png", ".gif": "image/gif",
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+        ".html": "text/html",
+    }
+    ws_root = Path(ws_root).resolve()
+    figs = build_investigation_figures(ws_root, name)
+    files = figs.get("files") or []
+    if not files:
+        return None
+    # Group by study, preserving member order (files come in slug/member order).
+    by_study: "dict[str, list[dict]]" = {}
+    for f in files:
+        by_study.setdefault(str(f.get("study") or ""), []).append(f)
+
+    groups: list = []
+    any_item = False
+    for slug, items in by_study.items():
+        rendered: list = []
+        for it in items:
+            p = ws_root / str(it.get("rel_path") or "")
+            suf = p.suffix.lower()
+            if suf not in _GALLERY_EXT or not p.is_file():
+                continue
+            try:
+                raw = p.read_bytes()
+            except OSError:
+                continue
+            is_html = suf == ".html"
+            stem = p.stem
+            if is_html:
+                try:
+                    label = _fig_label(raw.decode("utf-8", "replace"), stem)
+                except Exception:
+                    label = stem
+            else:
+                label = stem.replace("-", " ").replace("_", " ").strip() or stem
+            mime = _MIME.get(suf, "application/octet-stream")
+            data_uri = f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
+            rendered.append((data_uri, label, is_html))
+            any_item = True
+        if rendered:
+            groups.append((slug, None, rendered))
+    if not any_item:
+        return None
+    return figures_gallery_index_html(name, groups)
 
 
 def build_figures_zip(ws_root, name: str) -> Optional[bytes]:

@@ -9926,14 +9926,14 @@
   }
   window._showInvestigationList = _showInvestigationList;
 
-  // ── Investigations/Studies semantic zoom ────────────────────────────────
-  // Same 3-level framework as the Registry: 'table' (dense, sortable-looking)
-  // | 'cards' (grid — the historical default) | 'full' (cards with detail
-  // expanded). Drives BOTH the Investigations and Studies browse tabs.
-  // Persists in localStorage, mirroring window._registryZoom.
+  // ── Investigations/Studies view ─────────────────────────────────────────
+  // Two views: 'table' (the List view — dense, sortable; the DEFAULT) and
+  // 'cards' (grid). Drives BOTH the Investigations and Studies browse tabs.
+  // Persists in localStorage. (The old 'full' detail view was removed; any
+  // persisted 'full' falls back to the List default below.)
   window._isetZoom = (function () {
     var z; try { z = localStorage.getItem('viv.isetZoom'); } catch (e) { z = null; }
-    return (z === 'table' || z === 'cards' || z === 'full') ? z : 'cards';
+    return (z === 'table' || z === 'cards') ? z : 'table';
   })();
   function _syncIsetToolbar() {
     // Scoped to [data-izoom] — .reg-zoom-btn is shared with the Registry zoom
@@ -9959,11 +9959,10 @@
     _renderInvestigationSets();
   }
   window._setIsetZoom = _setIsetZoom;
-  // Double-click a card → zoom in one level (table → cards → full), mirroring
-  // the Registry's _zoomInOn.
+  // Double-click a card → switch to the other view (table ↔ cards).
   function _isetZoomIn() {
-    var order = ['table', 'cards', 'full'];
-    var i = order.indexOf(window._isetZoom || 'cards');
+    var order = ['table', 'cards'];
+    var i = order.indexOf(window._isetZoom || 'table');
     _setIsetZoom(order[Math.min(order.length - 1, i + 1)]);
   }
   window._isetZoomIn = _isetZoomIn;
@@ -9974,7 +9973,7 @@
     _syncIsetToolbar();
     if (window._isetBrowseTab === 'studies') {
       if (window._isetZoom === 'table') _renderStudyBrowseTable(list);
-      else _renderStudyBrowseCards(list, window._isetZoom === 'full');
+      else _renderStudyBrowseCards(list, false);
       return;
     }
     if (!window._isetIndex.length) {
@@ -10140,15 +10139,7 @@
           '<span class="iset-studies-toggle" role="button" tabindex="0" ' +
             'onclick="event.stopPropagation();var d=this.closest(\'.investigation-set-card\').querySelector(\'.iset-studies-detail\');var open=d.style.display===\'none\';d.style.display=open?\'block\':\'none\';this.querySelector(\'.iset-chev\').textContent=open?\'▾\':\'▸\'" ' +
             'style="flex:1;cursor:pointer;user-select:none"><strong>' + iset.n_studies + '</strong> stud' + (iset.n_studies === 1 ? 'y' : 'ies') + ' <span class="iset-chev" style="color:#94a3b8">' + (full ? '▾' : '▸') + '</span></span>' +
-          '<a href="#" title="Download the rendered HTML report for this investigation" ' +
-            'onclick="window._vivReportFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ report</a>' +
-          '<a href="#" title="Download the runnable notebook for this investigation" ' +
-            'onclick="window._vivNotebookFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ notebook</a>' +
-          (iset.n_figures ? '<a href="#" title="Download all figures for this investigation (studies figures + post-study composites), as a zip" ' +
-            'onclick="window._vivFiguresFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ figures</a>' : '') +
+          '<span style="white-space:nowrap">' + window._vivInvLinksHtml(iset) + '</span>' +
         '</div>' +
         '<div class="iset-studies-detail" style="display:' + (full ? 'block' : 'none') + ';margin-top:8px;border-top:1px solid #f1f5f9;padding-top:6px">' + (studyRows || '<span class="muted" style="font-size:0.85em">No studies.</span>') + '</div>' +
         // "Run this investigation in your terminal" chip (like the composite/process card).
@@ -10157,7 +10148,7 @@
     }
 
     var GRID = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px;margin:6px 0 14px';
-    var _isetFull = (window._isetZoom === 'full');
+    var _isetFull = false;  // the 'full' detail view was removed; cards render compact.
     // Render a grid of investigation cards. A header is drawn only when `label`
     // is given; called with '' it yields one flat, headerless grid (the single
     // combined list — no Active/Closed section split).
@@ -10539,24 +10530,29 @@
     }
     return h;
   }
+  // Fills the Validation TAB (#inv-validation-mount) in the investigation-detail
+  // tab strip. (Was a standalone collapsible labeled "Validation (RFC-0007)";
+  // now it's just another tab, so the RFC label is dropped.)
   function _vivLoadValidationPanel(slug) {
-    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot' || !slug) return;
+    if (!slug) return;
+    var mount = function () { return document.getElementById('inv-validation-mount'); };
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') {
+      var ms = mount();
+      if (ms) ms.innerHTML = '<div class="muted" style="padding:6px 2px">The validation panel is available in the live workbench.</div>';
+      return;
+    }
     fetch('/api/validation-panel/' + encodeURIComponent(slug), {headers: {Accept: 'application/json'}})
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (window._currentIset !== slug) return;
-        var host = document.getElementById('inv-validation-panel');
-        if (!d || !d.types || !d.records) { if (host) host.remove(); return; }
-        if (!host) {
-          var anchor = document.getElementById('investigation-intro');
-          if (!anchor || !anchor.parentNode) return;
-          host = document.createElement('details');
-          host.id = 'inv-validation-panel';
-          host.className = 'vp-panel';
-          anchor.parentNode.insertBefore(host, anchor.nextSibling);
+        var m = mount();
+        if (!m) return;
+        if (!d || !d.types || !d.records) {
+          m.innerHTML = '<div class="muted" style="padding:6px 2px">No validation records for this investigation yet.</div>';
+          return;
         }
-        host.innerHTML = '<summary>Validation (RFC-0007)</summary>' + _vpRender(d);
-      }).catch(function () { /* optional surface */ });
+        m.innerHTML = _vpRender(d);
+      }).catch(function () { /* leave the loading note in place */ });
   }
   window._vivLoadValidationPanel = _vivLoadValidationPanel;
   window._vivPaintEvidence = _vivPaintEvidence;
@@ -10824,21 +10820,33 @@
     // snapshot — leaving the ↓ figures button greyed even when figures.zip is
     // baked. DataSource is always present in a published bundle.
     var _mi = 'class="btn-mini" role="menuitem" style="display:block;width:100%;text-align:left;border:none;background:transparent"';
+    // Section header inside the menu (groups the Open / Download choices per artifact).
+    var _sec = function (t) {
+      return '<div style="padding:6px 8px 2px;font-size:0.72em;font-weight:700;text-transform:uppercase;' +
+        'letter-spacing:0.04em;color:#94a3b8">' + t + '</div>';
+    };
+    // Figures: Open (gallery) + Download (zip). Starts disabled; upgraded async
+    // below when the investigation actually has figures.
     var _figuresMenuItem =
       '<span id="ws-actions-figures">' +
         '<button class="btn-mini" role="menuitem" disabled ' +
           'title="No figures yet — run this investigation\'s studies to generate them" ' +
-          'style="display:block;width:100%;text-align:left;border:none;background:transparent;opacity:0.5;cursor:not-allowed">Figures (none yet)</button>' +
+          'style="display:block;width:100%;text-align:left;border:none;background:transparent;opacity:0.5;cursor:not-allowed">No figures yet</button>' +
       '</span>';
     var _exportDd =
       '<span class="inv-report-wrap" style="position:relative;display:inline-flex">' +
         '<button class="btn-mini" id="inv-report-btn" aria-haspopup="true" ' +
-          'aria-label="Export" title="Export — report, notebook, or figures" onclick="_toggleInvReportMenu(event)"><span aria-hidden="true">↓</span> Export ▾</button>' +
+          'aria-label="Shortcuts" title="Shortcuts — open in the browser or download (report, notebook, figures)" onclick="_toggleInvReportMenu(event)">Shortcuts ▾</button>' +
         '<div id="inv-report-menu" role="menu" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;' +
-          'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:170px;padding:4px">' +
-          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'html\')">HTML report</button>' +
-          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'pdf\')">PDF report</button>' +
-          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationNotebook()">Notebook</button>' +
+          'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:190px;padding:4px">' +
+          _sec('Report') +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();window._vivReportOpen(event)">Open in browser</button>' +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'html\')">Download HTML</button>' +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'pdf\')">Download PDF</button>' +
+          _sec('Notebook') +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();window._vivNotebookOpen(event)">Open in browser</button>' +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationNotebook()">Download .ipynb</button>' +
+          _sec('Figures') +
           _figuresMenuItem +
         '</div>' +
       '</span> ';
@@ -10857,12 +10865,14 @@
           var me = ((j && j.investigations) || []).filter(function (i) { return i.name === name; })[0];
           var host = document.getElementById('ws-actions-figures');
           if (me && me.n_figures && host) {
-            host.innerHTML = '<button class="btn-mini" role="menuitem" ' +
-              'style="display:block;width:100%;text-align:left;border:none;background:transparent" ' +
-              'onclick="_closeInvReportMenu();window._vivFiguresFromCard(event,\'' + _esc(name) + '\')" ' +
-              'title="Download all figures (studies figures + post-study composites) as a zip">Figures (zip)</button>';
+            var _row = 'class="btn-mini" role="menuitem" style="display:block;width:100%;text-align:left;border:none;background:transparent"';
+            host.innerHTML =
+              '<button ' + _row + ' onclick="_closeInvReportMenu();window._vivFiguresOpen(event,\'' + _esc(name) + '\')" ' +
+                'title="See all figures in a new browser tab">Open in browser</button>' +
+              '<button ' + _row + ' onclick="_closeInvReportMenu();window._vivFiguresFromCard(event,\'' + _esc(name) + '\')" ' +
+                'title="Download all figures (studies figures + post-study composites) as a zip">Download (zip)</button>';
           }
-          // else: leave the disabled/greyed ↓ figures in place.
+          // else: leave the disabled/greyed "No figures yet" in place.
         }).catch(function () {});
     }
   }
@@ -11202,7 +11212,7 @@
       mountEl.innerHTML = '<p class="empty-state">No investigations declared. Author one at <code>investigations/&lt;name&gt;/investigation.yaml</code>.</p>';
       return;
     }
-    var th = [['Name', 'left'], ['Status', 'left'], ['Studies', 'right'], ['Question', 'left'], ['Links', 'left']]
+    var th = [['Name', 'left'], ['Status', 'left'], ['Studies', 'right'], ['Question', 'left'], ['Shortcuts', 'left']]
       .map(function (c) {
         return '<th style="text-align:' + c[1] + ';position:sticky;top:0;background:#f8fafc;padding:7px 10px;' +
           'font-size:0.78em;text-transform:uppercase;letter-spacing:0.03em;color:#475569;' +
@@ -11236,15 +11246,7 @@
         '<td style="padding:7px 10px;text-align:right;color:' + (iset.n_studies ? '#1e293b' : '#cbd5e1') + '">' + (iset.n_studies || 0) + '</td>' +
         '<td style="padding:7px 10px;color:#64748b">' + (q ? _esc(q) : '<span style="color:#cbd5e1">—</span>') + '</td>' +
         '<td style="padding:7px 10px;white-space:nowrap;font-size:0.85em">' +
-          '<a href="#" title="Download the rendered HTML report for this investigation" ' +
-            'onclick="window._vivReportFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;margin-right:10px">↓ report</a>' +
-          '<a href="#" title="Download the runnable notebook for this investigation" ' +
-            'onclick="window._vivNotebookFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none">↓ notebook</a>' +
-          (iset.n_figures ? '<a href="#" title="Download all figures for this investigation (studies figures + post-study composites), as a zip" ' +
-            'onclick="window._vivFiguresFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;margin-left:10px">↓ figures</a>' : '') +
+          window._vivInvLinksHtml(iset) +
         '</td>' +
         '</tr>';
     }).join('');
@@ -11951,6 +11953,17 @@
         badge: _nDec ? (_nDec + ' needed') : 'all clear', attention: _nDec > 0 });
     }
 
+    // Validation (RFC-0007 content, label dropped) — filled async by
+    // _vivLoadValidationPanel into #inv-validation-mount once the panel loads.
+    tabs.push({ id: 'validation', label: 'Validation',
+      html: '<div id="inv-validation-mount" class="muted" style="padding:8px 2px;font-size:0.92em">Loading validation…</div>' });
+
+    // Needs attention — the deterministic needs-attention scan, moved here from a
+    // top-bar chip. Filled async by _renderInvNeedsAttention into #inv-attention-mount
+    // (which also sets this tab's badge).
+    tabs.push({ id: 'attention', label: 'Needs attention',
+      html: '<div id="inv-attention-mount" class="muted" style="padding:8px 2px;font-size:0.92em">Scanning…</div>' });
+
     // Overview is pushed first, so it is the default (active) tab via the i===0
     // rule below; every other tab (Verdict, Background, …) is reached by a click.
     if (tabs.length) {
@@ -12304,9 +12317,10 @@
   }
 
   function _aigCloseAllClearInfo() { var p = document.getElementById('aig-allclear-pop'); if (p) p.remove(); }
-  function _aigShowAllClearInfo(anchor) {
-    if (document.getElementById('aig-allclear-pop')) { _aigCloseAllClearInfo(); return; }   // toggle
-    var d = window._lastNeedsAttention || {};
+  // Shared body of the needs-attention scan (honest headline + per-check rows with
+  // drill-in). Rendered both into the Needs-attention tab and the legacy popover.
+  function _aigScanBodyHtml(d) {
+    d = d || {};
     var summary = d.summary || {};
     var checks = d.checks || [];
     var memberCount = (summary.member_count != null) ? summary.member_count : null;
@@ -12383,14 +12397,7 @@
     var _headline = clear
       ? _quiet.label
       : '⚠ ' + total + ' need' + (total === 1 ? 's' : '') + ' attention';
-    var pop = document.createElement('div');
-    pop.id = 'aig-allclear-pop';
-    pop.setAttribute('role', 'dialog');
-    pop.setAttribute('aria-label', 'Needs-attention scan');
-    pop.style.cssText = 'position:absolute;z-index:80;background:#fff;border:1px solid #e2e8f0;border-radius:8px;'
-      + 'box-shadow:0 8px 28px rgba(0,0,0,0.16);padding:10px 12px;min-width:320px;max-width:440px;text-align:left;'
-      + 'max-height:78vh;overflow:auto;font-size:0.85em;color:#334155;line-height:1.32';
-    pop.innerHTML =
+    return (
       '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:2px">'
         + '<span style="font-weight:700;color:' + _headColor + '">'
           + _headline + '</span>'
@@ -12400,7 +12407,21 @@
       + '<div style="margin-top:9px;padding-top:7px;border-top:1px solid #f1f5f9">'
         + '<a href="#" onclick="window._aigOpenDecisionsTab&&window._aigOpenDecisionsTab();return false;" '
         + 'style="color:#2563eb;text-decoration:none;font-size:0.92em">What are these checks? Open the Decisions tab →</a>'
-      + '</div>';
+      + '</div>'
+    );
+  }
+
+  // Legacy floating popover around the shared scan body (kept for back-compat).
+  function _aigShowAllClearInfo(anchor) {
+    if (document.getElementById('aig-allclear-pop')) { _aigCloseAllClearInfo(); return; }   // toggle
+    var pop = document.createElement('div');
+    pop.id = 'aig-allclear-pop';
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', 'Needs-attention scan');
+    pop.style.cssText = 'position:absolute;z-index:80;background:#fff;border:1px solid #e2e8f0;border-radius:8px;'
+      + 'box-shadow:0 8px 28px rgba(0,0,0,0.16);padding:10px 12px;min-width:320px;max-width:440px;text-align:left;'
+      + 'max-height:78vh;overflow:auto;font-size:0.85em;color:#334155;line-height:1.32';
+    pop.innerHTML = _aigScanBodyHtml(window._lastNeedsAttention || {});
     document.body.appendChild(pop);
     var r = anchor.getBoundingClientRect();
     var top = Math.round(r.bottom + (window.scrollY || window.pageYOffset || 0) + 6);
@@ -12431,44 +12452,46 @@
     _aigCloseAllClearInfo();
   }, true);
 
+  // Needs-attention is now a TAB in the investigation-detail strip (not a top-bar
+  // chip). This fills the tab's panel (#inv-attention-mount) with the full scan and
+  // reflects the flagged count on the tab button's badge.
   function _renderInvNeedsAttention(name) {
-    var container = document.getElementById('investigation-needs-attention');
-    var chip = document.getElementById('aig-needs-attention-chip');
-    if (!container && !chip) return;
-    if (container) container.innerHTML = '';
-    if (chip) chip.innerHTML = '';
-    var _fetch = fetch('/api/needs-attention?investigation=' + encodeURIComponent(name),
-                       {headers: {Accept: 'application/json'}})
-      .then(function(r) { return r.ok ? r.json() : null; });
-    _fetch.then(function(d) {
-      if (!d || !d.summary) return;
-      window._lastNeedsAttention = d;   // the all-clear popover reads this
-      var lbl = '<span class="muted" style="font-size:0.85em">code-computed by the needs-attention scan (deterministic)</span>';
-      var total = (d.summary.total) || 0;
-      if (!total) {
-        // Nothing flagged — but only call it a green "✓ All clear" when a study
-        // has actually run; an empty / never-run investigation gets a neutral
-        // "No studies yet" / "No runs yet" chip instead (issue #1618, bug 3).
+    var mount = document.getElementById('inv-attention-mount');
+    var tab = document.querySelector('.inv-brief-tab[onclick*="attention"]');
+    if (!mount && !tab) return;
+    fetch('/api/needs-attention?investigation=' + encodeURIComponent(name),
+          {headers: {Accept: 'application/json'}})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.summary) return;
+        if (window._currentIset && window._currentIset !== name) return;  // stale
+        window._lastNeedsAttention = d;   // the popover/tab read this
+        var total = (d.summary.total) || 0;
+        // Honest quiet/clear state (issue #1618, bug 3): "✓ All clear" only when
+        // something was actually evaluated — otherwise "No studies yet" / "No runs
+        // yet", a neutral state, not a validated pass. Drives the tab's tooltip.
         var _q = _naQuietState(d.summary);
-        if (chip) chip.innerHTML =
-          '<button type="button" class="aig-na-chip ' + _q.cls + '" onclick="window._aigShowAllClearInfo(this)" '
-          + 'title="Click to see what the needs-attention scan checked">' + _q.label + '</button>';
-        return;
-      }
-      var bySev = d.summary.by_severity || {};
-      var high = bySev.high || 0;
-      // Compact clickable chip in the toolbar — the SOLE needs-attention surface.
-      // Clicking it opens the rich scan popover (per-check counts + drill-in per
-      // flagged item); there is no longer a duplicate in-body banner.
-      if (chip) chip.innerHTML =
-        '<button type="button" class="aig-na-chip aig-na-flag' + (high ? ' aig-na-high' : '') + '" '
-        + 'onclick="window._aigShowAllClearInfo(this)" '
-        + 'title="' + high + ' high · ' + total + ' total — click for details">⚠ ' + total
-        + ' need' + (total === 1 ? 's' : '') + ' attention</button>';
-      // The flagged items + per-check breakdown render inside the chip's popover
-      // (window._aigShowAllClearInfo, which reads window._lastNeedsAttention set
-      // above). No in-body banner is drawn — the chip is the single surface.
-    }).catch(function() { /* tolerant — leave the chip empty */ });
+        var m = document.getElementById('inv-attention-mount');
+        if (m) m.innerHTML = _aigScanBodyHtml(d);
+        // Reflect the flagged count on the tab button (amber badge when > 0),
+        // and never let a quiet/never-run investigation read as a validated pass.
+        var tb = document.querySelector('.inv-brief-tab[onclick*="attention"]');
+        if (tb) {
+          var old = tb.querySelector('.inv-brief-tab-badge');
+          if (old) old.remove();
+          if (total > 0) {
+            tb.classList.add('inv-brief-tab-attn');
+            tb.title = total + ' item' + (total === 1 ? '' : 's') + ' need attention';
+            var b = document.createElement('span');
+            b.className = 'inv-brief-tab-badge attn';
+            b.textContent = total;
+            tb.appendChild(b);
+          } else {
+            tb.classList.remove('inv-brief-tab-attn');
+            tb.title = _q.label;   // "No studies yet" / "No runs yet" / "✓ All clear"
+          }
+        }
+      }).catch(function () { /* tolerant — leave the scanning note */ });
   }
   window._renderInvNeedsAttention = _renderInvNeedsAttention;
 
@@ -12952,11 +12975,13 @@
     view.classList.toggle('inv-overview-collapsed', collapsed);
     var btn = document.getElementById('inv-overview-toggle');
     if (btn) {
-      // Keep the "Investigation" text label beside the caret (iTerm-style labeled
-      // control); only the caret direction reflects collapsed/expanded.
-      btn.innerHTML = '<span class="inv-ov-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span> Investigation';
-      btn.setAttribute('title', collapsed ? 'Show investigation' : 'Hide investigation');
+      // "Details" toggle: the caret shows collapsed/expanded; when expanded the
+      // button takes a pressed/active look so it clearly reads as "showing the
+      // investigation details" rather than a dropdown menu.
+      btn.innerHTML = '<span class="inv-ov-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span> Details';
+      btn.setAttribute('title', collapsed ? 'Show the investigation details' : 'Hide the investigation details');
       btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      btn.classList.toggle('inv-toggle-on', !collapsed);
     }
   }
   function _toggleInvOverview() {
@@ -14279,7 +14304,8 @@
     var shown = _aigGraphShown();
     btn.innerHTML = '<span class="inv-graph-caret" aria-hidden="true">' + (shown ? '▾' : '▸') + '</span> Graph';
     btn.setAttribute('aria-expanded', shown ? 'true' : 'false');
-    btn.setAttribute('title', shown ? 'Hide investigation graph' : 'Show investigation graph');
+    btn.setAttribute('title', shown ? 'Hide the investigation graph' : 'Show the investigation graph');
+    btn.classList.toggle('inv-toggle-on', shown);
   }
   window._aigCollapseInline = _aigCollapseInline;
   window._aigExpandInline = _aigExpandInline;
@@ -15191,6 +15217,139 @@
     var a = document.createElement('a');
     a.href = url; a.download = name + '-figures.zip';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
+
+  // ── "Open in the browser" link variants (vs. the ↓ download handlers above) ──
+  // Report: open the self-contained HTML report inline in a new tab. Live route
+  // serves it inline by default (no ?download); snapshot is a plain .html file.
+  window._vivReportOpen = function (ev, name) {
+    if (ev) ev.stopPropagation();
+    name = name || window._wsInvestigation || window._currentIset;
+    if (!name) return;
+    window.open(_investigationReportUrl(name), '_blank', 'noopener');
+  };
+  // Report download, HTML or PDF (wraps the existing exporter).
+  window._vivReportDownload = function (ev, name, fmt) {
+    if (ev) ev.stopPropagation();
+    _downloadInvestigationReport(name, fmt);
+  };
+  // Notebook: open inline so the browser shows it (live serves ?download=0 inline;
+  // snapshot opens the static .ipynb).
+  window._vivNotebookOpen = function (ev, name) {
+    if (ev) ev.stopPropagation();
+    name = name || window._wsInvestigation || window._currentIset;
+    if (!name) return;
+    var c = window.__DASH_CONFIG__ || {};
+    var base = c.basePath || '';
+    var url = (c.mode === 'snapshot')
+      ? base + '/investigation-notebooks/' + encodeURIComponent(name) + '.ipynb'
+      : '/api/investigation-notebook/' + encodeURIComponent(name) + '?download=0';
+    window.open(url, '_blank', 'noopener');
+  };
+  // Figures: open a standalone figure gallery (every figure inline) in a new tab.
+  // Live: the server renders /figures.html; snapshot has no standalone gallery, so
+  // fall back to the report (which inlines the figures).
+  window._vivFiguresOpen = function (ev, name) {
+    if (ev) ev.stopPropagation();
+    name = name || window._wsInvestigation || window._currentIset;
+    if (!name) return;
+    var c = window.__DASH_CONFIG__ || {};
+    var base = c.basePath || '';
+    var url = (c.mode === 'snapshot')
+      ? base + '/reports/investigation-' + encodeURIComponent(name) + '.html'
+      : '/api/investigation/' + encodeURIComponent(name) + '/figures.html';
+    window.open(url, '_blank', 'noopener');
+  };
+
+  // Shared LINKS cell for an investigation (used by both the List table and the
+  // Cards view) — each artifact offers open-in-browser AND download, so nothing
+  // is forced to auto-download. report: open HTML | download HTML | download PDF;
+  // notebook: open | download .ipynb; figures (when present): open gallery | zip.
+  // Close every open row-level Shortcuts menu (list table + card view).
+  window._closeRowShortcuts = function () {
+    var ms = document.querySelectorAll('.inv-row-shortcuts-menu');
+    for (var i = 0; i < ms.length; i++) {
+      ms[i].style.display = 'none';
+      // Restore the markup defaults so a reopened menu starts from a clean
+      // absolute/right-aligned anchor (the open path lifts it to fixed).
+      ms[i].style.position = 'absolute';
+      ms[i].style.left = 'auto';
+      ms[i].style.right = '0';
+      ms[i].style.top = '100%';
+      ms[i].style.marginTop = '4px';
+      var b = ms[i].previousElementSibling;
+      if (b && b.setAttribute) b.setAttribute('aria-expanded', 'false');
+    }
+  };
+  // Toggle a single row's Shortcuts dropdown (btn's next sibling is its menu).
+  // Mirrors the investigation-detail _toggleInvReportMenu: stopPropagation keeps
+  // the row/card's own onclick from firing, and the outside-click closer is
+  // registered on a 0ms timeout so THIS click doesn't immediately close it.
+  window._toggleRowShortcuts = function (ev, btn) {
+    if (ev) ev.stopPropagation();
+    var menu = btn.nextElementSibling;
+    if (!menu) return;
+    var isOpen = menu.style.display !== 'none' && menu.style.display !== '';
+    window._closeRowShortcuts();          // close any other open menu first
+    btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+    if (!isOpen) {
+      // Lift the menu to position:fixed so it escapes the list table's
+      // overflow-x:auto / overflow:hidden clipping (last-row menus were cut
+      // off at the panel bottom). Anchor it to the button's viewport rect,
+      // right-aligned, and flip it above the button when it would spill past
+      // the bottom edge.
+      menu.style.display = 'block';
+      menu.style.position = 'fixed';
+      menu.style.right = 'auto';
+      menu.style.marginTop = '0';
+      var r = btn.getBoundingClientRect();
+      var left = r.right - menu.offsetWidth;
+      if (left < 8) left = 8;
+      var top = r.bottom + 4;
+      if (top + menu.offsetHeight > window.innerHeight - 8) {
+        top = r.top - menu.offsetHeight - 4;   // open upward
+      }
+      if (top < 8) top = 8;
+      menu.style.left = left + 'px';
+      menu.style.top = top + 'px';
+      setTimeout(function () {
+        document.addEventListener('click', window._closeRowShortcuts, { once: true, capture: true });
+      }, 0);
+    }
+  };
+  // LINKS cell for an investigation (used by both the List table and the cards):
+  // a single "Shortcuts ▾" button that opens the SAME grouped menu as the
+  // investigation-detail ↓ Shortcuts (Report / Notebook / Figures, each with
+  // open-in-browser + download), instead of a row of inline text links.
+  window._vivInvLinksHtml = function (iset) {
+    var nm = _esc(iset.name);
+    var _mi = 'class="btn-mini" role="menuitem" style="display:block;width:100%;text-align:left;border:none;background:transparent"';
+    var _sec = function (t) {
+      return '<div style="padding:6px 8px 2px;font-size:0.72em;font-weight:700;text-transform:uppercase;' +
+        'letter-spacing:0.04em;color:#94a3b8">' + t + '</div>';
+    };
+    var items =
+      _sec('Report') +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivReportOpen(event,\'' + nm + '\')">Open in browser</button>' +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivReportDownload(event,\'' + nm + '\',\'html\')">Download HTML</button>' +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivReportDownload(event,\'' + nm + '\',\'pdf\')">Download PDF</button>' +
+      _sec('Notebook') +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivNotebookOpen(event,\'' + nm + '\')">Open in browser</button>' +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivNotebookFromCard(event,\'' + nm + '\')">Download .ipynb</button>';
+    if (iset.n_figures) {
+      items +=
+        _sec('Figures') +
+          '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivFiguresOpen(event,\'' + nm + '\')">Open in browser</button>' +
+          '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivFiguresFromCard(event,\'' + nm + '\')">Download (zip)</button>';
+    }
+    return '<span class="inv-row-shortcuts" style="position:relative;display:inline-flex">' +
+      '<button type="button" class="btn-mini" aria-haspopup="true" aria-expanded="false" ' +
+        'title="Shortcuts — open in the browser or download (report, notebook, figures)" ' +
+        'onclick="window._toggleRowShortcuts(event, this)">Shortcuts ▾</button>' +
+      '<div class="inv-row-shortcuts-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;' +
+        'margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);' +
+        'z-index:70;min-width:190px;padding:4px">' + items + '</div>' +
+    '</span>';
   };
   // A single study's OUTPUTS (its image figures + any embedded HTML report /
   // dashboard and its viz assets) as a zip.

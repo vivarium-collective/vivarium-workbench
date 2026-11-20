@@ -709,3 +709,13 @@ def test_study_keep_carries_conclusion_verdicts():
     kept = {k: spec.get(k) for k in _STUDY_KEEP if spec.get(k) is not None}
     assert kept.get("conclusion_verdicts") == {"biological_validation": "pass"}
     assert "junk_field" not in kept  # whitelist stays bounded
+
+
+def test_report_has_top_download_html_button(tmp_path):
+    """A download-HTML control sits in the report topbar, so the open-in-browser
+    report can be saved without returning to the Export menu. Must stay
+    self-contained (DOM-serialized, no network)."""
+    ws = _ws(tmp_path)
+    html = render_html(build_report_data(ws, "src"))
+    assert 'id="dl-html-btn"' in html and "__dlPageHtml" in html
+    assert "fetch(" not in html          # still self-contained — no network
