@@ -100,13 +100,15 @@ def test_every_module_that_can_push_is_accounted_for():
     import re
     pat = re.compile(r"""["']push["']\s*[,\]]|remote_push_and_sha|remote_commit_and_push|\bgit\b[^\n]*\bpush\b""")
     # prose mentions only; compose_entry.py runs read-only git and has no route, its messages just tell a person to push
-    skip = {"models.py", "generate_ts.py", "ai_chat.py", "ai_tools.py", "compose_entry.py"}
+    # the SMS plugin's routes.py (step P2 Runs a2) likewise: a route docstring says "No git push"; the pushes are its
+    # views' (remote_pipeline_views.py, listed below) and EXCLUDED_PATHS covers their routes by path
+    skip = {"models.py", "generate_ts.py", "ai_chat.py", "ai_tools.py", "compose_entry.py", "routes.py"}
     # step P1b (deliberate change): the SMS plugin's modules moved out of lib/; scan them too, or this tripwire
     # would pass without looking at them.
     scanned = [*(REPO / "vivarium_workbench" / "lib").glob("*.py"), *(REPO / "vivarium_workbench_sms").glob("*.py")]
     found = {f.name for f in scanned if f.name not in skip and pat.search(f.read_text())}
     expected = {"git_status.py", "git_commit_views.py", "work_mutations.py", "work_pr_views.py",
-                "remote_run_views.py", "remote_run_jobs.py", "github_auth.py", "study_spec.py",
+                "remote_pipeline_views.py", "remote_run_jobs.py", "github_auth.py", "study_spec.py",
                 "work_state.py", "remote_link.py", "remote_run.py", "remote_pinned.py",
                 "remote_build_source.py", "source_build_views.py", "iset_close_views.py",
                 "env_worker_provision.py", "composite_test_run_views.py", "run_runner.py"}

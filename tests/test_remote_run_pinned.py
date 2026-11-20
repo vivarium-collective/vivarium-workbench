@@ -1,5 +1,5 @@
-"""Tests for pinned-build remote runs (lib.remote_pinned + the pinned paths in
-lib.remote_run_views).
+"""Tests for pinned-build remote runs (remote_pinned + the pinned paths in
+lib.remote_run_views and the plugin's remote_pipeline_views).
 
 Pinned mode lets the demo submit sims against the latest **built** simulator for
 a configured repo@branch with NO git push, NO login, NO local-repo access. These
@@ -11,7 +11,9 @@ from __future__ import annotations
 import pytest
 
 from vivarium_workbench_sms import remote_pinned as rp
+from vivarium_workbench.lib import github_auth
 from vivarium_workbench.lib import remote_run_views as rrv
+from vivarium_workbench_sms import remote_pipeline_views as pv
 from vivarium_workbench_sms import sms_legacy
 
 
@@ -138,7 +140,7 @@ def test_resolve_pinned_build_raises_when_no_match():
 
 def test_pinned_build_start_409_when_disabled(monkeypatch, tmp_path):
     monkeypatch.setattr(rrv.remote_pinned, "pinned_config", lambda: None)
-    body, status = rrv.remote_run_pinned_build_start(tmp_path, {"study": "s"})
+    body, status = pv.remote_run_pinned_build_start(tmp_path, {"study": "s"})
     assert status == 409
     assert "not enabled" in body["error"]
 
@@ -153,7 +155,7 @@ def test_pinned_build_start_returns_built_phase(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: _FakeClient())
     monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
-    body, status = rrv.remote_run_pinned_build_start(tmp_path, {"study": "s"})
+    body, status = pv.remote_run_pinned_build_start(tmp_path, {"study": "s"})
     assert status == 202
     assert body["phase"] == "built"
     assert body["simulator_id"] == 69
@@ -168,7 +170,7 @@ def test_pinned_build_start_returns_built_phase(monkeypatch, tmp_path):
 def test_submit_gate_allows_pinned_without_session(monkeypatch, tmp_path):
     # No GitHub session, but pinned mode on → gate passes (fails later on the
     # missing study, NOT on 401).
-    monkeypatch.setattr(rrv.github_auth, "current_session", lambda: None)
+    monkeypatch.setattr(github_auth, "current_session", lambda: None)
     monkeypatch.setattr(rrv.remote_pinned, "is_pinned_enabled", lambda: True)
     _body, status = rrv.remote_run_submit(tmp_path, {"study": "", "simulator_id": 69})
     assert status != 401
@@ -176,7 +178,7 @@ def test_submit_gate_allows_pinned_without_session(monkeypatch, tmp_path):
 
 
 def test_submit_gate_401_when_no_session_and_not_pinned(monkeypatch, tmp_path):
-    monkeypatch.setattr(rrv.github_auth, "current_session", lambda: None)
+    monkeypatch.setattr(github_auth, "current_session", lambda: None)
     monkeypatch.setattr(rrv.remote_pinned, "is_pinned_enabled", lambda: False)
     _body, status = rrv.remote_run_submit(tmp_path, {"study": "s", "simulator_id": 69})
     assert status == 401
@@ -276,7 +278,7 @@ def test_pinned_build_start_prefers_session_build_over_static_pin(
         ),
     )
     _stamp_build_meta(tmp_path)
-    body, status = rrv.remote_run_pinned_build_start(tmp_path, {"study": "s"})
+    body, status = pv.remote_run_pinned_build_start(tmp_path, {"study": "s"})
     assert status == 202
     assert body["simulator_id"] == 54
     assert body["commit"] == "d02c6a7"
@@ -310,7 +312,7 @@ def test_pinned_build_start_falls_back_to_static_pin_when_unswitched(
     )
     monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: _FakeClient())
     monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
-    body, status = rrv.remote_run_pinned_build_start(tmp_path, {"study": "s"})
+    body, status = pv.remote_run_pinned_build_start(tmp_path, {"study": "s"})
     assert status == 202
     assert body["simulator_id"] == 69
 

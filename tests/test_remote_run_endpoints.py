@@ -19,12 +19,12 @@ def test_normalize_repo_url_strips_git_suffix():
 
 
 def test_remote_run_start_requires_login(monkeypatch, tmp_path):
-    from vivarium_workbench.lib import remote_run_views
     from vivarium_workbench.lib import github_auth
+    from vivarium_workbench_sms import remote_pipeline_views
 
     monkeypatch.setattr(github_auth, "current_session", lambda: None)
 
-    body, code = remote_run_views.remote_run_start(tmp_path, {"study": "s"})
+    body, code = remote_pipeline_views.remote_run_start(tmp_path, {"study": "s"})
     assert code == 401
 
 
