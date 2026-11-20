@@ -318,7 +318,7 @@ vivarium_workbench_sms/   # the plugin, from P1b (module names kept from lib/, s
     - from the half-SMS core modules, until P2 splits them;
     - the registry's one provider import, until P4.
   - That list **is the ratchet**. Each later PR removes entries, and none may add one. An unmatched entry fails the check, so stale entries can't linger.
-  - **As landed in P1b:** 38 edges, generated with grimp after the move (`pyproject.toml`, the contract named "the core does not import the SMS plugin"). The route ratchet's `ALLOWED` list holds the core's 13 remaining (module, method) pairs. **After P2 Runs (a1, a2, b, c1, c2):** 18 edges and 5 pairs.
+  - **As landed in P1b:** 38 edges, generated with grimp after the move (`pyproject.toml`, the contract named "the core does not import the SMS plugin"). The route ratchet's `ALLOWED` list holds the core's 13 remaining (module, method) pairs. **After P2 Runs (a1, a2, b, c1, c2):** 18 edges and 5 pairs. **After Builds B1:** 16 edges.
 - **The route-literal ratchet** (`tests/test_sms_route_ratchet.py`).
   - Its `ALLOWED` list becomes "SMS client methods and `/api/v1` / `/core/v1` literals outside the plugin". After P1b that is exactly the mixed core modules.
   - The list shrinks with P2 and is empty when P2 ends.
