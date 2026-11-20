@@ -36,7 +36,7 @@
   // Prefix a root-absolute app path (e.g. "/api/composite-test-run") with the
   // configured base path in BOTH live and snapshot mode. Under the co-tenant ALB
   // the workbench is served at /workbench, so an un-prefixed "/api/…" misroutes to
-  // sms-api → 404. Composite-explore run/resolve calls route through this so they
+  // the backend → 404. Composite-explore run/resolve calls route through this so they
   // reach the workbench. Composes safely with the global _base_path_shim (which
   // skips a URL already starting with the base path), so no double-prefix.
   function apiUrl(path) {
@@ -219,7 +219,7 @@
     if (cfg().mode === "snapshot") return _base() + "/api/simulations.json";
     var qs = [];
     // Local-first load: fetch the fast local index first (include_remote=false),
-    // then a second call merges in the slow remote (GovCloud) runs.
+    // then a second call merges in the slow remote runs.
     if (opts && opts.includeRemote === false) qs.push("include_remote=false");
     if (opts && opts.refresh) qs.push("refresh=true");
     return "/api/simulations" + (qs.length ? "?" + qs.join("&") : "");

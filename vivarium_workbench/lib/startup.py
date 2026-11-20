@@ -149,19 +149,19 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
             from vivarium_workbench.lib.workspace_deps_views import remote_health
             _h = remote_health()
             if _h["reachable"]:
-                print(f"remote sms-api: {_h['base_url']} — reachable ✓ (v{_h['version']})")
+                print(f"remote backend: {_h['base_url']} — reachable ✓ (v{_h['version']})")
             else:
                 print(
-                    f"remote sms-api: {_h['base_url']} — UNREACHABLE ✗ "
-                    f'("switch to remote" unavailable until the endpoint/tunnel is up)',
+                    f"remote backend: {_h['base_url']} — UNREACHABLE ✗ "
+                    f'("switch to remote" unavailable until the endpoint is up)',
                     file=sys.stderr,
                 )
         except Exception as e:  # noqa: BLE001
-            print(f"warning: remote sms-api health check failed: {e}", file=sys.stderr)
+            print(f"warning: remote backend health check failed: {e}", file=sys.stderr)
 
         # Start the RemoteLink circuit-breaker probe so a wedged tunnel is
-        # detected in the background (~3s probe every 30s) and every sms-api call
-        # site fails fast instead of burning its 91.5s timeout budget. Opt-in:
+        # detected in the background (~3s probe every 30s) and every remote-backend
+        # call site fails fast instead of burning its 91.5s timeout budget. Opt-in:
         # only when the remote endpoint is configured (this branch), so tests and
         # the CLI never spawn the thread. Best-effort; never blocks/raises.
         # The breaker and its target are core config (step P2): the configured URL, the one it always probed.
