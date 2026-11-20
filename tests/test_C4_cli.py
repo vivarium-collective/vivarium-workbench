@@ -112,7 +112,7 @@ def test_git_pip_url_returns_git_url_for_clean_pushed_repo(tmp_path):
 
 def test_run_remote_calls_compose_submit(tmp_path):
     """run_remote calls compose_submit with the .pbg content."""
-    from vivarium_workbench.lib.remote_run import run_remote
+    from vivarium_workbench_sms.deployment_run import run
 
     # Set up a clean repo with a workspace
     repo = _make_clean_git_repo(tmp_path)
@@ -131,9 +131,9 @@ def test_run_remote_calls_compose_submit(tmp_path):
         Path(out_path).write_text('{"state": {}, "schema": {}}')
         return Path(out_path)
 
-    with patch("vivarium_workbench.lib.remote_run.export_composite_pbg", side_effect=fake_export), \
+    with patch("vivarium_workbench_sms.deployment_run.export_composite_pbg", side_effect=fake_export), \
          patch("vivarium_workbench.lib.remote_run.git_pip_url", return_value="git+file:///r@abc123"):
-        result = run_remote(repo, "test-composite", client=mock_client, skip_preflight=True)
+        result = run(repo, "test-composite", client=mock_client, skip_preflight=True)
 
     mock_client.compose_submit.assert_called_once()
     call_kwargs = mock_client.compose_submit.call_args
@@ -144,7 +144,7 @@ def test_run_remote_calls_compose_submit(tmp_path):
 
 def test_run_remote_passes_git_url_as_extra_dep(tmp_path):
     """run_remote passes the workspace git URL as extra_pip_deps to compose_submit."""
-    from vivarium_workbench.lib.remote_run import run_remote
+    from vivarium_workbench_sms.deployment_run import run
 
     repo = _make_clean_git_repo(tmp_path)
     mock_client = MagicMock()
@@ -160,9 +160,9 @@ def test_run_remote_passes_git_url_as_extra_dep(tmp_path):
         Path(out_path).write_text('{"state": {}, "schema": {}}')
         return Path(out_path)
 
-    with patch("vivarium_workbench.lib.remote_run.export_composite_pbg", side_effect=fake_export), \
+    with patch("vivarium_workbench_sms.deployment_run.export_composite_pbg", side_effect=fake_export), \
          patch("vivarium_workbench.lib.remote_run.git_pip_url", return_value=git_url):
-        run_remote(repo, "test-composite", client=mock_client, skip_preflight=True)
+        run(repo, "test-composite", client=mock_client, skip_preflight=True)
 
     call_kwargs = mock_client.compose_submit.call_args
     # extra_pip_deps should contain the git url
@@ -175,7 +175,7 @@ def test_run_remote_passes_git_url_as_extra_dep(tmp_path):
 
 def test_run_remote_returns_results_path(tmp_path):
     """run_remote returns the path to the downloaded results.zip."""
-    from vivarium_workbench.lib.remote_run import run_remote
+    from vivarium_workbench_sms.deployment_run import run
 
     repo = _make_clean_git_repo(tmp_path)
     mock_client = MagicMock()
@@ -189,9 +189,9 @@ def test_run_remote_returns_results_path(tmp_path):
         Path(out_path).write_text('{"state": {}, "schema": {}}')
         return Path(out_path)
 
-    with patch("vivarium_workbench.lib.remote_run.export_composite_pbg", side_effect=fake_export), \
+    with patch("vivarium_workbench_sms.deployment_run.export_composite_pbg", side_effect=fake_export), \
          patch("vivarium_workbench.lib.remote_run.git_pip_url", return_value="git+file:///r@sha"):
-        result = run_remote(repo, "test-composite", client=mock_client, skip_preflight=True)
+        result = run(repo, "test-composite", client=mock_client, skip_preflight=True)
 
     assert result == expected_path
 
@@ -266,7 +266,8 @@ class _Recorder:
 
 @pytest.fixture
 def _handler(monkeypatch, tmp_path):
-    """The real handler with ``run_remote`` stubbed and the client's base URL recorded."""
+    """The real handler with the plugin's ``deployment_run.run`` stubbed, its calls and the client's base URL
+    recorded."""
     from vivarium_workbench_sms import sms_api_client as sac
 
     for var in sac.BACKEND_BASE_ENV_VARS:
@@ -281,7 +282,15 @@ def _handler(monkeypatch, tmp_path):
 
     monkeypatch.setattr(sac.SmsApiClient, "__init__", init)
     rec.outcome = lambda *a, **k: tmp_path / "results.zip"
-    monkeypatch.setattr("vivarium_workbench.lib.remote_run.run_remote", lambda *a, **k: rec.outcome(*a, **k))
+    rec.calls = []
+
+    def fake_run(*a, **k):
+        rec.calls.append((a, k))
+        return rec.outcome(*a, **k)
+
+    # The handler reads deployment_run.run through the module at call time (Runs b); the core's remote_run.run_remote
+    # is a dispatcher that takes no client, so a patch there would steer nothing.
+    monkeypatch.setattr("vivarium_workbench_sms.deployment_run.run", fake_run)
     (tmp_path / "workspace.yaml").write_text("name: x\n")
     rec.ws = tmp_path
     return rec
@@ -297,6 +306,13 @@ def test_run_remote_handler_url_precedence(_handler, monkeypatch, capsys):
     monkeypatch.delenv("SMS_API_BASE")
     assert cli.main(["run-remote", "--workspace", str(_handler.ws), "c"]) == 0
     assert _handler.base_urls == ["http://flag:1", "http://flag:1", "http://env:2", "http://localhost:8080"]
+    # The fake was called, once per command, with the handler's own client (not a dispatcher that picks one).
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient
+
+    assert len(_handler.calls) == 4
+    assert [k["client"].base_url for _a, k in _handler.calls] == _handler.base_urls
+    assert all(isinstance(k["client"], SmsApiClient) for _a, k in _handler.calls)
+    assert _handler.calls[0][0] == (_handler.ws.resolve(), "c")
     assert "Done. Results:" in capsys.readouterr().out
 
 

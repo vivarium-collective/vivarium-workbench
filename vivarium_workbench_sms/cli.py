@@ -45,7 +45,7 @@ def cmd_run_remote(args: argparse.Namespace) -> int:
     composite to a .pbg document, submits it to sms-api, polls until
     completion, and lands results.zip in the workspace.
     """
-    from vivarium_workbench.lib.remote_run import run_remote
+    from vivarium_workbench_sms import deployment_run
     from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError, sms_api_base
 
     workspace = Path(args.workspace).resolve()
@@ -59,7 +59,7 @@ def cmd_run_remote(args: argparse.Namespace) -> int:
     dest = Path(args.dest) if getattr(args, "dest", None) else None
 
     try:
-        results = run_remote(
+        results = deployment_run.run(
             workspace,
             args.composite,
             client=client,

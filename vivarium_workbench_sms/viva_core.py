@@ -39,6 +39,17 @@ class VivaCoreRuns:
         # remote_trace.fetch_trace still serves viva-core traces itself; it moves here in step 4.
         raise NotImplementedError("viva-core traces are served by remote_trace.fetch_trace until step 4")
 
+    def run_composite(self, ws_root: Path, composite_id: str, *, dest: Path, n_steps: float,
+                      overrides: "dict | None", emit_paths: "list[str] | None",
+                      analysis_options: "dict | None", build_ref: "dict | None",
+                      poll_interval: float, poll_timeout: float) -> Path:
+        """A ``/viva/v1/composites`` document run of the composite (:func:`deployment_run.run`, step P2 Runs b)."""
+        from vivarium_workbench_sms import deployment_run  # lazy: loading the registry (env workers) skips it
+
+        return deployment_run.run(ws_root, composite_id, dest=dest, n_steps=n_steps, overrides=overrides,
+                                  poll_interval=poll_interval, poll_timeout=poll_timeout,
+                                  analysis_options=analysis_options, build_ref=build_ref, emit_paths=emit_paths, via_viva_v1=True)
+
 
 def viva_health_identity(base_url: str) -> "str | None":
     """The server identity a viva-core (viva-api) at ``base_url`` reports: ``deployment_id`` on ``GET /viva/v1/health``

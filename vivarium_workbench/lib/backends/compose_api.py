@@ -36,6 +36,21 @@ class ComposeApiRuns:
     def trace(self, run_id: str) -> "tuple[Union[bytes, dict], int, str]":
         return remote_run_compose.trace(run_id)
 
+    def run_composite(self, ws_root: Path, composite_id: str, *, dest: Path, n_steps: float,
+                      overrides: "dict | None", emit_paths: "list[str] | None",
+                      analysis_options: "dict | None", build_ref: "dict | None",
+                      poll_interval: float, poll_timeout: float) -> Path:
+        """The composite runs in the environment compose-api's registry lists for the workspace, recording
+        ``emit_paths`` (when given) under its own emitter; its results zip lands in ``dest``. ``build_ref`` names an
+        SMS build, which compose-api has no use for."""
+        if analysis_options:
+            # compose-api runs the document only; there is no server-side analysis step to hand these to.
+            print(f"note: compose-api does not run declared analyses; not run: {', '.join(sorted(analysis_options))}",
+                  flush=True)
+        return remote_run_compose.run_composite(
+            ws_root, composite_id, dest=Path(dest), n_steps=n_steps, overrides=overrides, emit_paths=emit_paths,
+            poll_interval=poll_interval, poll_timeout=poll_timeout)
+
 
 #: How long the identity request may wait for an answer: a probe's (``SmsApiClient.for_("probe")`` waits 3 s). The
 #: session bounds the connection itself at 5 s.

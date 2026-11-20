@@ -420,8 +420,9 @@ def test_a_matching_run_id_on_a_different_job_row_is_not_accepted(ws, stub, clea
 
 def test_run_remote_with_a_supplied_client_never_uses_the_run_surface(ws, stub, clean_backend_env, monkeypatch,
                                                                       tmp_path):
-    """CLI ``run-remote --sms-api-url`` and every test double pass a client: unchanged /compose/v1."""
+    """CLI ``run-remote --sms-api-url`` and every test double pass a client to the plugin's run: unchanged /compose/v1."""
     from vivarium_workbench.lib import remote_run
+    from vivarium_workbench_sms import deployment_run
     from vivarium_workbench_sms.sms_api_client import SmsApiClient
 
     _name_backend(monkeypatch, stub.url)
@@ -445,7 +446,7 @@ def test_run_remote_with_a_supplied_client_never_uses_the_run_surface(ws, stub, 
     monkeypatch.setattr(remote_run, "workspace_pinned_deps", lambda ws_root: [])
     monkeypatch.setattr("vivarium_workbench.lib.preflight.preflight_composite_run",
                         lambda *a, **k: type("R", (), {"summary": lambda self: "ok"})())
-    remote_run.run_remote(ws, COMPOSITE, client=Legacy("http://127.0.0.1:1"), dest=tmp_path / "o", poll_interval=0.01)
+    deployment_run.run(ws, COMPOSITE, client=Legacy("http://127.0.0.1:1"), dest=tmp_path / "o", poll_interval=0.01)
     assert used and stub.calls_to("viva-create-composite-run") == []
 
 

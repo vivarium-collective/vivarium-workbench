@@ -186,3 +186,45 @@ def test_refresh_submitted_answers_without_the_plugin():
     without SMS being asked; a compose-api item still settles."""
     proc = subprocess.run([sys.executable, "-c", _REFRESH_PROBE], capture_output=True, text=True, timeout=300)
     assert "@@RESULT@@submitted,done;plugin=False" in proc.stdout, proc.stdout[-2000:] + proc.stderr[-2000:]
+
+
+_RUN_PROBE = textwrap.dedent('''
+    import sys, tempfile
+    from pathlib import Path
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import remote_run, remote_run_compose
+    from vivarium_workbench.lib import server_capabilities as sc
+
+    ws = tempfile.mkdtemp()
+    sc.explicit_backend_profile = lambda: None          # nothing named
+    try:
+        remote_run.run_remote(ws, "c")
+        print("@@NONE@@returned")
+    except BaseException as e:  # noqa: BLE001
+        print("@@NONE@@" + type(e).__name__ + ": " + str(e))
+
+    sc.explicit_backend_profile = lambda: {"dispatch": sc.DISPATCH_COMPOSE}   # compose-api named
+    remote_run_compose.run_composite = lambda *a, **k: Path(k["dest"]) / "results.zip"
+    print("@@COMPOSE@@" + remote_run.run_remote(ws, "c").name)
+''')
+
+
+def test_a_deployment_run_works_or_refuses_cleanly_without_the_plugin(monkeypatch):
+    """Step P2 Runs b: the runner's dispatcher no longer imports the plugin before choosing a backend. With nothing
+    named it is a ``RuntimeError`` naming no backend (never ``ModuleNotFoundError``); a named compose-api runs."""
+    from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
+
+    for var in BACKEND_BASE_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+        monkeypatch.delenv(var.replace("VIVARIUM_WORKBENCH_", "VIVARIUM_DASHBOARD_"), raising=False)
+    proc = subprocess.run([sys.executable, "-c", _RUN_PROBE], capture_output=True, text=True, timeout=300)
+    assert "@@NONE@@RuntimeError: this run targets a deployment, but no remote backend is named" in proc.stdout, (
+        proc.stdout[-2000:], proc.stderr[-2000:])
+    assert "@@COMPOSE@@results.zip" in proc.stdout, (proc.stdout[-2000:], proc.stderr[-2000:])

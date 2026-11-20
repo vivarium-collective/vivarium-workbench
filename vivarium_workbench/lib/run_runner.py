@@ -1032,10 +1032,11 @@ def _remote_analysis_options(req: RunRequest, run_dir: Path) -> "dict | None":
 
 
 def _execute_remote(req: RunRequest, run_dir: Path) -> int:
-    """Dispatch a 'deployment'-target run to sms-api and land results. Returns 0/1.
+    """Dispatch a 'deployment'-target run to the selected backend and land results. Returns 0/1.
 
-    SP-D2: delegates to the already-built ``remote_run.run_remote`` (export .pbg →
-    ``/compose/v1`` submit → poll → download results.tar.gz), writing the SAME
+    SP-D2: delegates to ``remote_run.run_remote`` (the backend's ``runs.run_composite``; for SMS,
+    the plugin's ``deployment_run.run``: export .pbg → ``/compose/v1`` submit → poll → download
+    results.tar.gz), writing the SAME
     ``composite-runs.db`` status rows the local path does so the browser's existing
     ``/api/composite-run/<id>/status`` polling works unchanged. Unpacking the landed
     tar.gz into a viewable emitter store (viz/chart rendering) is still a

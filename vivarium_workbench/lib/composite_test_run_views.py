@@ -442,6 +442,11 @@ def composite_test_run(ws_root: Path, body: dict) -> tuple[dict, int]:
         # dispatch a run that can only fail in the run log.
         if not _compose_dispatch_allowed():
             return cloud
+        if chosen is None and backends.unrouted() is None:
+            # The detached runner would find no backend for this run (remote_run.run_remote): refuse it now, as the
+            # remote-run views do with providers off (step P2, Runs b).
+            return {"error": "no remote backend was named (serve --backend-base-url)", "reason": "no-backend",
+                    "run_target": "deployment"}, 409
         target = "deployment"
         build_ref = _explicit_build_ref(body)
         # Opt-in compose path: the workspace is installed FROM GIT on the
