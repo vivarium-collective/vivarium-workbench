@@ -721,7 +721,7 @@
   // "launched" alone is not useful feedback). Polling is a courtesy: giving up
   // never means the analysis failed, and the toast says so.
   var ANALYSIS_POLL_MS = 10000;
-  var ANALYSIS_POLL_MAX = 30;  // ~5 min ceiling, matching lib/remote_run_views.py
+  var ANALYSIS_POLL_MAX = 30;  // ~5 min ceiling, matching vivarium_workbench_sms/sms_legacy.py
 
   function _toast(msg) {
     if (typeof _showToast === "function") _showToast(msg); else alert(msg);

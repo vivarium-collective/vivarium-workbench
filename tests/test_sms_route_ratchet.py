@@ -60,7 +60,6 @@ NOT_SMS_RECEIVERS = frozenset({
 #: The core's remaining callers (step P1b: the plugin's own modules are no longer listed -- a move, not a removal
 #: of calls). Shrink this as step P2 lands; never grow it.
 ALLOWED: dict[str, frozenset[str]] = {
-    "lib.remote_run_views": frozenset({"run_analysis"}),
     "lib.remote_trace": frozenset({"compose_status", "simulation_trace"}),
     "lib.simulations_index": frozenset({"download_data"}),
 }
@@ -71,7 +70,7 @@ PINNED_UNION: frozenset[str] = frozenset({
     "analysis_status", "cancel_simulation", "compose_status",
     "download_data", "download_workspace", "get_simulation",
     "list_analyses", "list_branch_builds", "list_build_simulations", "list_simulators", "register_branch_head",
-    "run_analysis", "simulation_chain_progress", "simulation_status", "simulation_trace",
+    "simulation_chain_progress", "simulation_status", "simulation_trace",
     "simulator_commit", "simulator_status", "upload_simulator",
 })
 
@@ -195,8 +194,9 @@ def test_no_new_sms_method_calls():
 #: deployment run (remote_run.run_remote's SMS half) into the plugin; 6 after step P2 Runs c1 moved the SMS landing
 #: (``download_data``) into the plugin; 5 after step P2 Runs a2 moved the thin client's build phase
 #: (``upload_simulator``) into the plugin; 4 after step P2 Builds B2 moved the composite card's image dispatch
-#: (``run_simulation``) into the plugin. Only removals lower it.
-PINNED_PAIRS = 4
+#: (``run_simulation``) into the plugin; 3 after step P2 Analyses and figures moved the re-run
+#: (``run_analysis``) into the plugin's ``analyses`` facet. Only removals lower it.
+PINNED_PAIRS = 3
 
 
 def test_allowed_methods_never_grow():

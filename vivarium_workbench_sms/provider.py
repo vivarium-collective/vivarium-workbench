@@ -1,7 +1,8 @@
 """The SMS provider (docs/backend-adapters.md §2.2, step P1c): viva-api's two backends and its answers.
 
 * ``backends()``: ``viva-core`` (``/viva/v1`` document and composite runs) and ``sms-legacy`` (``/api/v1`` integer
-  simulations), one viva-api server -- they share ``viva_health_identity``;
+  simulations, with the ``artifacts`` / ``analyses`` facets of ``vivarium_workbench_sms/analyses.py``), one viva-api
+  server -- they share ``viva_health_identity``;
 * ``select()``: a run of the session's own build (``.viv-build.json``) or of a pinned deployment is SMS's;
 * ``session_build()``: the session's own build, read from its ``.viv-build.json`` stamp (``remote_pinned``);
 * ``recognise()``: the viva-core half of the capability probe (``server_capabilities.backend_profile``);
@@ -41,13 +42,14 @@ class SmsProvider:
         with self._lock:
             if self._backends is None:
                 from vivarium_workbench.lib.backends import Backend
+                from vivarium_workbench_sms.analyses import SmsAnalyses, SmsArtifacts
                 from vivarium_workbench_sms.sms_legacy import SmsLegacyRuns, SmsLegacyUnrouted
                 from vivarium_workbench_sms.viva_core import VivaCoreRuns, viva_health_identity
 
                 self._backends = (
                     Backend("viva-core", VivaCoreRuns(), identity=viva_health_identity),
                     Backend("sms-legacy", SmsLegacyRuns(), identity=viva_health_identity,  # the same viva-api
-                            unrouted=SmsLegacyUnrouted()),
+                            unrouted=SmsLegacyUnrouted(), artifacts=SmsArtifacts(), analyses=SmsAnalyses()),
                 )
             return self._backends
 

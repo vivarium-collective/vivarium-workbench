@@ -525,7 +525,7 @@ BACKEND_CACHES = (
     ("vivarium_workbench.lib.backends.records", "_REFRESHED"),
     ("vivarium_workbench_sms.sms_api_client", "_ENV_IDS"),
     ("vivarium_workbench_sms.sms_api_client", "COMPOSE_API_BASES"),  # absent since compose-api identities moved
-    ("vivarium_workbench.lib.remote_run_views", "_SMS_ONLY_MEMO"),
+    ("vivarium_workbench.lib.remote_run_views", "_FACET_MEMO"),
     ("vivarium_workbench_sms.remote_analysis_figures", "_caps_cache"),
     ("vivarium_workbench_sms.remote_simulations", "_REMOTE_CACHE"),
     ("vivarium_workbench_sms.remote_simulations", "_REMOTE_META"),

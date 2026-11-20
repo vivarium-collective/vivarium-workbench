@@ -288,7 +288,6 @@ type = "forbidden"
 source_modules = ["vivarium_workbench"]
 forbidden_modules = ["vivarium_workbench_sms"]
 ignore_imports = [
-    "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_analysis_figures",
     "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_simulations",
     "vivarium_workbench.api.app -> vivarium_workbench_sms.source_build_views",
     "vivarium_workbench.lib.backends.provider -> vivarium_workbench_sms.provider",  # the registry (P4: entry point)
@@ -496,6 +495,7 @@ files = [
     "vivarium_workbench/lib/backends/provider.py",
     "vivarium_workbench_sms/sms_legacy.py",
     "vivarium_workbench_sms/sms_landing.py",
+    "vivarium_workbench_sms/analyses.py",
     "vivarium_workbench_sms/routes.py",
     "vivarium_workbench_sms/remote_pipeline_views.py",
     "vivarium_workbench/lib/auth_views.py",

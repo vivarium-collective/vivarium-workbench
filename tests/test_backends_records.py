@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from vivarium_workbench.lib import composite_runs as cr
+from vivarium_workbench.lib import study_spec
 from vivarium_workbench_sms import remote_pinned
 from vivarium_workbench.lib.backends import records
 from vivarium_workbench_sms.sms_api_client import BACKEND_BASE_ENV_VARS
@@ -548,9 +549,9 @@ def test_sms_submit_and_land_record_the_clients_url(monkeypatch, tmp_path):
     monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://configured")
     monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
     monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [{"composite": "c"}]})
-    monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec)
-    monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
-    monkeypatch.setattr(rrv.study_spec, "collect_study_observables", lambda s: [])
+    monkeypatch.setattr(study_spec, "study_spec_path", lambda ws, name: spec)
+    monkeypatch.setattr(study_spec, "study_dir", lambda ws, name: tmp_path)
+    monkeypatch.setattr(study_spec, "collect_study_observables", lambda s: [])
     monkeypatch.setattr(sms_landing, "land_remote_run", lambda *a, **k: seen.update(k) or "r1")
 
     assert sms_legacy.submit_tail(tmp_path, {"study": "s", "simulator_id": 1, "num_generations": 1,

@@ -991,7 +991,7 @@ def _remote_analysis_options(req: RunRequest, run_dir: Path) -> "dict | None":
 
     Composite-auto-results Task 8: the composite deployment path (this module)
     submitted no ``analysis_options`` at all, unlike the study path
-    (``remote_run_views.py``'s ``build_analysis_options`` call). Mirrors that:
+    (the remote study submit's own ``build_analysis_options`` call). Mirrors that:
     merges the composite's own ``@composite_generator(analyses=[...])``
     declarations (``composite_flush._composite_analyses`` — returns ``[]`` when
     ``process_bigraph.composite_generator`` isn't importable, e.g. a

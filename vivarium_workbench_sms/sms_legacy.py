@@ -215,8 +215,9 @@ def land_tail(ws_root: Path, body: dict) -> tuple[dict, int]:
 
 
 def land_artifacts_tail(ws_root: Path, sim_id: "int | str", run_id: str) -> tuple[dict, int]:
-    """The SMS half of ``remote_run_views.remote_run_land_artifacts``, moved verbatim (step P2, Runs c1): the view
-    keeps its guards (login, the 400, ``_sms_only``) and calls this once the run is SMS's."""
+    """The SMS half of ``remote_run_views.remote_run_land_artifacts``, moved verbatim (step P2, Runs c1). Its caller
+    makes the checks first (login, the 400, the integer-id check): since step P2 (Analyses and figures) that is
+    ``vivarium_workbench_sms.analyses.land_outputs_tail``, the ``artifacts`` facet."""
     client = SmsApiClient(_sms_api_base())
     try:
         result = sms_landing.land_remote_simulation_artifacts(ws_root, int(sim_id), run_id, client=client)

@@ -75,8 +75,10 @@ class UnroutedFacet(Protocol):
     """What a backend answers for a run-lifecycle request the core cannot route by a run's record: one that names no
     run, or (status) carries a build or analysis id beside it (step P2, Runs a1). The views' ``(body, status)``
     shapes; the backend's own checks run first, so its "not authenticated" still comes before any "id required".
-    The methods are the SMS tails' own signatures. Once Builds and Analyses take the build and analysis ids, it
-    answers only requests that name no id at all. At most one active backend declares it."""
+    The methods are the SMS tails' own signatures. A bare ``analysis_id`` poll stays here for good: it names no run,
+    so no record can route it (step P2, Analyses and figures). Once Builds takes the build ids, it answers only
+    requests that name no run, or only an analysis. At most one active backend declares it. The same backend's
+    optional ``artifacts`` / ``analyses`` facets answer the land-artifacts and re-run requests that name no run."""
 
     def submit(self, ws_root: Path, body: dict) -> tuple[dict, int]: ...
     def land(self, ws_root: Path, body: dict) -> tuple[dict, int]: ...
@@ -109,20 +111,53 @@ class BatchStatus(Protocol):
     def status_many(self, run_ids: "list[str]") -> "dict[str, dict]": ...
 
 
+class ArtifactFacet(Protocol):
+    """Optional (§2.1, step P2 Analyses and figures): a run's analysis outputs -- land them locally, list and read its
+    figures -- and a study's gallery of them. The views' ``(body, status)`` shapes; :meth:`read_figure` has
+    :meth:`RunFacet.trace`'s ``(bytes | dict, status, content_type)``. The core routes a request that names a run by
+    the run's record and passes the run id as a normalised string; the facet makes its own id checks."""
+
+    def land_outputs(self, ws_root: Path, body: dict) -> tuple[dict, int]:
+        """Land the run's analyses and PTools exports into ``.pbg/runs/<run_id>/`` (no study). ``body``:
+        ``{simulation_id, run_id}`` (``run_id`` the LOCAL folder, a plain name); ``simulation_id`` is absent for a
+        request that names no run, which the facet answers itself (its own login check first)."""
+        ...
+
+    def list_figures(self, run_id: str) -> tuple[dict, int]: ...
+    def read_figure(self, run_id: str, analysis: str, path: str) -> "tuple[Union[bytes, dict], int, str]": ...
+
+    def study_figures(self, ws_root: Path, study: str, max_runs: int) -> tuple[dict, int]:
+        """The study's gallery (``{available, reason, study, sims}``) over at most ``max_runs`` of its runs. Names
+        no run, so the core asks every backend that offers the facet (:func:`offering`)."""
+        ...
+
+
+class AnalysisFacet(Protocol):
+    """Optional (§2.1, step P2 Analyses and figures): re-run a finished run's analyses, in the views'
+    ``(body, status)`` shape. ``body``: ``{simulation_id, modules?, study?}``; ``simulation_id`` is absent for a
+    request that names no run, which the facet answers itself (its own login check first)."""
+
+    def rerun(self, ws_root: Path, body: dict) -> tuple[dict, int]: ...
+
+
 @dataclass(frozen=True)
 class Backend:
-    """One backend. Only the run facet exists so far (§2.1's other facets come with later steps).
+    """One backend: its run facet and the optional facets below (§2.1; the rest come with later steps).
 
     ``identity`` maps a base URL to the identity that server reports (``None`` when the backend reports none);
     run records store it as ``server_id`` (§2.3). Backends that share one function are one server and share its
     cached identity (viva-core and sms-legacy); each other function is its own family (compose-api).
 
-    ``unrouted`` (optional) answers the lifecycle requests no run record routes (:class:`UnroutedFacet`)."""
+    ``unrouted`` (optional) answers the lifecycle requests no run record routes (:class:`UnroutedFacet`).
+    ``artifacts`` / ``analyses`` (optional, :class:`ArtifactFacet` / :class:`AnalysisFacet`): a backend without one
+    refuses those operations on its runs (409 ``not-sms`` until P3 renames the literal)."""
 
     name: str
     runs: RunFacet
     identity: Optional[Callable[[str], Optional[str]]] = None
     unrouted: Optional[UnroutedFacet] = None
+    artifacts: Optional[ArtifactFacet] = None
+    analyses: Optional[AnalysisFacet] = None
 
 
 COMPOSE = Backend("compose-api", ComposeApiRuns(), identity=compose_health_identity)
@@ -187,6 +222,13 @@ def unrouted() -> "Backend | None":
     """The active backend with an ``unrouted`` facet (at most one; the registry refuses two), or ``None`` (providers
     off). Read from the registry at every call, so :func:`reset_registry` covers it."""
     return next((b for b in _registry().values() if b.unrouted is not None), None)
+
+
+def offering(facet: 'Literal["artifacts", "analyses"]') -> "tuple[Backend, ...]":
+    """The active backends that declare the optional ``facet``, compose-api first and then the providers' in registry
+    order: for a request that names no run at all (the study gallery). Empty with providers off. Should compose-api
+    ever declare one, it comes first; §2.6 revisits the order with the generic listing."""
+    return tuple(b for b in (COMPOSE, *_registry().values()) if getattr(b, facet) is not None)
 
 
 def __getattr__(name: str) -> object:

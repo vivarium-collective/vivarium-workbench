@@ -19,7 +19,7 @@ FIGURE_ROUTES = ("/api/remote-analysis-figures?simulation_id={id}&study=s",
 @pytest.fixture
 def no_sms(monkeypatch):
     """The SMS figure libraries must not be reached."""
-    rrv._SMS_ONLY_MEMO.clear()
+    rrv._FACET_MEMO.clear()
     monkeypatch.setattr(raf, "list_remote_analysis_figures", lambda *a, **k: pytest.fail("asked SMS for figures"))
     monkeypatch.setattr(raf, "fetch_by_analysis", lambda *a, **k: pytest.fail("asked SMS for a figure"))
 
@@ -47,7 +47,7 @@ def test_the_figure_routes_answer_no_id_with_the_old_400(ws, asked, no_sms, inpr
 @pytest.mark.parametrize("given", ["12", "%2012%20", "%2B12"])
 def test_an_sms_id_still_reaches_the_figure_libs_as_an_int(ws, asked, inproc_client, monkeypatch, given):
     seen: list = []
-    rrv._SMS_ONLY_MEMO.clear()
+    rrv._FACET_MEMO.clear()
     monkeypatch.setattr(raf, "list_remote_analysis_figures",
                         lambda client, sim, **k: seen.append(("list", sim)) or {"available": True, "analyses": []})
     monkeypatch.setattr(raf, "fetch_by_analysis",
@@ -59,10 +59,10 @@ def test_an_sms_id_still_reaches_the_figure_libs_as_an_int(ws, asked, inproc_cli
     assert all(type(sim) is int for _, sim in seen)
 
 
-def test_sms_only_refuses_an_sms_record_whose_id_is_not_an_integer(ws, asked):
+def test_an_sms_record_whose_id_is_not_an_integer_is_refused(ws, asked):
     """A record naming SMS with a non-integer id is refused, not a 500 from the callers' int()."""
     _record(ws, "simulation-Z", "sms-legacy", HERE)
-    body, status = rrv._sms_only(ws, "simulation-Z", {"study": "s"})
+    body, status = rrv.analysis_figures(ws, "simulation-Z", study="s")
     assert status == 409 and body["reason"] == "not-sms"
     assert rrv.remote_run_analysis(ws, {"simulation_id": "simulation-Z", "study": "s"})[1] == 409
     assert rrv.remote_run_land_artifacts(ws, {"simulation_id": "simulation-Z", "run_id": "r1", "study": "s"})[1] == 409
