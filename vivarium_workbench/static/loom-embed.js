@@ -18,10 +18,10 @@
 
   // ── Cloud-run tracking (parent-owned) ─────────────────────────────────────
   // A composite-card Cloud Run dispatches the selected build's PRE-BUILT image
-  // via sms-api run_simulation (plan B). That dispatch POST is inherently slow
-  // (~15-25s while sms-api registers the whole-cell run over the SSM tunnel) and
-  // the loom's own run bar times out during it, mislabelling a run that actually
-  // landed on GovCloud. So the loom hands the PARENT the sms-api simulation id
+  // to the remote backend (plan B). That dispatch POST can be slow (~15-25s
+  // while the backend registers the run) and the loom's own run bar times out
+  // during it, mislabelling a run that actually landed on the remote backend.
+  // So the loom hands the PARENT the backend's simulation id
   // (postMessage explore:remote-dispatched) and the parent owns the tracking:
   // a patient chip driven by the SAME robust sim-status endpoint the Runs tab
   // uses (/api/composite-run/remote-sim-<id>/status), with backoff, terminating
@@ -148,7 +148,7 @@
         return;
       }
       // A just-dispatched cloud run only lands in the Runs list after the slow
-      // remote (GovCloud) merge — up to ~2 min on a cold fetch — so keep looking
+      // remote-backend merge — up to ~2 min on a cold fetch — so keep looking
       // well past the local-first paint instead of giving up at 10s and leaving
       // the user staring at a list that "doesn't have" their run yet.
       if (tries++ < 300) setTimeout(look, 500);
@@ -310,11 +310,11 @@
         if (bar && typeof window._toggleLoomCard === 'function') window._toggleLoomCard(bar);
       } else if (d.type === 'explore:remote-dispatching') {
         // The ~20s Cloud dispatch POST is in flight — show a patient chip so the
-        // card never mislabels a run that is still being registered on GovCloud.
+        // card never mislabels a run the remote backend is still registering.
         var cd = _cardFromMsg(ev);
         if (cd) _renderCloudChip(cd, { phase: 'dispatching', buildSim: d.build_sim });
       } else if (d.type === 'explore:remote-dispatched') {
-        // 202 carrying the sms-api simulation id — the SAME id the Runs tab
+        // 202 carrying the backend's simulation id — the SAME id the Runs tab
         // tracks. Own the chip + robust poll here, in the parent (vanilla JS),
         // independent of the loom bar's own per-run polling.
         var cx = _cardFromMsg(ev);

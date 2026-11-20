@@ -19842,7 +19842,7 @@
 
     // Phase 1 — local-first: fetch the fast local index (include_remote=false)
     // so the table + count paint in ~seconds instead of blocking on the slow
-    // (~tens-of-seconds) remote (GovCloud) fetch. Snapshot mode has no live
+    // (~tens-of-seconds) remote-backend fetch. Snapshot mode has no live
     // backend, so its baked list is already complete — load it in one call.
     var snapshot = (window.__DASH_CONFIG__ || {}).mode === 'snapshot';
     window.DataSource.loadSimulations(snapshot ? undefined : { includeRemote: false })
@@ -19857,7 +19857,7 @@
         }
         // Never shrink back to the local-only set once the remote-enriched rows
         // have loaded: a quiet auto-refresh's fast local-only fetch must not clobber
-        // the (slow) GovCloud rows while they're still valid — that collapse-to-local
+        // the (slow) remote rows while they're still valid — that collapse-to-local
         // then re-fetch was the visible flap.
         var _incoming = data.simulations || [];
         if (!window._simRemoteLoaded || _incoming.length >= (window._simRows || []).length) {
@@ -19876,7 +19876,8 @@
         // Phase 2 — merge in the remote runs (slow ~100s) in the background.
         // On a quiet auto-refresh this only re-fires after a backoff and never
         // while one is in flight, so the 15s poll can't restart the slow fetch.
-        if (!snapshot) _maybeLoadRemoteSims(quiet);
+        // Only when a backend lists its runs (the `listing` feature).
+        if (!snapshot) _whenListingOffered(function () { _maybeLoadRemoteSims(quiet); });
       })
       .catch(function (err) {
         if (quiet) return;
@@ -19888,12 +19889,25 @@
   window._initSimulations = _initSimulations;
 
   // Phase 2 of the Runs load: fetch local+remote (the second call includes the
-  // GovCloud runs, deduped server-side) and merge into the table. Best-effort:
-  // a down tunnel leaves the local-only view in place.
-  // Don't re-pull the slow GovCloud list more than ~every 3 min on the quiet
+  // remote backend's runs, deduped server-side) and merge into the table.
+  // Best-effort: an unreachable backend leaves the local-only view in place.
+  // Don't re-pull the slow remote list more than ~every 3 min on the quiet
   // auto-refresh; the deployed /simulations endpoint can take ~100s, so a 15s
   // poll firing it repeatedly never settles.
   var REMOTE_REFRESH_MS = 180000;
+
+  // Phase 2 is an optional request: run `fn` only when the declared features
+  // include `listing` (static/backend-features.js, docs/backend-adapters.md
+  // §2.2). Known features without it skip phase 2 — the server would list no
+  // remote runs. UNKNOWN features (no BackendFeatures, or its request failed)
+  // behave as before: phase 2 runs.
+  function _whenListingOffered(fn) {
+    var bf = window.BackendFeatures;
+    if (!bf || typeof bf.ready !== 'function') { fn(); return; }
+    bf.ready().then(function (r) {
+      if (!r || !r.known || (r.features || []).indexOf('listing') !== -1) fn();
+    }, function () { fn(); });
+  }
 
   function _maybeLoadRemoteSims(quiet) {
     // First load / explicit refresh: always. Quiet auto-refresh: only after the
@@ -19929,8 +19943,8 @@
   function _setSimRemoteStatus(state) {
     var el = document.getElementById('sim-remote-status');
     if (!el) return;
-    el.textContent = state === 'loading' ? '· loading GovCloud runs…'
-      : state === 'error' ? '· GovCloud runs unavailable'
+    el.textContent = state === 'loading' ? '· loading remote runs…'
+      : state === 'error' ? '· remote runs unavailable'
       : '';
   }
 

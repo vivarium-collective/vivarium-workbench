@@ -32,6 +32,13 @@ ACTIONS_NONE = [{"label": "Build on cloud", "panel": "builds", "commit": None},
 NO_IMAGE_ERROR = ("No cloud image exists for this workspace. Cloud runs execute a registered build's pre-built "
                   "image — build one on the cloud, or switch the Environment to Local.")
 NOT_PUSHED = {"ok": False, "reason": "unpushed", "message": "HEAD is not pushed.", "sha": "deadbeefcafe"}
+#: Step P3 F4b added ONE key to the SMS preflight bodies: ``tip``, the card's tooltip for a Run against the selected
+#: build, moved verbatim from ``static/composite-card.js`` (``{build}`` / ``{commit}`` filled by the card). Every
+#: other key below is as computed before B2; the viva-core and compose bodies gain nothing.
+SMS_TIP = ("▶ Run dispatches to the Cloud (GovCloud) against build #{build}{commit}. "
+           "It runs the build’s committed code — local edits not in that build won’t apply. "
+           "The dispatch itself takes ~15-25s (sms-api registers the run over the SSM tunnel); "
+           "the card tracks it robustly once it lands.")
 
 
 class _Net(Exception):
@@ -372,14 +379,15 @@ def test_preflight_session_build_image(card, inproc_client):
     card.stamp({"simulator_id": 124, "repo_url": "r", "commit": "c"})
     assert _preflight(card, inproc_client) == {
         "target": "deployment", "ok": True, "reason": "image", "dispatch": "image", "simulator_id": 124,
-        "message": "Cloud image (build #124) is ready — runs execute its pre-built image, no push needed."}
+        "message": "Cloud image (build #124) is ready — runs execute its pre-built image, no push needed.",
+        "tip": SMS_TIP}
 
 
 def test_preflight_pin_with_no_build(card, inproc_client):
     card.pin(None)
     assert _preflight(card, inproc_client) == {"error": NO_IMAGE_ERROR, "reason": "no-build",
                                                "run_target": "deployment", "actions": ACTIONS_NONE,
-                                               "target": "deployment", "ok": False}
+                                               "target": "deployment", "ok": False, "tip": SMS_TIP}
 
 
 def test_preflight_opt_in(card, inproc_client):
@@ -391,7 +399,8 @@ def test_preflight_opt_in(card, inproc_client):
         "actions": [{"label": "Build on cloud", "panel": "builds", "commit": "deadbeefcafe"},
                     {"label": "Switch Environment to Local", "panel": "environment"}],
         "message": ("HEAD is not pushed. The compose path installs your repo from git on the deployment and "
-                    "requires the repo to be on sms-api's compose allow-list.")}
+                    "requires the repo to be on sms-api's compose allow-list."),
+        "tip": SMS_TIP}
 
 
 def test_preflight_viva_named_environment_runs_the_git_check(card, inproc_client):

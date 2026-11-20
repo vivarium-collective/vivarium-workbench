@@ -29,7 +29,12 @@ function extract(name) {
 // `window` is a free variable (VivEnv); no VivEnv → the badge reflects the preflight.
 // eslint-disable-next-line no-new-func
 const compute = new Function('window',
-  extract('_computeRunTarget') + '\nreturn _computeRunTarget;')({});
+  extract('_selectedBuildTip') + '\n' + extract('_computeRunTarget') + '\nreturn _computeRunTarget;')({});
+// The Environment scope on Cloud with a selected build: the tooltip comes from the preflight's `tip` (step P3 F4b).
+// eslint-disable-next-line no-new-func
+const computeCloud = new Function('window',
+  extract('_selectedBuildTip') + '\n' + extract('_computeRunTarget') + '\nreturn _computeRunTarget;')({
+  VivEnv: { isCloud: () => true, runBuild: () => ({ simulator_id: 9, commit: '0123456789' }) } });
 
 function run() {
   const ready = { target: 'deployment', ok: true, reason: 'ok', dispatch: 'viva-v1-document',
@@ -63,6 +68,15 @@ function run() {
     'an empty warnings list is no warning');
   assert.strictEqual(compute({ target: 'local', ok: true }).label, 'Runs: Local', 'local unchanged');
   assert.strictEqual(compute(null).label, 'Runs: —', 'unknown unchanged');
+
+  // `tip`: the backend's template, filled with the selected build; absent → the neutral core text.
+  assert.strictEqual(computeCloud(Object.assign({}, ready, { tip: 'On X: build {build}{commit}, again {build}.' })).tip,
+    'On X: build 9 (0123456), again 9.', 'tip placeholders are filled (every occurrence)');
+  assert.ok(/remote backend against build #9 \(0123456\)/.test(computeCloud(ready).tip), 'no tip -> neutral text');
+  assert.ok(!/GovCloud|sms-api/i.test(computeCloud(ready).tip), 'the neutral text names no backend');
+  assert.strictEqual(compute(Object.assign({}, ready, { tip: 'ignored' })).tip, ready.message,
+    'tip is only for a selected build: the preflight badge keeps its message');
+  assert.ok(!/GovCloud/.test(compute({ target: 'deployment', ok: true }).tip), 'no message -> a neutral cloud tip');
 
   console.log('test_run_target_badge.js: all assertions passed');
 }

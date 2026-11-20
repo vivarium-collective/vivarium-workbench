@@ -32,6 +32,16 @@ if TYPE_CHECKING:
 # composite — but NEVER the alphabetically-first arbitrary file (#1113).
 _WHOLE_CELL_DEFAULT_CONFIG = "api_simulation_default.json"
 
+#: The preflight's ``tip`` (step P3 F4b, docs/backend-adapters.md §2.5): the composite card's tooltip for a Run against
+#: the build the Environment scope selected, in this backend's own words. The card fills ``{build}`` with the build id
+#: and ``{commit}`` with `` (<short sha>)`` or nothing. Moved verbatim from ``static/composite-card.js``, so the
+#: tooltip reads exactly as it did before; with no ``tip`` the card uses neutral core text.
+SELECTED_BUILD_TIP = (
+    "▶ Run dispatches to the Cloud (GovCloud) against build #{build}{commit}. "
+    "It runs the build’s committed code — local edits not in that build won’t apply. "
+    "The dispatch itself takes ~15-25s (sms-api registers the run over the SSM tunnel); "
+    "the card tracks it robustly once it lands.")
+
 
 def _config_for_spec(spec_id: str, cfgs: "list[str]") -> "str | None":
     """Pick the discovered config that matches the requested composite (#1113).
@@ -332,6 +342,8 @@ def dispatch_preflight(ws_root: Path) -> dict:
     to Local) so the card renders buttons, not prose. The dead compose/git-install path (which needs a clean+pushed
     tree AND the repo on sms-api's compose allow-list) is only surfaced when an operator opts in via
     ``VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH=1``.
+
+    Every answer carries ``tip`` (:data:`SELECTED_BUILD_TIP`, step P3 F4b).
     """
     cloud = resolve_cloud_target(ws_root, {})
     if isinstance(cloud, CloudTarget):
@@ -339,12 +351,13 @@ def dispatch_preflight(ws_root: Path) -> dict:
             "target": "deployment", "ok": True, "reason": "image",
             "dispatch": "image", "simulator_id": cloud.simulator_id,
             "message": f"Cloud image (build #{cloud.simulator_id}) is ready — "
-                       "runs execute its pre-built image, no push needed."}
+                       "runs execute its pre-built image, no push needed.",
+            "tip": SELECTED_BUILD_TIP}
     if not _compose_dispatch_allowed():
         # No cloud image and compose is not opted into → actionable dead-end.
         payload, _status = cloud if isinstance(cloud, tuple) else _no_image(None, reason="no-build")
         payload = dict(payload)
-        payload.update(target="deployment", ok=False)
+        payload.update(target="deployment", ok=False, tip=SELECTED_BUILD_TIP)
         return payload
     # Opt-in compose path: the git-install preflight, plus the real requirement.
     pf = remote_run.remote_dispatch_preflight(ws_root)
@@ -353,4 +366,5 @@ def dispatch_preflight(ws_root: Path) -> dict:
     pf["message"] = (pf.get("message", "") + " The compose path installs your "
                      "repo from git on the deployment and requires the repo to be "
                      "on sms-api's compose allow-list.").strip()
+    pf["tip"] = SELECTED_BUILD_TIP
     return pf
