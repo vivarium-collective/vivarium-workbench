@@ -420,6 +420,13 @@ _REFUSED = (409, "backend-not-installed", "backend-not-installed", True)
     ("post", "/api/remote-run-submit", {"study": "s", "simulator_id": 3}, _REFUSED),
     # nothing named at all
     ("post", "/api/remote-run-submit", {"study": "s"}, (409, "no-backend")),
+    # step P2 Analyses and figures: no backend offers artifacts or analyses (before it, an integer id reached SMS)
+    ("post", "/api/remote-run-land-artifacts", {"run_id": "r"}, (400, "simulation_id and run_id are required")),
+    ("post", "/api/remote-run-land-artifacts", {"simulation_id": 12, "run_id": "r"}, _REFUSED),
+    ("post", "/api/remote-run-analysis", {}, (400, "simulation_id is required")),
+    ("post", "/api/remote-run-analysis", {"simulation_id": 12}, _REFUSED),
+    ("get", "/api/remote-analysis-figures", {"simulation_id": 12}, _REFUSED),
+    ("get", "/api/remote-analysis-figure", {"simulation_id": 12, "analysis": "a", "path": "viz/x.png"}, _REFUSED),
 ])
 def test_with_providers_off_the_core_answers_unrouted_requests(providers_off, tmp_path, monkeypatch, inproc_client,
                                                                method, path, payload, expected):
@@ -440,6 +447,35 @@ def test_with_providers_off_the_core_answers_unrouted_requests(providers_off, tm
         assert (r.status_code, body["reason"]) == expected, body
     else:
         assert (r.status_code, body["error"]) == expected, body
+
+
+def test_with_providers_off_the_study_gallery_is_empty(providers_off, tmp_path, monkeypatch, inproc_client):
+    from vivarium_workbench_sms import sms_legacy
+
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda *a, **k: pytest.fail("SMS was asked"))
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    r = inproc_client(tmp_path).get("/api/study-remote-figures?study=s")
+    assert (r.status_code, r.json()) == (200, {"available": False, "reason": "no-backend", "study": "s", "sims": []})
+
+
+# --- the optional artifacts / analyses facets (step P2, Analyses and figures) ---------------------------------------
+
+def test_only_sms_legacy_offers_the_artifacts_and_analyses_facets():
+    from vivarium_workbench_sms.analyses import SmsAnalyses, SmsArtifacts
+
+    sms = backends.SMS_LEGACY
+    assert isinstance(sms.artifacts, SmsArtifacts) and isinstance(sms.analyses, SmsAnalyses)
+    for method in ("land_outputs", "list_figures", "read_figure", "study_figures"):
+        assert callable(getattr(sms.artifacts, method)), method
+    assert callable(sms.analyses.rerun)
+    for backend in (backends.COMPOSE, backends.VIVA_CORE, *backends._SENTINELS.values()):
+        assert (backend.artifacts, backend.analyses) == (None, None), backend.name
+    assert backends.offering("artifacts") == (sms,) and backends.offering("analyses") == (sms,)
+    assert backends.unrouted() is sms  # the no-id land / re-run requests go to its facets
+
+
+def test_with_providers_off_no_backend_offers_artifacts_or_analyses(providers_off):
+    assert backends.offering("artifacts") == () and backends.offering("analyses") == ()
 
 
 # --- the optional batch status (step P2, Runs c2) ---------------------------------------------------------------------

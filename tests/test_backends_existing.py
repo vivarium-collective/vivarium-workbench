@@ -262,9 +262,9 @@ def test_the_per_image_guard_is_memoised(ws, monkeypatch):
     calls = []
     real = rrv.backends.for_existing
     monkeypatch.setattr(rrv.backends, "for_existing", lambda *a, **k: calls.append(1) or real(*a, **k))
-    rrv._SMS_ONLY_MEMO.clear()
+    rrv._FACET_MEMO.clear()
     for _ in range(5):
-        rrv._sms_only(ws, 88, {"study": "s"}, memo=True)
+        rrv._artifacts_of(ws, "88", {"study": "s"}, memo=True)
     assert len(calls) == 1
 
 

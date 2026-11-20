@@ -62,7 +62,6 @@ from vivarium_workbench_sms import source_build_views as _source_build_views
 from vivarium_workbench.lib import job_status_views as _job_status_views
 from vivarium_workbench.lib import run_jobs as _run_jobs
 from vivarium_workbench.lib import remote_run_views as _remote_run_views
-from vivarium_workbench_sms import remote_analysis_figures as _remote_analysis_figures
 from vivarium_workbench.lib import auth_views as _auth_views
 from vivarium_workbench.lib import ai_auth as _ai_auth
 from vivarium_workbench.lib import chat_limits as _chat_limits
@@ -7839,21 +7838,14 @@ def create_app() -> FastAPI:
                                 ws: Path = Depends(get_workspace)) -> JSONResponse:
         """The "accessible through the remote setting" read path: list each
         completed analysis's rendered ``viz/*`` figures + ``ptools/*`` tables on
-        ``simulation_id``, from viva-core's dataset registry when the backend
-        serves it (no storage credentials) and from S3 otherwise; ``via`` says
-        which. ``available: false`` + a ``reason`` means fall back to landing /
-        show "pending"."""
-        # Opaque run ids: the id is a string and the run's record decides -- a compose-api or viva-core run gets
-        # _sms_only's 409 ``not-sms``, not a 422 for its form.
-        rid = _remote_run_views.opaque_run_id(simulation_id)
-        if not rid:
-            return JSONResponse(status_code=400, content={"error": "simulation_id required"})
-        refused = _remote_run_views._sms_only(ws, rid, {"deployment": deployment, "study": study})
-        if refused is not None:  # step 1c-2: another backend's run is never asked about here
-            return JSONResponse(status_code=refused[1], content=refused[0])
-        client = _remote_run_views._sms_client()
-        return JSONResponse(content=_remote_analysis_figures.list_remote_analysis_figures(
-            client, int(rid)))  # _sms_only passed: an SMS simulation, an integer
+        ``simulation_id``, from the run's backend's ``artifacts`` facet (for SMS:
+        viva-core's dataset registry when the backend serves it, no storage
+        credentials, and S3 otherwise; ``via`` says which). ``available: false`` +
+        a ``reason`` means fall back to landing / show "pending"."""
+        # Opaque run ids: the id is a string and the run's record decides -- a backend without the facet answers 409
+        # ``not-sms``, not a 422 for its form.
+        body, status = _remote_run_views.analysis_figures(ws, simulation_id, deployment=deployment, study=study)
+        return JSONResponse(status_code=status, content=body)
 
     @app.get("/api/study-remote-figures", tags=["Runs"],
              summary="Aggregate a study's remote-sim figures + ptools for its Viz/Analyses tabs")
@@ -7862,12 +7854,10 @@ def create_app() -> FastAPI:
         """Volume-capped gallery manifest of the remote figures/ptools across a
         study's completed remote sims — the data source for rendering the study
         Visualizations/Analyses tabs via the remote setting. Figure bytes are
-        fetched lazily through /api/remote-analysis-figure."""
-        if not study:
-            return JSONResponse(status_code=400, content={"error": "study required"})
-        client = _remote_run_views._sms_client()
-        return JSONResponse(content=_remote_analysis_figures.study_remote_figures(
-            ws, client, study, max_sims=max(1, min(int(limit or 10), 30))))
+        fetched lazily through /api/remote-analysis-figure. Every backend with an
+        ``artifacts`` facet is asked; none (providers off) is an empty gallery."""
+        body, status = _remote_run_views.study_figures(ws, study, limit)
+        return JSONResponse(status_code=status, content=body)
 
     @app.get("/api/remote-analysis-figure", tags=["Runs"],
              summary="Serve one rendered figure/ptools file from a remote analysis")
@@ -7875,25 +7865,16 @@ def create_app() -> FastAPI:
                                deployment: Union[str, None] = None, study: Union[str, None] = None,
                                ws: Path = Depends(get_workspace)) -> Response:
         """Serve a single ``viz/`` or ``ptools/`` file of the named analysis,
-        through the backend's ``/viva/v1/datasets/{id}/content`` when it is
-        registered there, else from the analysis's S3 ``result_uri``. Both are
-        resolved server-side from ``simulation_id`` + ``analysis``, so no raw
-        uri crosses the wire; ``path`` is traversal-guarded in the lib."""
-        rid = _remote_run_views.opaque_run_id(simulation_id)  # opaque run ids: the record decides, as above
-        if not rid or not analysis or not path:
-            return Response(content=b'{"error":"simulation_id, analysis, path required"}',
-                            status_code=400, media_type="application/json")
-        refused = _remote_run_views._sms_only(ws, rid, {"deployment": deployment, "study": study},
-                                                memo=True)
-        if refused is not None:  # step 1c-2: another backend's run is never asked about here
-            return JSONResponse(status_code=refused[1], content=refused[0])
-        client = _remote_run_views._sms_client()
-        got = _remote_analysis_figures.fetch_by_analysis(client, int(rid), analysis, path)
-        if not got:
-            return Response(content=b'{"error":"not found"}', status_code=404,
-                            media_type="application/json")
-        body, ct = got
-        return Response(content=body, media_type=ct)
+        from the run's backend's ``artifacts`` facet (for SMS: through the
+        backend's ``/viva/v1/datasets/{id}/content`` when it is registered there,
+        else from the analysis's S3 ``result_uri``). Both are resolved
+        server-side from ``simulation_id`` + ``analysis``, so no raw uri crosses
+        the wire; ``path`` is traversal-guarded in the lib."""
+        body, status, content_type = _remote_run_views.analysis_figure(
+            ws, simulation_id, analysis, path, deployment=deployment, study=study)
+        if isinstance(body, bytes):
+            return Response(content=body, status_code=status, media_type=content_type)
+        return JSONResponse(status_code=status, content=body)
 
     @app.get("/api/remote-run-poll", tags=["Runs"],
              summary="Thin-client on-demand status (build, run or analysis phase)")

@@ -14,7 +14,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from vivarium_workbench.lib import git_status, github_auth
+from vivarium_workbench.lib import git_status, github_auth, study_spec
 from vivarium_workbench.lib import remote_run_views as rrv
 from vivarium_workbench_sms import remote_pipeline_views as pv
 from vivarium_workbench_sms import remote_run_jobs, sms_landing, sms_legacy
@@ -54,8 +54,8 @@ def _wire_happy(monkeypatch, tmp_path: Path, spec: dict):
 
     spec_file = tmp_path / "study.yaml"
     spec_file.write_text("baseline: []\n")  # presence only — load_spec is stubbed
-    monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
-    monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
+    monkeypatch.setattr(study_spec, "study_spec_path", lambda ws, name: spec_file)
+    monkeypatch.setattr(study_spec, "study_dir", lambda ws, name: tmp_path)
     monkeypatch.setattr(sms_legacy, "load_spec", lambda p: spec)
 
     monkeypatch.setattr(
@@ -113,7 +113,7 @@ class TestErrorPaths:
         monkeypatch.setattr(git_status, "has_origin_remote", lambda ws: True)
         monkeypatch.setattr(git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
         monkeypatch.setattr(
-            rrv.study_spec, "study_spec_path", lambda ws, name: tmp_path / "missing.yaml",
+            study_spec, "study_spec_path", lambda ws, name: tmp_path / "missing.yaml",
         )
         body, status = pv.remote_run_start(tmp_path, {"study": "ghost"})
         assert (body, status) == ({"error": "study 'ghost' not found"}, 404)
@@ -243,10 +243,10 @@ def _wire_thin(monkeypatch, tmp_path, *, authed=True, study_exists=True):
     monkeypatch.setattr(git_status, "remote_push_and_sha", lambda ws: "abc123def456")
     spec_file = tmp_path / "study.yaml"
     spec_file.write_text("baseline: [{composite: my-comp}]\n")
-    monkeypatch.setattr(rrv.study_spec, "study_spec_path",
+    monkeypatch.setattr(study_spec, "study_spec_path",
                         lambda ws, name: (spec_file if study_exists else None))
-    monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
-    monkeypatch.setattr(rrv.study_spec, "collect_study_observables", lambda spec: ["cell_mass"])
+    monkeypatch.setattr(study_spec, "study_dir", lambda ws, name: tmp_path)
+    monkeypatch.setattr(study_spec, "collect_study_observables", lambda spec: ["cell_mass"])
     monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [{"composite": "my-comp"}]})
     monkeypatch.setattr(
         subprocess, "run",
@@ -342,7 +342,7 @@ def test_submit_still_succeeds_when_pending_row_write_fails(monkeypatch, tmp_pat
     def _boom(ws, name):
         raise OSError("workspace paths unavailable")
 
-    monkeypatch.setattr(rrv.study_spec, "study_dir", _boom)
+    monkeypatch.setattr(study_spec, "study_dir", _boom)
     body, status = rrv.remote_run_submit(
         tmp_path, {"simulator_id": 66, "study": "s", "num_generations": 1, "num_seeds": 1})
     assert status == 202

@@ -1,5 +1,6 @@
-"""Pure builders for the remote-run lifecycle routes (submit, poll, land, cancel, chain progress) and the SMS views
-the Analyses and Builds areas still own (``land_artifacts``, ``analysis``, ``_remote_run_config``).
+"""Pure builders for the remote-run lifecycle routes (submit, poll, land, cancel, chain progress), the analysis-output
+and re-run routers (land-artifacts, re-run, figures, the study gallery) and the SMS view the Builds area still owns
+(``_remote_run_config``).
 
 Each view returns ``(body, status)``; the FastAPI route wraps every path in ``JSONResponse``. The SMS seams
 (``SmsApiClient``, ``SmsApiError``, ``_sms_api_base``, ``load_spec``, ``_run_auth_ok``) and
@@ -8,24 +9,28 @@ call time: one patch target per name, none bound here. The lifecycle requests no
 backend's ``unrouted`` facet (``backends.unrouted()``); with providers off the core answers them itself.
 
 The SMS-only views (the legacy pipeline submit and the thin client's build phase) and their routes moved to the
-plugin in step P2 Runs a2 (``vivarium_workbench_sms.remote_pipeline_views``, served by ``Provider.router``).
+plugin in step P2 Runs a2 (``vivarium_workbench_sms.remote_pipeline_views``, served by ``Provider.router``). The
+analysis-output and re-run requests go to the run's backend's optional ``artifacts`` / ``analyses`` facets (step P2,
+Analyses and figures; SMS's are ``vivarium_workbench_sms.analyses``); a backend without the facet refuses them.
 """
 
 from __future__ import annotations
 
 import time
-import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING, Union
 
 from vivarium_workbench_sms import remote_pinned
-from vivarium_workbench.lib import backends, remote_run_compose
+from vivarium_workbench.lib import backends, path_safety, remote_run_compose
 from vivarium_workbench_sms import sms_legacy
-from vivarium_workbench.lib import study_spec
+
+if TYPE_CHECKING:
+    from vivarium_workbench.lib.backends import AnalysisFacet, ArtifactFacet, Backend
 
 
 def _sms_client() -> "sms_legacy.SmsApiClient":
-    """A client on the SMS host, built from ``sms_legacy``'s seams at call time (tests patch them there). Used by the
-    SMS views still here and the figure routes (transitional: Analyses, Builds)."""
+    """A client on the SMS host, built from ``sms_legacy``'s seams at call time (tests patch them there). Used by
+    ``_remote_run_config`` only (transitional: Builds)."""
     return sms_legacy.SmsApiClient(sms_legacy._sms_api_base())
 
 
@@ -166,10 +171,10 @@ def _first_id(params: dict, keys: "tuple[str, ...]") -> str:
     return ""
 
 
-#: ``_sms_only`` answers memoised for the figure routes, which ask once per image of a gallery (seconds, not
-#: minutes: a run's record changes only when it is dispatched or landed).
-_SMS_ONLY_MEMO: "dict[tuple, tuple[float, tuple[dict, int] | None]]" = {}
-_SMS_ONLY_TTL = 30.0
+#: ``_artifacts_of`` answers memoised for the per-image figure route, which asks once per image of a gallery (seconds,
+#: not minutes: a run's record changes only when it is dispatched or landed).
+_FACET_MEMO: "dict[tuple, tuple[float, Union[ArtifactFacet, tuple[dict, int]]]]" = {}
+_FACET_TTL = 30.0
 
 
 def _no_id(params: dict) -> dict:
@@ -178,37 +183,51 @@ def _no_id(params: dict) -> dict:
     return {k: v for k, v in params.items() if k not in ("run_id", "simulation_id")}
 
 
-def _sms_only(ws_root: Path, sim_id: object, body: dict, *, memo: bool = False) -> "tuple[dict, int] | None":
-    """For the SMS-only operations (re-run analyses, land artifacts, figures): refuse a run whose record names
-    another backend (or another SMS deployment) before anything is asked; ``None`` lets the SMS path proceed.
-    ``memo`` (the per-image figure route) reuses an answer for :data:`_SMS_ONLY_TTL`."""
-    rid = _first_id({"simulation_id": sim_id}, ("simulation_id",))
-    if not rid:  # a zero / blank id names no simulation (the callers' own checks see only the raw value)
-        return {"error": "simulation_id is required"}, 400
-    key = (str(ws_root), rid, body.get("deployment"), body.get("study"))
-    if memo:
-        hit = _SMS_ONLY_MEMO.get(key)
-        if hit and time.monotonic() - hit[0] < _SMS_ONLY_TTL:
-            return hit[1]
-        answer = _sms_only(ws_root, sim_id, body)
-        _SMS_ONLY_MEMO[key] = (time.monotonic(), answer)
-        return answer
-    chosen = backends.for_existing(ws_root, rid, deployment=body.get("deployment"), study=body.get("study"))
+def _owner(ws_root: Path, rid: str, where: dict) -> "Union[Backend, tuple[dict, int]]":
+    """The backend whose record (or, with none, whose id form) owns ``rid`` (``backends.for_existing``), or the
+    refusal: another backend's or deployment's run, or (providers off) one no installed provider serves."""
+    chosen = backends.for_existing(ws_root, rid, deployment=where.get("deployment"), study=where.get("study"))
     if isinstance(chosen, tuple):
         return chosen
-    if chosen is not None and chosen is not backends.SMS_LEGACY:
-        from vivarium_workbench.lib.backends.records import refusal
+    return _unowned(rid) if chosen is None else chosen
 
-        return refusal(rid, f"run {rid} ran on {chosen.name}; this operation exists only for SMS simulations",
-                       reason="not-sms", phase="not-sms")
-    if not (rid.isascii() and rid.isdigit()):
-        # Opaque run ids: the record said SMS but the id is no SMS simulation id (the callers int() it next). Refused
-        # like any other non-SMS run, rather than a 500 from int().
-        from vivarium_workbench.lib.backends.records import refusal
 
-        return refusal(rid, f"run {rid} is not an SMS simulation id; this operation exists only for SMS simulations",
-                       reason="not-sms", phase="not-sms")
-    return None
+def _not_offered(rid: str, backend: "Backend", what: str) -> tuple[dict, int]:
+    from vivarium_workbench.lib.backends.records import refusal
+
+    # The wire literal stays "not-sms" until P3 renames it; callers read it only as "refused, terminal".
+    return refusal(rid, f"run {rid} ran on {backend.name}, which does not offer {what}",
+                   reason="not-sms", phase="not-sms")
+
+
+def _artifacts_of(ws_root: Path, rid: str, where: dict, *,
+                  memo: bool = False) -> "Union[ArtifactFacet, tuple[dict, int]]":
+    """The ``artifacts`` facet of the backend that ran ``rid``, or the refusal (``_owner``'s, or 409 ``not-sms`` when
+    that backend offers none). ``memo`` (the per-image figure route) reuses an answer for :data:`_FACET_TTL`."""
+    key = (str(ws_root), rid, where.get("deployment"), where.get("study"))
+    if memo:
+        hit = _FACET_MEMO.get(key)
+        if hit and time.monotonic() - hit[0] < _FACET_TTL:
+            return hit[1]
+    chosen = _owner(ws_root, rid, where)
+    answer: "Union[ArtifactFacet, tuple[dict, int]]"
+    if isinstance(chosen, tuple):
+        answer = chosen
+    elif chosen.artifacts is None:
+        answer = _not_offered(rid, chosen, "analysis outputs (land, figures)")
+    else:
+        answer = chosen.artifacts
+    if memo:
+        _FACET_MEMO[key] = (time.monotonic(), answer)
+    return answer
+
+
+def _analyses_of(ws_root: Path, rid: str, where: dict) -> "Union[AnalysisFacet, tuple[dict, int]]":
+    """The ``analyses`` facet of the backend that ran ``rid``, or the refusal (as :func:`_artifacts_of`)."""
+    chosen = _owner(ws_root, rid, where)
+    if isinstance(chosen, tuple):
+        return chosen
+    return _not_offered(rid, chosen, "analysis re-runs") if chosen.analyses is None else chosen.analyses
 
 
 def opaque_run_id(value: object) -> str:
@@ -266,18 +285,28 @@ def remote_run_land_artifacts(ws_root: Path, body: dict) -> tuple[dict, int]:
 
     This is the "land on demand" endpoint the Runs-table remote-row actions call.
     Body: ``{simulation_id, run_id}``. Idempotent.
+
+    Step P2 (Analyses and figures): the run's record picks its backend, whose ``artifacts`` facet lands it (a backend
+    without one refuses, 409 ``not-sms``). A request that names no run goes to the ``unrouted`` backend's facet, so
+    its own answers come first (SMS: 401 before 400); with providers off the core answers the 400 itself.
     """
     body = body or {}
-    if not sms_legacy._run_auth_ok():
-        return {"error": "not authenticated"}, 401
-    sim_id = body.get("simulation_id")
-    run_id = (body.get("run_id") or "").strip()
-    if not sim_id or not run_id:
+    rid = _first_id(body, ("simulation_id",))
+    run_id = str(body.get("run_id") or "").strip()
+    if not rid or not run_id:
+        ub = backends.unrouted()
+        if ub is not None and ub.artifacts is not None:
+            # Only a dead simulation_id ("0", blank) is dropped, so the facet's own "required" check sees it missing;
+            # not _no_id, which would also drop run_id -- here the LOCAL landing folder, not a run id.
+            return ub.artifacts.land_outputs(ws_root, body if rid else {k: v for k, v in body.items()
+                                                                        if k != "simulation_id"})
         return {"error": "simulation_id and run_id are required"}, 400
-    refused = _sms_only(ws_root, sim_id, body)  # step 1c-2: never another backend's run
-    if refused is not None:
-        return refused
-    return sms_legacy.land_artifacts_tail(ws_root, sim_id, run_id)  # step P2, Runs c1: the SMS half
+    if not path_safety.is_plain_name(run_id):  # it becomes .pbg/runs/<run_id> (the app-wide guard covers routes only)
+        return {"error": "invalid run_id: it must be a plain name, not a path"}, 400
+    facet = _artifacts_of(ws_root, rid, body)
+    if isinstance(facet, tuple):
+        return facet
+    return facet.land_outputs(ws_root, {**body, "simulation_id": rid, "run_id": run_id})
 
 
 def remote_run_analysis(ws_root: Path, body: dict) -> tuple[dict, int]:
@@ -305,52 +334,68 @@ def remote_run_analysis(ws_root: Path, body: dict) -> tuple[dict, int]:
         third, drift-prone copy of a list neither side can verify.
 
     Returns ``({analysis_id, analysis_name, simulation_id, phase}, 202)``.
+
+    Step P2 (Analyses and figures): the run's record picks its backend, whose ``analyses`` facet runs it (SMS:
+    ``vivarium_workbench_sms.analyses.rerun_tail``); a backend without one refuses (409 ``not-sms``). A request that
+    names no run goes to the ``unrouted`` backend's facet (its 401 before its 400); providers off, the core's 400.
     """
     body = body or {}
-    if not sms_legacy._run_auth_ok():
-        return {"error": "not authenticated"}, 401
-    sim_id = body.get("simulation_id")
-    if not sim_id:
+    rid = _first_id(body, ("simulation_id",))
+    if not rid:
+        ub = backends.unrouted()
+        if ub is not None and ub.analyses is not None:
+            return ub.analyses.rerun(ws_root, {k: v for k, v in body.items() if k != "simulation_id"})
         return {"error": "simulation_id is required"}, 400
-    refused = _sms_only(ws_root, sim_id, body)  # step 1c-2: never another backend's run
-    if refused is not None:
-        return refused
+    facet = _analyses_of(ws_root, rid, body)
+    if isinstance(facet, tuple):
+        return facet
+    return facet.rerun(ws_root, {**body, "simulation_id": rid})
 
-    modules = body.get("modules") or {}
-    study = (body.get("study") or "").strip()
-    analysis_errors: list[dict] = []
-    if not modules and study:
-        spec_path = study_spec.study_spec_path(ws_root, study)
-        if spec_path is None or not spec_path.is_file():
-            return {"error": f"study {study!r} not found"}, 404
-        from vivarium_workbench.lib.study_run_post import build_analysis_options
 
-        modules, analysis_errors = build_analysis_options(sms_legacy.load_spec(spec_path).get("analyses") or [], ws_root)
-        for err in analysis_errors:
-            warnings.warn(f"remote_run_analysis: {study!r} analysis config: {err.get('error')}")
+def analysis_figures(ws_root: Path, simulation_id: object, *, deployment: "str | None" = None,
+                     study: "str | None" = None) -> tuple[dict, int]:
+    """``GET /api/remote-analysis-figures``: the run's figures and PTools tables, from its backend's ``artifacts``
+    facet (``{available, reason, via, analyses}``). The id is opaque (:func:`opaque_run_id`); its record decides."""
+    rid = opaque_run_id(simulation_id)
+    if not rid:
+        return {"error": "simulation_id required"}, 400
+    facet = _artifacts_of(ws_root, rid, {"deployment": deployment, "study": study})
+    if isinstance(facet, tuple):
+        return facet
+    return facet.list_figures(rid)
 
-    client = _sms_client()
-    try:
-        triggered = client.run_analysis(int(sim_id), modules)
-    except sms_legacy.SmsApiError as e:
-        # Unlike the land-time trigger (best-effort, must never block landing),
-        # this IS the requested action — a failure has to reach the operator.
-        status = 401 if getattr(e, "status", None) == 401 else 502
-        return {"error": str(e), "simulation_id": int(sim_id)}, status
-    response: dict = {
-        "analysis_id": triggered.get("database_id"),
-        "analysis_name": triggered.get("analysis_name"),
-        "simulation_id": int(sim_id),
-        "phase": "analyzing",
-    }
-    if analysis_errors:
-        # backlog item 39: surface which requested analyses couldn't be
-        # resolved (e.g. a stale workspace PVC missing a newer v2ecoli
-        # analysis) instead of silently dropping them -- the analysis trigger
-        # itself still proceeds (via whatever modules DID resolve), this is
-        # informational.
-        response["analysis_errors"] = analysis_errors
-    return response, 202
+
+def analysis_figure(ws_root: Path, simulation_id: object, analysis: str, path: str, *,
+                    deployment: "str | None" = None,
+                    study: "str | None" = None) -> "tuple[Union[bytes, dict], int, str]":
+    """``GET /api/remote-analysis-figure``: one figure or PTools file, ``(bytes | dict, status, content_type)``.
+    Asked once per image of a gallery, so the routing answer is memoised (:data:`_FACET_TTL`)."""
+    rid = opaque_run_id(simulation_id)
+    if not rid or not analysis or not path:
+        return b'{"error":"simulation_id, analysis, path required"}', 400, "application/json"
+    facet = _artifacts_of(ws_root, rid, {"deployment": deployment, "study": study}, memo=True)
+    if isinstance(facet, tuple):
+        return facet[0], facet[1], "application/json"
+    return facet.read_figure(rid, analysis, path)
+
+
+def study_figures(ws_root: Path, study: str, limit: "int | None") -> tuple[dict, int]:
+    """``GET /api/study-remote-figures``: a study's gallery of remote figures over at most ``limit`` runs (1..30,
+    default 10). It names no run, so every backend that offers ``artifacts`` is asked (``backends.offering``): the
+    first ``available`` answer wins, else the first answer. Providers off: an empty gallery (``reason:
+    "no-backend"``)."""
+    if not study:
+        return {"error": "study required"}, 400
+    max_runs = max(1, min(int(limit or 10), 30))
+    first: "tuple[dict, int] | None" = None
+    for backend in backends.offering("artifacts"):
+        if backend.artifacts is None:  # offering() returns only backends that declare it
+            continue
+        body, status = backend.artifacts.study_figures(ws_root, study, max_runs)
+        if status == 200 and body.get("available"):
+            return body, status
+        first = first or (body, status)
+    return first or ({"available": False, "reason": "no-backend", "study": study, "sims": []}, 200)
 
 
 def remote_run_status(params: dict, *, ws_root: Path) -> tuple[dict, int]:

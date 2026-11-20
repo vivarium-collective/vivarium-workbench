@@ -52,7 +52,9 @@ _NOT_SMS_ID = "run simulation-Z is not an SMS simulation id; this operation exis
 
 
 def _not_offered(rid, backend, what):
-    return f"run {rid} ran on {backend}; this operation exists only for SMS simulations"
+    # DECLARED: the text is neutral (the base said "...; this operation exists only for SMS simulations"); the wire
+    # literal "not-sms" and the rest of the body are unchanged.
+    return f"run {rid} ran on {backend}, which does not offer {what}"
 
 
 # --- land-artifacts ----------------------------------------------------------------------------------------------
@@ -60,7 +62,9 @@ def _not_offered(rid, backend, what):
 @pytest.mark.parametrize("payload, expected", [
     ({}, (401, {"error": "not authenticated"})),
     ({"simulation_id": 12, "run_id": "r"}, (401, {"error": "not authenticated"})),
-    ({"simulation_id": "7", "run_id": "r"}, (401, {"error": "not authenticated"})),  # a viva-core record
+    # DECLARED: the record is looked up before the login check (base: 401), as remote_run_land already does.
+    ({"simulation_id": "7", "run_id": "r"},
+     (409, _not_sms("7", _not_offered("7", "viva-core", "analysis outputs (land, figures)")))),
 ])
 def test_land_artifacts_unauthenticated(records, asked, landed, inproc_client, monkeypatch, payload, expected):
     monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: False)
@@ -74,7 +78,8 @@ def test_land_artifacts_unauthenticated(records, asked, landed, inproc_client, m
     ({"simulation_id": 12}, (400, {"error": "simulation_id and run_id are required"})),
     ({"simulation_id": 12, "run_id": "  "}, (400, {"error": "simulation_id and run_id are required"})),
     ({"simulation_id": 0, "run_id": "r"}, (400, {"error": "simulation_id and run_id are required"})),
-    ({"simulation_id": "0", "run_id": "r"}, (400, {"error": "simulation_id is required"})),
+    # DECLARED: a zero id is no id, answered by the facet's own 400 (base: "simulation_id is required").
+    ({"simulation_id": "0", "run_id": "r"}, (400, {"error": "simulation_id and run_id are required"})),
     ({"simulation_id": "7", "run_id": "r"},
      (409, _not_sms("7", _not_offered("7", "viva-core", "analysis outputs (land, figures)")))),
     ({"simulation_id": "compose-7", "run_id": "r"},
@@ -117,11 +122,16 @@ def test_land_artifacts_failures(records, asked, inproc_client, monkeypatch, exc
 
 # --- re-run ------------------------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("payload", [{}, {"simulation_id": 12}, {"simulation_id": "7"}])
-def test_rerun_unauthenticated(records, asked, inproc_client, monkeypatch, payload):
+@pytest.mark.parametrize("payload, expected", [
+    ({}, (401, {"error": "not authenticated"})),
+    ({"simulation_id": 12}, (401, {"error": "not authenticated"})),
+    # DECLARED: the record is looked up before the login check (base: 401).
+    ({"simulation_id": "7"}, (409, _not_sms("7", _not_offered("7", "viva-core", "analysis re-runs")))),
+])
+def test_rerun_unauthenticated(records, asked, inproc_client, monkeypatch, payload, expected):
     monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: False)
     r = inproc_client(records).post(RERUN, json=payload)
-    assert (r.status_code, r.json()) == (401, {"error": "not authenticated"})
+    assert (r.status_code, r.json()) == expected
     assert asked == []
 
 
