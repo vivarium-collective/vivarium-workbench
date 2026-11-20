@@ -14,8 +14,10 @@ from vivarium_workbench.lib import composite_stop_views as csv_
 from vivarium_workbench.lib import remote_run_views as rrv
 
 # The refusal literal and the stop note (declared wire changes in I1 are re-pointed here, and only here).
-NOT_OFFERED = "not-sms"
-STOP_NOTE = "Cloud runs continue on GovCloud — track it in the Runs tab."
+# DECLARED (P3 I1): "not-sms" -> "not-offered"; the stop note was "Cloud runs continue on GovCloud — track it in the
+# Runs tab." (neutral text, Jim's decision B).
+NOT_OFFERED = "not-offered"
+STOP_NOTE = "Remote runs continue on their backend — track it in the Runs tab."
 
 
 # --- /api/composite-run/remote-sim-<id>/status -----------------------------------------------------------------
@@ -47,10 +49,11 @@ def test_status_of_a_string_suffix_is_routed_by_its_record(ws, asked):
 
 def test_status_of_another_backends_all_digit_id(ws, asked):
     """A viva-core record whose id happens to be all digits: its backend's status body carries no id, so the
-    response's ``simulation_id`` is the suffix."""
+    response's ``simulation_id`` is the suffix. DECLARED (P3 I1): the suffix is passed on and echoed as the string
+    ``"123"`` (the base ``int()``-ed it to ``123``); SMS's own answer is still its integer (above)."""
     _record(ws, "123", "viva-core", HERE)
     body, status = crv.build_composite_run_status(ws, "remote-sim-123")
-    assert (status, body["simulation_id"]) == (200, 123)
+    assert (status, body["simulation_id"]) == (200, "123")
     assert asked == [("viva", "status")]
 
 
@@ -125,3 +128,45 @@ def test_the_refusal_through_the_route(ws, asked, inproc_client):
     _record(ws, "simulation-V", "viva-core", HERE)
     r = inproc_client(ws).post("/api/remote-run-analysis", json={"simulation_id": "simulation-V"})
     assert (r.status_code, r.json()["reason"], r.json()["phase"]) == (409, NOT_OFFERED, NOT_OFFERED)
+
+
+# --- P3 I1 pins ----------------------------------------------------------------------------------------------------
+
+def test_the_core_spells_the_remote_run_prefix_only_in_ids():
+    """The ``remote-sim-`` prefix is one core constant (``lib/backends/ids.py``); no other core string constant
+    (docstrings included) spells it."""
+    import ast
+    from pathlib import Path
+
+    core = Path(__file__).resolve().parent.parent / "vivarium_workbench"
+    found = []
+    for path in core.rglob("*.py"):
+        rel = path.relative_to(core).as_posix()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and "remote-sim-" in node.value:
+                found.append(rel)
+    assert sorted(found) == ["lib/backends/ids.py"]
+
+
+def test_the_prefix_is_the_external_contract():
+    from vivarium_workbench.lib.backends.ids import REMOTE_RUN_PREFIX, remote_run_id
+
+    assert REMOTE_RUN_PREFIX == "remote-sim-"
+    assert remote_run_id(9) == "remote-sim-9" and remote_run_id("simulation-V") == "remote-sim-simulation-V"
+
+
+def test_the_plugins_cloud_dispatch_uses_the_core_prefix():
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "vivarium_workbench_sms" / "cloud_dispatch.py").read_text()
+    assert '"remote-sim-' not in src and "remote_run_id(sim_db_id)" in src
+
+
+def test_the_study_page_accepts_both_refusal_literals():
+    """The browser accepts ``not-offered`` and the pre-I1 ``not-sms`` (a page loaded before the upgrade, or a server
+    behind it), in both places it reads the refusal phase."""
+    from pathlib import Path
+
+    detail = (Path(__file__).resolve().parent.parent / "vivarium_workbench" / "static" / "study-detail.js").read_text()
+    assert "d.phase === 'other-backend' || d.phase === 'not-offered' || d.phase === 'not-sms'" in detail
+    assert "d.phase !== 'other-backend' && d.phase !== 'not-offered' && d.phase !== 'not-sms'" in detail

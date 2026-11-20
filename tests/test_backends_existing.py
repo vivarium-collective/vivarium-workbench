@@ -131,7 +131,7 @@ def test_sms_only_operations_refuse_a_non_sms_or_foreign_run(ws, asked, fn, monk
     }[fn]
     _record(ws, "7", "viva-core", HERE)
     body, status = call("7")
-    assert status == 409 and body["reason"] == "not-sms" and body["error"] and asked == []
+    assert status == 409 and body["reason"] == "not-offered" and body["error"] and asked == []
     _record(ws, "8", "sms-legacy", ELSEWHERE, dep="prod-elsewhere")
     assert call("8")[1] == 409 and asked == []
 
@@ -201,7 +201,7 @@ def test_the_pages_send_where_the_run_went():
     detail = (static / "study-detail.js").read_text(encoding="utf-8")
     assert "{ simulation_id: runId, study: studyName() }" in detail  # cancel
     assert "'&study=' + encodeURIComponent(studyName() || '')" in detail  # chain progress
-    assert "d.phase === 'other-backend' || d.phase === 'not-sms'" in detail  # rendered, no Stop button
+    assert "d.phase === 'other-backend' || d.phase === 'not-offered' || d.phase === 'not-sms'" in detail
     sim = (static / "sim-table.js").read_text(encoding="utf-8")
     assert sim.count("_rowWhere(btn)") >= 3 and "_whereQuery(where)" in sim
 

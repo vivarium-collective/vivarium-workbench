@@ -93,7 +93,7 @@ def test_the_declared_ordering_record_before_login(ws, asked, monkeypatch):
     for call in (lambda: rrv.remote_run_land_artifacts(ws, {"simulation_id": "simulation-V", "run_id": "r"}),
                  lambda: rrv.remote_run_analysis(ws, {"simulation_id": "simulation-V"})):
         body, status = call()
-        assert (status, body["reason"], body["terminal"]) == (409, "not-sms", True)
+        assert (status, body["reason"], body["terminal"]) == (409, "not-offered", True)
     assert asked == []
 
 

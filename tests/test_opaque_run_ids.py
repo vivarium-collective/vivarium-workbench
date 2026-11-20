@@ -34,7 +34,7 @@ def test_the_figure_routes_refuse_a_string_id_with_409_not_422(ws, asked, no_sms
     res = inproc_client(ws).get(url.format(id=rid))
     assert res.status_code == 409, res.text
     body = res.json()
-    assert body["reason"] == "not-sms" and body["terminal"] is True and body["simulation_id"] == rid
+    assert body["reason"] == "not-offered" and body["terminal"] is True and body["simulation_id"] == rid
     assert asked == []
 
 
@@ -63,7 +63,7 @@ def test_an_sms_record_whose_id_is_not_an_integer_is_refused(ws, asked):
     """A record naming SMS with a non-integer id is refused, not a 500 from the callers' int()."""
     _record(ws, "simulation-Z", "sms-legacy", HERE)
     body, status = rrv.analysis_figures(ws, "simulation-Z", study="s")
-    assert status == 409 and body["reason"] == "not-sms"
+    assert status == 409 and body["reason"] == "not-offered"
     assert rrv.remote_run_analysis(ws, {"simulation_id": "simulation-Z", "study": "s"})[1] == 409
     assert rrv.remote_run_land_artifacts(ws, {"simulation_id": "simulation-Z", "run_id": "r1", "study": "s"})[1] == 409
     assert asked == []
