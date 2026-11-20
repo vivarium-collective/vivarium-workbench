@@ -4969,6 +4969,7 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
    the "▸ Investigation graph" collapsed bar. No blue. */
 .inv-header-bar { gap: 8px; flex-wrap: wrap; }
 .inv-header-bar .btn-mini,
+.inv-row-shortcuts .btn-mini,
 .inv-header-bar .aig-na-chip {
   font-size: 0.75em;
   font-weight: 600;
@@ -4985,9 +4986,12 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 }
 .inv-header-bar .aig-na-chip { display: inline-flex; align-items: center; gap: 5px; }
 .inv-header-bar .btn-mini:hover,
+.inv-row-shortcuts .btn-mini:hover,
 .inv-header-bar .aig-na-chip:hover { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
-.inv-header-bar .btn-mini:disabled { opacity: 0.55; cursor: default; }
-.inv-header-bar .btn-mini:disabled:hover { background: #f8fafc; color: #475569; border-color: #e5e7eb; }
+.inv-header-bar .btn-mini:disabled,
+.inv-row-shortcuts .btn-mini:disabled { opacity: 0.55; cursor: default; }
+.inv-header-bar .btn-mini:disabled:hover,
+.inv-row-shortcuts .btn-mini:disabled:hover { background: #f8fafc; color: #475569; border-color: #e5e7eb; }
 /* Keep only a quiet status tint on the chip's glyph/text so the pill still reads
    as a status without breaking the shared shape. */
 .inv-header-bar .aig-na-chip.aig-na-clear { color: #166534; }
@@ -4996,10 +5000,12 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 .inv-header-bar .aig-na-chip.aig-na-flag.aig-na-high { color: #991b1b; }
 #ws-actions { display: inline-flex; align-items: center; gap: 8px; }
 :root[data-theme="dark"] .inv-header-bar .btn-mini,
+:root[data-theme="dark"] .inv-row-shortcuts .btn-mini,
 :root[data-theme="dark"] .inv-header-bar .aig-na-chip {
   background: rgba(148,163,184,0.12); border-color: rgba(148,163,184,0.3); color: #cbd5e1;
 }
 :root[data-theme="dark"] .inv-header-bar .btn-mini:hover,
+:root[data-theme="dark"] .inv-row-shortcuts .btn-mini:hover,
 :root[data-theme="dark"] .inv-header-bar .aig-na-chip:hover { background: rgba(148,163,184,0.22); color: #e2e8f0; }
 
 /* ── Dockable investigation graph (while a study is embedded) ──
