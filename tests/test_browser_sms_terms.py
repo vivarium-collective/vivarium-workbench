@@ -19,15 +19,11 @@ TERMS = ("sms-api", "GovCloud", "SMS_API_BASE", "smsvpctest", "sms-launch")
 
 #: The counts on the base of step P3 F0 (2026-11-20). Lower a number when you remove terms (optional).
 BASELINE: dict[str, dict[str, int]] = {
-    "static/branch-source.js": {"sms-api": 15, "SMS_API_BASE": 2},
     "static/configure-run.js": {"sms-api": 1, "sms-launch": 1},
     "static/data-source.js": {"sms-api": 1, "GovCloud": 1},
     "static/progress-track.js": {"sms-api": 1},
-    "static/session.js": {"sms-api": 1},
     "static/sms-launch.js": {"sms-api": 1},
     "static/walkthrough.js": {"sms-api": 2, "GovCloud": 2, "sms-launch": 1},
-    "static/workspace-picker.js": {"sms-api": 4},
-    "templates/index.html.j2": {"sms-api": 2, "GovCloud": 1},
 }
 
 _SMS_LAUNCH_TAG = re.compile(r'<script[^>]*\bsrc="[^"]*sms-launch\.js[^"]*"[^>]*>\s*</script>')

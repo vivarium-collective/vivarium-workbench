@@ -107,7 +107,7 @@
 
   // Spawn bootstrap (session-per-tab slice 3). Opening a workspace in a new tab is
   // window.open('/?workspace=<catalog-name>') for a LOCAL workspace, or
-  // window.open('/?build=<simulator_id>') for an sms-api REMOTE build. When THIS
+  // window.open('/?build=<simulator_id>') for a REMOTE build. When THIS
   // tab loads with either param it must (a) take its OWN session — never the id a
   // sibling tab's sessionStorage was copied into when the browser cloned it — so
   // we force-mint fresh; (b) bind that session to the source (by name → switch, or
@@ -192,8 +192,38 @@
       stripBuildParam();
       if (r && r.ok && window.location && typeof window.location.reload === "function") {
         window.location.reload();
-      } else if (!r || !r.ok) {
+        return r;
+      }
+      var noBackend = function () {
+        // No build backend on this workbench (step P3 F3): the builds routes are
+        // a provider's, so without one switch-build does not exist. Say so,
+        // rather than a bare status code. (Deliberately not read from the
+        // declared features: the route's own answer is the authority.)
+        bindFailed("Can't open build " + build + " — this workbench has no build backend.");
+      };
+      var generic = function () {
         bindFailed("Failed to open build — /api/source/switch-build returned " + (r ? r.status : "no response"));
+      };
+      if (r && r.status === 405) {
+        noBackend();
+      } else if (r && r.status === 404) {
+        // A 404 is ambiguous: FastAPI's bare {"detail": "Not Found"} means the
+        // route is absent (no build backend), but with a provider on, the route
+        // itself answers 404 {"error": "build <id> not found"} for an unknown
+        // build (e.g. a stale ?build= link). Only the former is "no backend".
+        var readBody = (typeof r.json === "function")
+          ? Promise.resolve().then(function () { return r.json(); }).catch(function () { return null; })
+          : Promise.resolve(null);
+        return readBody.then(function (body) {
+          if (body && typeof body === "object" && body.error) {
+            bindFailed("Can't open build " + build + " — " + body.error);
+          } else {
+            noBackend();
+          }
+          return r;
+        });
+      } else if (!r || !r.ok) {
+        generic();
       }
       return r;
     }).catch(function () {

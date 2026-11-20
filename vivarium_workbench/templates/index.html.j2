@@ -1897,10 +1897,11 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         <div>
           <h4>Source — where this workspace runs</h4>
           <ul>
-            <li><strong>Local</strong> is a workspace checked out on this machine; <strong>Cloud</strong> is a build registered on the GovCloud sms-api server.</li>
-            <li>Pick a <strong>Repo / Branch / Commit</strong> (or build), then <strong>Open ↗</strong> to open it in a new tab (instant, non-destructive), or <strong>Use this environment</strong> to re-point <em>this</em> tab to it — that downloads the cloud environment's workspace the first time (a minute or two; cached builds are instant). You don't need to use the cloud environment to view results.</li>
-            <li><strong>Build via sms-api</strong> registers a branch's current HEAD as a new cloud environment. <strong>Run locally</strong> gives you a command to recreate this exact source on your own machine.</li>
-            <li>In the build list, chips flag which build is <strong>in workspace ✓</strong>, on your <strong>workspace commit</strong>, or the <strong>latest</strong>.</li>
+            <li><strong>Local</strong> is a workspace checked out on this machine<span data-feature="builds">; <strong>Cloud</strong> is a build registered on the remote backend</span>.</li>
+            <li>Pick a <strong>Repo / Branch / Commit</strong><span data-feature="builds"> (or build)</span>, then <strong>Open ↗</strong> to open it in a new tab (instant, non-destructive), or <strong>Use this environment</strong> to re-point <em>this</em> tab to it<span data-feature="builds"> — that downloads the cloud environment's workspace the first time (a minute or two; cached builds are instant). You don't need to use the cloud environment to view results</span>.</li>
+            <li data-feature="builds"><strong>Build on cloud</strong> registers a branch's current HEAD as a new cloud environment on the remote backend.</li>
+            <li><strong>Run locally</strong> gives you a command to recreate this exact source on your own machine.</li>
+            <li data-feature="builds">In the build list, chips flag which build is <strong>in workspace ✓</strong>, on your <strong>workspace commit</strong>, or the <strong>latest</strong>.</li>
           </ul>
         </div>
         <div>

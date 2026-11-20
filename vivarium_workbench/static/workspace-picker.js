@@ -44,7 +44,7 @@
     });
   }
 
-  // Reduce sms-api's flat build history (GET /api/source/builds) to one row
+  // Reduce the remote backend's flat build history (GET /api/source/builds) to one row
   // per distinct repo — its MOST RECENT build — normalized into the same
   // {name, label, status, path} shape a local workspace row has, so it can
   // share render()/openWs()/pin/recent-use machinery. Older builds of the
@@ -135,9 +135,47 @@
     try { localStorage.setItem("viv.wsShowAll", v ? "1" : "0"); } catch (e) { /* private mode */ }
   }
 
+  // The dropdown's two sources, fetched in parallel: local catalog workspaces
+  // (GET /api/workspaces) and remote builds (GET /api/source/builds). Remote
+  // builds are the `builds` feature (docs/backend-adapters.md §2.1, step P3 F3):
+  // when the declared features are KNOWN and lack it, no builds request is sent
+  // (it would only 404). Unknown features (a failed fetch, or no
+  // BackendFeatures on the page) behave as before: ask, and treat a failure as
+  // "no builds". The wait on the features is bounded (FEATURES_WAIT_MS, the
+  // same as the Source panel's): no answer by then counts as unknown, so the
+  // builds request goes out as before. The local rows never wait on the
+  // features: `onLocal(wsData)` (optional) fires as soon as /api/workspaces
+  // answers. Resolves [wsData|null, buildsData|null]; never rejects.
+  var FEATURES_WAIT_MS = 1500;
+  function loadSources(fetchImpl, features, onLocal, waitMs) {
+    function getJson(url) {
+      return Promise.resolve().then(function () { return fetchImpl(url); })
+        .then(function (r) { return r && r.ok ? r.json() : null; })
+        .catch(function () { return null; });
+    }
+    var wait = (typeof waitMs === "number") ? waitMs : FEATURES_WAIT_MS;
+    var timer = null;
+    var ready = (features && typeof features.ready === "function")
+      ? Promise.race([
+          Promise.resolve().then(function () { return features.ready(); }).catch(function () { return null; }),
+          new Promise(function (res) { timer = setTimeout(function () { res(null); }, wait); }),
+        ]).then(function (f) { if (timer) clearTimeout(timer); return f; })
+      : Promise.resolve(null);
+    var wsFetch = getJson("/api/workspaces").then(function (ws) {
+      if (typeof onLocal === "function") { try { onLocal(ws); } catch (e) { /* render error: ignore */ } }
+      return ws;
+    });
+    var buildsFetch = ready.then(function (f) {
+      if (f && f.known && (f.features || []).indexOf("builds") === -1) return null;
+      return getJson("/api/source/builds");
+    });
+    return Promise.all([wsFetch, buildsFetch]);
+  }
+
   var api = { filterWorkspaces: filterWorkspaces, statusMeta: statusMeta,
               normalizeRemoteBuilds: normalizeRemoteBuilds,
-              collapseByRepo: collapseByRepo, repoKey: _repoKey };
+              collapseByRepo: collapseByRepo, repoKey: _repoKey,
+              loadSources: loadSources };
   if (typeof module !== "undefined" && module.exports) { module.exports = api; return; }
   if (typeof window !== "undefined") window.vivWorkspacePicker = api;
 
@@ -285,7 +323,7 @@
           li.appendChild(tail);
         } else {
           // Local workspaces get two actions (Switch this tab / Open in a new
-          // tab); remote sms-api builds are session-per-tab only (branch-source.js
+          // tab); remote builds are session-per-tab only (branch-source.js
           // established this: window.open('/?build=<id>') spawns a fresh
           // per-tab session — there is no in-place "switch this tab" for a
           // remote build), so they get Open ↗ only.
@@ -328,7 +366,7 @@
         li.appendChild(pin);
         // Remove (Forget) — drop an unwanted/stale local workspace from the
         // global catalog (~/.pbg/workspaces.json), so the dropdown itself lets you
-        // prune it. Not for the current workspace or remote sms-api builds (those
+        // prune it. Not for the current workspace or remote builds (those
         // are not catalog entries). Uses the existing /api/workspaces/forget.
         if (!isCur && !isRemote && ws.path) {
           var forget = document.createElement("button");
@@ -458,17 +496,18 @@
       listEl.appendChild(loading);
       searchEl.focus();
 
-      // Local catalog workspaces + remote sms-api builds, fetched in parallel
-      // and merged into one list — previously remote builds were reachable
-      // only through the separate Source panel, which a user switching
-      // workspaces had no reason to know existed.
-      var wsFetch = fetch("/api/workspaces").then(function (r) { return r && r.ok ? r.json() : null; })
-        .catch(function () { return null; });
-      var buildsFetch = fetch("/api/source/builds").then(function (r) { return r && r.ok ? r.json() : null; })
-        .catch(function () { return null; });
-      Promise.all([wsFetch, buildsFetch]).then(function (results) {
+      // Local catalog workspaces + remote builds, fetched in parallel and
+      // merged into one list — previously remote builds were reachable only
+      // through the separate Source panel, which a user switching workspaces
+      // had no reason to know existed. No builds request without `builds`.
+      // The local rows paint as soon as they arrive; the remote rows join them.
+      function localOf(wsData) { return (wsData && wsData.workspaces) || wsData || []; }
+      loadSources(function (u) { return fetch(u); }, window.BackendFeatures, function (wsData) {
+        all = localOf(wsData);
+        render();
+      }).then(function (results) {
         var wsData = results[0], buildsData = results[1];
-        var local = (wsData && wsData.workspaces) || wsData || [];
+        var local = localOf(wsData);
         var remote = normalizeRemoteBuilds(buildsData && buildsData.builds);
         all = local.concat(remote);
         var cur = local.filter(function (w) { return w.status === "current"; })[0];
