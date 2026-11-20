@@ -582,22 +582,25 @@ def _apply_readonly_filter(app: FastAPI, allowed: "Optional[frozenset[str]]" = N
     app.router.routes[:] = kept
 
 
-def _include_provider_routers(app: FastAPI) -> frozenset[str]:
+def _include_provider_routers(app: FastAPI) -> tuple[frozenset[str], frozenset[str]]:
     """Include each backend provider's routes (``Provider.router``, docs/backend-adapters.md §2.2) and return the
-    paths they declare read-only-safe. Called once all the core's routes are registered and before the SPA catch-all
-    (Starlette matches in registration order, so the catch-all would otherwise answer their GETs).
+    paths they declare read-only-safe and the paths they declare the built-in AI must never call. Called once all the
+    core's routes are registered and before the SPA catch-all (Starlette matches in registration order, so the
+    catch-all would otherwise answer their GETs).
 
     Refuses (``RuntimeError``) a (path, method) the app already serves, since one of the two would be silently
-    shadowed, and a ``readonly_allowed`` path that is not one of the router's own routes, since a plugin must not
-    re-enable a core route that read-only mode drops. The app-level dependencies, the middleware and the exception
-    handlers apply to the included routes as to the core's. A provider that fails to load raises here: a broken
-    plugin must not look absent."""
+    shadowed, a ``readonly_allowed`` path that is not one of the router's own routes, since a plugin must not
+    re-enable a core route that read-only mode drops, and an ``ai_excluded`` path that is not one of them, since a
+    plugin speaks only for its own routes (a typo there would leave a pushing route reachable). The app-level
+    dependencies, the middleware and the exception handlers apply to the included routes as to the core's. A provider
+    that fails to load raises here: a broken plugin must not look absent."""
     from vivarium_workbench.lib.backends import provider as _provider
 
     def served(routes: list) -> set[tuple[str, str]]:
         return {(r.path, m) for r in routes if getattr(r, "methods", None) for m in r.methods}
 
     allowed: set[str] = set()
+    ai_excluded: set[str] = set()
     for p in _provider.providers():
         pr = p.router()
         if pr is None:
@@ -611,10 +614,15 @@ def _include_provider_routers(app: FastAPI) -> frozenset[str]:
         if foreign:
             raise RuntimeError(f"provider {p.name!r} declares read-only-safe paths that are not its own routes: "
                                f"{sorted(foreign)}")
+        foreign = set(pr.ai_excluded) - {path for path, _ in own}
+        if foreign:
+            raise RuntimeError(f"provider {p.name!r} declares AI-excluded paths that are not its own routes: "
+                               f"{sorted(foreign)}")
         for route in pr.router.routes:
             _add_route_like(app, route, p.name)
         allowed |= pr.readonly_allowed
-    return frozenset(allowed)
+        ai_excluded |= pr.ai_excluded
+    return frozenset(allowed), frozenset(ai_excluded)
 
 
 def _add_route_like(app: FastAPI, route: object, provider: str) -> None:
@@ -8872,9 +8880,11 @@ def create_app() -> FastAPI:
 
     # Routes only a backend provider serves (step P2 Runs a2): after every core
     # route, before the catch-all; refuses a clash. The effective read-only
-    # allowlist (core + providers) is the app's own, never the module global's.
-    app.state.readonly_allowed_mutations = (
-        frozenset(_READONLY_ALLOWED_MUTATIONS) | _include_provider_routers(app))
+    # allowlist (core + providers) is the app's own, never the module global's;
+    # so is what the providers say the built-in AI must never call (Routes Rt2:
+    # lib/ai_tools adds it to its own EXCLUDED_PATHS; not imported here, [chat] is optional).
+    provider_readonly, app.state.provider_ai_excluded = _include_provider_routers(app)
+    app.state.readonly_allowed_mutations = frozenset(_READONLY_ALLOWED_MUTATIONS) | provider_readonly
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)

@@ -84,7 +84,8 @@ def test_registry_installs_are_now_reachable_but_pushing_and_rebinding_are_not(t
                  "/api/system-deps-install"):
         assert ("POST", path) in served, f"{path} should be reachable (approval-gated)"
     for path in ("/api/branch/push", "/api/work-push", "/api/work-create-pr",     # the one exception: pushing
-                 "/api/work-link-branch", "/api/remote-run-start", "/api/remote-run-build",   # ...also push
+                 "/api/work-link-branch", "/api/remote-run-start", "/api/remote-run-build",   # ...also push (the
+                 # remote-run pair is the SMS provider's declaration, ProviderRouter.ai_excluded; absent if off)
                  "/api/source/switch", "/api/workspaces/start", "/api/auth/github/start",
                  "/api/ai/credentials", "/api/chat/turn", "/api/events"):
         assert not any(p == path for _, p in served), f"{path} must stay unreachable"
@@ -94,14 +95,17 @@ def test_registry_installs_are_now_reachable_but_pushing_and_rebinding_are_not(t
 def test_every_module_that_can_push_is_accounted_for():
     """Tripwire, not proof: the exclusion list is per-route, so a NEW code path that runs
     ``git push`` would silently become reachable. This fails when a lib module gains (or loses) a
-    push site, forcing whoever added it to decide whether its route must join EXCLUDED_PATHS.
-    Reviewed 2026-09: branch_push/work_push/work_create_pr/work_link_branch/remote-run-start/
-    remote-run-build are excluded; ``remote_push_and_sha`` callers listed here are covered by that."""
+    push site, forcing whoever added it to decide whether its route must join EXCLUDED_PATHS (a core
+    route) or its provider's ``ProviderRouter.ai_excluded`` (a plugin route; step P2 Routes Rt2).
+    Reviewed 2026-09: branch_push/work_push/work_create_pr/work_link_branch are excluded by EXCLUDED_PATHS;
+    remote-run-start/remote-run-build by the SMS provider's ``routes.AI_EXCLUDED`` (with providers off those
+    routes do not exist at all); ``remote_push_and_sha`` callers listed here are covered by that."""
     import re
     pat = re.compile(r"""["']push["']\s*[,\]]|remote_push_and_sha|remote_commit_and_push|\bgit\b[^\n]*\bpush\b""")
     # prose mentions only; compose_entry.py runs read-only git and has no route, its messages just tell a person to push
     # the SMS plugin's routes.py (step P2 Runs a2) likewise: a route docstring says "No git push"; the pushes are its
-    # views' (remote_pipeline_views.py, listed below) and EXCLUDED_PATHS covers their routes by path
+    # views' (remote_pipeline_views.py, listed below) and the provider's routes.AI_EXCLUDED covers their routes by
+    # path (step P2 Routes Rt2; the /api/source/* build routes by ai_tools' core /api/source/ prefix)
     skip = {"models.py", "generate_ts.py", "ai_chat.py", "ai_tools.py", "compose_entry.py", "routes.py"}
     # step P1b (deliberate change): the SMS plugin's modules moved out of lib/; scan them too, or this tripwire
     # would pass without looking at them.

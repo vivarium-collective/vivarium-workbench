@@ -127,7 +127,7 @@ class SmsProvider:
         app."""
         from vivarium_workbench_sms import routes  # lazy, like backends()
 
-        return ProviderRouter(routes.build_router(), routes.READONLY_ALLOWED)
+        return ProviderRouter(routes.build_router(), routes.READONLY_ALLOWED, ai_excluded=routes.AI_EXCLUDED)
 
 
 PROVIDER = SmsProvider()

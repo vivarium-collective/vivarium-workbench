@@ -66,11 +66,13 @@ EXCLUDED_PATH_PREFIXES = (
     "/api/ai/",
     "/api/events",
 )
+# A backend provider's own routes that must never be called are its to declare
+# (``ProviderRouter.ai_excluded``; the app keeps their union on ``app.state.provider_ai_excluded``),
+# and ``excluded_paths(app)`` adds them to these.
 EXCLUDED_PATHS = frozenset({
     "/api/branch/push", "/api/work-push", "/api/work-create-pr",
-    # These also `git push` (work-link-branch defaults push=true; the remote-run build/start
-    # pipelines push the branch to origin before building) — same rule: never.
-    "/api/work-link-branch", "/api/remote-run-start", "/api/remote-run-build",
+    # This also `git push`es (work-link-branch defaults push=true) — same rule: never.
+    "/api/work-link-branch",
     "/api/simulation-run-download", "/api/study-analysis-zip",
     "/api/composite-run/{run_id}/download",
     # Copies any file the server can read into the workspace (where it is served back) — a user's own action.
@@ -108,9 +110,15 @@ def make_client(app: FastAPI) -> httpx.AsyncClient:
     )
 
 
-def is_excluded(path: str, tags: list[str] | tuple[str, ...], method: str = "get") -> bool:
+def excluded_paths(app: FastAPI) -> frozenset[str]:
+    """``EXCLUDED_PATHS`` plus what the app's backend providers declare (``ProviderRouter.ai_excluded``)."""
+    return EXCLUDED_PATHS | getattr(app.state, "provider_ai_excluded", frozenset())
+
+
+def is_excluded(path: str, tags: list[str] | tuple[str, ...], method: str = "get",
+                paths: frozenset[str] = EXCLUDED_PATHS) -> bool:
     return (
-        path in EXCLUDED_PATHS
+        path in paths
         or path.startswith(EXCLUDED_PATH_PREFIXES)
         or bool(EXCLUDED_TAGS.intersection(tags))
         or (method.lower() == "get" and bool(EXCLUDED_GET_TAGS.intersection(tags)))
@@ -126,13 +134,14 @@ def build_index(app: FastAPI) -> dict[str, dict[str, Any]]:
     """``operationId -> {operation_id, method, path, tag, summary, mutating, op}``
     for every non-excluded operation the app currently serves."""
     index: dict[str, dict[str, Any]] = {}
+    paths = excluded_paths(app)
     for path, item in app.openapi().get("paths", {}).items():
         for method in _METHODS:
             op = item.get(method)
             if not op:
                 continue
             tags = op.get("tags") or []
-            if is_excluded(path, tags, method):
+            if is_excluded(path, tags, method, paths):
                 continue
             oid = op["operationId"]
             index[oid] = {
@@ -697,7 +706,7 @@ def capabilities(app: FastAPI) -> dict[str, Any]:
         "writes": sum(1 for e in idx.values() if e["mutating"]),
         "excluded": [*(f"tag: {t}" for t in sorted(EXCLUDED_TAGS)),
                      *(f"tag: {t} (reads)" for t in sorted(EXCLUDED_GET_TAGS)),
-                     *sorted(EXCLUDED_PATH_PREFIXES), *sorted(EXCLUDED_PATHS)],
+                     *sorted(EXCLUDED_PATH_PREFIXES), *sorted(excluded_paths(app))],
     }
 
 

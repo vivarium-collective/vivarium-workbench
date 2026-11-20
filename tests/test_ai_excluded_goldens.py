@@ -68,3 +68,40 @@ def test_with_providers_on_the_ai_index_leaves_out_what_the_base_did():
 def test_with_providers_on_the_capabilities_popover_lists_what_the_base_did():
     app = appmod.create_app()
     assert ai_tools.capabilities(app)["excluded"] == CAPABILITIES_EXCLUDED
+
+
+# --- declared change: with providers off the plugin's two paths are absent, so they leave the excluded list ---------
+
+def test_with_providers_off_the_plugin_paths_leave_the_excluded_list(monkeypatch):
+    """Declared (step P2 Routes Rt2): with providers off the SMS routes do not exist, so their paths are not in the
+    popover's ``excluded`` list either. Everything the core excludes stays excluded."""
+    from vivarium_workbench.lib.backends import provider as provider_mod
+
+    monkeypatch.setenv(provider_mod.PROVIDERS_ENV, "none")
+    backends.reset_registry()
+    app = appmod.create_app()
+    assert app.state.provider_ai_excluded == frozenset()
+    sms = {"/api/remote-run-start", "/api/remote-run-build"}
+    assert ai_tools.capabilities(app)["excluded"] == [e for e in CAPABILITIES_EXCLUDED if e not in sms]
+    plugin_ops = {("POST", p) for p in sms} | {("GET", "/api/source/builds"), ("POST", "/api/source/build-remote"),
+                                              ("POST", "/api/source/switch-build")}
+    assert _left_out(app) == [op for op in EXCLUDED_OPERATIONS if op not in plugin_ops]
+
+
+def test_with_providers_on_the_plugin_declares_its_pushing_routes():
+    app = appmod.create_app()
+    assert app.state.provider_ai_excluded == frozenset({"/api/remote-run-start", "/api/remote-run-build"})
+
+
+def test_ai_tools_names_no_plugin_route():
+    """The plugin's paths are its own declaration (``ProviderRouter.ai_excluded``), not ``ai_tools``' literals."""
+    import inspect
+
+    from vivarium_workbench_sms import routes
+
+    text = inspect.getsource(ai_tools)
+    assert "/api/remote-run-" not in text
+    plugin_paths = {r.path for r in routes.build_router().routes}
+    assert plugin_paths >= routes.AI_EXCLUDED
+    for path in plugin_paths:
+        assert f'"{path}"' not in text, path
