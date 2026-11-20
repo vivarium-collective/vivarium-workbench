@@ -58,6 +58,7 @@ async function load(features, opts) {
     DataSource: {
       loadSimulations(o) {
         log.push(o === undefined ? 'all' : (o.includeRemote ? 'remote' : 'local'));
+        if (o && o.includeRemote && opts.remoteError) return Promise.resolve({ error: 'unreachable' });
         return Promise.resolve({ simulations: [] });
       },
     },
@@ -82,15 +83,18 @@ async function run() {
   const LISTING = { features: ['analyses', 'artifacts', 'builds', 'listing', 'sms-launch'], known: true };
   const NONE = { features: [], known: true };
   const UNKNOWN = { features: [], known: false };
-  const PHASE2 = { log: ['local', 'remote'], statuses: ['· loading GovCloud runs…', ''] };
+  const PHASE2 = { log: ['local', 'remote'], statuses: ['· loading remote runs…', ''] };
   const PHASE1 = { log: ['local'], statuses: [] };
 
   assert.deepStrictEqual(await load(LISTING), PHASE2, 'listing offered → phase 2');
-  assert.deepStrictEqual(await load(NONE), PHASE2, 'no listing (known) → no phase 2, no remote status');
-  assert.deepStrictEqual(await load({ features: ['builds'], known: true }), PHASE2, 'other features only → no phase 2');
+  assert.deepStrictEqual(await load(NONE), PHASE1, 'no listing (known) → no phase 2, no remote status');
+  assert.deepStrictEqual(await load({ features: ['builds'], known: true }), PHASE1, 'other features only → no phase 2');
   assert.deepStrictEqual(await load(UNKNOWN), PHASE2, 'unknown features → as before');
   assert.deepStrictEqual(await load('absent'), PHASE2, 'no BackendFeatures → as before');
   assert.deepStrictEqual(await load('reject'), PHASE2, 'a rejected ready() → as before');
+  assert.deepStrictEqual(await load(LISTING, { remoteError: true }),
+    { log: ['local', 'remote'], statuses: ['· loading remote runs…', '· remote runs unavailable'] },
+    'phase 2 failed → the neutral unavailable line');
   assert.deepStrictEqual(await load(LISTING, { snapshot: true }), { log: ['all'], statuses: [] },
     'snapshot → one load, no phase 2');
 
