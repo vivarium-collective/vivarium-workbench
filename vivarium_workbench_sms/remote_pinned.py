@@ -74,7 +74,7 @@ def session_build(ws_root: Path) -> SessionBuild | None:
         return None
     try:
         data = json.loads(meta_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except Exception:  # noqa: BLE001 - never raises on the stamp (OSError, ValueError, RecursionError on deep nesting)
         data = None
     if not isinstance(data, dict):
         return SessionBuild(readable=False, id=None, repo_url=None, commit=None, branch=None)

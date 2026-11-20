@@ -134,7 +134,7 @@ def test_session_build_or_pin_takes_sms_without_asking_the_backend(world, named,
 
 
 def test_session_build_is_checked_before_the_pin(world, monkeypatch):
-    """``run_core.run_target_for`` short-circuits before ``is_pinned_enabled`` is asked."""
+    """``SmsProvider.session_build`` short-circuits before ``is_pinned_enabled`` is asked."""
     configure, _ = world
     ws = configure("none", session=True)
 

@@ -117,7 +117,7 @@ def test_with_providers_off_a_session_build_or_pin_does_not_pick_sms(providers_o
     from vivarium_workbench_sms import remote_pinned
 
     if session_build:
-        (tmp_path / ".viv-build.json").write_text("{}")  # any stamp: run_core.run_target_for says "deployment"
+        (tmp_path / ".viv-build.json").write_text("{}")  # any stamp: SmsProvider.session_build claims it
     monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: pinned)
     monkeypatch.setattr(backends, "named", lambda: None)
     assert backends.select(tmp_path) is None

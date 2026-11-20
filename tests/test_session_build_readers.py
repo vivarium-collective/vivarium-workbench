@@ -333,3 +333,13 @@ def test_no_core_string_literal_names_the_session_build_stamp():
     assert not offenders, f"core code names the session-build stamp (ask backends.session_build): {offenders}"
     # the scan is live: the one allowed file does name it
     assert ".viv-build.json" in (root / "lib" / "remote_run.py").read_text(encoding="utf-8")
+
+
+def test_a_deeply_nested_stamp_is_unreadable_not_an_error(tmp_path):
+    """``Provider.session_build`` never raises: a stamp nested past the parser's recursion limit is ``readable=False``
+    (review of wb#1680; the base's readers caught it with ``except Exception``)."""
+    from vivarium_workbench_sms import remote_pinned
+
+    (tmp_path / ".viv-build.json").write_text("[" * 100000 + "]" * 100000)
+    sb = remote_pinned.session_build(tmp_path)
+    assert sb is not None and sb.readable is False
