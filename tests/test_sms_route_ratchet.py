@@ -1,16 +1,11 @@
-"""Ratchet: the CORE's calls to the SMS-specific viva-api surfaces may shrink, never grow.
+"""Ban: the CORE calls no SMS-specific viva-api method and spells no SMS route (docs/backend-adapters.md §2.4).
 
-docs/backend-adapters.md §2.4 (step P1b, deliberate change): SMS code lives in the plugin package
-``vivarium_workbench_sms``, which may call these surfaces freely. The workbench core (``vivarium_workbench``) may
-call them only from the mixed modules listed in ``ALLOWED`` below -- the modules step P2 splits -- and that list
-only shrinks; it is empty when P2 ends.
+SMS code lives in the plugin package ``vivarium_workbench_sms``, which may call these surfaces freely. Steps P1b and
+P2 ratcheted the core's remaining callers down to none; at the end of P2 (Routes Rt3) the ratchet became this ban:
 
-* a core module calling one of these methods that is not listed, or a listed one calling one it did not call
-  before, fails -- put the call in the plugin (behind a backend facet) instead;
-* a listed call that is GONE also fails, so the list is shrunk in the same PR that removes the call.
-
-Only the plugin may spell an SMS route; a core module that does (a ``client._get("/api/v1/...")`` that bypasses
-the methods) is pinned by ``ROUTE_LITERALS`` the same way.
+* a core module referring to one of ``SMS_METHODS`` fails -- put the call in the plugin, behind a backend facet;
+* a core module spelling a viva-api route (``/api/v1``, ``/core/v1``, ``/compose/v1``, ``/env-worker/v1`` or any
+  ``/viva/v1``) fails -- the core reaches viva-api only through a provider's backend.
 
 What counts as a use: any reference to the method by name -- a call, a bound method passed on
 (``status_of or client.compose_status``), or ``getattr(client, "compose_status")``. ``SMS_METHODS`` itself
@@ -57,30 +52,15 @@ NOT_SMS_RECEIVERS = frozenset({
     ("lib.ai_views", "ai_tools"),            # the AI chat's own capabilities() (a module function)
 })
 
-#: The core's remaining callers (step P1b: the plugin's own modules are no longer listed -- a move, not a removal
-#: of calls). Shrink this as step P2 lands; never grow it.
-ALLOWED: dict[str, frozenset[str]] = {
-}
-
-#: Every SMS method any module calls, as of step 1a. With PINNED_PAIRS below, this keeps a move between modules
-#: (a new ALLOWED key) from also slipping a new call in. Only ever remove names from it.
-PINNED_UNION: frozenset[str] = frozenset({
-    "analysis_status", "cancel_simulation",
-    "download_workspace", "get_simulation",
-    "list_analyses", "list_branch_builds", "list_build_simulations", "list_simulators", "register_branch_head",
-    "simulation_chain_progress", "simulation_status",
-    "simulator_commit", "simulator_status", "upload_simulator",
-})
-
-#: SMS route literals outside the client: module -> the routes it spells.
-#: Empty since step P2 Builds B2 moved the card's config discovery (``/api/v1/simulations/discovery``) into the
-#: plugin (``vivarium_workbench_sms/cloud_dispatch.py``).
-ROUTE_LITERALS: dict[str, frozenset[str]] = {}
-
 #: The SMS-specific prefixes. ``/viva/v1/compose`` is the interim home of ``/compose/v1``; ``/env-worker/v1`` is
 #: viva-api's hosted env-worker surface, spelled ``/viva/v1/workers`` when the server advertises ``viva-v1-workers``
-#: (step P2 Workers). The rest of ``/viva/v1`` is viva-core, which the design keeps.
+#: (step P2 Workers). The rest of ``/viva/v1`` is viva-core, which the design keeps. This classifies the CLIENT's
+#: methods (``SMS_METHODS``); the core's route ban below is wider.
 _ROUTE = re.compile(r"^/(api/v1|core/v1|compose/v1|viva/v1/compose|env-worker/v1|viva/v1/workers)(/|$)")
+
+#: Every viva-api route the core must not spell: the SMS-specific prefixes above and, since the end of step P2, the
+#: rest of ``/viva/v1`` too (viva-core's surface is a provider's backend as well; the core names none).
+_ANY_VIVA_API_ROUTE = re.compile(r"^/(api/v1|core/v1|compose/v1|env-worker/v1|viva/v1)(/|$)")
 
 
 def _modules():
@@ -166,58 +146,25 @@ def _route_literals() -> dict[str, set[str]]:
     found: dict[str, set[str]] = {}
     for name, tree in _modules():
         for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str) and _ROUTE.match(node.value):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and _ANY_VIVA_API_ROUTE.match(node.value)):
                 found.setdefault(name, set()).add(node.value)
     return found
 
 
-def _diff(found: dict[str, set[str]], allowed: dict[str, frozenset[str]]) -> tuple[list[str], list[str]]:
-    new = [f"{m}: {sorted(found[m] - allowed.get(m, frozenset()))}"
-           for m in sorted(found) if found[m] - allowed.get(m, frozenset())]
-    gone = [f"{m}: {sorted(allowed[m] - found.get(m, set()))}"
-            for m in sorted(allowed) if allowed[m] - found.get(m, set())]
-    return new, gone
+def test_the_core_calls_no_sms_method():
+    found = _sms_calls()
+    assert found == {}, (
+        "SMS-specific SmsApiClient calls in the core (docs/backend-adapters.md §2.4): put them in the SMS plugin "
+        "(vivarium_workbench_sms) behind a backend facet instead:\n  "
+        + "\n  ".join(f"{m}: {sorted(v)}" for m, v in sorted(found.items())))
 
 
-def test_no_new_sms_method_calls():
-    new, _ = _diff(_sms_calls(), ALLOWED)
-    assert not new, (
-        "new SMS-specific SmsApiClient calls in the core (docs/backend-adapters.md §2.4): put them in the SMS "
-        "plugin (vivarium_workbench_sms) behind a backend facet instead:\n  " + "\n  ".join(new))
-
-
-#: (module, method) pairs in ALLOWED: 42 as of step 1a; 13 after step P1b moved the plugin's own modules out of
-#: the core (a move, not 28 removed calls); 12 after step P2 Client moved the capability contract into the plugin;
-#: 11 after step P2 Runs c2 moved run_jobs' batch status into the plugin; 7 after step P2 Runs b moved the SMS
-#: deployment run (remote_run.run_remote's SMS half) into the plugin; 6 after step P2 Runs c1 moved the SMS landing
-#: (``download_data``) into the plugin; 5 after step P2 Runs a2 moved the thin client's build phase
-#: (``upload_simulator``) into the plugin; 4 after step P2 Builds B2 moved the composite card's image dispatch
-#: (``run_simulation``) into the plugin; 3 after step P2 Analyses and figures moved the re-run
-#: (``run_analysis``) into the plugin's ``analyses`` facet; 1 after step P2 Runs b2 moved the trace
-#: (``compose_status``, ``simulation_trace``) into the plugin; 0 after step P2 Remote tab R2 moved the store fetch
-#: (``download_data``) behind the ``artifacts`` facet's ``fetch_store``: the core calls no SMS method. Only removals
-#: lower it.
-PINNED_PAIRS = 0
-
-
-def test_allowed_methods_never_grow():
-    extra = set().union(*ALLOWED.values()) - PINNED_UNION
-    assert not extra, f"ALLOWED gained SMS methods no module called before: {sorted(extra)}"
-    pairs = sum(len(v) for v in ALLOWED.values())
-    assert pairs <= PINNED_PAIRS, (
-        f"ALLOWED has {pairs} (module, method) pairs, more than {PINNED_PAIRS}: a move must remove what it adds")
-
-
-def test_removed_sms_method_calls_are_dropped_from_the_ratchet():
-    _, gone = _diff(_sms_calls(), ALLOWED)
-    assert not gone, "these calls are gone; remove them from ALLOWED so the ratchet stays tight:\n  " + "\n  ".join(gone)
-
-
-def test_no_new_sms_route_literals():
-    new, gone = _diff(_route_literals(), ROUTE_LITERALS)
-    assert not new, ("SMS routes spelled in the core; put the call in vivarium_workbench_sms (the plugin):\n  "
-                     + "\n  ".join(new))
-    assert not gone, "these route literals are gone; remove them from ROUTE_LITERALS:\n  " + "\n  ".join(gone)
+def test_the_core_spells_no_sms_route():
+    found = _route_literals()
+    assert found == {}, (
+        "viva-api routes spelled in the core; put the call in vivarium_workbench_sms (the plugin), behind a backend "
+        "facet:\n  " + "\n  ".join(f"{m}: {sorted(v)}" for m, v in sorted(found.items())))
 
 
 def test_sms_methods_match_the_client():
