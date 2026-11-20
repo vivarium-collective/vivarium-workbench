@@ -7717,7 +7717,7 @@ def create_app() -> FastAPI:
         credentials, and S3 otherwise; ``via`` says which). ``available: false`` +
         a ``reason`` means fall back to landing / show "pending"."""
         # Opaque run ids: the id is a string and the run's record decides -- a backend without the facet answers 409
-        # ``not-sms``, not a 422 for its form.
+        # ``not-offered``, not a 422 for its form.
         body, status = _remote_run_views.analysis_figures(ws, simulation_id, deployment=deployment, study=study)
         return JSONResponse(status_code=status, content=body)
 

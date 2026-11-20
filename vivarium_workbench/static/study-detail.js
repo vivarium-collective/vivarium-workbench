@@ -2726,7 +2726,7 @@
       label.textContent = '⚠ progress unavailable (remote backend unreachable)';
       return;
     }
-    if (d.phase === 'other-backend' || d.phase === 'not-sms') {
+    if (d.phase === 'other-backend' || d.phase === 'not-offered' || d.phase === 'not-sms') {  // 'not-sms': before P3 I1
       // Refused: the run belongs to another backend than this workbench's (step 1c). Terminal; no Stop button.
       track.style.display = 'none';
       label.textContent = '⚠ ' + (d.error || 'this run belongs to another backend');
@@ -2796,7 +2796,7 @@
         // flight, or vice versa) must never trigger this run's reload.
         if (_gradeAfterRunId != null && String(_gradeAfterRunId) === String(runId)) {
           _gradeAfterRunId = null;
-          if (d.terminal && d.phase !== 'other-backend' && d.phase !== 'not-sms') _reloadStudyAndTests();
+          if (d.terminal && d.phase !== 'other-backend' && d.phase !== 'not-offered' && d.phase !== 'not-sms') _reloadStudyAndTests();
         }
       })
       .catch(function () {

@@ -515,7 +515,8 @@
 
   // Opaque run ids (docs/backend-adapters.md §2.5): a remote run's id is sent as the string the row carries, never
   // coerced with Number() -- a compose-api / viva-core id would become NaN -> null. The server routes it by the run's
-  // record and refuses a non-SMS run with 409 `not-sms`; an SMS integer id ("12") is read exactly as 12 was.
+  // record and refuses a run whose backend does not offer the operation with 409 `not-offered`; an integer id ("12")
+  // is read exactly as 12 was.
   function _landRemote(runId, simId, btn) {
     if (!runId || simId == null || simId === "") return;
     var orig = btn ? btn.textContent : "";
