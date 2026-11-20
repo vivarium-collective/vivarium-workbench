@@ -88,6 +88,10 @@ function run() {
   check(build124(null), NEUTRAL_124, 'Cloud scope, a build, no preflight answer');
   check(build124(Object.assign({}, SMS_IMAGE, { tip: '' })), NEUTRAL_124, 'an empty tip is no tip');
   check(build124(Object.assign({}, SMS_IMAGE, { tip: 42 })), NEUTRAL_124, 'a non-string tip is no tip');
+  // DECLARED (P3 F4b review): providers on, SMS installed, but no session build and no pin, so SMS does not claim the
+  // workspace and the preflight answers target "local" with no tip. A Cloud scope picked in the browser then shows the
+  // neutral text (before F4b it showed the SMS text). Neutral wording is Jim's decision (2026-11-20).
+  check(build124({ target: 'local', ok: true }), NEUTRAL_124, 'Cloud scope, SMS on but unclaimed (local preflight)');
 
   // SMS, the Environment scope on Local: the workspace's own preflight (an image resolves).
   const local = computeWith({ VivEnv: { isCloud: () => false, runBuild: () => null, setScope: () => {} } });
