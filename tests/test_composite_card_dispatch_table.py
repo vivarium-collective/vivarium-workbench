@@ -57,7 +57,7 @@ def card(tmp_path, monkeypatch):
 
     (tmp_path / ".pbg").mkdir()
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
-    seen: dict = {"spawned": [], "preflight": 0, "run_simulation": [], "get": []}
+    seen: dict = {"spawned": [], "preflight": 0, "run_simulation": [], "get": [], "compose_sessions": []}
     state: dict = {"preflight": {"ok": True, "reason": "ok", "message": "ready"}, "configs": ["api_simulation_default.json"],
                    "run_simulation": {"database_id": 909, "experiment_id": "exp-1"}}
     monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
@@ -105,6 +105,36 @@ def card(tmp_path, monkeypatch):
                 return {"simulator_id": simulator_id, "commit": "abc", "branch": branch, "repo_url": repo}
 
             monkeypatch.setattr(remote_pinned, "resolve_pinned_build", resolve)
+
+        @staticmethod
+        def compose(environments=("runtime",)):
+            """Name compose-api, answering through a fake session (``remote_run_compose._session``) that lists these
+            prebuilt environments and no registry entries; records each session it opens."""
+            from types import SimpleNamespace
+
+            from vivarium_workbench.lib import remote_run_compose
+
+            World.name("compose")
+
+            class Session:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def environments(self):
+                    return [SimpleNamespace(name=n, kind="prebuilt", simulator="sim-1", image="img:1", stale=False)
+                            for n in environments]
+
+                def catalog(self):
+                    return []
+
+            def session(*a, **k):
+                seen["compose_sessions"].append(k)
+                return Session()
+
+            monkeypatch.setattr(remote_run_compose, "_session", session)
 
         @staticmethod
         def opt_in():
@@ -262,7 +292,7 @@ def test_opt_in_on_a_stamp_with_no_repo_runs_detached_with_no_build_ref(card):
 def test_compose_refuses_a_step_count_it_cannot_run(card):
     from vivarium_workbench.lib import remote_run_compose
 
-    card.name("compose")
+    card.compose()
     m = remote_run_compose.MAX_STEPS
     assert card.run({"steps": m + 1}) == ({
         "error": f"compose-api runs 1 to {m} steps per run; this run asks for {float(m + 1)}",
@@ -270,12 +300,25 @@ def test_compose_refuses_a_step_count_it_cannot_run(card):
 
 
 def test_compose_runs_detached_with_no_preflight(card):
-    card.name("compose")
+    card.compose()
     resp, status = card.run({"run_target": "deployment", "build": BUILD})
     assert status == 202
     req = card.request(resp)
     assert (req["target"], req["build_ref"]) == ("deployment", None)
     assert card.seen["preflight"] == 0 and card.seen["run_simulation"] == []
+
+
+@pytest.mark.xfail(strict=True, reason="the card does not check the compose environment yet")
+def test_compose_refuses_an_unknown_environment_with_no_run(card):
+    """Like the readiness check: a named environment compose-api does not list is refused at launch (409), with no
+    run row written and nothing spawned, instead of a run that fails in the detached runner."""
+    card.compose()
+    card.env("name:missing")
+    assert card.run({}) == ({
+        "error": "compose-api has no prebuilt environment 'missing' (it has: runtime)",
+        "reason": "unknown-environment", "run_target": "deployment"}, 409)
+    assert card.seen["spawned"] == [] and card.seen["preflight"] == 0
+    assert not (card.ws / ".pbg" / "runs").exists() or not any((card.ws / ".pbg" / "runs").iterdir())
 
 
 def test_viva_named_environment_with_a_dirty_tree_is_409(card):
