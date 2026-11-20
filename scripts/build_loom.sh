@@ -18,5 +18,6 @@ loom_dir="${script_dir}/../vivarium_workbench/loom"
 cd "$loom_dir"
 npm ci || npm install
 npm run build
+npm run build:single
 
 echo "built: ${loom_dir}/_dist"

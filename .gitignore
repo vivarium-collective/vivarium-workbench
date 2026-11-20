@@ -50,3 +50,4 @@ tests/_fixtures/ws_federation_demo/.pbg/registry-catalog/
 tests/_fixtures/ws_federation_demo/reports/
 tests/_fixtures/ws_increase_demo/.pbg/composite-state-cache/
 tests/_fixtures/ws_increase_demo/.pbg/registry-catalog/
+vivarium_workbench/loom/_dist_single
