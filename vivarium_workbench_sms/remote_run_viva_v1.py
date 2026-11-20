@@ -55,6 +55,23 @@ def viva_v1_document_options(
     return options
 
 
+# Moved here from the core's remote_run in step P2 (Builds B2): viva-core's grammar of the shared
+# VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT (compose-api reads its own ``name:`` form, remote_run_compose).
+#: The site-named environment ``POST /viva/v1/composites`` accepts for a document run (viva-core
+#: ``NAMED_ENVIRONMENTS``): one container on the core runtime image. ``deployment-default`` is only
+#: the label a legacy submission is *recorded* under, not a name the route accepts.
+DEFAULT_BACKEND_ENVIRONMENT = "runtime"
+
+
+def backend_environment() -> dict:
+    """``environment`` for a /viva/v1 document run: ``VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT``
+    is a site-named environment (``runtime``) or ``id:<environment id>``; default ``runtime``."""
+    from vivarium_workbench.lib.env_compat import get_env
+
+    raw = (get_env("BACKEND_ENVIRONMENT", DEFAULT_BACKEND_ENVIRONMENT) or DEFAULT_BACKEND_ENVIRONMENT).strip()
+    return {"id": raw[3:]} if raw.startswith("id:") else {"name": raw}
+
+
 # One batch-status read asks for this many simulation ids; a little past the run's row covers a simulation
 # created ahead of its row.
 _SIMULATION_LOOKUP_BATCH = 200
@@ -116,7 +133,7 @@ def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
     n_steps = int(body.get("n_steps") or params.get("n_steps") or 1)
     steps = max(0, min(n_steps, 1000))
 
-    environment = remote_run.backend_environment()
+    environment = backend_environment()
     extra_pip_deps = None
     if "name" in environment:
         # A named environment is one container: the workspace arrives as a pip dependency.

@@ -36,6 +36,8 @@ named, nothing is probed and runs stay local.
 
 The code is not shipped. `GET /registry/entries` and `GET /registry/environments` decide where the run goes:
 1. `VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT=name:<environment>`, when set, names a prebuilt environment outright.
+   The core reads this form itself (`remote_run_compose.resolve_environment`); viva-core's reading of the same
+   variable (a bare name or `id:<env id>`) is the SMS plugin's since step P2 Builds B2 (docs/backend-viva-v1.md).
 2. Otherwise the workspace's git `origin` is matched to a registry entry's `source` (an entry pinned by commit links
    `…/tree/<commit>`, which names the same repository). If that entry has a prebuilt environment
    (`kind: prebuilt`, in the entry's `bundles`), its name becomes the run's `environment=`, so its default version runs.

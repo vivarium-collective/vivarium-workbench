@@ -2,13 +2,17 @@
 decision — a CloudTarget (image dispatch), None (local run), or a (dict, 409)
 with an actionable actions[] list. These tests pin every branch, including the
 frozen-``PinnedConfig`` path that used to raise ``AttributeError`` → 500.
+
+Step P2 Builds B2 moved the decision verbatim into the SMS plugin
+(``vivarium_workbench_sms.cloud_dispatch``); the end-to-end test at the bottom
+still drives the core's ``composite_test_run``.
 """
 from __future__ import annotations
 
 import pytest
 
 from vivarium_workbench.lib import backends
-from vivarium_workbench.lib import composite_test_run_views as v
+from vivarium_workbench_sms import cloud_dispatch as v
 from vivarium_workbench_sms import remote_pinned
 
 
@@ -121,21 +125,27 @@ def test_compose_dispatch_allowed_when_flag_set(monkeypatch):
 
 def test_pinned_no_build_end_to_end_is_409_not_500(tmp_path, monkeypatch):
     """The frozen-dataclass bug end to end: a pinned workspace with no build must
-    surface as a clean 409 with actions[] from composite_test_run — never a 500."""
+    surface as a clean 409 with actions[] from composite_test_run — never a 500.
+
+    The pin is real (the SMS provider's ``select`` claims the run, as in production), so the card reaches the SMS
+    backend's ``dispatch_composite`` for real; only the build lookup is stubbed."""
+    from vivarium_workbench.lib import composite_test_run_views as ctr
     from vivarium_workbench.lib import run_registry
     (tmp_path / ".pbg").mkdir()
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
     monkeypatch.delenv("VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH", raising=False)
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_REPO_URL", "https://github.com/x/sms-ecoli.git")
     monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
     spawned = []
     monkeypatch.setattr(run_registry, "spawn_detached",
                         lambda *a, **k: (spawned.append(1), 1)[1])
-    monkeypatch.setattr(backends, "resolve_run_target", lambda ws: "deployment")
     monkeypatch.setattr(remote_pinned, "resolved_from_session_build", lambda ws: None)
     monkeypatch.setattr(remote_pinned, "resolve_pinned_simulator_id",
                         lambda client, ws: None)
+    assert backends.select(tmp_path) is backends.SMS_LEGACY  # the real claim, not a patched target
 
-    resp, status = v.composite_test_run(tmp_path, {"id": "pkg.composites.x"})
+    resp, status = ctr.composite_test_run(tmp_path, {"id": "pkg.composites.x"})
     assert status == 409
     assert resp["reason"] == "no-build"
     assert resp["actions"]

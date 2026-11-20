@@ -304,11 +304,11 @@ def _card_branch(ws, monkeypatch):
     """Which branch ``composite_test_run`` takes for a card body with no ``run_target`` and no ``build``: the
     dispatch ends are patched, so nothing runs and nothing is asked over the network."""
     from vivarium_workbench.lib import composite_test_run_views as ctr
-    from vivarium_workbench.lib import remote_run, remote_run_compose, run_core
+    from vivarium_workbench.lib import remote_run_compose, run_core
+    from vivarium_workbench_sms import cloud_dispatch
 
     seen = {}
     monkeypatch.setattr(remote_run_compose, "checked_steps", lambda steps: steps)
-    monkeypatch.setattr(remote_run, "remote_dispatch_preflight", lambda ws_root: {"ok": True})
 
     def image(simulator_id, *a, **k):
         seen["image"] = simulator_id
@@ -318,7 +318,7 @@ def _card_branch(ws, monkeypatch):
         seen["target"] = k.get("target")
         raise _CardStop
 
-    monkeypatch.setattr(ctr, "_dispatch_build_image_run", image)
+    monkeypatch.setattr(cloud_dispatch, "_dispatch_build_image_run", image)
     monkeypatch.setattr(run_core, "invoke_run", invoke)
     try:
         body, status = ctr.composite_test_run(ws, {"id": "c"})
@@ -341,6 +341,11 @@ def _card_branch(ws, monkeypatch):
 def _preflight_branch(body):
     if body.get("phase") == "unreachable":
         return ("unreachable", 502)
+    if body.get("ok") is False:
+        # Not ready, whichever dispatch it names: the card refuses that launch with a 409 (its viva-core branch
+        # answers the git preflight's own reason). Checked before the dispatch, so a branch that names its dispatch
+        # with ``ok: False`` cannot pass for a card that launches.
+        return ("refused", 409, body.get("reason"))
     if body["target"] == "local":
         return ("local",)
     if body.get("dispatch") == "compose":
@@ -353,17 +358,19 @@ def _preflight_branch(body):
     return ("refused", 409, body.get("reason"))
 
 
-@pytest.mark.parametrize("named", list(EXPECTED))
-@pytest.mark.parametrize("build", ["none", "session", "pinned"])
-def test_preflight_and_card_take_the_same_decision(world, monkeypatch, inproc_client, named, build):
-    """The preflight decides once (``backends.active``); the card decides with ``backends.select`` and then
-    ``resolve_cloud_target`` (``backends.resolve_run_target``). They read the same select and the same cached
-    profile, so they agree -- this pins it, so a later step cannot split them. Only which branch each side takes is
-    compared: the preflight answers HTTP 200 with ``ok: False`` bodies where the card raises 502 or returns 409."""
-    from vivarium_workbench.lib import remote_run_compose
+def _same_decision(world, monkeypatch, inproc_client, named, build, tree, environment=None):
+    """``(preflight's branch, card's branch)`` for one world. The git preflight (``remote_run.remote_dispatch_preflight``)
+    answers ``tree`` to both sides: clean, or dirty (``reason: "dirty"``)."""
+    from vivarium_workbench.lib import remote_run, remote_run_compose
 
     configure, _ = world
     ws = configure(named, session=build == "session", pinned=build == "pinned")
+    if environment is None:
+        monkeypatch.delenv("VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT", raising=False)
+    else:
+        monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT", environment)
+    pf = {"ok": True} if tree == "clean" else {"ok": False, "reason": "dirty", "message": "uncommitted changes"}
+    monkeypatch.setattr(remote_run, "remote_dispatch_preflight", lambda ws_root: dict(pf))
     (ws / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
     (ws / ".pbg").mkdir(exist_ok=True)
     # The SMS half: a session build resolves to an image; a pin with no build is the no-build dead end.
@@ -375,11 +382,40 @@ def test_preflight_and_card_take_the_same_decision(world, monkeypatch, inproc_cl
                         lambda ws_root: {"target": "deployment", "ok": True, "dispatch": "compose"})
 
     preflight = _preflight_branch(inproc_client(ws).get("/api/remote-dispatch-preflight").json())
-    card = _card_branch(ws, monkeypatch)
+    return preflight, _card_branch(ws, monkeypatch)
+
+
+@pytest.mark.parametrize("named", list(EXPECTED))
+@pytest.mark.parametrize("build", ["none", "session", "pinned"])
+@pytest.mark.parametrize("tree", ["clean", "dirty"])
+def test_preflight_and_card_take_the_same_decision(world, monkeypatch, inproc_client, named, build, tree):
+    """The preflight decides once (``backends.active``) and asks the backend's ``runs.dispatch_preflight``; the card
+    decides with ``backends.select`` (``active`` when nothing is selected) and asks ``runs.dispatch_composite`` (step
+    P2 Builds B2). They read the same select and the same cached profile, so they agree -- this pins it, so a later
+    step cannot split them (#1107). Only which branch each side takes is compared: the preflight answers HTTP 200
+    with ``ok: False`` bodies where the card raises 502 or returns 409. A dirty tree refuses only viva-core's named
+    environment, which ships the workspace from git."""
+    preflight, card = _same_decision(world, monkeypatch, inproc_client, named, build, tree)
     assert preflight == card
     expected = {
         "session": ("image",),
         "pinned": ("refused", 409, "no-build"),
     }.get(build) or {"none": ("local",), "compose": ("compose",), "viva": ("document",), "legacy": ("local",),
                      "unreachable": ("unreachable", 502)}[named]
+    if tree == "dirty" and expected == ("document",):
+        expected = ("refused", 409, "dirty")
     assert card == expected
+
+
+def test_an_environment_id_with_a_clean_tree_runs_a_document_on_both_sides(world, monkeypatch, inproc_client):
+    assert _same_decision(world, monkeypatch, inproc_client, "viva", "none", "clean", "id:env-1") == (
+        ("document",), ("document",))
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "Finding F (plan P2 Builds, open question 3): for an id: environment the card skips the git preflight and "
+    "launches, while /api/remote-dispatch-preflight always runs it and answers not ready. Builds B2 keeps both "
+    "behaviours; the fix (rule A plus a non-blocking warning) is PR B2b"))
+def test_an_environment_id_with_a_dirty_tree_takes_the_same_decision(world, monkeypatch, inproc_client):
+    preflight, card = _same_decision(world, monkeypatch, inproc_client, "viva", "none", "dirty", "id:env-1")
+    assert preflight == card

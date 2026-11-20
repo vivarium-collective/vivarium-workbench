@@ -60,7 +60,6 @@ NOT_SMS_RECEIVERS = frozenset({
 #: The core's remaining callers (step P1b: the plugin's own modules are no longer listed -- a move, not a removal
 #: of calls). Shrink this as step P2 lands; never grow it.
 ALLOWED: dict[str, frozenset[str]] = {
-    "lib.composite_test_run_views": frozenset({"run_simulation"}),
     "lib.remote_run_views": frozenset({"run_analysis"}),
     "lib.remote_trace": frozenset({"compose_status", "simulation_trace"}),
     "lib.simulations_index": frozenset({"download_data"}),
@@ -72,15 +71,14 @@ PINNED_UNION: frozenset[str] = frozenset({
     "analysis_status", "cancel_simulation", "compose_status",
     "download_data", "download_workspace", "get_simulation",
     "list_analyses", "list_branch_builds", "list_build_simulations", "list_simulators", "register_branch_head",
-    "run_analysis", "run_simulation", "simulation_chain_progress", "simulation_status", "simulation_trace",
+    "run_analysis", "simulation_chain_progress", "simulation_status", "simulation_trace",
     "simulator_commit", "simulator_status", "upload_simulator",
 })
 
 #: SMS route literals outside the client: module -> the routes it spells.
-ROUTE_LITERALS: dict[str, frozenset[str]] = {
-    # The config discovery a card-run dispatch reads to pick a build's config file.
-    "lib.composite_test_run_views": frozenset({"/api/v1/simulations/discovery"}),
-}
+#: Empty since step P2 Builds B2 moved the card's config discovery (``/api/v1/simulations/discovery``) into the
+#: plugin (``vivarium_workbench_sms/cloud_dispatch.py``).
+ROUTE_LITERALS: dict[str, frozenset[str]] = {}
 
 #: The SMS-specific prefixes. ``/viva/v1/compose`` is the interim home of ``/compose/v1``; ``/env-worker/v1`` is
 #: viva-api's hosted env-worker surface, spelled ``/viva/v1/workers`` when the server advertises ``viva-v1-workers``
@@ -196,8 +194,9 @@ def test_no_new_sms_method_calls():
 #: 11 after step P2 Runs c2 moved run_jobs' batch status into the plugin; 7 after step P2 Runs b moved the SMS
 #: deployment run (remote_run.run_remote's SMS half) into the plugin; 6 after step P2 Runs c1 moved the SMS landing
 #: (``download_data``) into the plugin; 5 after step P2 Runs a2 moved the thin client's build phase
-#: (``upload_simulator``) into the plugin. Only removals lower it.
-PINNED_PAIRS = 5
+#: (``upload_simulator``) into the plugin; 4 after step P2 Builds B2 moved the composite card's image dispatch
+#: (``run_simulation``) into the plugin. Only removals lower it.
+PINNED_PAIRS = 4
 
 
 def test_allowed_methods_never_grow():

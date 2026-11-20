@@ -250,10 +250,12 @@ def test_composite_test_run_pinned_workspace_dispatches_image(tmp_path, monkeypa
     monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
     monkeypatch.setattr(run_registry, "spawn_detached",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no compose spawn")))
-    # Pinned to build 124 (resolve_run_target → deployment; session build resolves).
-    monkeypatch.setattr(backends, "resolve_run_target", lambda ws: "deployment")
-    monkeypatch.setattr(remote_pinned, "resolved_from_session_build",
-                        lambda ws: {"simulator_id": 124, "repo_url": "r", "commit": "c", "branch": "b"})
+    # Pinned to build 124: a real session-build stamp, so the SMS provider's select claims the run
+    # (resolve_run_target → deployment) and the session build resolves to the image.
+    (tmp_path / ".viv-build.json").write_text(
+        '{"simulator_id": 124, "repo_url": "r", "commit": "c", "branch": "b"}', encoding="utf-8")
+    assert backends.select(tmp_path) is backends.SMS_LEGACY
+    assert remote_pinned.resolved_from_session_build(tmp_path)["simulator_id"] == 124
     # The compose preflight must never be consulted when a pinned build resolves.
     monkeypatch.setattr(remote_run, "remote_dispatch_preflight",
                         lambda ws: (_ for _ in ()).throw(AssertionError("preflight skipped on pinned image path")))

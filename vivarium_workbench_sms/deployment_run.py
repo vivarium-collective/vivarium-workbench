@@ -6,9 +6,10 @@ core keeps ``remote_run.run_remote`` as a backend-blind dispatcher; it reaches :
 ``SmsLegacyRuns.run_composite`` / ``SmsLegacyUnrouted.run_composite`` and, with ``via_viva_v1=True``,
 ``VivaCoreRuns.run_composite``. The plugin's CLI ``run-remote`` calls :func:`run` directly with its own client.
 
-The core names this module reads (``git_pip_url``, ``workspace_pinned_deps``, ``backend_environment``, the poll
-defaults) are read through ``remote_run.<name>`` at call time, and the client's through ``sms_api_client.<name>``,
-so each keeps exactly one patch target. ``export_composite_pbg`` and ``time`` are this module's own globals (tests
+The core names this module reads (``git_pip_url``, ``workspace_pinned_deps``, the poll defaults) are read through
+``remote_run.<name>`` at call time, the client's through ``sms_api_client.<name>``, and viva-core's environment
+(``backend_environment``, moved out of the core in step P2 Builds B2) through ``remote_run_viva_v1.<name>``, so each
+keeps exactly one patch target. ``export_composite_pbg`` and ``time`` are this module's own globals (tests
 patch them here).
 """
 from __future__ import annotations
@@ -177,10 +178,10 @@ def run(
     status_of: "Callable[[int | str], dict] | None"
     if via_viva_v1:
         run = client.create_composite_run(
-            environment=remote_run.backend_environment(),
+            environment=remote_run_viva_v1.backend_environment(),
             document=json.loads(pbg_bytes),
             execution={"options": remote_run_viva_v1.viva_v1_document_options(
-                remote_run.backend_environment(), steps, extra_pip_deps, analysis_options)},
+                remote_run_viva_v1.backend_environment(), steps, extra_pip_deps, analysis_options)},
             label=f"workbench: {composite_id}",
         )
         sim_id = run["id"]

@@ -290,3 +290,51 @@ def test_the_session_build_answers_without_the_plugin():
     ``composite_resolve``'s preview raised ``ModuleNotFoundError`` on any workspace)."""
     proc = subprocess.run([sys.executable, "-c", _SESSION_BUILD_PROBE], capture_output=True, text=True, timeout=300)
     assert "@@RESULT@@(None, 'local')" in proc.stdout, proc.stderr[-2000:]
+
+
+_CARD_PROBE = textwrap.dedent('''
+    import json, sys, tempfile
+    from pathlib import Path
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import composite_test_run_views as ctr, run_registry
+    from vivarium_workbench.lib import server_capabilities as sc
+
+    ws = Path(tempfile.mkdtemp())
+    (ws / ".pbg").mkdir()
+    (ws / "workspace.yaml").write_text("name: ws\\n", encoding="utf-8")
+    (ws / ".viv-build.json").write_text('{"simulator_id": 124, "repo_url": "r", "commit": "c"}')
+    sc.explicit_backend_profile = lambda: None          # nothing named
+    run_registry.count_running = lambda db_file: 0
+    run_registry.spawn_detached = lambda *a, **k: 1
+    body = {"id": "pkg.composites.x", "run_target": "deployment", "build": {"simulator_id": 211, "repo_url": "r"}}
+    try:
+        print("@@CLOUD@@" + json.dumps(ctr.composite_test_run(ws, body)))
+    except BaseException as e:  # noqa: BLE001
+        print("@@CLOUD@@" + type(e).__name__ + ": " + str(e))
+    resp, status = ctr.composite_test_run(ws, {"id": "pkg.composites.x"})
+    req = json.loads((ws / ".pbg" / "runs" / resp["run_id"] / "request.json").read_text())
+    print(f"@@STAMPED@@{status}:{req['target']}")
+''')
+
+
+def test_a_card_run_answers_without_the_plugin(monkeypatch):
+    """Step P2 Builds B2: with the plugin absent, the Environment picker's explicit cloud run is refused (409
+    ``no-backend``), never ``ModuleNotFoundError`` (before B2 the card imported ``remote_pinned`` on that path); a
+    stamped workspace is a plain local one (nothing claims it)."""
+    from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
+
+    for var in BACKEND_BASE_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+        monkeypatch.delenv(var.replace("VIVARIUM_WORKBENCH_", "VIVARIUM_DASHBOARD_"), raising=False)
+    proc = subprocess.run([sys.executable, "-c", _CARD_PROBE], capture_output=True, text=True, timeout=300)
+    expected = json.dumps([{"error": "no remote backend was named (serve --backend-base-url)", "reason": "no-backend",
+                            "run_target": "deployment"}, 409])
+    assert "@@CLOUD@@" + expected in proc.stdout, (proc.stdout[-2000:], proc.stderr[-2000:])
+    assert "@@STAMPED@@202:local" in proc.stdout, (proc.stdout[-2000:], proc.stderr[-2000:])

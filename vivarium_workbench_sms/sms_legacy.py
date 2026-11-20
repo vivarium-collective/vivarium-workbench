@@ -21,6 +21,7 @@ import tempfile
 import time
 import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vivarium_workbench.lib import github_auth, study_spec
 from vivarium_workbench.lib.investigations import load_spec
@@ -28,6 +29,9 @@ from vivarium_workbench_sms import sms_landing
 from vivarium_workbench_sms import remote_pinned, sms_api_client
 from vivarium_workbench.lib.backends.records import remote_record as _remote_record
 from vivarium_workbench_sms.sms_api_client import DOWNLOAD_TIMEOUT, SmsApiClient, SmsApiError
+
+if TYPE_CHECKING:
+    from vivarium_workbench.lib.backends.provider import Detached
 
 # sms-api JobStatus terminal sets (relocated here from remote_run_jobs, which R5
 # deletes). The thin client maps a raw sms-api status into a UI phase.
@@ -549,6 +553,22 @@ class SmsLegacyRuns:
                                   poll_interval=poll_interval, poll_timeout=poll_timeout,
                                   analysis_options=analysis_options, build_ref=build_ref, emit_paths=emit_paths)
 
+    def dispatch_preflight(self, ws_root: Path) -> dict:
+        """Does a cloud image resolve for this workspace (:func:`cloud_dispatch.dispatch_preflight`; step P2 Builds
+        B2)."""
+        from vivarium_workbench_sms import cloud_dispatch  # lazy: loading the registry (env workers) skips it
+
+        return cloud_dispatch.dispatch_preflight(ws_root)
+
+    def dispatch_composite(self, ws_root: Path, body: dict, *, spec_id: str, overrides: dict,
+                           emit_paths: list, steps: float) -> "tuple[dict, int] | Detached | None":
+        """The card's run of a session build or a pin: the build's image (:func:`cloud_dispatch.dispatch_composite`;
+        step P2 Builds B2)."""
+        from vivarium_workbench_sms import cloud_dispatch  # lazy: loading the registry (env workers) skips it
+
+        return cloud_dispatch.dispatch_composite(ws_root, body, spec_id=spec_id, overrides=overrides,
+                                                 emit_paths=emit_paths, steps=steps)
+
 
 class SmsLegacyUnrouted:
     """The ``unrouted`` facet (step P2, Runs a1): the tails above for the lifecycle requests the core cannot route by
@@ -580,3 +600,12 @@ class SmsLegacyUnrouted:
         return deployment_run.run(ws_root, composite_id, dest=dest, n_steps=n_steps, overrides=overrides,
                                   poll_interval=poll_interval, poll_timeout=poll_timeout,
                                   analysis_options=analysis_options, build_ref=build_ref, emit_paths=emit_paths)
+
+    def dispatch_composite(self, ws_root: Path, body: dict, *, spec_id: str, overrides: dict,
+                           emit_paths: list, steps: float) -> "tuple[dict, int] | Detached | None":
+        """The Environment picker's explicit cloud run (``run_target: "deployment"``) that no backend selected: the
+        selected build's image, as before step P2 Builds B2 (:func:`cloud_dispatch.dispatch_composite`)."""
+        from vivarium_workbench_sms import cloud_dispatch  # lazy: loading the registry (env workers) skips it
+
+        return cloud_dispatch.dispatch_composite(ws_root, body, spec_id=spec_id, overrides=overrides,
+                                                 emit_paths=emit_paths, steps=steps)

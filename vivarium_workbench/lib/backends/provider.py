@@ -85,6 +85,15 @@ class ProviderRouter:
     readonly_allowed: frozenset[str]
 
 
+@dataclass(frozen=True)
+class Detached:
+    """``runs.dispatch_composite``'s answer when the card's run goes through the detached deployment runner
+    (``run_runner`` -> ``remote_run.run_remote`` -> ``runs.run_composite``; step P2 Builds B2). ``build_ref`` is
+    written into the run request and carried unread to ``run_composite``."""
+
+    build_ref: "dict | None" = None
+
+
 class Provider(Protocol):
     """What a backend plugin registers. Only the methods a step needs exist; later steps add theirs (§2.1)."""
 

@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Callable, Literal, Optional, Protocol, Union
 
 from vivarium_workbench.lib.backends.compose_api import ComposeApiRuns, compose_health_identity
 
+if TYPE_CHECKING:
+    from vivarium_workbench.lib.backends.provider import Detached
 
 
 class RunFacet(Protocol):
@@ -54,6 +56,20 @@ class RunFacet(Protocol):
         use for them ignores them."""
         ...
 
+    def dispatch_preflight(self, ws_root: Path) -> dict:
+        """``GET /api/remote-dispatch-preflight``'s body for a workspace this backend runs (step P2, Builds B2):
+        ``{target, ok, reason, message, ...}``, ready or not, never raising for "not ready". The same decision
+        :meth:`dispatch_composite` takes for a card body with no ``run_target`` (#1107)."""
+        ...
+
+    def dispatch_composite(self, ws_root: Path, body: dict, *, spec_id: str, overrides: dict,
+                           emit_paths: list, steps: float) -> "tuple[dict, int] | Detached | None":
+        """The composite card's launch on this backend (``composite_test_run``, step P2 Builds B2). ``body`` is the
+        card's request. Returns the card's answer ``(body, status)`` when the backend answers it itself (a run it
+        started, or a refusal); :class:`Detached` when the run goes through the detached deployment runner (its
+        ``build_ref`` written into the run request); ``None`` when the run is local."""
+        ...
+
 
 class UnroutedFacet(Protocol):
     """What a backend answers for a run-lifecycle request the core cannot route by a run's record: one that names no
@@ -73,6 +89,12 @@ class UnroutedFacet(Protocol):
                       poll_interval: float, poll_timeout: float) -> Path:
         """:meth:`RunFacet.run_composite` for a deployment run no backend selected (step P2, Runs b): the opt-in
         compose path (``VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH``) with no session build, pin or named backend."""
+        ...
+
+    def dispatch_composite(self, ws_root: Path, body: dict, *, spec_id: str, overrides: dict,
+                           emit_paths: list, steps: float) -> "tuple[dict, int] | Detached | None":
+        """:meth:`RunFacet.dispatch_composite` for a card request with ``run_target: "deployment"`` that no backend
+        selected (the Environment picker's explicit cloud run; step P2 Builds B2)."""
         ...
 
 
@@ -137,6 +159,7 @@ class _Inert:
         raise RuntimeError(f"the {self.name} backend's provider is not active")
 
     submit = land = status = progress = cancel = trace = run_composite = _refuse  # type: ignore[assignment]
+    dispatch_preflight = dispatch_composite = _refuse  # type: ignore[assignment]
 
 
 _SENTINELS = {kind: Backend(kind, _Inert(kind)) for kind in _ATTRS}  # type: ignore[arg-type]
