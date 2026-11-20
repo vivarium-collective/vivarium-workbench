@@ -63,13 +63,23 @@ class ComposeApiRuns:
                            emit_paths: list, steps: float) -> "tuple[dict, int] | Detached":
         """The card's run goes to the detached runner (``run_composite`` sends it to the environment compose-api's
         registry lists for this workspace). No cloud image to resolve and no git preflight: the environment's image
-        runs, not this checkout. A step count compose-api cannot run is refused now (its 400)."""
+        runs, not this checkout. A step count compose-api cannot run is refused now (its 400), and so is a workspace
+        the readiness check refuses (:func:`remote_run_compose.check_environment`, with a short timeout since it runs
+        inside the launch request): a named environment compose-api does not list (409 ``unknown-environment``), or
+        a compose-api that cannot be asked (``_backend_error``'s answer: 502, or 401/403 for the token). Nothing is
+        written and nothing is spawned for a refused launch."""
+        from compose_api_client.ext import CliError
+
         from vivarium_workbench.lib.backends.provider import Detached
 
         try:
             remote_run_compose.checked_steps(steps)
+            remote_run_compose.check_environment(ws_root, timeout=remote_run_compose.CHECK_TIMEOUT)
         except remote_run_compose.ComposeDispatchError as e:
             return {**e.body, "run_target": "deployment"}, e.status
+        except CliError as e:
+            out, status = remote_run_compose._backend_error(e)
+            return {**out, "run_target": "deployment"}, status
         return Detached()
 
 

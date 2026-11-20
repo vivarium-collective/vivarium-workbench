@@ -308,7 +308,6 @@ def test_compose_runs_detached_with_no_preflight(card):
     assert card.seen["preflight"] == 0 and card.seen["run_simulation"] == []
 
 
-@pytest.mark.xfail(strict=True, reason="the card does not check the compose environment yet")
 def test_compose_refuses_an_unknown_environment_with_no_run(card):
     """Like the readiness check: a named environment compose-api does not list is refused at launch (409), with no
     run row written and nothing spawned, instead of a run that fails in the detached runner."""

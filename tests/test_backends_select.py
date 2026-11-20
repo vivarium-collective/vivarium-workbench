@@ -444,7 +444,6 @@ def test_an_environment_id_with_a_dirty_tree_takes_the_same_decision(world, monk
     assert preflight == card == ("document",)
 
 
-@pytest.mark.xfail(strict=True, reason="the card does not check the compose environment yet")
 def test_an_unknown_compose_environment_takes_the_same_decision(world, monkeypatch, inproc_client):
     """The compose analogue of Finding F: a named environment compose-api does not list is refused by the preflight
     (409 ``unknown-environment``), and the card refuses the launch the same way instead of spawning a run that fails
@@ -453,7 +452,6 @@ def test_an_unknown_compose_environment_takes_the_same_decision(world, monkeypat
     assert preflight == card == ("refused", 409, "unknown-environment")
 
 
-@pytest.mark.xfail(strict=True, reason="the card does not check the compose environment yet")
 def test_a_compose_registry_error_takes_the_same_decision(world, monkeypatch, inproc_client):
     """compose-api answers the environment listing with an error: the preflight is not ready and the card refuses the
     launch for the same reason. The statuses differ (the preflight's branch reads every ``ok: False`` as a 409; the

@@ -47,6 +47,18 @@ function run() {
   assert.strictEqual(warned.bg, plain.bg, 'a warning keeps the ready background');
   assert.strictEqual(warned.fg, plain.fg, 'a warning keeps the ready colour');
 
+  // Not ready (compose-api has no such environment): amber, with the reason in the tooltip.
+  const notReady = compute({ target: 'deployment', dispatch: 'compose-api', ok: false,
+    reason: 'unknown-environment', error: "compose-api has no prebuilt environment 'missing' (it has: runtime)",
+    message: "compose-api has no prebuilt environment 'missing' (it has: runtime)" });
+  assert.strictEqual(notReady.label, 'Runs: Cloud · not ready ⚠', 'ok: false -> not-ready label');
+  assert.ok(/no prebuilt environment 'missing'/.test(notReady.tip), 'the reason is in the tooltip');
+  assert.notStrictEqual(notReady.bg, plain.bg, 'not ready leaves the ready styling');
+  assert.strictEqual(compute({ target: 'deployment', ok: false, reason: 'backend error', error: 'boom' }).tip,
+    'A Cloud Run would be refused: boom.', 'no message -> the error text');
+  assert.strictEqual(compute({ target: 'local', ok: false, message: 'x' }).label, 'Runs: Local',
+    'ok: false on a local target is not a cloud warning');
+
   assert.strictEqual(compute(Object.assign({}, ready, { warnings: [] })).label, 'Runs: Cloud',
     'an empty warnings list is no warning');
   assert.strictEqual(compute({ target: 'local', ok: true }).label, 'Runs: Local', 'local unchanged');
