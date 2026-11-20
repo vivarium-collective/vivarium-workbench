@@ -2235,6 +2235,33 @@ def create_app() -> FastAPI:
             )
 
     @app.get(
+        "/api/composite-loom-standalone",
+        tags=["Composites"],
+        summary="Download a composite baked into the single-file loom (self-contained HTML)",
+    )
+    def composite_loom_standalone(id: str, ws: Path = Depends(get_workspace)) -> Response:
+        """A server-free, self-contained HTML of the composite's loom: the single-file
+        loom bundle with the composite baked in via the ``composite:load`` handshake, so it
+        opens with no server (download, email, static host, offline). 404 on an unknown id;
+        503 when the single-file bundle has not been built (``scripts/build_loom.sh``)."""
+        import re as _re
+        from vivarium_workbench.lib.composite_resolve import resolve_composite
+        from vivarium_workbench.lib.loom_standalone import standalone_loom_html
+        resolved = resolve_composite(ws, id)
+        if not resolved or (isinstance(resolved, dict) and resolved.get("unresolved")):
+            return Response(status_code=404)
+        html = standalone_loom_html(resolved)
+        if html is None:
+            return Response(
+                "The single-file loom bundle is not built (run scripts/build_loom.sh).",
+                status_code=503, media_type="text/plain")
+        short = resolved.get("name") or str(id).split(".")[-1] or "composite"
+        safe = _re.sub(r"[^A-Za-z0-9._-]+", "_", str(short))
+        return Response(
+            content=html, media_type="text/html",
+            headers={"Content-Disposition": f'attachment; filename="{safe}-loom.html"'})
+
+    @app.get(
         "/api/composite-contract-audit",
         tags=["Composites"],
         summary="Real composite-level contract audit (per-process roll-up + wiring)",
