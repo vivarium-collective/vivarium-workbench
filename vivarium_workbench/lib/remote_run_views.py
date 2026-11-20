@@ -147,8 +147,7 @@ def _owner(ws_root: Path, rid: str, where: dict) -> "Union[Backend, tuple[dict, 
 def _not_offered(rid: str, backend: "Backend", what: str) -> tuple[dict, int]:
     from vivarium_workbench.lib.backends.records import refusal
 
-    # "not-offered" (P3 I1; "not-sms" before it, which the browser still accepts): callers read it only as "refused,
-    # terminal".
+    # "not-offered" (P3 I1; "not-sms" before it): callers read it only as "refused, terminal".
     return refusal(rid, f"run {rid} ran on {backend.name}, which does not offer {what}",
                    reason="not-offered", phase="not-offered")
 

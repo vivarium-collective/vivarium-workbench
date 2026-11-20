@@ -29,15 +29,13 @@ from conftest import (
 
 TESTS = Path(__file__).parent
 
-UNMARKED_PLUGIN_IMPORTERS: frozenset[str] = frozenset({
-    "test_source_branch.py",
-    "test_source_build_views_lib.py",
-})
+#: Empty since step P3 Z (the last two, test_source_branch and test_source_build_views_lib, were converted there).
+UNMARKED_PLUGIN_IMPORTERS: frozenset[str] = frozenset()
 
 #: The ratchet's ceiling: UNMARKED_PLUGIN_IMPORTERS's size when the core-only job arrived (K1). Each K2 PR that
 #: shrinks the set lowers this to the new size in the same PR; NEVER raise it -- a new module-level importer gets the
 #: mark instead.
-UNMARKED_PLUGIN_IMPORTERS_CEILING = 2
+UNMARKED_PLUGIN_IMPORTERS_CEILING = 0
 
 
 def _name(path: Path) -> str:

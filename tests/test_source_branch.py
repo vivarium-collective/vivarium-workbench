@@ -1,10 +1,11 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 import vivarium_workbench
 from vivarium_workbench.lib import workspace_deps_views as _wdv
 from vivarium_workbench.lib import git_commit_views as _gcv
-from vivarium_workbench_sms import source_build_views as _sbv
 
 _PKG_DIR = Path(vivarium_workbench.__file__).parent
 
@@ -103,6 +104,7 @@ def test_branch_push_non_git_409(tmp_path, monkeypatch):
     assert code == 409
 
 
+@pytest.mark.plugin
 def test_register_simulator_posts_upload(monkeypatch):
     from vivarium_workbench_sms import sms_api_client as sac
     seen = {}
@@ -114,7 +116,9 @@ def test_register_simulator_posts_upload(monkeypatch):
     assert seen["body"]["git_branch"] == "main" and seen["body"]["git_commit_hash"] == "abc1234"
 
 
+@pytest.mark.plugin
 def test_build_remote_endpoint(monkeypatch):
+    from vivarium_workbench_sms import source_build_views as _sbv
     from vivarium_workbench_sms import sms_api_client as sac
     monkeypatch.setattr(sac.SmsApiClient, "latest_simulator",
                         lambda self, repo, branch: {"git_commit_hash": "deadbee"})
@@ -126,13 +130,17 @@ def test_build_remote_endpoint(monkeypatch):
     assert obj["simulator_id"] == 64 and obj["commit"] == "deadbee"
 
 
+@pytest.mark.plugin
 def test_build_remote_missing_args_400(monkeypatch):
+    from vivarium_workbench_sms import source_build_views as _sbv
     obj, code = _sbv.build_remote({"repo": ""})
     assert code == 400
 
 
+@pytest.mark.plugin
 def test_build_remote_normalizes_git_suffix(monkeypatch):
     """A .git-suffixed repo URL must be stripped before it reaches sms-api."""
+    from vivarium_workbench_sms import source_build_views as _sbv
     from vivarium_workbench_sms import sms_api_client as sac
     seen = {}
     monkeypatch.setattr(sac.SmsApiClient, "latest_simulator",
@@ -146,8 +154,10 @@ def test_build_remote_normalizes_git_suffix(monkeypatch):
     assert seen["repo"] == "https://github.com/o/v2ecoli"
 
 
+@pytest.mark.plugin
 def test_build_remote_empty_commit_502(monkeypatch):
     """When sms-api returns an empty commit hash, return 502 immediately."""
+    from vivarium_workbench_sms import source_build_views as _sbv
     from vivarium_workbench_sms import sms_api_client as sac
     monkeypatch.setattr(sac.SmsApiClient, "latest_simulator",
                         lambda self, repo, branch: {"git_commit_hash": ""})

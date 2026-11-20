@@ -30,9 +30,10 @@ def test_the_prefix_is_the_external_contract():
     assert remote_run_id(9) == "remote-sim-9" and remote_run_id("simulation-V") == "remote-sim-simulation-V"
 
 
-def test_the_study_page_accepts_both_refusal_literals():
-    """The browser accepts ``not-offered`` and the pre-I1 ``not-sms`` (a page loaded before the upgrade, or a server
-    behind it), in both places it reads the refusal phase."""
+def test_the_study_page_reads_the_not_offered_refusal():
+    """The browser reads ``not-offered`` as a terminal refusal in both places it reads the refusal phase. The pre-I1
+    ``not-sms`` literal it also accepted until P3 Z is gone: nothing emits it any more."""
     detail = (ROOT / "vivarium_workbench" / "static" / "study-detail.js").read_text()
-    assert "d.phase === 'other-backend' || d.phase === 'not-offered' || d.phase === 'not-sms'" in detail
-    assert "d.phase !== 'other-backend' && d.phase !== 'not-offered' && d.phase !== 'not-sms'" in detail
+    assert "d.phase === 'other-backend' || d.phase === 'not-offered')" in detail
+    assert "d.phase !== 'other-backend' && d.phase !== 'not-offered')" in detail
+    assert "not-sms" not in detail
