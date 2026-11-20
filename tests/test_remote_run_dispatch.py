@@ -210,15 +210,18 @@ def test_remote_run_binds_no_sms_seam():
     so a stale ``setattr(remote_run, ...)`` raises instead of patching a dead copy."""
     for name in ("_poll_until_terminal", "_TERMINAL_STATUSES", "_MAX_CONSECUTIVE_POLL_ERRORS", "compose_simulation_id",
                  "viva_v1_document_options", "_SIMULATION_LOOKUP_BATCH", "_SIMULATION_LOOKUP_SLACK",
-                 "export_composite_pbg", "time", "json", "tempfile"):
+                 "export_composite_pbg", "time", "json", "tempfile",
+                 # step P2 Builds B2: viva-core's environment grammar moved to remote_run_viva_v1
+                 "backend_environment", "DEFAULT_BACKEND_ENVIRONMENT"):
         assert not hasattr(remote_run, name), name
 
 
 def test_plugin_reads_core_remote_run_through_the_module():
-    """Plugin code reads ``git_pip_url``, ``workspace_pinned_deps``, ``remote_dispatch_preflight`` and
-    ``backend_environment`` as ``remote_run.<name>`` at call time, never from-imports them: tests patch them on
-    ``remote_run``, and a from-imported copy would make those patches silently dead. ``deployment_run`` reads the
-    client the same way (``sms_api_client.<name>``)."""
+    """Plugin code reads ``git_pip_url``, ``workspace_pinned_deps`` and ``remote_dispatch_preflight`` as
+    ``remote_run.<name>`` at call time, never from-imports them: tests patch them on ``remote_run``, and a
+    from-imported copy would make those patches silently dead. ``deployment_run`` reads the client the same way
+    (``sms_api_client.<name>``). (``backend_environment`` was one of them until step P2 Builds B2 moved it into
+    ``remote_run_viva_v1``.)"""
     offenders = []
     for path in sorted(PLUGIN_DIR.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))

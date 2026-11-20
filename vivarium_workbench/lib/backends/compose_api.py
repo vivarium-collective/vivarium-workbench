@@ -7,9 +7,12 @@ module still takes effect.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Optional, Union
+from typing import TYPE_CHECKING, Callable, Optional, Union
 
 from vivarium_workbench.lib import remote_run_compose
+
+if TYPE_CHECKING:
+    from vivarium_workbench.lib.backends.provider import Detached
 
 
 class ComposeApiRuns:
@@ -50,6 +53,24 @@ class ComposeApiRuns:
         return remote_run_compose.run_composite(
             ws_root, composite_id, dest=Path(dest), n_steps=n_steps, overrides=overrides, emit_paths=emit_paths,
             poll_interval=poll_interval, poll_timeout=poll_timeout)
+
+    def dispatch_preflight(self, ws_root: Path) -> dict:
+        """Ready exactly when an environment compose-api's registry lists runs this workspace (nothing is shipped
+        from git): :func:`remote_run_compose.dispatch_preflight`."""
+        return remote_run_compose.dispatch_preflight(ws_root)
+
+    def dispatch_composite(self, ws_root: Path, body: dict, *, spec_id: str, overrides: dict,
+                           emit_paths: list, steps: float) -> "tuple[dict, int] | Detached":
+        """The card's run goes to the detached runner (``run_composite`` sends it to the environment compose-api's
+        registry lists for this workspace). No cloud image to resolve and no git preflight: the environment's image
+        runs, not this checkout. A step count compose-api cannot run is refused now (its 400)."""
+        from vivarium_workbench.lib.backends.provider import Detached
+
+        try:
+            remote_run_compose.checked_steps(steps)
+        except remote_run_compose.ComposeDispatchError as e:
+            return {**e.body, "run_target": "deployment"}, e.status
+        return Detached()
 
 
 #: How long the identity request may wait for an answer: a probe's (``SmsApiClient.for_("probe")`` waits 3 s). The

@@ -7,10 +7,13 @@ module still takes effect.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Union
+from typing import TYPE_CHECKING, Union
 
 from vivarium_workbench.lib import remote_run_compose
 from vivarium_workbench_sms import remote_run_viva_v1
+
+if TYPE_CHECKING:
+    from vivarium_workbench.lib.backends.provider import Detached
 
 
 class VivaCoreRuns:
@@ -49,6 +52,32 @@ class VivaCoreRuns:
         return deployment_run.run(ws_root, composite_id, dest=dest, n_steps=n_steps, overrides=overrides,
                                   poll_interval=poll_interval, poll_timeout=poll_timeout,
                                   analysis_options=analysis_options, build_ref=build_ref, emit_paths=emit_paths, via_viva_v1=True)
+
+    def dispatch_preflight(self, ws_root: Path) -> dict:
+        """The named backend runs the workspace's composites as documents: there is no cloud image to resolve, but a
+        named-environment run ships the workspace from git. Moved verbatim from ``/api/remote-dispatch-preflight``
+        (step P2 Builds B2): the git preflight always runs (Finding F: the card skips it for an ``id:``
+        environment)."""
+        from vivarium_workbench.lib import remote_run
+
+        pf = remote_run.remote_dispatch_preflight(ws_root)
+        pf["target"] = "deployment"
+        pf["dispatch"] = "viva-v1-document"
+        return pf
+
+    def dispatch_composite(self, ws_root: Path, body: dict, *, spec_id: str, overrides: dict,
+                           emit_paths: list, steps: float) -> "tuple[dict, int] | Detached":
+        """The card's run goes to the detached runner as a document (``run_composite`` -> ``POST
+        /viva/v1/composites``): no cloud image to resolve. A named environment installs the workspace FROM GIT, so
+        the clean+pushed preflight still applies. Moved verbatim from ``composite_test_run`` (step P2 Builds B2)."""
+        from vivarium_workbench.lib import remote_run
+        from vivarium_workbench.lib.backends.provider import Detached
+
+        pf = remote_run.remote_dispatch_preflight(ws_root) if "name" in remote_run_viva_v1.backend_environment() else {"ok": True}
+        if not pf.get("ok"):
+            return {"error": pf.get("message", "workspace not ready to run remotely"),
+                    "reason": pf.get("reason"), "preflight": pf, "run_target": "deployment"}, 409
+        return Detached()
 
 
 def viva_health_identity(base_url: str) -> "str | None":

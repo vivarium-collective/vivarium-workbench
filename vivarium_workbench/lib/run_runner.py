@@ -109,12 +109,11 @@ class RunRequest:
     # wins on name collision. Empty/absent = a no-op merge (composite defaults
     # flow through unchanged), never a crash.
     declared_results: dict = None  # type: ignore[assignment]
-    # Cloud-run-against-build: when a deployment run targets a SELECTED registered
-    # build (the Environment picker's chosen Cloud build), this carries that
-    # build's identity {simulator_id, repo_url, commit}. run_remote then installs
-    # the workspace code from build_ref['commit'] instead of the local git tree —
-    # so a Cloud run needs no local push. Absent/None = the stock deployment path
-    # (pinned config, else the clean+pushed local tree via git_pip_url).
+    # A build reference the backend's ``runs.dispatch_composite`` returned
+    # (``Detached.build_ref``, step P2 Builds B2), carried unread through
+    # run_remote to ``runs.run_composite``. (The SMS plugin's: the Environment
+    # picker's selected build {simulator_id, repo_url, commit}, installed instead
+    # of the local git tree.) Absent/None = the backend's stock deployment path.
     build_ref: dict = None  # type: ignore[assignment]
 
     @classmethod

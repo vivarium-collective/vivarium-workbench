@@ -305,6 +305,7 @@ def _card_branch(ws, monkeypatch):
     dispatch ends are patched, so nothing runs and nothing is asked over the network."""
     from vivarium_workbench.lib import composite_test_run_views as ctr
     from vivarium_workbench.lib import remote_run_compose, run_core
+    from vivarium_workbench_sms import cloud_dispatch
 
     seen = {}
     monkeypatch.setattr(remote_run_compose, "checked_steps", lambda steps: steps)
@@ -317,7 +318,7 @@ def _card_branch(ws, monkeypatch):
         seen["target"] = k.get("target")
         raise _CardStop
 
-    monkeypatch.setattr(ctr, "_dispatch_build_image_run", image)
+    monkeypatch.setattr(cloud_dispatch, "_dispatch_build_image_run", image)
     monkeypatch.setattr(run_core, "invoke_run", invoke)
     try:
         body, status = ctr.composite_test_run(ws, {"id": "c"})

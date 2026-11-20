@@ -117,21 +117,6 @@ def git_pip_url(ws_root: "Path | str") -> str:
     return f"git+{origin_url}@{sha}"
 
 
-#: The site-named environment ``POST /viva/v1/composites`` accepts for a document run (viva-core
-#: ``NAMED_ENVIRONMENTS``): one container on the core runtime image. ``deployment-default`` is only
-#: the label a legacy submission is *recorded* under, not a name the route accepts.
-DEFAULT_BACKEND_ENVIRONMENT = "runtime"
-
-
-def backend_environment() -> dict:
-    """``environment`` for a /viva/v1 document run: ``VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT``
-    is a site-named environment (``runtime``) or ``id:<environment id>``; default ``runtime``."""
-    from vivarium_workbench.lib.env_compat import get_env
-
-    raw = (get_env("BACKEND_ENVIRONMENT", DEFAULT_BACKEND_ENVIRONMENT) or DEFAULT_BACKEND_ENVIRONMENT).strip()
-    return {"id": raw[3:]} if raw.startswith("id:") else {"name": raw}
-
-
 def remote_dispatch_preflight(ws_root: "Path | str") -> dict:
     """Non-raising, structured counterpart to :func:`git_pip_url`'s guards.
 

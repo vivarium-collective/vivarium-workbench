@@ -7509,20 +7509,12 @@ def create_app() -> FastAPI:
     def remote_dispatch_preflight(ws: Path = Depends(get_workspace)) -> JSONResponse:
         """Proactive check the Run UI calls when the workspace runs remotely.
 
-        Cloud runs execute a registered build's PRE-BUILT image (plan B / #1101),
-        so the question is "does a cloud image resolve for this workspace" — the
-        SAME decision :func:`composite_test_run_views.resolve_cloud_target` makes
-        at dispatch. When one does, it's ready (no push needed). When none does,
-        return the actionable ``actions[]`` shape (Build on cloud / Switch to
-        Local) so the card renders buttons, not prose. The dead compose/git-install
-        path (which needs a clean+pushed tree AND the repo on sms-api's compose
-        allow-list) is only surfaced when an operator opts in via
-        ``VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH=1``.
-        Returns ``{target, ok, reason, message, actions?, ...}``; a local
-        workspace is always ok (no push needed)."""
+        The same decision the composite card takes at dispatch (#1107): ``backends.active``, then the chosen
+        backend's ``runs.dispatch_preflight`` (step P2 Builds B2) -- compose-api: does an environment its registry
+        lists run this workspace; viva-core: the git preflight a named environment needs; the SMS plugin: does a
+        cloud image resolve (with the actionable ``actions[]`` shape when none does). Returns ``{target, ok,
+        reason, message, actions?, ...}``; a local workspace is always ok (no push needed)."""
         from vivarium_workbench.lib import backends as _backends
-        from vivarium_workbench.lib import remote_run as _remote_run
-        from vivarium_workbench.lib import composite_test_run_views as _ctr
         # One decision: backends.active (which backends.resolve_run_target also reads). Patching
         # backends.resolve_run_target does not steer this preflight; patch backends.active / backends.select.
         try:
@@ -7533,39 +7525,7 @@ def create_app() -> FastAPI:
         if _chosen is None:
             return JSONResponse(content={"target": "local", "ok": True, "reason": "local",
                                          "message": "This workspace runs locally — no push needed."})
-        if _chosen is _backends.COMPOSE:
-            # compose-api runs the composite in the environment its registry lists for this
-            # workspace: ready exactly when one resolves (nothing is shipped from git).
-            from vivarium_workbench.lib import remote_run_compose as _rc
-            return JSONResponse(content=_rc.dispatch_preflight(ws))
-        if _chosen is _backends.VIVA_CORE:
-            # The named backend runs the workspace's composites as documents: there is no
-            # cloud image to resolve, but a named-environment run ships the workspace from git.
-            pf = _remote_run.remote_dispatch_preflight(ws)
-            pf["target"] = "deployment"
-            pf["dispatch"] = "viva-v1-document"
-            return JSONResponse(content=pf)
-        cloud = _ctr.resolve_cloud_target(ws, {})
-        if isinstance(cloud, _ctr.CloudTarget):
-            return JSONResponse(content={
-                "target": "deployment", "ok": True, "reason": "image",
-                "dispatch": "image", "simulator_id": cloud.simulator_id,
-                "message": f"Cloud image (build #{cloud.simulator_id}) is ready — "
-                           "runs execute its pre-built image, no push needed."})
-        if not _ctr._compose_dispatch_allowed():
-            # No cloud image and compose is not opted into → actionable dead-end.
-            payload, _status = cloud if isinstance(cloud, tuple) else _ctr._no_image(None, reason="no-build")
-            payload = dict(payload)
-            payload.update(target="deployment", ok=False)
-            return JSONResponse(content=payload)
-        # Opt-in compose path: the git-install preflight, plus the real requirement.
-        pf = _remote_run.remote_dispatch_preflight(ws)
-        pf["target"] = "deployment"
-        pf["actions"] = _ctr.cloud_build_actions(pf.get("sha"))
-        pf["message"] = (pf.get("message", "") + " The compose path installs your "
-                         "repo from git on the deployment and requires the repo to be "
-                         "on sms-api's compose allow-list.").strip()
-        return JSONResponse(content=pf)
+        return JSONResponse(content=_chosen.runs.dispatch_preflight(ws))
 
     # -----------------------------------------------------------------------
     # Loom SAVE-POINTS: workspace-persisted captured bigraph states. A save-point

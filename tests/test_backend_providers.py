@@ -604,3 +604,110 @@ def test_a_provider_cannot_allowlist_a_path_that_is_not_its_own(monkeypatch):
                         lambda: (_fake_provider(r, {"/api/fake-own", "/api/study-create"}),))
     with pytest.raises(RuntimeError, match="not its own"):
         appmod.create_app()
+
+
+# --- step P2 Builds B2: the card's dispatch and the dispatch preflight ----------------------------------------------
+
+def test_every_backend_dispatches_a_card_run_and_answers_the_preflight_and_the_sentinels_refuse(tmp_path):
+    """``RunFacet.dispatch_preflight`` / ``dispatch_composite`` on every active backend; the unrouted facet has
+    ``dispatch_composite`` (the explicit cloud run no backend selected); an inert sentinel refuses both."""
+    for backend in backends._ALL:
+        assert callable(getattr(backend.runs, "dispatch_preflight", None)), backend.name
+        assert callable(getattr(backend.runs, "dispatch_composite", None)), backend.name
+        if backend.unrouted is not None:
+            assert callable(getattr(backend.unrouted, "dispatch_composite", None)), backend.name
+    for sentinel in backends._SENTINELS.values():
+        with pytest.raises(RuntimeError, match="provider is not active"):
+            sentinel.runs.dispatch_preflight(tmp_path)
+        with pytest.raises(RuntimeError, match="provider is not active"):
+            sentinel.runs.dispatch_composite(tmp_path, {}, spec_id="c", overrides={}, emit_paths=[], steps=1)
+
+
+def _card_ws(tmp_path, monkeypatch):
+    from vivarium_workbench.lib import run_registry
+
+    (tmp_path / ".pbg").mkdir()
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
+    spawned: list = []
+    monkeypatch.setattr(run_registry, "spawn_detached", lambda *a, **k: (spawned.append(a), 1)[1])
+    return spawned
+
+
+def test_with_providers_off_an_explicit_cloud_run_is_refused_no_backend(providers_off, tmp_path, monkeypatch):
+    """Declared change (step P2 Builds B2): the Environment picker's explicit cloud run, with nothing selected, goes
+    to the unrouted facet; with providers off there is none, so it is refused (409 ``no-backend``) and nothing is
+    sent or spawned. Before B2 it reached the SMS dispatch (a ``run_simulation`` call, or SMS's no-build 409)."""
+    from vivarium_workbench.lib import composite_test_run_views as ctr
+    from vivarium_workbench_sms import sms_api_client as sac
+
+    spawned = _card_ws(tmp_path, monkeypatch)
+    monkeypatch.setattr(sac.SmsApiClient, "run_simulation",
+                        lambda self, **kw: (_ for _ in ()).throw(AssertionError("SMS was asked")))
+    for body in ({"run_target": "deployment", "build": {"simulator_id": 211, "repo_url": "r", "commit": "c"}},
+                 {"run_target": "deployment"}):
+        assert ctr.composite_test_run(tmp_path, {"id": "pkg.composites.x", **body}) == (
+            {"error": "no remote backend was named (serve --backend-base-url)", "reason": "no-backend",
+             "run_target": "deployment"}, 409)
+    assert spawned == []
+
+
+def test_with_providers_off_a_stamped_or_pinned_card_run_is_local(providers_off, tmp_path, monkeypatch):
+    """Unchanged by B2 (nothing claims a session build or a pin with providers off): the card runs locally."""
+    import json
+
+    from vivarium_workbench.lib import composite_test_run_views as ctr
+
+    spawned = _card_ws(tmp_path, monkeypatch)
+    (tmp_path / ".viv-build.json").write_text('{"simulator_id": 124, "repo_url": "r", "commit": "c"}')
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_REPO_URL", "https://github.com/x/sms-ecoli.git")
+    resp, status = ctr.composite_test_run(tmp_path, {"id": "pkg.composites.x"})
+    assert status == 202 and len(spawned) == 1
+    req = json.loads((tmp_path / ".pbg" / "runs" / resp["run_id"] / "request.json").read_text())
+    assert (req["target"], req["build_ref"]) == ("local", None)
+
+
+#: Names that moved from the core's composite card (lib.composite_test_run_views) to the plugin's cloud_dispatch in
+#: step P2 Builds B2. The card must bind none of them: a stale ``monkeypatch.setattr(ctr, name, ...)`` then raises
+#: instead of silently patching a dead copy.
+_MOVED_TO_CLOUD_DISPATCH = (
+    "_WHOLE_CELL_DEFAULT_CONFIG", "_config_for_spec", "_dispatch_build_image_run", "CloudTarget", "_COMPOSE_TRUTHY",
+    "_compose_dispatch_allowed", "cloud_build_actions", "_no_image", "_explicit_build_ref", "resolve_cloud_target",
+)
+
+
+def test_the_card_binds_no_sms_seam():
+    from vivarium_workbench.lib import composite_test_run_views as ctr
+    from vivarium_workbench_sms import cloud_dispatch
+
+    assert [n for n in _MOVED_TO_CLOUD_DISPATCH if hasattr(ctr, n)] == []
+    assert [n for n in _MOVED_TO_CLOUD_DISPATCH if not hasattr(cloud_dispatch, n)] == []
+
+
+def test_viva_cores_environment_grammar_left_the_core():
+    """``backend_environment`` / ``DEFAULT_BACKEND_ENVIRONMENT`` (viva-core's reading of the shared
+    ``VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT``) live in the plugin since step P2 Builds B2, with no core alias."""
+    from vivarium_workbench.lib import remote_run
+    from vivarium_workbench_sms import remote_run_viva_v1
+
+    for name in ("backend_environment", "DEFAULT_BACKEND_ENVIRONMENT"):
+        assert not hasattr(remote_run, name), name
+        assert hasattr(remote_run_viva_v1, name), name
+
+
+def test_cloud_dispatch_reads_every_seam_through_its_module():
+    """The moved card code reads core names (``remote_run``, ``backends``) and the plugin's own (``remote_pinned``,
+    ``sms_api_client``) as ``<module>.<name>`` at call time, never from-imports them: tests patch them on those
+    modules, and a from-imported copy would make those patches silently dead."""
+    import ast
+    from pathlib import Path
+
+    import vivarium_workbench_sms.cloud_dispatch as cd
+
+    watched = {"vivarium_workbench.lib.remote_run", "vivarium_workbench.lib.backends",
+               "vivarium_workbench_sms.remote_pinned", "vivarium_workbench_sms.sms_api_client"}
+    tree = ast.parse(Path(cd.__file__).read_text(encoding="utf-8"))
+    offenders = [f"{n.module}:{n.lineno}" for n in ast.walk(tree)
+                 if isinstance(n, ast.ImportFrom) and n.module in watched]
+    assert offenders == []
