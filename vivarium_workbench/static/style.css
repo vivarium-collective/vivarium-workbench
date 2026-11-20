@@ -6925,3 +6925,7 @@ body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]{
   background:var(--surface-2,#f6f8fa); border:1px solid var(--border,#e5e7eb); border-radius:8px;
   padding:7px 14px; color:var(--text,#334155); cursor:pointer; margin:2px 0 12px; font-weight:500; }
 .mdef-explore-btn:hover{ background:var(--surface-3,#eef2f7); border-color:var(--accent,#6366f1); }
+.mdef-dl-btn{ margin-left:auto; font-size:0.8em; text-decoration:none; white-space:nowrap;
+  background:var(--surface-2,#f6f8fa); border:1px solid var(--border,#e5e7eb); border-radius:7px;
+  padding:4px 10px; color:var(--text,#334155); }
+.mdef-dl-btn:hover{ background:var(--surface-3,#eef2f7); border-color:var(--accent,#6366f1); color:var(--accent,#6366f1); }

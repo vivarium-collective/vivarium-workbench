@@ -1651,7 +1651,10 @@
     return '<div class="mdef-panel">' +
       '<div class="mdef-hd"><span class="overview-label" style="margin:0">Model definition</span>' +
         (d.name ? '<code class="mdef-name">' + _esc(d.name) + '</code>' : '') +
-        (d.kind ? '<span class="mdef-kind">' + _esc(d.kind) + '</span>' : '') + '</div>' +
+        (d.kind ? '<span class="mdef-kind">' + _esc(d.kind) + '</span>' : '') +
+        (d.id ? '<a class="mdef-dl-btn" href="/api/composite-loom-standalone?id=' + encodeURIComponent(d.id) +
+          '" download title="Download a self-contained single-file HTML of this composite\'s loom — opens anywhere, no server, no install">⬇ Portable loom</a>' : '') +
+        '</div>' +
       (d.description ? '<p class="mdef-desc">' + _esc(d.description) + '</p>' : '') +
       (procHtml ? '<div class="mdef-sect"><div class="mdef-sect-lbl">Processes · ' + procNames.length + '</div>' + procHtml + '</div>' : '') +
       (storeHtml ? '<div class="mdef-sect"><div class="mdef-sect-lbl">State variables — shared stores</div><div class="mdef-stores">' + storeHtml + '</div></div>' : '') +
