@@ -414,3 +414,32 @@ def test_the_remote_listing_answers_without_the_plugin():
     proc = subprocess.run([sys.executable, "-c", _LISTING_PROBE], capture_output=True, text=True, timeout=300)
     expected = json.dumps({"has_remote": False, "offering": [], "plugin": [], "stats": {}}, sort_keys=True)
     assert "@@RESULT@@" + expected in proc.stdout, (proc.stdout[-2000:], proc.stderr[-2000:])
+
+
+_STORE_PROBE = textwrap.dedent('''
+    import json, sys, tempfile
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import simulations_index
+
+    row = {"run_id": "r", "db_path": None, "store_path": "s3://bucket/r", "study_slug": None,
+           "remote_origin": {"simulation_id": 113, "deployment": "smsvpctest"}}
+    got = simulations_index.resolve_or_fetch_store(tempfile.mkdtemp(), row)
+    plugin = [m for m in sys.modules if m.startswith("vivarium_workbench_sms")]
+    print("@@RESULT@@" + json.dumps({"got": list(got), "plugin": plugin}))
+''')
+
+
+def test_the_store_fetch_answers_without_the_plugin():
+    """Step P2 Remote tab R2: with the plugin absent (the env-worker pod) an SMS simulation's s3-only row has no
+    backend offering ``artifacts``, so its store is ``(None, None)`` and the plugin is never reached for."""
+    proc = subprocess.run([sys.executable, "-c", _STORE_PROBE], capture_output=True, text=True, timeout=300)
+    marker = [ln for ln in proc.stdout.splitlines() if ln.startswith("@@RESULT@@")]
+    assert marker, proc.stderr[-2000:]
+    assert json.loads(marker[-1][len("@@RESULT@@"):]) == {"got": [None, None], "plugin": []}
