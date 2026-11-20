@@ -946,3 +946,11 @@ def test_with_providers_off_a_compose_run_is_still_traced_by_compose_api(provide
         assert remote_trace.fetch_trace(ws_root=tmp_path, **{key: "compose-6"}) == (b"{}", 200, "compose-6.json")
     body, status = remote_trace.trace_support()
     assert (status, body["supported"], body["capability"]) == (200, True, "get-simulation-trace-chrome")
+
+
+def test_with_providers_off_a_blank_trace_id_is_no_id(providers_off, tmp_path):
+    """A whitespace-only id counts as no id (as the run views' ``_first_id``): 400, not a 409 naming an empty run."""
+    from vivarium_workbench.lib import remote_trace
+
+    body, status, _ = remote_trace.fetch_trace(ws_root=tmp_path, simulation_id="  ")
+    assert status == 400, body

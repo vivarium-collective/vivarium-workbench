@@ -117,7 +117,7 @@ def fetch_trace(*, ws_root: "Path | str", simulation_id: object = None, composit
     if ub is not None and ub.unrouted is not None:
         return ub.unrouted.trace(ids)
     # Providers off: nothing installed serves a run that no record or id form routed.
-    named_ids = [v for v in ids.values() if v not in (None, "")]
+    named_ids = [v for v in ids.values() if v is not None and str(v).strip()]  # a blank id is no id (as rrv)
     if len(named_ids) != 1:
         return ({"error": "give exactly one of simulation_id, composite_run_id, compose_id"}, 400, "")
     body, status = records.unowned(str(named_ids[0]).strip())
