@@ -7,7 +7,8 @@ offers ``artifacts`` for a study's gallery. What is SMS's is here:
 * the login check, the "required" 400s and the integer-id check, which used to run in the core views;
 * the re-run's tail (``remote_run_views.remote_run_analysis``'s SMS half, moved verbatim);
 * the figure reads over :mod:`remote_analysis_figures` and the study gallery;
-* land-artifacts calls :func:`sms_legacy.land_artifacts_tail` (the store landing is ``sms_landing``'s, Runs c1).
+* land-artifacts calls :func:`sms_legacy.land_artifacts_tail` (the store landing is ``sms_landing``'s, Runs c1);
+* the store fetch (``fetch_store``, Remote tab R2) calls :func:`sms_legacy.fetch_store_tail`.
 
 The seams tests patch (``SmsApiClient``, ``_sms_api_base``, ``_run_auth_ok``, ``SmsApiError``, ``load_spec``, and
 ``remote_analysis_figures``' functions) are read through their modules at call time and bound nowhere here, so each
@@ -130,6 +131,9 @@ class SmsArtifacts:
 
     def study_figures(self, ws_root: Path, study: str, max_runs: int) -> tuple[dict, int]:
         return remote_analysis_figures.study_remote_figures(ws_root, _client(), study, max_sims=max_runs), 200
+
+    def fetch_store(self, run_id: str, dest: Path) -> Optional[Path]:
+        return sms_legacy.fetch_store_tail(run_id, dest)
 
 
 class SmsAnalyses:

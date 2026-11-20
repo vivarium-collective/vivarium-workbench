@@ -2217,12 +2217,18 @@ def _build_simulations_data(ws_root: Path, include_remote: bool = True,
 
 
 def resolve_or_fetch_store(workspace: Path, row: dict) -> "tuple[Path | None, tempfile.TemporaryDirectory | None]":
-    """Resolve a run's native store, falling back to sms-api when local
+    """Resolve a run's native store, falling back to the run's backend when local
     resolution fails and the row's ``remote_origin`` carries a
-    ``simulation_id`` — the same S3-streaming fetch
-    :func:`build_simulation_run_zip` uses for Results, reused here so
-    Viz/Report can render real data for a run whose local materialization
-    is gone.
+    ``simulation_id`` — the same fetch :func:`build_simulation_run_zip` uses
+    for Results, reused here so Viz/Report can render real data for a run
+    whose local materialization is gone.
+
+    The fetch is the backend's ``artifacts.fetch_store`` (docs/backend-adapters.md
+    §2.1, step P2 Remote tab R2): the run's record picks the backend
+    (``backends.for_existing``), and a backend without ``artifacts`` (or a
+    refusal) has nothing to fetch. This function owns the temporary directory
+    the facet downloads into, and removes it when the facet returns ``None``
+    or raises.
 
     Returns ``(store_path, tmp_handle)``. ``tmp_handle`` is a
     ``tempfile.TemporaryDirectory`` when a remote fetch happened (the caller
@@ -2230,8 +2236,6 @@ def resolve_or_fetch_store(workspace: Path, row: dict) -> "tuple[Path | None, te
     ``None`` when the store resolved locally (nothing to clean up) or
     couldn't be resolved at all (``store_path`` is also ``None`` in that case).
     """
-    import tarfile
-
     workspace = Path(workspace)
 
     def _resolve(p: "str | None") -> "Path | None":
@@ -2253,27 +2257,25 @@ def resolve_or_fetch_store(workspace: Path, row: dict) -> "tuple[Path | None, te
     sim_id = remote_origin.get("simulation_id")
     if sim_id is None:
         return None, None
-    # Step 1c-2: only this backend's SMS simulations are downloaded (a viva-core or compose-api row's id is not an
-    # SMS simulation, and another deployment's run must not be fetched from this one).
+    # Step 1c-2: only the run's own backend is asked (another deployment's run must not be fetched from this one), and
+    # only one that offers ``artifacts`` has a store to fetch (step P2 R2; today sms-legacy).
     from vivarium_workbench.lib import backends
 
-    if backends.for_existing(workspace, sim_id, deployment=remote_origin.get("deployment"),
-                             study=row.get("study_slug")) is not backends.SMS_LEGACY:
+    chosen = backends.for_existing(workspace, sim_id, deployment=remote_origin.get("deployment"),
+                                   study=row.get("study_slug"))
+    if not isinstance(chosen, backends.Backend) or chosen.artifacts is None:
         return None, None
 
-    from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
-    from vivarium_workbench_sms import sms_api_client
     tmp = tempfile.TemporaryDirectory()
     try:
-        tar_path = SmsApiClient(sms_api_client.sms_api_base()).download_data(int(sim_id), Path(tmp.name))
-    except SmsApiError:
+        store = chosen.artifacts.fetch_store(str(sim_id), Path(tmp.name))
+    except BaseException:
+        tmp.cleanup()
+        raise
+    if store is None:
         tmp.cleanup()
         return None, None
-    extract_dir = Path(tmp.name) / "extracted"
-    extract_dir.mkdir()
-    with tarfile.open(tar_path) as tf:
-        tf.extractall(extract_dir, filter="data")  # noqa: S202 — sms-api's own tar, not user input
-    return extract_dir, tmp
+    return store, tmp
 
 
 def build_simulation_run_zip(workspace: Path, run_id: str) -> "tuple[bytes, str, int]":
@@ -2283,12 +2285,12 @@ def build_simulation_run_zip(workspace: Path, run_id: str) -> "tuple[bytes, str,
     NO filesystem path is trusted from the client. Prefers the native
     zarr/parquet store directory; falls back to the SQLite ``runs.db`` that holds
     the run's rows. Remote (``s3://``) stores can't be zipped as-is, so those
-    fall back to fetching the run's native store from sms-api (which already
-    streams it out of S3 with no disk touch on its side) via the run's recorded
-    ``remote_origin.simulation_id`` — the same call the remote-run-land flow
-    already makes at dispatch time (:mod:`lib.remote_run_views`), reused here
-    for an already-landed run whose local materialization no longer exists
-    (e.g. the session/build directory it ran in didn't survive a pod restart).
+    fall back to fetching the run's native store from the run's backend
+    (:func:`resolve_or_fetch_store`: its ``artifacts.fetch_store``; for SMS the
+    same download the remote-run-land flow makes) via the run's recorded
+    ``remote_origin.simulation_id``, for an already-landed run whose local
+    materialization no longer exists (e.g. the session/build directory it ran
+    in didn't survive a pod restart).
 
     Returns ``(zip_bytes, filename, status)``:
       200 — zip built;  404 — run not found, and no local or remote store to fetch it from.
