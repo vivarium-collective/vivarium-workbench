@@ -348,7 +348,7 @@ def _preflight_branch(body):
         return ("refused", 409, body.get("reason"))
     if body["target"] == "local":
         return ("local",)
-    if body.get("dispatch") == "compose":
+    if body.get("dispatch") in ("compose", "compose-api"):
         return ("compose",)
     if body.get("dispatch") == "viva-v1-document":
         return ("document",)
@@ -358,9 +358,35 @@ def _preflight_branch(body):
     return ("refused", 409, body.get("reason"))
 
 
-def _same_decision(world, monkeypatch, inproc_client, named, build, tree, environment=None):
+class _FakeComposeSession:
+    """compose-api as ``remote_run_compose._session`` opens it: one prebuilt environment (``runtime``) and no registry
+    entries, or ``environments()`` raising ``fail``. Both sides run the real compose environment check against it,
+    so nothing is asked over the network."""
+
+    def __init__(self, fail=None):
+        self.fail = fail
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def environments(self):
+        from types import SimpleNamespace
+
+        if self.fail is not None:
+            raise self.fail
+        return [SimpleNamespace(name="runtime", kind="prebuilt", simulator="sim-1", image="img:1", stale=False)]
+
+    def catalog(self):
+        return []
+
+
+def _same_decision(world, monkeypatch, inproc_client, named, build, tree, environment=None, compose_fail=None):
     """``(preflight's branch, card's branch)`` for one world. The git preflight (``remote_run.remote_dispatch_preflight``)
-    answers ``tree`` to both sides: clean, or dirty (``reason: "dirty"``)."""
+    answers ``tree`` to both sides: clean, or dirty (``reason: "dirty"``). compose-api answers both sides through one
+    fake session (:class:`_FakeComposeSession`), so its real preflight and its real card check both run."""
     from vivarium_workbench.lib import remote_run, remote_run_compose
 
     configure, _ = world
@@ -378,8 +404,7 @@ def _same_decision(world, monkeypatch, inproc_client, named, build, tree, enviro
                         lambda ws_root: {"simulator_id": 7, "repo_url": "r", "commit": "c"}
                         if (ws_root / ".viv-build.json").exists() else None)
     monkeypatch.setattr(remote_pinned, "resolve_pinned_simulator_id", lambda client, ws_root: None)
-    monkeypatch.setattr(remote_run_compose, "dispatch_preflight",
-                        lambda ws_root: {"target": "deployment", "ok": True, "dispatch": "compose"})
+    monkeypatch.setattr(remote_run_compose, "_session", lambda *a, **k: _FakeComposeSession(compose_fail))
 
     preflight = _preflight_branch(inproc_client(ws).get("/api/remote-dispatch-preflight").json())
     return preflight, _card_branch(ws, monkeypatch)
@@ -417,3 +442,23 @@ def test_an_environment_id_with_a_dirty_tree_takes_the_same_decision(world, monk
     from git, so both sides launch a document; the preflight only warns about the dirty tree."""
     preflight, card = _same_decision(world, monkeypatch, inproc_client, "viva", "none", "dirty", "id:env-1")
     assert preflight == card == ("document",)
+
+
+def test_an_unknown_compose_environment_takes_the_same_decision(world, monkeypatch, inproc_client):
+    """The compose analogue of Finding F: a named environment compose-api does not list is refused by the preflight
+    (409 ``unknown-environment``), and the card refuses the launch the same way instead of spawning a run that fails
+    in the detached runner."""
+    preflight, card = _same_decision(world, monkeypatch, inproc_client, "compose", "none", "clean", "name:missing")
+    assert preflight == card == ("refused", 409, "unknown-environment")
+
+
+def test_a_compose_registry_error_takes_the_same_decision(world, monkeypatch, inproc_client):
+    """compose-api answers the environment listing with an error: the preflight is not ready and the card refuses the
+    launch for the same reason. The statuses differ (the preflight's branch reads every ``ok: False`` as a 409; the
+    card answers ``_backend_error``'s 502), so only the reasons are compared."""
+    from compose_api_client.ext import ApiError
+
+    preflight, card = _same_decision(world, monkeypatch, inproc_client, "compose", "none", "clean",
+                                     compose_fail=ApiError(500, "boom"))
+    assert preflight[0] == card[0] == "refused"
+    assert preflight[2] == card[2] == "backend error"

@@ -57,6 +57,15 @@ LOOKUP_ATTEMPTS = 5
 LOOKUP_INTERVAL = 3.0
 #: What :func:`run_composite` names its results archive after the run (``compose-4706-results.zip``).
 ARCHIVE_SUFFIX = "-results.zip"
+#: A session's timeout in seconds for each request: long enough for an upload or a slow answer from a run.
+SESSION_TIMEOUT = 120.0
+#: The timeout for the environment check the composite card makes before it launches (:func:`check_environment`),
+#: which runs inside the launch request: two small listings (environments, registry entries). The client caps each
+#: read at ``min(timeout, 60)`` and adds a 5 s connect, so the card waits at most about 40 s for a hung compose-api
+#: (two GETs), where the readiness check (:func:`dispatch_preflight`, the session's own timeout) waits up to 60 s per
+#: read. A compose-api slower than 15 s but under 60 s can therefore show a ready badge while the card refuses with
+#: 502 "backend unreachable"; accepted (a launch must not hold the request for a minute).
+CHECK_TIMEOUT = 15.0
 
 _TERMINAL_OK = {"completed"}
 _TERMINAL_BAD = {"failed", "cancelled", "out_of_memory", "timeout"}
@@ -94,8 +103,9 @@ def _text(value: object) -> "str | None":
     return value if isinstance(value, str) else None
 
 
-def _session() -> "ComposeSession":
-    """A session on the named backend, signed in when ``COMPOSE_API_TOKEN`` is set (anonymous otherwise)."""
+def _session(timeout: float = SESSION_TIMEOUT) -> "ComposeSession":
+    """A session on the named backend, signed in when ``COMPOSE_API_TOKEN`` is set (anonymous otherwise), each
+    request bounded by ``timeout`` seconds."""
     from compose_api_client.ext import ComposeSession, EnvironmentToken
 
     from vivarium_workbench.lib.backend_config import explicit_backend_base_url
@@ -105,7 +115,7 @@ def _session() -> "ComposeSession":
         raise ComposeDispatchError({"error": "this is a compose-api run, but no backend was named "
                                              "(serve --backend-base-url) to ask about it", "reason": "no-backend"}, 409)
     tokens = EnvironmentToken() if os.environ.get(TOKEN_ENV_VAR, "").strip() else None
-    return ComposeSession(base, tokens=tokens, timeout=120.0)
+    return ComposeSession(base, tokens=tokens, timeout=timeout)
 
 
 # -- which environment runs the workspace --------------------------------------------------------------------------
@@ -526,6 +536,16 @@ def _dispatch(session: "ComposeSession", ws_root: Path, composite_id: str, param
     return int(experiment.simulation_database_id), env
 
 
+def check_environment(ws_root: Path, *, timeout: float = SESSION_TIMEOUT) -> dict:
+    """The environment that runs this workspace (:func:`resolve_environment`), asked of compose-api in a session of its
+    own whose requests wait at most ``timeout`` seconds. The readiness check (:func:`dispatch_preflight`) and the
+    composite card's launch (``ComposeApiRuns.dispatch_composite``) both ask it, so they refuse the same workspaces.
+    Raises :class:`ComposeDispatchError` (409: a named environment compose-api lacks, or no backend named) and the
+    client's ``CliError`` for a call that failed (:func:`_backend_error` reads it)."""
+    with _session(timeout=timeout) as session:
+        return resolve_environment(session, Path(ws_root))
+
+
 def dispatch_preflight(ws_root: Path) -> dict:
     """``/api/remote-dispatch-preflight`` on compose-api: ``{target, dispatch, ok, reason, message, environment?}``,
     ready when a prebuilt environment runs this workspace, or (``reason`` ``inferred``) when compose-api will choose or
@@ -535,8 +555,7 @@ def dispatch_preflight(ws_root: Path) -> dict:
 
     out: dict = {"target": "deployment", "dispatch": BACKEND}
     try:
-        with _session() as session:
-            env = resolve_environment(session, Path(ws_root))
+        env = check_environment(Path(ws_root))
     except ComposeDispatchError as e:
         return {**out, **e.body, "ok": False, "message": e.body.get("error")}
     except CliError as e:

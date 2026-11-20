@@ -1005,6 +1005,13 @@
     // the run uses its prebuilt image, so local edits won't apply) — an ⓘ on the
     // label and the note in the tooltip; the badge keeps its ready (blue) styling.
     var notes = (pf.warnings && pf.warnings.length) ? pf.warnings : null;
+    // Not ready (`ok: false`, e.g. compose-api lists no such environment, or cannot be
+    // asked): the card would refuse a Run with the same reason, so say so up front in the
+    // amber of the "no build" state. The badge itself blocks nothing. A published bundle
+    // has no preflight (`pf` null), so it never reaches here.
+    if (cloud && pf.ok === false) return { label: 'Runs: Cloud · not ready ⚠', bg: '#fdf0e3', fg: '#a15c12',
+      tip: 'A Cloud Run would be refused: ' +
+        String(pf.message || pf.error || pf.reason || 'the deployment is not ready').replace(/\.?$/, '.') };
     if (cloud) return { label: 'Runs: Cloud' + (notes ? ' ⓘ' : ''), bg: '#e6f0fb', fg: '#1e5fa4',
       tip: (pf.message || 'This workspace runs on the Cloud (GovCloud) deployment — ▶ Run dispatches remotely.') +
         (notes ? ' Note (does not block a Run): ' + notes.join('; ') + '.' : '') };
