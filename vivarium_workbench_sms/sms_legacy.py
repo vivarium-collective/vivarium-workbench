@@ -12,7 +12,8 @@ module's own globals, read at call time; the SMS code still in ``remote_run_view
 too, so each has exactly one patch target. The SMS store landing (``land_remote_run``,
 ``land_remote_simulation_artifacts``) is :mod:`vivarium_workbench_sms.sms_landing`'s (Runs c1), read through that
 module at call time and bound nowhere else. Step P2 Builds B3 added the ``builds`` facet (:class:`SmsLegacyBuilds`): the
-pin ``/api/remote-run-config`` reports and the study baseline's run of the selected build. This module is deleted
+pin ``/api/remote-run-config`` reports and the study baseline's run of the selected build. Step P2 Remote tab R2 moved
+the store fetch here (:func:`fetch_store_tail`, behind the ``artifacts`` facet's ``fetch_store``). This module is deleted
 only if the plugin itself leaves ``/api/v1`` (out of scope, Appendix A).
 """
 
@@ -227,6 +228,24 @@ def land_artifacts_tail(ws_root: Path, sim_id: "int | str", run_id: str) -> tupl
     except Exception as e:  # noqa: BLE001 — surface a shaped error, never a 500 traceback page
         return {"error": f"land failed: {type(e).__name__}: {e}"}, 500
     return result, 200
+
+
+def fetch_store_tail(run_id: str, dest: Path) -> "Path | None":
+    """``simulations_index.resolve_or_fetch_store``'s SMS half, moved verbatim (step P2, Remote tab R2): download the
+    simulation's native store (``POST /api/v1/simulations/{id}/data``, a tar) into ``dest`` and extract it into
+    ``dest/"extracted"``. ``None`` when sms-api cannot provide it; the caller owns ``dest`` and removes it. Its
+    caller is ``vivarium_workbench_sms.analyses.SmsArtifacts.fetch_store``, the ``artifacts`` facet."""
+    import tarfile
+
+    try:
+        tar_path = SmsApiClient(_sms_api_base()).download_data(int(run_id), dest)
+    except SmsApiError:
+        return None
+    extract_dir = dest / "extracted"
+    extract_dir.mkdir()
+    with tarfile.open(tar_path) as tf:
+        tf.extractall(extract_dir, filter="data")  # noqa: S202 — sms-api's own tar, not user input
+    return extract_dir
 
 
 def status_tail(params: dict) -> tuple[dict, int]:

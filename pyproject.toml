@@ -289,7 +289,6 @@ source_modules = ["vivarium_workbench"]
 forbidden_modules = ["vivarium_workbench_sms"]
 ignore_imports = [
     "vivarium_workbench.lib.backends.provider -> vivarium_workbench_sms.provider",  # the registry (P4: entry point)
-    "vivarium_workbench.lib.simulations_index -> vivarium_workbench_sms.sms_api_client",
 ]
 
 [[tool.importlinter.contracts]]

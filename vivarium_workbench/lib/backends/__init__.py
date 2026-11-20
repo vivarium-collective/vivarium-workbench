@@ -145,6 +145,13 @@ class ArtifactFacet(Protocol):
         no run, so the core asks every backend that offers the facet (:func:`offering`)."""
         ...
 
+    def fetch_store(self, run_id: str, dest: Path) -> "Optional[Path]":
+        """Download the run's native store into ``dest`` (a directory the caller owns and removes) and return where
+        to read it; ``None`` when the server cannot provide it. Blocking; any other error propagates. Unlike the
+        methods above it answers no route: it is ``simulations_index.resolve_or_fetch_store``'s remote half (the
+        Results zip, the Viz/Report zarr fallback), so it keeps that function's shape (step P2 Remote tab R2)."""
+        ...
+
 
 class AnalysisFacet(Protocol):
     """Optional (§2.1, step P2 Analyses and figures): re-run a finished run's analyses, in the views'

@@ -465,7 +465,7 @@ def test_only_sms_legacy_offers_the_artifacts_and_analyses_facets():
 
     sms = backends.SMS_LEGACY
     assert isinstance(sms.artifacts, SmsArtifacts) and isinstance(sms.analyses, SmsAnalyses)
-    for method in ("land_outputs", "list_figures", "read_figure", "study_figures"):
+    for method in ("land_outputs", "list_figures", "read_figure", "study_figures", "fetch_store"):
         assert callable(getattr(sms.artifacts, method)), method
     assert callable(sms.analyses.rerun)
     for backend in (backends.COMPOSE, backends.VIVA_CORE, *backends._SENTINELS.values()):
@@ -494,6 +494,23 @@ def test_only_sms_legacy_offers_the_listing_facet():
 
 def test_with_providers_off_no_backend_offers_the_listing(providers_off):
     assert backends.offering("listing") == ()
+
+
+def test_with_providers_off_a_runs_store_is_never_fetched(providers_off, tmp_path, monkeypatch, inproc_client):
+    """Step P2 Remote tab R2: an s3-only row of an SMS simulation (no record: routed by its id's form) has no backend
+    offering ``artifacts`` with providers off, so the Results zip is a 404 and SMS is never asked."""
+    from vivarium_workbench.lib import simulations_index as si
+    from vivarium_workbench_sms import sms_api_client, sms_legacy
+
+    monkeypatch.setattr(sms_api_client.SmsApiClient, "__init__", lambda *a, **k: pytest.fail("SMS was asked"))
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda *a, **k: pytest.fail("SMS was asked"))
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    row = {"run_id": "r", "db_path": None, "store_path": "s3://bucket/r", "study_slug": None,
+           "remote_origin": {"simulation_id": 113, "deployment": "smsvpctest"}}
+    assert si.resolve_or_fetch_store(tmp_path, row) == (None, None)
+    monkeypatch.setattr(si, "list_simulations", lambda workspace: [row])
+    r = inproc_client(tmp_path).get("/api/simulation-run-download?run_id=r")
+    assert (r.status_code, r.json()) == (404, {"error": "run data not found: r"})
 
 
 # --- the optional batch status (step P2, Runs c2) ---------------------------------------------------------------------
