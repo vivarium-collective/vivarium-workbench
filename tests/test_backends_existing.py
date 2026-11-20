@@ -4,18 +4,20 @@ docs/backend-adapters.md §2.3 (decided 2026-11-19): an existing run is answered
 record (``params.remote``) names; a run that belongs to another backend is refused (409, terminal) with no request
 to the configured backend. Each entry point is driven with a real workspace holding the record, and every refusal
 case asserts that no backend was asked anything.
+
+Step P3 K2a: the cases whose record or id names a viva-core or sms-legacy run need the SMS plugin and are marked
+``plugin``; the rest run core-only too, where ``asked`` records only compose-api (the SMS backends cannot be asked).
 """
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import pytest
 
 from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib import remote_run_compose
-from vivarium_workbench_sms import remote_run_viva_v1
 from vivarium_workbench.lib import remote_run_views as rrv
-from vivarium_workbench_sms import sms_legacy
 from vivarium_workbench.lib.backends import records
 from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
 
@@ -49,12 +51,23 @@ def _record(ws: Path, rid: str, kind: str, base: str, *, dep: str = "smsvpctest"
 
 @pytest.fixture
 def asked(monkeypatch):
-    """Every request to any backend: compose-api and viva-core adapters' modules, and the SMS client."""
+    """Every request to any backend: compose-api and viva-core adapters' modules, and the SMS client (the latter two
+    only where the plugin is installed)."""
+    try:
+        remote_run_viva_v1 = importlib.import_module("vivarium_workbench_sms.remote_run_viva_v1")
+        sms_legacy = importlib.import_module("vivarium_workbench_sms.sms_legacy")
+    except ImportError:   # the core-only job
+        remote_run_viva_v1 = sms_legacy = None
+
     seen: list = []
     for mod, tag in ((remote_run_compose, "compose"), (remote_run_viva_v1, "viva")):
+        if mod is None:
+            continue
         for name in ("land", "status", "progress", "cancel"):
             monkeypatch.setattr(mod, name, lambda *a, _t=tag, _n=name: seen.append((_t, _n)) or ({"via": _t}, 200))
         monkeypatch.setattr(remote_run_compose, "trace", lambda rid: seen.append(("compose", "trace")) or (b"{}", 200, "t"))
+    if sms_legacy is None:
+        return seen
 
     class Client:
         base_url = HERE
@@ -81,6 +94,7 @@ VIEWS = {
 }
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("view", list(VIEWS))
 def test_a_record_on_another_backend_is_refused_and_nothing_is_asked(ws, asked, view):
     _record(ws, "12", "sms-legacy", ELSEWHERE, dep="prod-elsewhere")
@@ -89,6 +103,7 @@ def test_a_record_on_another_backend_is_refused_and_nothing_is_asked(ws, asked, 
     assert asked == []
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("view, op", [("status", "status"), ("progress", "progress"), ("cancel", "cancel")])
 def test_a_records_kind_decides_over_the_ids_form(ws, asked, view, op):
     """An all-digit id that the record says is a viva-core run goes to viva-core, not to the SMS path."""
@@ -97,12 +112,14 @@ def test_a_records_kind_decides_over_the_ids_form(ws, asked, view, op):
     assert asked == [("viva", op)]
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("view", list(VIEWS))
 def test_no_record_falls_back_to_the_ids_form(ws, asked, view):
     VIEWS[view](ws, "simulation-X")
     assert asked and asked[0][0] == "viva"
 
 
+@pytest.mark.plugin
 def test_land_routes_by_the_record_and_refuses_another_backends_run(ws, asked):
     _record(ws, "simulation-A", "viva-core", HERE)
     rrv.remote_run_land(ws, {"study": "s", "simulation_id": "simulation-A"})
@@ -123,6 +140,7 @@ def test_a_legacy_row_from_another_deployment_is_refused(ws, asked):
     assert VIEWS["status"](ws, "12")[1] == 409 and asked == []
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("fn", ["land_artifacts", "analysis"])
 def test_sms_only_operations_refuse_a_non_sms_or_foreign_run(ws, asked, fn, monkeypatch):
     call = {
@@ -136,6 +154,7 @@ def test_sms_only_operations_refuse_a_non_sms_or_foreign_run(ws, asked, fn, monk
     assert call("8")[1] == 409 and asked == []
 
 
+@pytest.mark.plugin
 def test_trace_routes_by_the_record(ws, asked, monkeypatch):
     from vivarium_workbench.lib import remote_trace
     from vivarium_workbench_sms import sms_api_client, sms_trace
@@ -163,10 +182,14 @@ def test_trace_routes_by_the_record(ws, asked, monkeypatch):
 
 def test_resolve_or_fetch_store_never_fetches_another_backends_run(ws, monkeypatch):
     from vivarium_workbench.lib import simulations_index
-    from vivarium_workbench_sms import sms_api_client
 
-    monkeypatch.setattr(sms_api_client.SmsApiClient, "download_data",
-                        lambda *a, **k: pytest.fail("downloaded another backend's run"))
+    try:
+        sms_api_client = importlib.import_module("vivarium_workbench_sms.sms_api_client")
+    except ImportError:   # the core-only job: there is no SMS client to download with
+        pass
+    else:
+        monkeypatch.setattr(sms_api_client.SmsApiClient, "download_data",
+                            lambda *a, **k: pytest.fail("downloaded another backend's run"))
     _record(ws, "55", "sms-legacy", ELSEWHERE, dep="prod-elsewhere")
     row = {"store_path": None, "db_path": None, "study_slug": "s",
            "remote_origin": {"simulation_id": 55, "deployment": "prod-elsewhere"}}
@@ -176,6 +199,7 @@ def test_resolve_or_fetch_store_never_fetches_another_backends_run(ws, monkeypat
     assert simulations_index.resolve_or_fetch_store(ws, row2) == (None, None)  # not an SMS simulation
 
 
+@pytest.mark.plugin
 def test_composite_run_status_asks_with_this_deployment(ws, asked, monkeypatch):
     """A ``remote-sim-<id>`` run is this process's own dispatch: an older row of another deployment with the same
     integer id must not be taken for it."""
@@ -225,6 +249,7 @@ def test_land_reads_run_id_only_as_a_compose_run(ws, asked):
     assert asked == [("compose", "land")]
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("junk", [{"a": 1}, ["x"], 7, "  "])
 def test_a_non_string_deployment_is_ignored_not_a_500(ws, asked, junk):
     _record(ws, "simulation-A", "viva-core", HERE)
@@ -233,17 +258,26 @@ def test_a_non_string_deployment_is_ignored_not_a_500(ws, asked, junk):
 
 
 def test_the_figures_routes_refuse_another_backends_run(ws, monkeypatch, inproc_client):
-    from vivarium_workbench_sms import sms_api_client
+    """Refused either way: another server's run with the plugin, a backend not installed without it (core-only)."""
+    from conftest import CORE_MODE
 
+    try:   # the tripwire, when there is a client to trip
+        from vivarium_workbench_sms import sms_api_client
+    except ImportError:
+        sms_api_client = None
+    if sms_api_client is not None:
+        monkeypatch.setattr(sms_api_client.SmsApiClient, "__init__", lambda *a, **k: pytest.fail("asked a backend"))
+    reason = "other-backend" if CORE_MODE is None else "backend-not-installed"
     _record(ws, "66", "sms-legacy", ELSEWHERE, dep="prod-elsewhere")
-    monkeypatch.setattr(sms_api_client.SmsApiClient, "__init__", lambda *a, **k: pytest.fail("asked a backend"))
     c = inproc_client(ws)
     for url in ("/api/remote-analysis-figures?simulation_id=66&study=s",
                 "/api/remote-analysis-figure?simulation_id=66&analysis=a&path=viz/x.png&study=s"):
         res = c.get(url)
         assert res.status_code == 409 and res.json()["terminal"] is True, url
+        assert res.json()["reason"] == reason, (url, res.json())
 
 
+@pytest.mark.plugin
 def test_the_study_gallery_skips_an_index_candidate_of_another_backend(ws, monkeypatch):
     from vivarium_workbench_sms import remote_analysis_figures as raf
     from vivarium_workbench.lib import simulations_index

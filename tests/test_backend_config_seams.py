@@ -138,6 +138,7 @@ _BROKEN_API_PROBE = textwrap.dedent('''
 ''')
 
 
+@pytest.mark.plugin   # simulates a broken plugin by breaking the installed one
 def test_the_typed_api_entry_reports_a_broken_plugin():
     """``python -m vivarium_workbench.api`` with a plugin that fails to import: the message, not a traceback (the
     module no longer builds the app at import, which asked the providers before the check could)."""

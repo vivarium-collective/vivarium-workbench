@@ -9,6 +9,10 @@ the contract; the UI routes (config / submit / poll / progress / cancel / study-
 with NO named backend, or a backend without the document run surface, nothing changes.
 They do NOT prove a real deployment runs a workspace's document (its image's processes, allow-lists,
 auth) -- only a real run can; nothing here talks to one.
+
+viva-core (``backends.VIVA_CORE``) and the legacy simulator path are the SMS plugin's backends, so every test that
+dispatches to, negotiates with or lands from them is marked ``plugin`` (docs/backend-adapters.md step P3, K2a); the
+no-named-backend tests and the provenance readers are core.
 """
 from __future__ import annotations
 
@@ -105,10 +109,12 @@ def _name_backend(monkeypatch, url: str, environment: str | None = "id:env-1") -
 
 # --- (a) no named backend: nothing changes, nothing is asked ----------------------------------
 
+@pytest.mark.plugin
 def test_without_a_named_backend_the_config_and_target_are_exactly_as_before(
         ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """The alias env points at a document-capable backend; since it is an ALIAS (not the flag),
-    the workbench neither probes its /viva/v1 surface nor moves any run there."""
+    the workbench neither probes its /viva/v1 surface nor moves any run there. (The alias and the ``smsvpctest``
+    deployment default are the SMS plugin's since step P3 C1, hence the mark.)"""
     monkeypatch.setenv("VIVA_API_BASE", stub.url)
     c = inproc_client(ws)
     cfg = c.get("/api/remote-run-config")
@@ -168,6 +174,7 @@ def legacy_backend():
     srv.server_close()
 
 
+@pytest.mark.plugin
 def test_named_backend_without_capabilities_route_stays_legacy(ws, clean_backend_env, inproc_client,
                                                                monkeypatch, legacy_backend):
     url, handler = legacy_backend
@@ -186,6 +193,7 @@ def test_named_backend_without_capabilities_route_stays_legacy(ws, clean_backend
     assert not any("/viva/v1/composites" in p for _, p in handler.seen)
 
 
+@pytest.mark.plugin
 def test_named_backend_without_documents_capability_stays_legacy(ws, stub, clean_backend_env, inproc_client,
                                                                  monkeypatch):
     stub.respond("GET", "/viva/v1/capabilities", 200, {"version": "0.1.9", "capabilities": ["viva-v1-composites"]})
@@ -199,6 +207,7 @@ def test_named_backend_without_documents_capability_stays_legacy(ws, stub, clean
     assert stub.calls_to("viva-create-composite-run") == []
 
 
+@pytest.mark.plugin
 def test_pinned_and_session_build_keep_the_simulator_path_even_with_a_named_backend(
         ws, stub, clean_backend_env, monkeypatch):
     from vivarium_workbench.lib import backends
@@ -215,6 +224,7 @@ def test_pinned_and_session_build_keep_the_simulator_path_even_with_a_named_back
 
 # --- a backend that runs documents -------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_config_and_preflight_report_the_negotiated_backend(ws, stub, clean_backend_env, inproc_client,
                                                             monkeypatch):
     _name_backend(monkeypatch, stub.url)
@@ -226,6 +236,7 @@ def test_config_and_preflight_report_the_negotiated_backend(ws, stub, clean_back
     assert "url" not in json.dumps(backend).lower() or stub.url not in json.dumps(backend)
 
 
+@pytest.mark.plugin
 def test_submit_poll_progress_cancel_over_a_real_server(ws, stub, clean_backend_env, inproc_client,
                                                         monkeypatch):
     stub.respond("GET", "/viva/v1/composites/{id}/progress", 200, {
@@ -258,6 +269,7 @@ def test_submit_poll_progress_cancel_over_a_real_server(ws, stub, clean_backend_
     assert [x.method for x in stub.calls if x.method == "DELETE"] == ["DELETE"]
 
 
+@pytest.mark.plugin
 def test_study_run_baseline_dispatches_through_the_run_surface(ws, stub, clean_backend_env, inproc_client,
                                                                monkeypatch):
     _name_backend(monkeypatch, stub.url)
@@ -268,6 +280,7 @@ def test_study_run_baseline_dispatches_through_the_run_surface(ws, stub, clean_b
     assert len(stub.calls_to("viva-create-composite-run")) == 1
 
 
+@pytest.mark.plugin
 def test_a_study_run_says_when_its_steps_are_clamped(ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """Visibility only: the clamp (1000 simulated time units) is the workbench's own and is unchanged; the response
     now says when a run got less than it asked for. A run in range answers exactly as before (the test above)."""
@@ -279,6 +292,7 @@ def test_a_study_run_says_when_its_steps_are_clamped(ws, stub, clean_backend_env
     assert call.body["execution"]["options"]["interval_time"] == 1000.0
 
 
+@pytest.mark.plugin
 def test_upstream_refusal_is_a_502_with_the_real_reason(ws, stub, clean_backend_env, inproc_client, monkeypatch):
     orig = stub.handle  # 409 carries no JSON schema in the contract, so serve it raw
 
@@ -294,6 +308,7 @@ def test_upstream_refusal_is_a_502_with_the_real_reason(ws, stub, clean_backend_
     assert "building, not ready" in res.json()["error"] and res.json()["reachable"] is False
 
 
+@pytest.mark.plugin
 def test_a_dependency_the_backend_does_not_allow_is_explained_not_reported_as_unreachable(
         ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """The real backend answers 422 "'<dep>' is not in the compose allow list". That is a policy refusal from a reachable
@@ -317,6 +332,7 @@ def test_a_dependency_the_backend_does_not_allow_is_explained_not_reported_as_un
     assert "not in the compose allow list" in body["backend_error"]  # the backend's own words are kept
 
 
+@pytest.mark.plugin
 def test_other_upstream_refusals_are_still_reported_as_before(ws, stub, clean_backend_env, inproc_client, monkeypatch):
     orig = stub.handle
 
@@ -372,6 +388,7 @@ def _remote_ready(stub, monkeypatch) -> None:
                         lambda *a, **k: type("R", (), {"summary": lambda self: "ok"})())
 
 
+@pytest.mark.plugin
 def test_run_remote_runs_a_document_and_lands_the_compose_results(ws, stub, clean_backend_env, monkeypatch,
                                                                   tmp_path):
     from vivarium_workbench.lib import remote_run
@@ -395,6 +412,7 @@ def test_run_remote_runs_a_document_and_lands_the_compose_results(ws, stub, clea
     assert str(SIM_ID) in lookup.query["ids"]
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("environment", ["id:env-1", "runtime"])
 def test_run_remote_ships_from_git_only_for_a_named_environment(ws, stub, clean_backend_env, monkeypatch, tmp_path,
                                                                  environment):
@@ -443,6 +461,7 @@ _CLEAN = {"ok": True, "reason": "ok", "sha": "abc", "dirty_files": "", "remote":
           "message": "Workspace is clean and pushed — ready to run remotely."}
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("environment, tree, ok, warns", [
     ("id:env-1", "dirty", True, True),
     ("id:env-1", "clean", True, False),
@@ -473,6 +492,7 @@ def test_the_dispatch_preflight_needs_a_clean_tree_only_for_a_named_environment(
         assert "warnings" not in body
 
 
+@pytest.mark.plugin
 def test_run_remote_refuses_to_guess_when_the_backend_does_not_know_the_run(ws, stub, clean_backend_env, monkeypatch,
                                                                             tmp_path):
     from vivarium_workbench.lib import remote_run
@@ -485,6 +505,7 @@ def test_run_remote_refuses_to_guess_when_the_backend_does_not_know_the_run(ws, 
     assert [c for c in stub.calls if c.path.endswith("/results")] == []
 
 
+@pytest.mark.plugin
 def test_a_matching_run_id_on_a_different_job_row_is_not_accepted(ws, stub, clean_backend_env, monkeypatch, tmp_path):
     """The run id AND the job row its record names (compose:38) must both agree."""
     from vivarium_workbench.lib import remote_run
@@ -496,6 +517,7 @@ def test_a_matching_run_id_on_a_different_job_row_is_not_accepted(ws, stub, clea
     assert [c for c in stub.calls if c.path.endswith("/results")] == []
 
 
+@pytest.mark.plugin
 def test_run_remote_with_a_supplied_client_never_uses_the_run_surface(ws, stub, clean_backend_env, monkeypatch,
                                                                       tmp_path):
     """CLI ``run-remote --sms-api-url`` and every test double pass a client to the plugin's run: unchanged /compose/v1."""
@@ -528,6 +550,7 @@ def test_run_remote_with_a_supplied_client_never_uses_the_run_surface(ws, stub, 
     assert used and stub.calls_to("viva-create-composite-run") == []
 
 
+@pytest.mark.plugin
 def test_a_composite_that_cannot_be_exported_is_a_422_with_the_reason_and_nothing_is_sent(
         ws, stub, clean_backend_env, inproc_client, monkeypatch):
     (ws / "studies" / "demo" / "study.yaml").write_text(yaml.safe_dump({
@@ -547,6 +570,7 @@ def _runs_db(ws: Path) -> sqlite3.Connection:
     return conn
 
 
+@pytest.mark.plugin
 def test_a_finished_viva_v1_study_run_lands_its_emitter_history_where_the_viewers_read_it(
         ws, stub, clean_backend_env, inproc_client, monkeypatch):
     _name_backend(monkeypatch, stub.url)
@@ -576,6 +600,7 @@ def test_a_finished_viva_v1_study_run_lands_its_emitter_history_where_the_viewer
         f"/viva/v1/compose/simulation/{SIM_ID}/results"]
 
 
+@pytest.mark.plugin
 def test_landing_an_unfinished_viva_v1_run_is_refused_and_downloads_nothing(
         ws, stub, clean_backend_env, inproc_client, monkeypatch):
     _name_backend(monkeypatch, stub.url)
@@ -587,6 +612,7 @@ def test_landing_an_unfinished_viva_v1_run_is_refused_and_downloads_nothing(
     assert not (ws / "studies" / "demo" / "runs.db").exists()
 
 
+@pytest.mark.plugin
 def test_a_viva_v1_run_shows_in_the_run_list_while_pending_and_as_a_local_store_once_landed(
         ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """Pending: the list still renders (the run's id is the backend's string, not a number). Landed: its data is
@@ -610,6 +636,7 @@ def test_a_viva_v1_run_shows_in_the_run_list_while_pending_and_as_a_local_store_
     assert row["config"] is None  # the backend's record is provenance, not a reproduction config
 
 
+@pytest.mark.plugin
 def test_a_landed_viva_v1_run_still_says_which_backend_it_ran_on(
         ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """Regression: once landed, the row has no remote_origin (its data is local), and the Runs table's Origin column
@@ -631,6 +658,7 @@ def test_a_landed_viva_v1_run_still_says_which_backend_it_ran_on(
     assert row["remote_origin"] is None            # unchanged: the data lives in this workspace now
 
 
+@pytest.mark.plugin
 def test_the_run_lists_status_poll_reads_a_viva_v1_run_by_its_own_id(
         ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """The Runs table polls a pending remote row by the id it recorded; for a /viva/v1 run that is the backend's
@@ -644,6 +672,7 @@ def test_the_run_lists_status_poll_reads_a_viva_v1_run_by_its_own_id(
 
 
 
+@pytest.mark.plugin
 def test_a_simulation_far_below_its_job_row_is_still_found(ws, stub, clean_backend_env, monkeypatch, tmp_path):
     """Every container build takes a job row but no simulation, so the gap grows with a deployment's age; the
     lookup walks down until it finds the run, however far."""
@@ -656,6 +685,7 @@ def test_a_simulation_far_below_its_job_row_is_still_found(ws, stub, clean_backe
     assert [c.path for c in stub.calls if c.path.endswith("/results")] == ["/viva/v1/compose/simulation/12/results"]
 
 
+@pytest.mark.plugin
 def test_landing_the_same_run_twice_answers_the_first_landing(ws, stub, clean_backend_env, inproc_client,
                                                                monkeypatch):
     _name_backend(monkeypatch, stub.url)
@@ -670,6 +700,7 @@ def test_landing_the_same_run_twice_answers_the_first_landing(ws, stub, clean_ba
     assert len([c for c in stub.calls if c.path.endswith("/results")]) == 1
 
 
+@pytest.mark.plugin
 def test_a_string_id_is_not_landed_through_viva_v1_unless_a_document_backend_is_named(
         ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """Without `serve --backend-base-url`, a viva-core run is not landed from whatever the alias points at.
@@ -681,6 +712,7 @@ def test_a_string_id_is_not_landed_through_viva_v1_unless_a_document_backend_is_
     assert stub.calls_to("viva-get-composite-run") == []
 
 
+@pytest.mark.plugin
 def test_a_run_landed_before_ran_on_existed_heals_its_origin(ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """Runs landed by an older workbench have run-log records without ``ran_on``; the next listing must re-backfill
     them so their Origin names the backend instead of staying "local"."""
@@ -701,6 +733,7 @@ def test_a_run_landed_before_ran_on_existed_heals_its_origin(ws, stub, clean_bac
     assert row["ran_on"] and row["remote_origin"] is None
 
 
+@pytest.mark.plugin
 def test_a_composite_explorer_run_on_the_backend_records_where_it_ran(
         ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """Regression: a Composite Explorer run sent to a named /viva/v1 backend recorded only its params, so its row had
@@ -768,6 +801,7 @@ def test_a_landed_runs_own_provenance_wins_over_a_manifest_ran_on():
     assert _row_to_dict(row, "/ws/studies/demo/runs.db")["ran_on"] == "landed.example"
 
 
+@pytest.mark.plugin
 def test_a_viva_v1_run_records_where_it_went_while_pending_and_once_landed(
         ws, stub, clean_backend_env, inproc_client, monkeypatch):
     """Step 1c: the placeholder and the landed row both carry ``params.remote`` (lib/backends/records.py)."""

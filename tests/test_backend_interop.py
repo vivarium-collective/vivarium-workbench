@@ -15,6 +15,9 @@ request"), this file pins the contract that keeps both working from one branch:
 * a backend that was named and cannot be asked never turns a run into a local one.
 
 Removing a viva-api path should mean deleting a test here on purpose, not finding out from a deployment.
+
+The viva-api paths and the aliases are the SMS plugin's, so those cases are marked ``plugin``; the compose-api and
+unreachable-backend cases run core-only too (docs/backend-adapters.md step P3, K2a).
 """
 from __future__ import annotations
 
@@ -30,7 +33,7 @@ import yaml
 
 from vivarium_workbench.lib import server_capabilities as sc
 from vivarium_workbench.lib.backends import config as backend_cfg
-from vivarium_workbench_sms import sms_api_client as sac
+from vivarium_workbench.lib import backend_config as bc
 
 HERE = Path(__file__).parent
 FIXTURE_WS = HERE / "_fixtures" / "ws_increase_demo"
@@ -139,6 +142,7 @@ def _stanford_env(monkeypatch, url: str) -> None:
 
 # --- the deployed configuration ------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_the_stanford_workbench_env_submits_to_sms_and_asks_nothing_else(ws, backend, monkeypatch, inproc_client):
     """The server answers as viva-v1 AND as compose-api. Neither is asked: an alias never names a backend."""
     _Backend.routes = {**VIVA_V1, **COMPOSE}
@@ -160,6 +164,7 @@ def test_the_stanford_workbench_env_submits_to_sms_and_asks_nothing_else(ws, bac
     assert not [p for _, p in _Backend.seen if p.startswith("/viva/v1/composites")]
 
 
+@pytest.mark.plugin
 def test_the_stanford_env_resolves_run_targets_without_probing(ws, monkeypatch):
     from vivarium_workbench.lib import backends
 
@@ -175,6 +180,7 @@ def test_the_stanford_env_resolves_run_targets_without_probing(ws, monkeypatch):
 
 # --- the pinned SMS build beats a named compose-api ----------------------------------------------------------
 
+@pytest.mark.plugin
 def test_the_pinned_sms_build_keeps_the_simulator_path_when_compose_api_is_named(ws, backend, monkeypatch):
     from vivarium_workbench.lib import backends
 
@@ -197,9 +203,11 @@ def test_the_pinned_sms_build_keeps_the_simulator_path_when_compose_api_is_named
     pytest.param({}, sc.DISPATCH_LEGACY, id="sms-api-without-capabilities"),
     pytest.param({"/viva/v1/capabilities": {"version": "0.9.182", "capabilities": ["viva-v1-composites"]}},
                  sc.DISPATCH_LEGACY, id="viva-api-composites-by-id-only"),
-    pytest.param(VIVA_V1, sc.DISPATCH_DOCUMENT, id="viva-v1-documents"),
+    # viva-core's document dispatch is the SMS plugin's (docs/backend-adapters.md step P3, K2a)
+    pytest.param(VIVA_V1, sc.DISPATCH_DOCUMENT, id="viva-v1-documents", marks=pytest.mark.plugin),
     pytest.param(COMPOSE, sc.DISPATCH_COMPOSE, id="compose-api"),
-    pytest.param({**VIVA_V1, **COMPOSE}, sc.DISPATCH_DOCUMENT, id="viva-v1-wins-over-a-compose-like-openapi"),
+    pytest.param({**VIVA_V1, **COMPOSE}, sc.DISPATCH_DOCUMENT, id="viva-v1-wins-over-a-compose-like-openapi",
+                 marks=pytest.mark.plugin),
 ])
 def test_each_named_backend_gets_its_own_dispatch(ws, backend, monkeypatch, inproc_client, routes, dispatch):
     _Backend.routes = routes
@@ -325,6 +333,7 @@ def test_a_submit_that_names_no_simulator_asks_the_named_backend_first(ws, monke
     _assert_unreachable(res.json(), DEAD)
 
 
+@pytest.mark.plugin
 def test_a_pinned_submit_without_a_simulator_id_is_still_the_sms_paths_answer(ws, monkeypatch, inproc_client):
     """A pinned deployment never runs on a named backend, so a dead one changes nothing for it: the submit still gets
     the SMS path's own answer, not a 502 about the named backend."""
@@ -336,6 +345,7 @@ def test_a_pinned_submit_without_a_simulator_id_is_still_the_sms_paths_answer(ws
     assert (res.status_code, res.json()) == (400, {"error": "simulator_id is required"})
 
 
+@pytest.mark.plugin
 def test_a_session_build_submit_without_a_simulator_id_is_still_the_sms_paths_answer(ws, monkeypatch, inproc_client):
     """A session build (.viv-build.json) sends the submit to SMS and never asks the named backend, dead or not."""
     monkeypatch.setenv(NAMED, DEAD)
@@ -344,6 +354,7 @@ def test_a_session_build_submit_without_a_simulator_id_is_still_the_sms_paths_an
     assert (res.status_code, res.json()) == (401, {"error": "not authenticated"})  # no login: the SMS gate's own answer
 
 
+@pytest.mark.plugin
 def test_a_submit_that_carries_a_simulator_id_does_not_ask_the_named_backend(ws, monkeypatch, inproc_client):
     """A simulator id makes the submit the SMS path's, whatever backend was named: a dead one changes nothing, so the
     answer is the SMS gate's own (no login: not authenticated), not a 502 about the named backend."""
@@ -418,14 +429,12 @@ def test_a_backend_that_comes_back_is_seen_again_once_its_circuit_breaker_closes
     The breaker's own probe (every 30 s while ``serve`` runs, on the one URL ``sms_api_base()`` names at start-up) or
     the first call after its minute is up closes it when the backend is back; the profile reads the backend again
     within its own 5 s window after that."""
-    from vivarium_workbench_sms import remote_link
-
     base = dropping_backend
     _Dropping.routes = dict(COMPOSE)
     monkeypatch.setenv(NAMED, base)
     _Dropping.up = False
     assert sc.explicit_backend_profile()["reachable"] is False
-    assert remote_link.link(base).state == remote_link.STATE_DOWN
+    assert bc.link(base).state == bc.STATE_DOWN
     assert _Dropping.attempts == 1
 
     _Dropping.up = True
@@ -433,7 +442,7 @@ def test_a_backend_that_comes_back_is_seen_again_once_its_circuit_breaker_closes
     assert sc.explicit_backend_profile()["reachable"] is False  # the circuit is still open: the backend is not asked
     assert _Dropping.attempts == 1, "the profile probed through an open circuit"
 
-    assert remote_link.link(base).probe() is True  # what RemoteLink's background probe does
+    assert bc.link(base).probe() is True  # what RemoteLink's background probe does
     _age(base, 10.0)
     profile = sc.explicit_backend_profile()
     assert (profile["reachable"], profile["dispatch"]) == (True, sc.DISPATCH_COMPOSE)
@@ -497,17 +506,21 @@ def test_the_failure_window_counts_from_the_end_of_the_probe(monkeypatch):
 # named URL for the SMS flows). That configuration is now refused when the process starts, so a workbench never talks
 # to two backends; the refusal itself is pinned in tests/test_backends_startup.py.
 
+@pytest.mark.plugin
 def test_compose_api_named_beside_the_stanford_alias_is_refused_at_startup(backend, sms_host, monkeypatch):
     from vivarium_workbench import cli
 
     monkeypatch.setenv(NAMED, backend)
     _stanford_env(monkeypatch, sms_host)
-    with pytest.raises(sac.BackendConfigError):
+    with pytest.raises(bc.BackendConfigError):
         backend_cfg.check_config()
     assert cli.main(["serve", "--workspace", str(FIXTURE_WS)]) == 2
 
 
+@pytest.mark.plugin
 def test_the_named_backend_alone_is_the_sms_base(backend, monkeypatch):
+    from vivarium_workbench_sms import sms_api_client as sac
+
     monkeypatch.setenv(NAMED, backend)
     assert sac.sms_api_base() == backend
     backend_cfg.check_config()

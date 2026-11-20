@@ -30,6 +30,10 @@ from vivarium_workbench_sms.sms_api_client import (
     environments_as_simulators,
 )
 
+#: A pure-plugin module (it tests the SMS plugin's own code): the core-only job does not collect it
+#: (docs/backend-adapters.md step P3, K2a).
+pytestmark = pytest.mark.plugin
+
 REPO = "https://github.com/CovertLabEcoli/vEcoli-private"
 
 
