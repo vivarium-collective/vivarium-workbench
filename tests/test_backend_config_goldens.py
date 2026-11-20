@@ -209,7 +209,8 @@ def _serve(monkeypatch, tmp_path, capsys):
     return rc, out.out, out.err, started
 
 
-_REACHABLE = "remote sms-api: {} — reachable ✓ (v1.2.3)\n"
+# DECLARED (P3 C2): the start-up line reads "remote backend:" (was "remote sms-api:"), providers on and off.
+_REACHABLE = "remote backend: {} — reachable ✓ (v1.2.3)\n"
 _COMPOSE = "backend dispatch: compose-api (server v9)\n"
 
 # case -> (return code (None: it went on to serve), stdout, stderr, breaker probe URLs)

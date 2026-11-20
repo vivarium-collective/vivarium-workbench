@@ -99,7 +99,7 @@ class PreflightError(RuntimeError):
         self.report = report
         msg = (
             "Preflight validation failed before remote dispatch — NOT dispatching "
-            "(this would otherwise be a silent wrong-but-successful GovCloud run):\n"
+            "(this would otherwise be a silent wrong-but-successful remote run):\n"
             + "\n".join(f"  - {f}" for f in failures)
         )
         super().__init__(msg)

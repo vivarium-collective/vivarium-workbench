@@ -243,7 +243,7 @@ def ping(base_url: str, timeout: "float | None" = None) -> str:
     except HTTPError as e:
         raise BackendError(f"GET {url} -> {e.code}{_http_error_detail(e)}", status=e.code) from e
     except (URLError, OSError) as e:
-        raise BackendError(f"GET {url} failed (sms-api unreachable — is the tunnel up?): {e}") from e
+        raise BackendError(f"GET {url} failed (backend unreachable — is the endpoint up?): {e}") from e
     try:
         parsed = json.loads(body)
     except (json.JSONDecodeError, ValueError):
@@ -301,7 +301,7 @@ class ProbeClient:
             raise BackendError(f"GET {url} -> {e.code}{_http_error_detail(e)}", status=e.code) from e
         except (URLError, OSError) as e:
             self._mark(False, str(e))
-            raise BackendError(f"GET {url} failed (sms-api unreachable — is the tunnel up?): {e}") from e
+            raise BackendError(f"GET {url} failed (backend unreachable — is the endpoint up?): {e}") from e
         self._mark(True)
         doc = doc if isinstance(doc, dict) else {}
         info: dict = doc["info"] if isinstance(doc.get("info"), dict) else {}
@@ -445,7 +445,7 @@ class RemoteLink:
                 last_err = self.last_err
                 down_since = self._down_since
         raise CircuitOpen(
-            f"sms-api at {self.base_url} unreachable since {_fmt(down_since)}: {last_err}"
+            f"backend at {self.base_url} unreachable since {_fmt(down_since)}: {last_err}"
         )
 
 

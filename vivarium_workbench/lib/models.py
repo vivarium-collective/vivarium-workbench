@@ -24,7 +24,7 @@ EmitterKind = Literal["xarray", "parquet", "sqlite"]
 
 
 class RemoteOrigin(BaseModel):
-    """Provenance of a run executed on a remote deployment (sms-api).
+    """Provenance of a run executed on a remote deployment (a remote backend).
 
     Built in ``lib/simulations_index.py`` ``_row_to_dict`` from the run's
     ``params_json`` provenance.
@@ -128,10 +128,10 @@ class SimRow(BaseModel):
 
 
 class RemoteSourceState(BaseModel):
-    """Provenance of the remote (sms-api) runs merged into the Simulations DB.
+    """Provenance of the remote backend's runs merged into the Simulations DB.
 
-    Lets the Runs tab show "GovCloud runs as of HH:MM (refreshing…)" instead of a
-    spinner, and stay honest when the tunnel is down — the fetch is
+    Lets the Runs tab show "remote runs as of HH:MM (refreshing…)" instead of a
+    spinner, and stay honest when the backend is unreachable — the fetch is
     stale-while-revalidate, so the payload never blocks on it.
     """
 
@@ -1312,7 +1312,7 @@ class VisualizationInstances(BaseModel):
 class RemoteHealth(BaseModel):
     """``GET /api/source/remote-health`` payload (lib.workspace_deps_views.remote_health).
 
-    Reachability + config status of the remote sms-api endpoint (``SMS_API_BASE``)
+    Reachability + config status of the configured remote backend
     for the Source panel's health indicator. Always HTTP 200; never raises.
     """
 

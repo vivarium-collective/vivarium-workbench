@@ -1536,10 +1536,9 @@ def _build_parser(commands: "Sequence[Command] | None" = None) -> argparse.Argum
     )
     p_serve.add_argument(
         "--backend-base-url", default=None, metavar="URL",
-        help="Base URL of the compute backend (a viva-api / viva-core deployment, e.g. "
-             "https://sms.cam.uchc.edu) that runs, tracks and returns this workspace's "
-             "simulations. Sets VIVARIUM_WORKBENCH_BACKEND_BASE_URL; overrides the "
-             "VIVA_API_BASE / SMS_API_BASE aliases. The UI and chat stay local. "
+        help="Base URL of the compute backend that runs, tracks and returns this workspace's "
+             "simulations. Sets VIVARIUM_WORKBENCH_BACKEND_BASE_URL; overrides any URL a "
+             "backend provider reads from its own settings. The UI and chat stay local. "
              "Credentials in the URL are refused.",
     )
     p_serve.add_argument(

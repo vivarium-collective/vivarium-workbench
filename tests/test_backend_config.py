@@ -197,7 +197,11 @@ def test_ping_agrees_with_the_sms_client_when_unreachable(monkeypatch):
     with pytest.raises(sac.SmsApiError) as sms:
         sac.SmsApiClient("http://x:1").ping()
     assert core.value.status is None and sms.value.status is None
-    assert str(core.value) == str(sms.value)
+    # The text differs on purpose (step P3 C2): the core's is neutral, the SMS client keeps its own.
+    assert str(core.value) == ("GET http://x:1/version failed (backend unreachable — is the endpoint up?): "
+                               "<urlopen error connection refused>")
+    assert str(sms.value) == ("GET http://x:1/version failed (sms-api unreachable — is the tunnel up?): "
+                              "<urlopen error connection refused>")
 
 
 def test_the_breaker_probe_pings_through_the_core(monkeypatch):
@@ -246,6 +250,12 @@ def _fresh_links():
         bc._links.update(saved)
 
 
+_UNREACHABLE = {
+    "core": "(backend unreachable — is the endpoint up?)",
+    "sms": "(sms-api unreachable — is the tunnel up?)",
+}
+
+
 def _ask(which: str, base: str):
     return _PROBE_CLIENTS[which](base).openapi_operations()
 
@@ -285,8 +295,11 @@ def test_probe_client_unreachable_opens_the_breaker(monkeypatch, _fresh_links, w
     with pytest.raises(bc.BackendError) as ei:
         _ask(which, "http://p2-probe:3")
     assert ei.value.status is None
-    assert str(ei.value) == ("GET http://p2-probe:3/openapi.json failed (sms-api unreachable — is the tunnel up?): "
-                             "<urlopen error connection refused>")
+    # The type and status agree; the text is each client's own (step P3 C2: the core's is neutral). Both keep the
+    # "unreachable" substring that run_runner._remote_failure_reason classifies on.
+    assert str(ei.value) == ("GET http://p2-probe:3/openapi.json failed " + _UNREACHABLE[which]
+                             + ": <urlopen error connection refused>")
+    assert "unreachable" in str(ei.value)
     assert bc.link("http://p2-probe:3").state == bc.STATE_DOWN
     with pytest.raises(bc.CircuitOpen):
         _ask(which, "http://p2-probe:3")

@@ -12,7 +12,7 @@
 
   // Prefix a root-absolute /api path with the dashboard base path (e.g. /workbench)
   // so composite-explore run/resolve/status calls reach the workbench under the
-  // co-tenant ALB instead of misrouting to sms-api → 404. No-op at root; composes
+  // co-tenant ALB instead of misrouting to the backend → 404. No-op at root; composes
   // safely with the global _base_path_shim (which skips already-prefixed URLs).
   function _api(p) {
     return (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl(p) : p;
@@ -2404,7 +2404,7 @@
       return;
     }
     // A target is keyed by `study` (a local study's exports) or `run` (a landed
-    // run's exports, e.g. a GovCloud compose analysis) — forward whichever is set.
+    // run's exports, e.g. a remote compose analysis) — forward whichever is set.
     var q = study ? '?study=' + encodeURIComponent(study)
           : (run ? '?run=' + encodeURIComponent(run) : '');
     var url = '/api/analysis-viewer/' + encodeURIComponent(uid) + '/launch' + q;
@@ -4274,7 +4274,7 @@
   // Composite Explorer Test Run panel) -- before a remote-pinned deployment
   // dispatches to AWS Batch, fetch the server-resolved
   // repo/branch/commit/simulator_id and require explicit confirmation
-  // (mirrors sms-launch.js's _dispatchRemotePinned), so a workspace-
+  // (mirrors the launch panel's _dispatchRemotePinned), so a workspace-
   // identity mismatch is caught here, before money gets spent, not
   // discovered afterward via aws batch describe-jobs. A plain local-engine
   // run (unchanged, pre-existing behavior) fires with no confirm.
@@ -17452,7 +17452,7 @@
         '<hr style="margin:20px 0;border:none;border-top:1px solid #eee">' +
         '<p class="panel-lead">Analyses to run at dispatch time — which of the workspace\'s <code>v2ecoli.' +
           'workflow.analysis.ANALYSIS_REGISTRY</code> entries to compute. Translated ' +
-          'into <code>analysis_options</code> for remote (sms-api) dispatch and the local post-run pipeline ' +
+          'into <code>analysis_options</code> for remote dispatch and the local post-run pipeline ' +
           'alike.</p>' +
         '<div id="inv-analyses-list">' +
           (window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading analyses…') : '<p class="empty-state">Loading analyses…</p>') +
@@ -19614,7 +19614,7 @@
   // Statuses that mean "not finished" — a run the user just launched and is
   // actively watching. These ALWAYS pin to the top of the Runs list, regardless
   // of the column sort: remote list timestamps come from an unreliable bulk
-  // `last_updated` (every GovCloud run shows the same frozen time), so a live
+  // `last_updated` (every remote run shows the same frozen time), so a live
   // cloud run can't otherwise rise above the wall of old completed runs.
   var _ACTIVE_RUN_STATUSES = { queued: 1, running: 1, pending: 1, submitted: 1,
                                in_progress: 1, started: 1, dispatching: 1 };

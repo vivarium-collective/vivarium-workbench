@@ -462,7 +462,7 @@ _OPENAPI_TAGS = [
     },
     {
         "name": "Runs",
-        "description": "Simulation runs and the workspace-wide runs index, including remote (sms-api) run submission.",
+        "description": "Simulation runs and the workspace-wide runs index, including remote run submission.",
     },
     {
         "name": "Composites",
@@ -959,7 +959,7 @@ def create_app() -> FastAPI:
         first) and ``total`` reports the full count for the current view, so the
         client can show "N runs" and load chunks instead of the whole index.
         Omitting ``limit`` returns every row (``total`` still populated).
-        ``?refresh=true`` bypasses the remote-runs cache for a fresh sms-api pull.
+        ``?refresh=true`` bypasses the remote-runs cache for a fresh pull from the backend.
         """
         from vivarium_workbench.lib.simulations_index import (
             build_simulations_data_cached, clear_build_cache, forget_remote_listings)
@@ -4011,10 +4011,10 @@ def create_app() -> FastAPI:
         "/api/source/remote-health",
         response_model=RemoteHealth,
         tags=["Workspaces & sources"],
-        summary="Reachability + version of the remote sms-api endpoint (SMS_API_BASE)",
+        summary="Reachability + version of the configured remote backend",
     )
     def source_remote_health_route() -> RemoteHealth:
-        """Best-effort probe of the configured sms-api endpoint for the Source
+        """Best-effort probe of the configured remote backend for the Source
         panel's health indicator: is it configured, is it reachable, what version.
         Always HTTP 200; never raises. Library-backed via
         ``lib.workspace_deps_views.remote_health``."""

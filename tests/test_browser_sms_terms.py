@@ -17,13 +17,11 @@ ROOT = Path(__file__).resolve().parent.parent / "vivarium_workbench"
 
 TERMS = ("sms-api", "GovCloud", "SMS_API_BASE", "smsvpctest", "sms-launch")
 
-#: The counts on the base of step P3 F0 (2026-11-20). Lower a number when you remove terms (optional).
+#: The counts on the base of step P3 F0 (2026-11-20), lowered by F3 (branch-source, session, workspace-picker and the
+#: dashboard template are now clean) and C2 (configure-run, data-source, progress-track and walkthrough). Lower a
+#: number when you remove terms (optional).
 BASELINE: dict[str, dict[str, int]] = {
-    "static/configure-run.js": {"sms-api": 1, "sms-launch": 1},
-    "static/data-source.js": {"sms-api": 1, "GovCloud": 1},
-    "static/progress-track.js": {"sms-api": 1},
     "static/sms-launch.js": {"sms-api": 1},
-    "static/walkthrough.js": {"sms-api": 2, "GovCloud": 2, "sms-launch": 1},
 }
 
 _SMS_LAUNCH_TAG = re.compile(r'<script[^>]*\bsrc="[^"]*sms-launch\.js[^"]*"[^>]*>\s*</script>')

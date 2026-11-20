@@ -77,7 +77,7 @@ class BuildRemoteResponse(BaseModel):
     The non-200 error paths (``{"error": ...}``, HTTP 400/502) are returned via
     ``JSONResponse``, not this model.
 
-    Source: ``lib.source_build_views.build_remote``.
+    Source: ``vivarium_workbench_sms.source_build_views.build_remote``.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -123,7 +123,7 @@ class RemoteRunStartResponse(BaseModel):
     The non-202 error paths (``{"error": ...}``, HTTP 401/400/409/404) are
     returned via ``JSONResponse``, not this model.
 
-    Source: ``lib.remote_run_views.remote_run_start``.
+    Source: ``vivarium_workbench_sms.remote_pipeline_views.remote_run_start``.
     """
 
     model_config = ConfigDict(extra="allow")

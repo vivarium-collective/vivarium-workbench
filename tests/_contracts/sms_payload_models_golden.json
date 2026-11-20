@@ -20,7 +20,7 @@
   },
   "BuildRemoteResponse": {
    "additionalProperties": true,
-   "description": "200-path payload for ``POST /api/source/build-remote``.\n\n``{\"ok\": True, \"simulator_id\": <id|null>, \"repo\", \"branch\", \"commit\"}``.\nThe non-200 error paths (``{\"error\": ...}``, HTTP 400/502) are returned via\n``JSONResponse``, not this model.\n\nSource: ``lib.source_build_views.build_remote``.",
+   "description": "200-path payload for ``POST /api/source/build-remote``.\n\n``{\"ok\": True, \"simulator_id\": <id|null>, \"repo\", \"branch\", \"commit\"}``.\nThe non-200 error paths (``{\"error\": ...}``, HTTP 400/502) are returned via\n``JSONResponse``, not this model.\n\nSource: ``vivarium_workbench_sms.source_build_views.build_remote``.",
    "properties": {
     "branch": {
      "title": "Branch",
@@ -107,7 +107,7 @@
   },
   "RemoteRunStartResponse": {
    "additionalProperties": true,
-   "description": "202-path payload for ``POST /api/remote-run-start`` — ``{\"job_id\": <id>}``.\n\nThe non-202 error paths (``{\"error\": ...}``, HTTP 401/400/409/404) are\nreturned via ``JSONResponse``, not this model.\n\nSource: ``lib.remote_run_views.remote_run_start``.",
+   "description": "202-path payload for ``POST /api/remote-run-start`` — ``{\"job_id\": <id>}``.\n\nThe non-202 error paths (``{\"error\": ...}``, HTTP 401/400/409/404) are\nreturned via ``JSONResponse``, not this model.\n\nSource: ``vivarium_workbench_sms.remote_pipeline_views.remote_run_start``.",
    "properties": {
     "job_id": {
      "title": "Job Id",

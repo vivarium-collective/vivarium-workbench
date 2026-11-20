@@ -971,16 +971,16 @@ def _render_default_viz(*, db_file: str, run_id: str, core) -> dict:
 def _remote_failure_reason(exc: Exception) -> str:
     """A clean, actionable one-line reason for a failed remote run.
 
-    Maps the known failure modes (poll timeout, unreachable sms-api, dirty/unpushed
+    Maps the known failure modes (poll timeout, unreachable backend, dirty/unpushed
     workspace) to a hint an external user can act on, instead of surfacing only a
     raw Python traceback in the run's error excerpt.
     """
     msg = str(exc)
     low = msg.lower()
     if isinstance(exc, TimeoutError):
-        return f"{msg}  [the run may still be executing on the deployment — check sms-api before retrying]"
+        return f"{msg}  [the run may still be executing on the deployment — check the remote backend before retrying]"
     if "unreachable" in low or "is the tunnel up" in low or "still reachable" in low:
-        return f"{msg}  [remote sms-api not reachable — is the tunnel/endpoint up? (SMS_API_BASE)]"
+        return f"{msg}  [remote backend not reachable (check the configured backend URL)]"
     if "uncommitted" in low or "untracked" in low or "not pushed" in low:
         return f"{msg}  [commit and push the workspace before running remotely — the remote build installs it from git]"
     return f"{type(exc).__name__}: {msg}"
