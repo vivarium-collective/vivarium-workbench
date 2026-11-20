@@ -54,32 +54,43 @@ const FILES_LINK_REMOTE = 'DOWNLOAD link ⬇ Analysis files — analyses.json �
 const FILES_LOCAL = 'DOWNLOAD link ⬇ Analysis files — analyses.json';
 const LAND = 'DOWNLOAD land-viva-btn ⬇ Land results — Bring the run\'s results into this study';
 const RAW = 'DOWNLOAD link ⬇ Raw data — Raw emitter data (.zip)';
-const REANALYSE = 'RERUN run-analysis-btn 🧪 Re-run analysis — Recompute cd1_*/ptools_* on GovCloud';
+const REANALYSE = 'RERUN run-analysis-btn 🧪 Re-run analysis — Recompute the run\'s analyses on its backend';
 const RERUN = 'RERUN rerun-btn ↻ Re-run simulation — Replay this run\'s exact manifest';
 
 const CASES = [
-  // [name, row, snapshot?, expected]
+  // [name, row, snapshot?, expected]. The base (goldens commit) -> after, step P3 F1:
+  //   SMS rows: identical (the Re-run analysis description is neutral);
+  //   viva-core / compose rows: Figures (remote Viz), Analysis files and Re-run analysis hidden -- their backend
+  //     declares neither `artifacts` nor `analyses`; the server answered each with a 409;
+  //   an all-digit viva-core id: Land results (a fix; it used to get Analysis files by its id's form);
+  //   providers off, or an old payload without features: the same as a viva-core row (Land results is the core
+  //     run lifecycle's; the server answers it as before);
+  //   snapshot: identical.
   ['on: SMS row (integer id)', remoteRow(12, SMS), false,
     [VIZ_REMOTE, TRACE, REPORT, FILES_REMOTE, REANALYSE, RERUN]],
   ['on: SMS row (integer id as a string)', remoteRow('12', SMS), false,
     [VIZ_REMOTE, TRACE, REPORT, FILES_REMOTE, REANALYSE, RERUN]],
   ['on: viva-core row (string id)', remoteRow('simulation-E9Ec819', []), false,
-    [VIZ_REMOTE, TRACE, REPORT, FILES_REMOTE, LAND, REANALYSE, RERUN]],
+    [TRACE, REPORT, LAND, RERUN]],
   ['on: viva-core row with an all-digit id', remoteRow('123', []), false,
-    [VIZ_REMOTE, TRACE, REPORT, FILES_REMOTE, REANALYSE, RERUN]],
+    [TRACE, REPORT, LAND, RERUN]],
   ['on: compose row', remoteRow('compose-7', []), false,
-    [VIZ_REMOTE, TRACE, REPORT, FILES_REMOTE, LAND, REANALYSE, RERUN]],
+    [TRACE, REPORT, LAND, RERUN]],
   ['on: viva-core row, still running', remoteRow('simulation-E9Ec819', [], 'running'), false,
     [TRACE, LAND, RERUN]],
   ['on: SMS row, still running', remoteRow(12, SMS, 'running'), false,
     [TRACE, RERUN]],
+  ['a backend with artifacts but no analyses', remoteRow('x-1', ['artifacts']), false,
+    [VIZ_REMOTE, TRACE, REPORT, FILES_REMOTE, RERUN]],
   ['off: SMS row (no features)', remoteRow(12, []), false,
-    [VIZ_REMOTE, TRACE, REPORT, FILES_REMOTE, REANALYSE, RERUN]],
+    [TRACE, REPORT, LAND, RERUN]],
   ['off: viva-core row (no features)', remoteRow('simulation-E9Ec819', []), false,
-    [VIZ_REMOTE, TRACE, REPORT, FILES_REMOTE, LAND, REANALYSE, RERUN]],
+    [TRACE, REPORT, LAND, RERUN]],
   ['old payload: SMS row without a features key', remoteRow(12, undefined), false,
-    [VIZ_REMOTE, TRACE, REPORT, FILES_REMOTE, REANALYSE, RERUN]],
+    [TRACE, REPORT, LAND, RERUN]],
   ['local row', LOCAL, false,
+    [VIZ_LOCAL, REPORT, FILES_LOCAL, RAW, RERUN]],
+  ['local row with a stray features key', Object.assign({ features: SMS }, LOCAL), false,
     [VIZ_LOCAL, REPORT, FILES_LOCAL, RAW, RERUN]],
   ['snapshot: SMS row', remoteRow(12, SMS), true,
     [VIZ_REMOTE, REPORT, FILES_LINK_REMOTE]],
