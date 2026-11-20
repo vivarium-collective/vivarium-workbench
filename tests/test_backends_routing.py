@@ -25,7 +25,7 @@ import pytest
 from vivarium_workbench.lib import remote_run_compose
 from vivarium_workbench_sms import remote_pinned, remote_run_viva_v1
 from vivarium_workbench.lib import remote_run_views as rrv
-from vivarium_workbench_sms import sms_legacy
+from vivarium_workbench_sms import sms_landing, sms_legacy
 from vivarium_workbench.lib import remote_trace
 
 
@@ -84,7 +84,7 @@ def calls(monkeypatch, tmp_path):
     monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
     monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
     monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [{"composite": "c"}]})
-    monkeypatch.setattr(sms_legacy, "land_remote_run", lambda *a, **k: rec.append(("sms", "land_remote_run", None)) or "r1")
+    monkeypatch.setattr(sms_landing, "land_remote_run", lambda *a, **k: rec.append(("sms", "land_remote_run", None)) or "r1")
     return rec
 
 

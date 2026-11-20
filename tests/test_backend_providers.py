@@ -312,7 +312,7 @@ def test_with_providers_off_the_run_target_ignores_sms(providers_off, tmp_path, 
 #: The names that moved from lib.remote_run_views to the plugin's sms_legacy. remote_run_views must bind none of them:
 #: a stale ``monkeypatch.setattr(rrv, name, ...)`` then raises instead of silently patching a dead copy.
 _MOVED_TO_SMS_LEGACY = (
-    "SmsApiClient", "SmsApiError", "_sms_api_base", "load_spec", "_run_auth_ok", "land_remote_run",
+    "SmsApiClient", "SmsApiError", "_sms_api_base", "load_spec", "_run_auth_ok",
     "_TERMINAL_OK", "_TERMINAL_BAD", "_ANALYSIS_POLL_INTERVAL_SECONDS", "_ANALYSIS_POLL_MAX_ATTEMPTS",
     "_ANALYSIS_LAND_WAIT_SECONDS", "_ANALYSIS_TERMINAL_STATUSES",
 )

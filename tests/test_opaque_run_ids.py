@@ -78,10 +78,10 @@ def test_land_artifacts_and_reanalysis_refuse_a_string_id_of_another_backend(ws,
 
 def test_a_string_sms_id_is_the_same_request_as_the_integer(ws, asked, monkeypatch):
     """The Runs tab now sends the row's id as a string ("12"); SMS is asked with the integer 12 as before."""
-    from vivarium_workbench.lib import remote_run_landing
+    from vivarium_workbench_sms import sms_landing
 
     landed: list = []
-    monkeypatch.setattr(remote_run_landing, "land_remote_simulation_artifacts",
+    monkeypatch.setattr(sms_landing, "land_remote_simulation_artifacts",
                         lambda ws_root, sim, run_id, client: landed.append(sim) or {"run_id": run_id})
     for given in ("12", 12):
         assert rrv.remote_run_land_artifacts(ws, {"simulation_id": given, "run_id": "r1"})[1] == 200
