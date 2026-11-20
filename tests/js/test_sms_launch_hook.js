@@ -204,6 +204,35 @@ function lastModal(dom) {
     assert.ok(!calls.some(c => c.url.includes('/api/source/remote-health')));
   }
 
+  // ── 4b. declared features never decide dispatch (step P3 F2, review B1): even with the
+  //        features known and EMPTY (no `sms-launch`), a loaded plugin still mounts, and
+  //        /api/remote-run-config alone decides the pinned remote dispatch. ──
+  {
+    const BF = fs.readFileSync(path.join(dir, 'backend-features.js'), 'utf8');
+    const { win, dom, calls } = load({
+      withPlugin: true,
+      preload: BF,
+      routes: {
+        'GET /api/backend/features': { status: 200, body: { features: [] } },
+        'GET /api/source/remote-health': { status: 200, body: { configured: true } },
+        'GET /api/remote-run-config': { status: 200, body: { pinned: true, simulator_id: 7, repo_url: 'r', branch: 'b', commit: 'c' } },
+        'POST /api/remote-run-submit': { status: 202, body: { simulation_id: 99 } },
+      },
+    });
+    await win.BackendFeatures.ready();
+    assert.strictEqual(win.BackendFeatures.known(), true);
+    assert.ok(dom.byId['study-run-composite'], 'the plugin mounts whatever the features say');
+    await settle();
+    const p = win._dispatchCurrentSpecBaseline();
+    await settle();
+    lastModal(dom).ok.click();
+    assert.strictEqual((await p).status, 202);
+    assert.ok(calls.some(c => c.url === '/api/remote-run-submit'), 'pinned dispatch still goes remote');
+    assert.ok(!calls.some(c => c.url === '/api/study-run-baseline'), 'never falls back to local');
+  }
+  assert.ok(!/BackendFeatures\.has\(\s*['"]sms-launch/.test(SD),
+    'a has("sms-launch") check may live only in sms-launch.js (review notes)');
+
   // ── 5. the quarantine: launch terms live in sms-launch.js, not study-detail.js ──
   for (const term of ['n_generations', 'n_seeds', 'ParCa', 'multi_node_dispatch', 'mbp_dispatch',
     'nextflow_dispatch', 'AWS Batch', '_dispatchRemotePinned', '_dispatchRemoteComposite',

@@ -399,6 +399,20 @@
   }
   window._loadAnalyses = _loadAnalyses;
 
+  // Whether to ask for the remote figure gallery (/api/study-remote-figures):
+  // only when the active backends declare `artifacts` (docs/backend-adapters.md
+  // §2.1, step P3 F2). Features only HIDE this optional panel; when they are
+  // unknown (no BackendFeatures, a failed fetch) the page asks as before, and
+  // the read-only snapshot bundle keeps its old behaviour without consulting them.
+  var _GALLERY_NOT_OFFERED = {};
+  function _remoteGalleryOffered() {
+    var bf = window.BackendFeatures;
+    if (_isSnapshot() || !bf || typeof bf.ready !== 'function') return Promise.resolve(true);
+    return bf.ready().then(
+      function (st) { return !st || !st.known || (st.features || []).indexOf('artifacts') !== -1; },
+      function () { return true; });
+  }
+
   // Analyses tab: list the study's completed remote sims' ptools/EcoCyc overlay
   // .tsv files for download, read from their S3 result_uri via the remote
   // setting (complements the local "Analysis result files" above and the
@@ -416,9 +430,15 @@
       panel.id = 'remote-analyses-panel';
       anchor.parentNode.insertBefore(panel, anchor.nextSibling);
     }
-    fetch('/api/study-remote-figures?study=' + encodeURIComponent(slug) + '&limit=8')
-      .then(function (r) { return r.ok ? r.json() : { available: false }; })
+    _remoteGalleryOffered()
+      .then(function (offered) {
+        // Not offered: stay loaded (nothing to retry) and leave the panel empty.
+        if (!offered) return _GALLERY_NOT_OFFERED;
+        return fetch('/api/study-remote-figures?study=' + encodeURIComponent(slug) + '&limit=8')
+          .then(function (r) { return r.ok ? r.json() : { available: false }; });
+      })
       .then(function (d) {
+        if (d === _GALLERY_NOT_OFFERED) return;
         if (!d || !d.available || !(d.sims || []).length) {
           panel.innerHTML = (d && d.reason === 's3-auth-error' && d.total_completed_remote_sims)
             ? '<p class="muted" style="margin:10px 0">' + d.total_completed_remote_sims
@@ -448,7 +468,7 @@
         }).join('');
         panel.innerHTML =
           '<h4 style="margin-top:18px">Remote ptools / EcoCyc overlays (S3)</h4>'
-          + '<p class="muted">Rendered on GovCloud, read from S3 via the remote setting — showing '
+          + '<p class="muted">Rendered on the remote backend, read from S3 via the remote setting — showing '
           + d.shown_sims + ' of ' + d.total_completed_remote_sims
           + ' completed remote sims. Rendered figures are in the Visualizations tab.</p>'
           + rows;
@@ -871,9 +891,15 @@
       panel.id = 'remote-figures-panel';
       anchor.parentNode.insertBefore(panel, anchor.nextSibling);
     }
-    fetch('/api/study-remote-figures?study=' + encodeURIComponent(slug) + '&limit=8')
-      .then(function (r) { return r.ok ? r.json() : { available: false }; })
+    _remoteGalleryOffered()
+      .then(function (offered) {
+        // Not offered: stay loaded (nothing to retry) and leave the panel empty.
+        if (!offered) return _GALLERY_NOT_OFFERED;
+        return fetch('/api/study-remote-figures?study=' + encodeURIComponent(slug) + '&limit=8')
+          .then(function (r) { return r.ok ? r.json() : { available: false }; });
+      })
       .then(function (d) {
+        if (d === _GALLERY_NOT_OFFERED) return;
         if (!d || !d.available || !(d.sims || []).length) {
           panel.innerHTML = (d && d.reason === 's3-auth-error' && d.total_completed_remote_sims)
             ? '<p class="muted" style="margin:10px 0">' + d.total_completed_remote_sims
@@ -2462,8 +2488,8 @@
   // to eliminate the "which button do I click" choice, not reintroduce it
   // under a new name. A backend's launch plugin may take the dispatch (below);
   // otherwise the study runs on the existing local-engine path.
-  // Backend-specific launch UI: static/sms-launch.js, loaded before this file
-  // when present. It gets only the small interface below and returns
+  // Backend-specific launch UI: a provider's launch script (window.SmsLaunch),
+  // loaded before this file when present. It gets only the small interface below and returns
   // {dispatchBaseline, setRemoteConfigured}; absent, the study page is local-only.
   var _CANCELLED = { status: 0, body: { cancelled: true } };
   var _smsLaunch = null;
@@ -2482,9 +2508,9 @@
     } catch (err) {
       // The plugin is present but broken: fail the dispatch visibly. Never fall back to a local run,
       // which on a pinned deployment would run the study somewhere the operator did not choose.
-      if (window.console) console.error('sms-launch mount failed', err);
+      if (window.console) console.error('launch plugin mount failed', err);
       _smsLaunch = {
-        dispatchBaseline: function () { return Promise.reject(new Error('the launch plugin (sms-launch.js) failed to load: ' + (err && err.message || err))); },
+        dispatchBaseline: function () { return Promise.reject(new Error('the launch plugin failed to load: ' + (err && err.message || err))); },
         setRemoteConfigured: function () {},
       };
     }
@@ -2630,11 +2656,11 @@
   // fill instead of popping between polls.
   var _chainProgressStart = null;
 
-  // Whether THIS workspace has a remote compute backend (viva-api/sms-api)
+  // Whether THIS workspace has a remote compute backend
   // configured. A local-only workspace (a bench process-bigraph workspace) has
   // none — so the remote-dispatch affordances (⚙ Dispatch composite + the remote
   // chain-progress poller below) must stay hidden and the UI must not even mention
-  // sms-api. Resolved once from /api/source/remote-health by _gateRemoteDispatch();
+  // the remote backend. Resolved once from /api/source/remote-health by _gateRemoteDispatch();
   // default false so a local workspace is never coupled to a remote it lacks.
   var _remoteConfigured = false;
 
@@ -2770,7 +2796,7 @@
   function _pollChainProgress(runId) {
     // Local-only workspace: there is no remote backend to report chain progress,
     // so never poll /api/remote-run-chain-progress (it would surface a spurious
-    // "sms-api unreachable"). Local runs track progress via the Runs tab refresh.
+    // "remote backend unreachable"). Local runs track progress via the Runs tab refresh.
     if (!_remoteConfigured) return;
     if (_chainProgressTimer) { clearTimeout(_chainProgressTimer); _chainProgressTimer = null; }
     // Opaque run ids: every run is asked for by run_id, whatever its form (an SMS integer, a
@@ -4945,7 +4971,7 @@
   // reused after a study-grade success AND after a Tests-tab-initiated
   // baseline run completes (see _gradeAfterRunId / _pollChainProgress above).
   // Reuses window.DataSource.loadStudy (the page's existing study-reload
-  // path, also used by sms-launch.js) rather than a bespoke fetch.
+  // path, also used by the launch plugin) rather than a bespoke fetch.
   function _reloadStudyAndTests() {
     var slug = studyName();
     var reload = (window.DataSource && window.DataSource.loadStudy)

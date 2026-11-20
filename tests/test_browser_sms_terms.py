@@ -28,11 +28,9 @@ BASELINE: dict[str, dict[str, int]] = {
     "static/session.js": {"sms-api": 1},
     "static/sim-table.js": {"sms-api": 2, "GovCloud": 4},
     "static/sms-launch.js": {"sms-api": 1},
-    "static/study-detail.js": {"sms-api": 3, "GovCloud": 1, "sms-launch": 4},
     "static/walkthrough.js": {"sms-api": 2, "GovCloud": 8, "sms-launch": 1},
     "static/workspace-picker.js": {"sms-api": 4},
     "templates/index.html.j2": {"sms-api": 2, "GovCloud": 1},
-    "templates/study-detail.html": {"smsvpctest": 1, "sms-launch": 2},
 }
 
 _SMS_LAUNCH_TAG = re.compile(r'<script[^>]*\bsrc="[^"]*sms-launch\.js[^"]*"[^>]*>\s*</script>')
