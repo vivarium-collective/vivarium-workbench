@@ -6,7 +6,9 @@
 * ``recognise()``: the viva-core half of the capability probe (``server_capabilities.backend_profile``);
 * ``worker_launcher()``: viva-api's hosted env-worker launcher (proxy or dial-back), when the deployment asks for one;
 * ``probe_client()``: the client the capability probe reads a named backend with (``SmsApiClient``, probe class);
-* ``cli()``: its subcommands (``run-remote``, ``vivarium_workbench_sms/cli.py``).
+* ``cli()``: its subcommands (``run-remote``, ``vivarium_workbench_sms/cli.py``);
+* ``router()``: the routes only SMS serves (the legacy pipeline and the thin client's build phase,
+  ``vivarium_workbench_sms/routes.py``).
 
 The core finds this module by importing it (until step P4's entry point) and reads ``PROVIDER``.
 """
@@ -17,7 +19,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from vivarium_workbench.lib.backends.provider import Recognised
+from vivarium_workbench.lib.backends.provider import ProviderRouter, Recognised
 
 if TYPE_CHECKING:
     from vivarium_workbench.lib.backends import Backend
@@ -105,6 +107,14 @@ class SmsProvider:
         from vivarium_workbench_sms import cli as _cli  # lazy, like backends()
 
         return _cli.commands()
+
+    def router(self) -> ProviderRouter:
+        """``remote-run-start``, ``-status``, ``-build`` and ``-pinned-build`` (``vivarium_workbench_sms/routes.py``,
+        step P2 Runs a2), built fresh on every call. Imported here, lazily, so FastAPI and the route models load only
+        in a process that builds an app."""
+        from vivarium_workbench_sms import routes  # lazy, like backends()
+
+        return ProviderRouter(routes.build_router(), routes.READONLY_ALLOWED)
 
 
 PROVIDER = SmsProvider()

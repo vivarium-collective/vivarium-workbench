@@ -4599,26 +4599,26 @@ class TestSourceSwitchBuildRoute:
 
 # ===========================================================================
 # C-state-3c: POST /api/remote-run-start (manager.submit pipeline job)
-# Every external (auth, git, sms-api, manager) is monkeypatched on the lib
-# builder — no real network/git/auth.
+# Every external (auth, git, sms-api, manager) is monkeypatched on the plugin
+# view's modules (remote_pipeline_views, step P2 Runs a2) — no real network/git/auth.
 # ===========================================================================
 class TestRemoteRunStartRoute:
     def test_not_authenticated_401(self, client, monkeypatch):
-        from vivarium_workbench.lib import remote_run_views as rrv
-        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: None)
+        from vivarium_workbench_sms import remote_pipeline_views as pv
+        monkeypatch.setattr(pv.github_auth, "current_session", lambda: None)
         r = client.post("/api/remote-run-start", json={"study": "s"})
         assert r.status_code == 401
         assert r.json() == {"error": "not authenticated"}
 
     def test_missing_study_400(self, client, monkeypatch):
-        from vivarium_workbench.lib import remote_run_views as rrv
-        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
+        from vivarium_workbench_sms import remote_pipeline_views as pv
+        monkeypatch.setattr(pv.github_auth, "current_session", lambda: object())
         r = client.post("/api/remote-run-start", json={"study": "   "})
         assert r.status_code == 400
         assert r.json() == {"error": "study is required"}
 
     def test_happy_path_202(self, client, tmp_path, monkeypatch):
-        from vivarium_workbench.lib import remote_run_views as rrv
+        from vivarium_workbench_sms import remote_pipeline_views as pv
         from vivarium_workbench_sms import sms_legacy
 
         class _Job:
@@ -4626,17 +4626,17 @@ class TestRemoteRunStartRoute:
 
         captured = {}
 
-        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
-        monkeypatch.setattr(rrv.git_status, "has_origin_remote", lambda ws: True)
-        monkeypatch.setattr(rrv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
+        monkeypatch.setattr(pv.github_auth, "current_session", lambda: object())
+        monkeypatch.setattr(pv.git_status, "has_origin_remote", lambda ws: True)
+        monkeypatch.setattr(pv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
         spec_file = tmp_path / "study.yaml"
         spec_file.write_text("baseline: []\n")
-        monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
-        monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
+        monkeypatch.setattr(pv.study_spec, "study_spec_path", lambda ws, name: spec_file)
+        monkeypatch.setattr(pv.study_spec, "study_dir", lambda ws, name: tmp_path)
         monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [], "readouts": []})
         import subprocess as _sp
         monkeypatch.setattr(
-            rrv.subprocess, "run",
+            pv.subprocess, "run",
             lambda *a, **k: _sp.CompletedProcess(args=[], returncode=0, stdout="feature/x\n"),
         )
         monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: object())
@@ -4647,7 +4647,7 @@ class TestRemoteRunStartRoute:
             captured["worker"] = worker_fn
             return _Job()
 
-        monkeypatch.setattr(rrv.manager, "submit", _submit)
+        monkeypatch.setattr(pv.remote_run_jobs.manager, "submit", _submit)
 
         r = client.post("/api/remote-run-start", json={"study": "study-a"})
         assert r.status_code == 202
@@ -4655,23 +4655,23 @@ class TestRemoteRunStartRoute:
         assert captured["study"] == "study-a"
         assert callable(captured["worker"])
 
-    def _wire_happy(self, rrv, tmp_path, monkeypatch, captured):
+    def _wire_happy(self, pv, tmp_path, monkeypatch, captured):
         """Monkeypatch every external for a happy submit; capture PipelineCtx kwargs."""
         from vivarium_workbench_sms import sms_legacy
 
         class _Job:
             job_id = "JX"
-        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
-        monkeypatch.setattr(rrv.git_status, "has_origin_remote", lambda ws: True)
-        monkeypatch.setattr(rrv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
+        monkeypatch.setattr(pv.github_auth, "current_session", lambda: object())
+        monkeypatch.setattr(pv.git_status, "has_origin_remote", lambda ws: True)
+        monkeypatch.setattr(pv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
         spec_file = tmp_path / "study.yaml"
         spec_file.write_text("baseline: []\n")
-        monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
-        monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
+        monkeypatch.setattr(pv.study_spec, "study_spec_path", lambda ws, name: spec_file)
+        monkeypatch.setattr(pv.study_spec, "study_dir", lambda ws, name: tmp_path)
         monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [], "readouts": []})
         import subprocess as _sp
         monkeypatch.setattr(
-            rrv.subprocess, "run",
+            pv.subprocess, "run",
             lambda *a, **k: _sp.CompletedProcess(args=[], returncode=0, stdout="feature/x\n"),
         )
         monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: object())
@@ -4680,24 +4680,24 @@ class TestRemoteRunStartRoute:
         def _ctx(**kwargs):
             captured.update(kwargs)
             return object()
-        monkeypatch.setattr(rrv, "PipelineCtx", _ctx)
-        monkeypatch.setattr(rrv, "run_remote_pipeline", lambda j, ctx: None)
-        monkeypatch.setattr(rrv.manager, "submit", lambda study, worker_fn: _Job())
+        monkeypatch.setattr(pv.remote_run_jobs, "PipelineCtx", _ctx)
+        monkeypatch.setattr(pv.remote_run_jobs, "run_remote_pipeline", lambda j, ctx: None)
+        monkeypatch.setattr(pv.remote_run_jobs.manager, "submit", lambda study, worker_fn: _Job())
 
     def test_run_parca_defaults_true_when_omitted(self, client, tmp_path, monkeypatch):
         # Legacy raw-JSON contract: an OMITTED run_parca runs ParCa (.get(..., True)).
         # The route must not let pydantic's None default flip it to False.
-        from vivarium_workbench.lib import remote_run_views as rrv
+        from vivarium_workbench_sms import remote_pipeline_views as pv
         captured = {}
-        self._wire_happy(rrv, tmp_path, monkeypatch, captured)
+        self._wire_happy(pv, tmp_path, monkeypatch, captured)
         r = client.post("/api/remote-run-start", json={"study": "study-a"})
         assert r.status_code == 202
         assert captured["run_parca"] is True
 
     def test_run_parca_explicit_false_preserved(self, client, tmp_path, monkeypatch):
-        from vivarium_workbench.lib import remote_run_views as rrv
+        from vivarium_workbench_sms import remote_pipeline_views as pv
         captured = {}
-        self._wire_happy(rrv, tmp_path, monkeypatch, captured)
+        self._wire_happy(pv, tmp_path, monkeypatch, captured)
         r = client.post("/api/remote-run-start", json={"study": "study-a", "run_parca": False})
         assert r.status_code == 202
         assert captured["run_parca"] is False

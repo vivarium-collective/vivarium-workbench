@@ -469,3 +469,138 @@ def test_every_backend_runs_a_composite_and_the_sentinels_refuse_it(tmp_path):
         with pytest.raises(RuntimeError, match="provider is not active"):
             sentinel.runs.run_composite(tmp_path, "c", dest=tmp_path, n_steps=1, overrides=None, emit_paths=None,
                                         analysis_options=None, build_ref=None, poll_interval=0, poll_timeout=0)
+
+
+# --- the plugin router (step P2, Runs a2) ---------------------------------------------------------------------------
+
+#: The SMS-only routes ``SmsProvider.router()`` serves, and how a router-less app answers each (Starlette: a POST
+#: matches the GET-only catch-all's path -> 405; a GET falls through to it and misses -> an empty 404).
+_SMS_ONLY_ROUTES = (
+    ("post", "/api/remote-run-start", 405),
+    ("get", "/api/remote-run-status", 404),
+    ("post", "/api/remote-run-build", 405),
+    ("post", "/api/remote-run-pinned-build", 405),
+)
+
+#: What moved from lib.remote_run_views to the plugin's remote_pipeline_views (the three views and their helper), and
+#: what remote_run_views no longer binds (the pipeline seams, read through remote_run_jobs, and the modules only those
+#: views used).
+_MOVED_TO_PIPELINE_VIEWS = ("remote_run_start", "remote_run_build_start", "remote_run_pinned_build_start",
+                            "_resolve_repo_branch")
+_DROPPED_FROM_RRV = ("PipelineCtx", "manager", "run_remote_pipeline", "github_auth", "git_status", "subprocess")
+
+
+def _app_routes(app):
+    return {(r.path, m.lower()): r for r in app.router.routes if getattr(r, "methods", None) for m in r.methods}
+
+
+def test_the_sms_only_views_moved_to_the_plugin_and_bind_no_pipeline_seam():
+    from vivarium_workbench.lib import remote_run_views as rrv
+    from vivarium_workbench_sms import remote_pipeline_views as pv
+
+    assert [n for n in _MOVED_TO_PIPELINE_VIEWS + _DROPPED_FROM_RRV if hasattr(rrv, n)] == []
+    assert [n for n in _MOVED_TO_PIPELINE_VIEWS if not hasattr(pv, n)] == []
+    # The pipeline seams are read through remote_run_jobs and the SMS ones through sms_legacy: one patch target each.
+    assert [n for n in ("PipelineCtx", "manager", "run_remote_pipeline") + _MOVED_TO_SMS_LEGACY if hasattr(pv, n)] == []
+
+
+def test_the_registry_does_not_load_the_routes_or_the_pipeline():
+    """An env worker loads the provider for the registry (``backends.active`` -> ``_registry``); that must not pull in
+    the plugin's routes, its views or the in-process pipeline (``remote_run_jobs``), which only ``create_app`` needs."""
+    import subprocess
+    import sys
+
+    code = ("import sys\n"
+            "from vivarium_workbench.lib import backends\n"
+            "assert [b.name for b in backends._ALL] == ['compose-api', 'viva-core', 'sms-legacy']\n"
+            "import vivarium_workbench_sms.sms_legacy\n"
+            "mods = ('vivarium_workbench_sms.routes', 'vivarium_workbench_sms.remote_pipeline_views',\n"
+            "        'vivarium_workbench_sms.remote_run_jobs', 'vivarium_workbench.api.app')\n"
+            "print(sorted(m for m in mods if m in sys.modules))\n")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip().splitlines()[-1] == "[]"
+
+
+def test_with_providers_on_the_sms_only_routes_are_served_under_the_app_wide_guards():
+    from vivarium_workbench.api import app as appmod
+
+    app = appmod.create_app()
+    routes = _app_routes(app)
+    paths = app.openapi()["paths"]
+    for method, path, _ in _SMS_ONLY_ROUTES:
+        route = routes[(path, method)]
+        assert route.endpoint.__module__ == "vivarium_workbench_sms.routes"
+        assert appmod._plain_identifiers in [d.call for d in route.dependant.dependencies], path
+        assert method in paths[path]
+    # Included before the SPA catch-all, which stays last.
+    assert app.router.routes[-1].path == "/{rel:path}"
+    assert app.state.readonly_allowed_mutations >= {"/api/remote-run-start", "/api/remote-run-build"}
+    assert "/api/remote-run-pinned-build" not in app.state.readonly_allowed_mutations
+
+
+def test_read_only_keeps_start_build_and_status_and_drops_pinned_build(tmp_path, monkeypatch, inproc_client):
+    from vivarium_workbench.lib import github_auth
+
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_READONLY", "1")
+    monkeypatch.setattr(github_auth, "current_session", lambda: None)
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    client = inproc_client(tmp_path)
+    # kept: the views answer (401 is the views' own login check)
+    assert client.post("/api/remote-run-start", json={"study": "s"}).status_code == 401
+    assert client.post("/api/remote-run-build", json={"study": "s"}).status_code == 401
+    assert client.get("/api/remote-run-status").status_code == 200
+    # dropped, as before step P2 Runs a2
+    assert client.post("/api/remote-run-pinned-build", json={}).status_code == 405
+
+
+@pytest.mark.parametrize("method, path, status", _SMS_ONLY_ROUTES)
+def test_with_providers_off_the_sms_only_routes_are_absent(providers_off, tmp_path, inproc_client,
+                                                          method, path, status):
+    from vivarium_workbench.api import app as appmod
+
+    app = appmod.create_app()
+    assert path not in app.openapi()["paths"]
+    assert (path, method) not in _app_routes(app)
+    assert app.state.readonly_allowed_mutations == frozenset(appmod._READONLY_ALLOWED_MUTATIONS)
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    client = inproc_client(tmp_path)
+    r = client.get(path) if method == "get" else client.post(path, json={"study": "s"})
+    assert r.status_code == status
+
+
+def _fake_provider(router, readonly_allowed=frozenset()):
+    from vivarium_workbench.lib.backends.provider import ProviderRouter
+
+    class Fake:
+        name = "fake"
+
+        def router(self):
+            return ProviderRouter(router, frozenset(readonly_allowed))
+
+    return Fake()
+
+
+def test_a_provider_route_that_clashes_with_a_core_route_is_refused(monkeypatch):
+    from fastapi import APIRouter
+
+    from vivarium_workbench.api import app as appmod
+
+    r = APIRouter()
+    r.post("/api/remote-run-submit")(lambda: None)
+    monkeypatch.setattr(provider_mod, "providers", lambda: (_fake_provider(r),))
+    with pytest.raises(RuntimeError, match="clash"):
+        appmod.create_app()
+
+
+def test_a_provider_cannot_allowlist_a_path_that_is_not_its_own(monkeypatch):
+    from fastapi import APIRouter
+
+    from vivarium_workbench.api import app as appmod
+
+    r = APIRouter()
+    r.post("/api/fake-own")(lambda: None)
+    monkeypatch.setattr(provider_mod, "providers",
+                        lambda: (_fake_provider(r, {"/api/fake-own", "/api/study-create"}),))
+    with pytest.raises(RuntimeError, match="not its own"):
+        appmod.create_app()

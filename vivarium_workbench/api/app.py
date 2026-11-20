@@ -61,7 +61,6 @@ from vivarium_workbench.lib import source_switch_views as _source_switch_views
 from vivarium_workbench_sms import source_build_views as _source_build_views
 from vivarium_workbench.lib import job_status_views as _job_status_views
 from vivarium_workbench.lib import run_jobs as _run_jobs
-from vivarium_workbench_sms import remote_run_jobs as _remote_run_jobs
 from vivarium_workbench.lib import remote_run_views as _remote_run_views
 from vivarium_workbench_sms import remote_analysis_figures as _remote_analysis_figures
 from vivarium_workbench.lib import auth_views as _auth_views
@@ -326,9 +325,6 @@ from vivarium_workbench.lib.models import (
     BuildRemoteResponse,
     MaterializeRepoRequest,
     SwitchBuildRequest,
-    # C-state-3c: remote-run submit (manager.submit pipeline job)
-    RemoteRunStartRequest,
-    RemoteRunStartResponse,
     # C-state-3e: GitHub device-flow auth (pass-through payload)
     AuthPayload,
     AiCapabilitiesPayload,
@@ -533,9 +529,10 @@ _READONLY_ALLOWED_MUTATIONS = {
     # run triggers (local or remote execution)
     "/api/investigation-run", "/api/investigation-run-one", "/api/investigation-run-unblocked",
     "/api/study-run-baseline", "/api/study-run-variant", "/api/composite-test-run",
-    "/api/remote-run-start",
-    # remote-run thin client (WS1, two-phase)
-    "/api/remote-run-build", "/api/remote-run-submit", "/api/remote-run-land",
+    # remote-run thin client (WS1, two-phase); its build phase and the legacy
+    # pipeline start are the SMS provider's routes, which it declares itself
+    # (``ProviderRouter.readonly_allowed``, step P2 Runs a2)
+    "/api/remote-run-submit", "/api/remote-run-land",
     # item 53: cancelling a real remote run is a control action, same class of
     # operational necessity as starting one — a read-only deployment must not
     # block an operator from stopping a runaway campaign
@@ -569,8 +566,13 @@ def _readonly_enabled() -> bool:
     return (get_env("READONLY", "") or "").strip().lower() not in ("", "0", "false", "no")
 
 
-def _apply_readonly_filter(app: FastAPI) -> None:
-    """Drop every mutating route except the whitelisted actions (in place)."""
+def _apply_readonly_filter(app: FastAPI, allowed: "Optional[frozenset[str]]" = None) -> None:
+    """Drop every mutating route except the whitelisted actions (in place).
+
+    ``allowed`` defaults to the app's own effective allowlist, ``app.state.readonly_allowed_mutations``: the core's
+    ``_READONLY_ALLOWED_MUTATIONS`` plus what its providers' routers declare (``_include_provider_routers``)."""
+    if allowed is None:
+        allowed = app.state.readonly_allowed_mutations
     kept = []
     for r in app.router.routes:
         methods = getattr(r, "methods", None)
@@ -578,10 +580,76 @@ def _apply_readonly_filter(app: FastAPI) -> None:
             kept.append(r); continue
         if methods <= {"GET", "HEAD", "OPTIONS"}:         # pure read
             kept.append(r)
-        elif getattr(r, "path", "") in _READONLY_ALLOWED_MUTATIONS:
+        elif getattr(r, "path", "") in allowed:
             kept.append(r)
         # else: an un-whitelisted mutation route -> dropped
     app.router.routes[:] = kept
+
+
+def _include_provider_routers(app: FastAPI) -> frozenset[str]:
+    """Include each backend provider's routes (``Provider.router``, docs/backend-adapters.md §2.2) and return the
+    paths they declare read-only-safe. Called once all the core's routes are registered and before the SPA catch-all
+    (Starlette matches in registration order, so the catch-all would otherwise answer their GETs).
+
+    Refuses (``RuntimeError``) a (path, method) the app already serves, since one of the two would be silently
+    shadowed, and a ``readonly_allowed`` path that is not one of the router's own routes, since a plugin must not
+    re-enable a core route that read-only mode drops. The app-level dependencies, the middleware and the exception
+    handlers apply to the included routes as to the core's. A provider that fails to load raises here: a broken
+    plugin must not look absent."""
+    from vivarium_workbench.lib.backends import provider as _provider
+
+    def served(routes: list) -> set[tuple[str, str]]:
+        return {(r.path, m) for r in routes if getattr(r, "methods", None) for m in r.methods}
+
+    allowed: set[str] = set()
+    for p in _provider.providers():
+        pr = p.router()
+        if pr is None:
+            continue
+        own = served(pr.router.routes)
+        clash = own & served(app.router.routes)
+        if clash:
+            raise RuntimeError(f"provider {p.name!r} routes clash with routes the app already serves: "
+                               f"{sorted(clash)}")
+        foreign = set(pr.readonly_allowed) - {path for path, _ in own}
+        if foreign:
+            raise RuntimeError(f"provider {p.name!r} declares read-only-safe paths that are not its own routes: "
+                               f"{sorted(foreign)}")
+        for route in pr.router.routes:
+            _add_route_like(app, route, p.name)
+        allowed |= pr.readonly_allowed
+    return frozenset(allowed)
+
+
+def _add_route_like(app: FastAPI, route: object, provider: str) -> None:
+    """Register ``route`` on the app itself, as ``@app.post(...)`` would: a flat ``APIRoute`` that the app-level
+    dependencies wrap and that ``_apply_readonly_filter``, the AI tool index and the clash check see. Not
+    ``app.include_router``: from FastAPI 0.138 it adds one lazy ``_IncludedRouter`` entry that hides its routes from
+    ``app.router.routes`` (so read-only mode would keep every one of them). The keyword list is what
+    ``APIRouter.include_router`` passed per route before it went lazy."""
+    from fastapi.routing import APIRoute
+
+    if not isinstance(route, APIRoute):
+        raise RuntimeError(f"provider {provider!r} router holds a {type(route).__name__}; only API routes are "
+                           "supported")
+    extra = {}
+    if hasattr(route, "strict_content_type"):  # FastAPI >= 0.138
+        extra["strict_content_type"] = route.strict_content_type
+    app.router.add_api_route(
+        route.path, route.endpoint,
+        response_model=route.response_model, status_code=route.status_code, tags=route.tags,
+        dependencies=route.dependencies, summary=route.summary, description=route.description,
+        response_description=route.response_description, responses=route.responses, deprecated=route.deprecated,
+        methods=route.methods, operation_id=route.operation_id,
+        response_model_include=route.response_model_include, response_model_exclude=route.response_model_exclude,
+        response_model_by_alias=route.response_model_by_alias,
+        response_model_exclude_unset=route.response_model_exclude_unset,
+        response_model_exclude_defaults=route.response_model_exclude_defaults,
+        response_model_exclude_none=route.response_model_exclude_none,
+        include_in_schema=route.include_in_schema, response_class=route.response_class, name=route.name,
+        route_class_override=type(route), callbacks=route.callbacks, openapi_extra=route.openapi_extra,
+        generate_unique_id_function=route.generate_unique_id_function, **extra,
+    )
 
 
 def create_app() -> FastAPI:
@@ -6839,32 +6907,6 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=200,
                             content=_run_jobs.manager.redrive(job_id))
 
-    @app.get(
-        "/api/remote-run-status",
-        response_model=JobStatusPayload,
-        tags=["Rigor & jobs"],
-        summary="Status of a remote (sms-api) run job",
-    )
-    def remote_run_status(
-        job_id: str = "",
-    ) -> Union[JobStatusPayload, JSONResponse]:
-        """Status of a remote-run job (mirrors the stdlib
-        ``GET /api/remote-run-status?job_id=<id>``).
-
-        Reads the in-process ``lib.remote_run_jobs.manager`` singleton.  No
-        ``job_id`` returns ``{jobs: manager.list_recent(10)}``; a known id
-        returns the job's ``to_dict()`` (a ``steps[]`` shape); an unknown id
-        returns HTTP 404 ``{error: "job not found"}``.
-
-        The manager is read at call time via the module attribute
-        (``_remote_run_jobs.manager``) so tests can monkeypatch it.
-        Library-backed via the pure ``lib.job_status_views.job_status``.
-        """
-        body, status = _job_status_views.job_status(_remote_run_jobs.manager, job_id)
-        if status != 200:
-            return JSONResponse(status_code=status, content=body)
-        return JobStatusPayload.model_validate(body)
-
     # -----------------------------------------------------------------------
     # Source — in-process workspace re-pointing (first stateful POST)
     # -----------------------------------------------------------------------
@@ -7777,66 +7819,13 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
-    # Runs — remote (sms-api) simulation-run SUBMIT
+    # Remote-run THIN CLIENT (WS1, two-phase). sms-api owns async/state; these
+    # routes are stateless maps over one call each. The JS panel drives build →
+    # poll → submit → poll → land. Phase 1 (``/api/remote-run-build``,
+    # ``-pinned-build``) and the legacy pipeline (``/api/remote-run-start``,
+    # ``-status``) are the SMS provider's routes (``Provider.router``, step P2
+    # Runs a2), included by ``_include_provider_routers`` below.
     # -----------------------------------------------------------------------
-
-    @app.post(
-        "/api/remote-run-start",
-        response_model=RemoteRunStartResponse,
-        tags=["Runs"],
-        summary="Submit a remote (sms-api) simulation pipeline job for a study",
-        status_code=202,
-    )
-    def remote_run_start(
-        req: RemoteRunStartRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Submit a remote sms-api simulation pipeline job for a study.
-
-        Mirrors the stdlib ``POST /api/remote-run-start``.  Body:
-        ``{"study", "num_generations"?, "num_seeds"?, "run_parca"?}`` — pushes
-        the workspace branch, builds a simulator from the pushed commit, runs it
-        on smsvpctest, polls, downloads, and lands the native store as a study
-        run, all as one background pipeline job on the in-process
-        ``lib.remote_run_jobs.manager`` singleton (the SAME manager the
-        ``GET /api/remote-run-status`` poller reads, so the submit is visible to
-        the status GET).
-
-        Status codes (byte-identical to the legacy handler):
-          - 401  not authenticated (``{"error": "not authenticated"}``)
-          - 400  missing study (``{"error": "study is required"}``)
-          - 409  no origin remote (``{"error": "no GitHub remote configured"}``)
-          - 409  unresolved url (``{"error": "could not resolve origin remote url"}``)
-          - 404  spec missing (``{"error": "study <slug> not found"}``)
-          - 202  ``{"job_id": <id>}``
-
-        The CSRF middleware already guards this POST.  Library-backed via the
-        pure ``lib.remote_run_views.remote_run_start`` (ws_root-parameterised);
-        every path (incl. the 202 success) is wrapped in ``JSONResponse`` so the
-        lib-returned status code is preserved verbatim.
-        """
-        # exclude_none so an OMITTED optional field is absent (not present-as-None)
-        # — the lib builder's ``body.get("run_parca", True)`` must see the True
-        # default for a client that omits the key, matching the legacy raw-JSON
-        # contract (``bool(None)`` would otherwise flip the default to False).
-        body, status = _remote_run_views.remote_run_start(ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
-
-    # -----------------------------------------------------------------------
-    # Remote-run THIN CLIENT (WS1, two-phase) — additive, alongside the legacy
-    # pipeline above. sms-api owns async/state; these routes are stateless maps
-    # over one sms-api call each. The JS panel drives build → poll → submit →
-    # poll → land. R5 removes the legacy pipeline once the panel cuts over.
-    # -----------------------------------------------------------------------
-    @app.post("/api/remote-run-build", tags=["Runs"], status_code=202,
-              summary="Thin-client phase 1: push + register the simulator build")
-    def remote_run_build(
-        req: Union[dict, None] = Body(default=None),
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        body, status = _remote_run_views.remote_run_build_start(ws, req or {})
-        return JSONResponse(status_code=status, content=body)
-
     @app.post("/api/remote-run-submit", tags=["Runs"], status_code=202,
               summary="Thin-client phase 2: issue the run for a completed build")
     def remote_run_submit(
@@ -8060,18 +8049,6 @@ def create_app() -> FastAPI:
                 headers[_remote_trace.TRACE_EVENTS_HEADER] = str(n_events)
             return Response(content=body, status_code=status, media_type="application/json",
                             headers=headers)
-        return JSONResponse(status_code=status, content=body)
-
-    @app.post("/api/remote-run-pinned-build",tags=["Runs"], status_code=202,
-              summary="Pinned phase 1: resolve the latest built simulator (no push/login)")
-    def remote_run_pinned_build(
-        req: Union[dict, None] = Body(default=None),
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Pinned variant of phase 1: resolve the latest built simulator for the
-        configured repo@branch. No git push, no GitHub login — enabled by the
-        ``VIVARIUM_WORKBENCH_REMOTE_PINNED`` deployment config."""
-        body, status = _remote_run_views.remote_run_pinned_build_start(ws, req or {})
         return JSONResponse(status_code=status, content=body)
 
     @app.get("/api/remote-run-config", tags=["Runs"],
@@ -9085,6 +9062,12 @@ def create_app() -> FastAPI:
         body, status = _catalog_uninstall_views.catalog_uninstall(
             ws, req.model_dump(exclude_none=True))
         return JSONResponse(status_code=status, content=body)
+
+    # Routes only a backend provider serves (step P2 Runs a2): after every core
+    # route, before the catch-all; refuses a clash. The effective read-only
+    # allowlist (core + providers) is the app's own, never the module global's.
+    app.state.readonly_allowed_mutations = (
+        frozenset(_READONLY_ALLOWED_MUTATIONS) | _include_provider_routers(app))
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)

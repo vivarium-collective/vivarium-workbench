@@ -15,10 +15,11 @@ too: the CSRF/origin guard, the Host guard and the session middleware (middlewar
 guard (an app-level dependency), and the ``{"error": ...}`` envelope (exception handlers;
 ``lib.errors.APIError`` raises it).
 
-Two rules for whoever includes such a router (``create_app``, not the router): include it BEFORE the SPA
-catch-all route (``/{rel:path}``), which otherwise answers its GETs first; and before ``_apply_readonly_filter``,
-whose allowlist (``_READONLY_ALLOWED_MUTATIONS``) must name any of its POST routes a read-only deployment keeps --
-others are dropped there, silently.
+``create_app`` includes such a router (``api.app._include_provider_routers``, step P2 Runs a2) BEFORE the SPA
+catch-all route (``/{rel:path}``), which otherwise answers its GETs first, and before ``_apply_readonly_filter``. A
+read-only deployment keeps only the router's POST routes the provider declares (``ProviderRouter.readonly_allowed``,
+merged into ``app.state.readonly_allowed_mutations``); the others are dropped there. A route that clashes with one
+the app already serves, or a declared path that is not the router's own, makes ``create_app`` raise.
 """
 
 from __future__ import annotations

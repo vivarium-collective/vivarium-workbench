@@ -1,4 +1,5 @@
-"""Parity tests for vivarium_workbench.lib.remote_run_views.remote_run_start.
+"""Parity tests for the remote-run views: the legacy pipeline submit (``remote_run_start``, now in
+``vivarium_workbench_sms.remote_pipeline_views``, step P2 Runs a2) and ``lib.remote_run_views``.
 
 The pure builder is a behaviour-preserving port of the stdlib handler
 ``server._post_remote_run_start``.  EVERY external is monkeypatched — these
@@ -13,10 +14,10 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
+from vivarium_workbench.lib import git_status, github_auth
 from vivarium_workbench.lib import remote_run_views as rrv
-from vivarium_workbench_sms import sms_landing, sms_legacy
+from vivarium_workbench_sms import remote_pipeline_views as pv
+from vivarium_workbench_sms import remote_run_jobs, sms_landing, sms_legacy
 
 
 # ---------------------------------------------------------------------------
@@ -47,9 +48,9 @@ def _wire_happy(monkeypatch, tmp_path: Path, spec: dict):
     """
     captured: dict = {"submit": None, "ctx": None}
 
-    monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
-    monkeypatch.setattr(rrv.git_status, "has_origin_remote", lambda ws: True)
-    monkeypatch.setattr(rrv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
+    monkeypatch.setattr(github_auth, "current_session", lambda: object())
+    monkeypatch.setattr(git_status, "has_origin_remote", lambda ws: True)
+    monkeypatch.setattr(git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
 
     spec_file = tmp_path / "study.yaml"
     spec_file.write_text("baseline: []\n")  # presence only — load_spec is stubbed
@@ -58,7 +59,7 @@ def _wire_happy(monkeypatch, tmp_path: Path, spec: dict):
     monkeypatch.setattr(sms_legacy, "load_spec", lambda p: spec)
 
     monkeypatch.setattr(
-        rrv.subprocess, "run",
+        subprocess, "run",
         lambda *a, **k: subprocess.CompletedProcess(args=[], returncode=0, stdout="feature/x\n"),
     )
     monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeClient)
@@ -68,14 +69,14 @@ def _wire_happy(monkeypatch, tmp_path: Path, spec: dict):
         captured["submit"] = (study, worker_fn)
         return _FakeJob("J1")
 
-    monkeypatch.setattr(rrv.manager, "submit", _fake_submit)
+    monkeypatch.setattr(remote_run_jobs.manager, "submit", _fake_submit)
 
     # Capture the PipelineCtx the builder wires by intercepting run_remote_pipeline
     # (the submitted worker is ``lambda j: run_remote_pipeline(j, ctx)``).
     def _fake_pipeline(job, ctx):
         captured["ctx"] = ctx
 
-    monkeypatch.setattr(rrv, "run_remote_pipeline", _fake_pipeline)
+    monkeypatch.setattr(remote_run_jobs, "run_remote_pipeline", _fake_pipeline)
     return captured
 
 
@@ -85,36 +86,36 @@ def _wire_happy(monkeypatch, tmp_path: Path, spec: dict):
 
 class TestErrorPaths:
     def test_not_authenticated_401(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: None)
-        body, status = rrv.remote_run_start(tmp_path, {"study": "s"})
+        monkeypatch.setattr(github_auth, "current_session", lambda: None)
+        body, status = pv.remote_run_start(tmp_path, {"study": "s"})
         assert (body, status) == ({"error": "not authenticated"}, 401)
 
     def test_missing_study_400(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
-        body, status = rrv.remote_run_start(tmp_path, {"study": "   "})
+        monkeypatch.setattr(github_auth, "current_session", lambda: object())
+        body, status = pv.remote_run_start(tmp_path, {"study": "   "})
         assert (body, status) == ({"error": "study is required"}, 400)
 
     def test_no_origin_remote_409(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
-        monkeypatch.setattr(rrv.git_status, "has_origin_remote", lambda ws: False)
-        body, status = rrv.remote_run_start(tmp_path, {"study": "s"})
+        monkeypatch.setattr(github_auth, "current_session", lambda: object())
+        monkeypatch.setattr(git_status, "has_origin_remote", lambda ws: False)
+        body, status = pv.remote_run_start(tmp_path, {"study": "s"})
         assert (body, status) == ({"error": "no GitHub remote configured"}, 409)
 
     def test_unresolved_repo_url_409(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
-        monkeypatch.setattr(rrv.git_status, "has_origin_remote", lambda ws: True)
-        monkeypatch.setattr(rrv.git_status, "remote_repo_url", lambda ws: None)
-        body, status = rrv.remote_run_start(tmp_path, {"study": "s"})
+        monkeypatch.setattr(github_auth, "current_session", lambda: object())
+        monkeypatch.setattr(git_status, "has_origin_remote", lambda ws: True)
+        monkeypatch.setattr(git_status, "remote_repo_url", lambda ws: None)
+        body, status = pv.remote_run_start(tmp_path, {"study": "s"})
         assert (body, status) == ({"error": "could not resolve origin remote url"}, 409)
 
     def test_spec_not_found_404(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
-        monkeypatch.setattr(rrv.git_status, "has_origin_remote", lambda ws: True)
-        monkeypatch.setattr(rrv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
+        monkeypatch.setattr(github_auth, "current_session", lambda: object())
+        monkeypatch.setattr(git_status, "has_origin_remote", lambda ws: True)
+        monkeypatch.setattr(git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
         monkeypatch.setattr(
             rrv.study_spec, "study_spec_path", lambda ws, name: tmp_path / "missing.yaml",
         )
-        body, status = rrv.remote_run_start(tmp_path, {"study": "ghost"})
+        body, status = pv.remote_run_start(tmp_path, {"study": "ghost"})
         assert (body, status) == ({"error": "study 'ghost' not found"}, 404)
 
 
@@ -129,7 +130,7 @@ class TestHappyPath:
             "readouts": [{"store_path": "agents.0.listeners.foo"}],
         }
         captured = _wire_happy(monkeypatch, tmp_path, spec)
-        body, status = rrv.remote_run_start(tmp_path, {"study": "study-a"})
+        body, status = pv.remote_run_start(tmp_path, {"study": "study-a"})
         assert (body, status) == ({"job_id": "J1"}, 202)
 
         # submit was called with the study slug + a callable worker.
@@ -137,9 +138,7 @@ class TestHappyPath:
         assert study_arg == "study-a"
         assert callable(worker_fn)
 
-        # Submits to the SAME singleton (manager.submit was the patched attr).
-        from vivarium_workbench_sms import remote_run_jobs
-        assert rrv.manager is remote_run_jobs.manager
+        # Submitted to the SAME singleton: remote_run_jobs.manager.submit was the patched attr.
 
     def test_pipeline_ctx_spec_id_from_baseline_composite(self, monkeypatch, tmp_path):
         spec = {
@@ -147,7 +146,7 @@ class TestHappyPath:
             "readouts": [{"store_path": "agents/0/listeners/foo"}],
         }
         captured = _wire_happy(monkeypatch, tmp_path, spec)
-        body, status = rrv.remote_run_start(
+        body, status = pv.remote_run_start(
             tmp_path, {"study": "study-a", "num_generations": 3, "num_seeds": 2, "run_parca": False},
         )
         assert status == 202
@@ -172,14 +171,14 @@ class TestHappyPath:
             called["ws"] = ws
             return "sha123"
 
-        monkeypatch.setattr(rrv.git_status, "remote_push_and_sha", _fake_push)
+        monkeypatch.setattr(git_status, "remote_push_and_sha", _fake_push)
         assert ctx.push_and_sha() == "sha123"
         assert called["ws"] == tmp_path
 
     def test_pipeline_ctx_spec_id_falls_back_to_slug(self, monkeypatch, tmp_path):
         spec = {"baseline": [], "readouts": []}  # no baseline composite declared
         captured = _wire_happy(monkeypatch, tmp_path, spec)
-        body, status = rrv.remote_run_start(tmp_path, {"study": "lonely-study"})
+        body, status = pv.remote_run_start(tmp_path, {"study": "lonely-study"})
         assert status == 202
         _study, worker_fn = captured["submit"]
         worker_fn(object())
@@ -238,10 +237,10 @@ class _FakeThinClient:
 
 
 def _wire_thin(monkeypatch, tmp_path, *, authed=True, study_exists=True):
-    monkeypatch.setattr(rrv.github_auth, "current_session", lambda: (object() if authed else None))
-    monkeypatch.setattr(rrv.git_status, "has_origin_remote", lambda ws: True)
-    monkeypatch.setattr(rrv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
-    monkeypatch.setattr(rrv.git_status, "remote_push_and_sha", lambda ws: "abc123def456")
+    monkeypatch.setattr(github_auth, "current_session", lambda: (object() if authed else None))
+    monkeypatch.setattr(git_status, "has_origin_remote", lambda ws: True)
+    monkeypatch.setattr(git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
+    monkeypatch.setattr(git_status, "remote_push_and_sha", lambda ws: "abc123def456")
     spec_file = tmp_path / "study.yaml"
     spec_file.write_text("baseline: [{composite: my-comp}]\n")
     monkeypatch.setattr(rrv.study_spec, "study_spec_path",
@@ -250,7 +249,7 @@ def _wire_thin(monkeypatch, tmp_path, *, authed=True, study_exists=True):
     monkeypatch.setattr(rrv.study_spec, "collect_study_observables", lambda spec: ["cell_mass"])
     monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [{"composite": "my-comp"}]})
     monkeypatch.setattr(
-        rrv.subprocess, "run",
+        subprocess, "run",
         lambda *a, **k: subprocess.CompletedProcess(args=[], returncode=0, stdout="feature/x\n"),
     )
     monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
@@ -263,7 +262,7 @@ def _wire_thin(monkeypatch, tmp_path, *, authed=True, study_exists=True):
 def test_build_start_returns_simulator_id_and_building_phase(monkeypatch, tmp_path):
     _wire_thin(monkeypatch, tmp_path)
     monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
-    body, status = rrv.remote_run_build_start(tmp_path, {"study": "s"})
+    body, status = pv.remote_run_build_start(tmp_path, {"study": "s"})
     assert status == 202
     assert body["simulator_id"] == 66
     assert body["phase"] == "building"
@@ -273,13 +272,13 @@ def test_build_start_returns_simulator_id_and_building_phase(monkeypatch, tmp_pa
 def test_build_start_unauthenticated_401(monkeypatch, tmp_path):
     _wire_thin(monkeypatch, tmp_path, authed=False)
     monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
-    assert rrv.remote_run_build_start(tmp_path, {"study": "s"})[1] == 401
+    assert pv.remote_run_build_start(tmp_path, {"study": "s"})[1] == 401
 
 
 def test_build_start_missing_study_400(monkeypatch, tmp_path):
     _wire_thin(monkeypatch, tmp_path)
     monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
-    assert rrv.remote_run_build_start(tmp_path, {})[1] == 400
+    assert pv.remote_run_build_start(tmp_path, {})[1] == 400
 
 
 def test_submit_issues_run_and_returns_simulation_id(monkeypatch, tmp_path):
@@ -738,7 +737,7 @@ def test_land_missing_simulation_id_400(monkeypatch, tmp_path):
 
 
 def _bind_analysis_client(monkeypatch, tmp_path, *, client=None, authed=True):
-    monkeypatch.setattr(rrv.github_auth, "current_session", lambda: (object() if authed else None))
+    monkeypatch.setattr(github_auth, "current_session", lambda: (object() if authed else None))
     monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
     c = client or _FakeThinClient()
     monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: c)

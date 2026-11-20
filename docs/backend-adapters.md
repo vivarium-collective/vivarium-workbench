@@ -32,7 +32,8 @@ Every PR that advances this plan updates this table in the same PR. Steps are de
 | P2 Runs a1 | `remote_run_views`' SMS constants and login check (`_run_auth_ok`) move to `sms_legacy`; its six read-backs of `remote_run_views` are gone (new contract: the plugin does not import `lib.remote_run_views`); the SMS code still in `remote_run_views` reads every seam through `sms_legacy` (one patch target per name, no aliases; 105 test patches re-pointed); new optional facet `Backend.unrouted` answers the lifecycle requests no record routes (SMS's 401 still before 400), and with providers off the core answers them (400 / 409 `no-backend` / `backend-not-installed`); ratchet 26 → 25; no behaviour change with providers on | wb#1673 | **done**, merged 2026-11-19 |
 | P2 Runs c2 | `run_jobs.refresh_submitted(job)` (no `client=`) asks each item's owner (`backends.for_run`): one `runs.status_many` call when the owner declares that optional method (`backends.BatchStatus`), otherwise `runs.status` per item with the down-skip; `_refresh_one`'s mapping becomes the shared `_apply`; `_refresh_sms` and `_UPSTREAM_*` move to `sms_legacy` (`status_batch`, `SmsLegacyRuns.status_many`); ratchet −1 (`run_jobs -> sms_api_client`), route-ratchet pairs −1 (`lib.run_jobs: compose_status_batch`); with providers on, three declared changes: an id stored as the text `"12"` settles; an id no backend owns no longer makes the SMS batch fail (it used to leave every SMS item `submitted`); a non-text status from viva-api drops the whole batch (it used to apply the rows before it). Only canonical integer text matches an SMS answer (`"012"` never settled, before or now); providers off, integer batch items are not asked and stay `submitted` | wb#1675 | **done**, merged 2026-11-19 |
 | P2 Runs b | `remote_run.run_remote` becomes a backend-blind dispatcher (`select`, else `unrouted`, else `RuntimeError`) over the new `RunFacet.run_composite` / `UnroutedFacet.run_composite` (the detached runner's blocking call; compose-api's is today's branch); the SMS half and its poll loop move verbatim to `vivarium_workbench_sms/deployment_run.py` (sms-legacy and unrouted: `/compose/v1`; viva-core: `via_viva_v1=True`); `viva_v1_document_options` / `compose_simulation_id` move to `remote_run_viva_v1`; the plugin CLI's `run-remote` calls `deployment_run.run`; the PTools landing stays in `run_runner`, untouched. Providers off: a deployment run with nothing named is a `RuntimeError` in the runner, and the opt-in compose path is refused at launch (409 `no-backend`); plugin absent: a named compose-api run now works. Ratchet 24 → 22, route-ratchet pairs 11 → 7 (after Runs c2); no behaviour change with providers on | wb#1677 | **done**, merged 2026-11-19 |
-| P2 Runs c1 | The SMS store landing moves verbatim from core `remote_run_landing` into `vivarium_workbench_sms/sms_landing.py` (`land_remote_run`, `land_remote_simulation_artifacts`, `RemoteRunSeedCountMismatch`, the zarr/parquet helpers); the core keeps the archive landing (`land_composite_results`, `fold_analyses`, `land_ptools_tsvs`) byte for byte, read by the plugin through its module; `sms_legacy` no longer binds `land_remote_run` (one binding, `sms_landing`) and gains `land_artifacts_tail` (the SMS half of `remote_run_land_artifacts`, whose guards stay core); a PTools golden test (paths, sha256, `analyses.json`, run id, computed before the move) pins the layout; ratchet 22 → 20, route-ratchet pairs 7 → 6 (after Runs c2 and b); no behaviour change with providers on | wb#1679 | in review (2026-11-19) |
+| P2 Runs c1 | The SMS store landing moves verbatim from core `remote_run_landing` into `vivarium_workbench_sms/sms_landing.py` (`land_remote_run`, `land_remote_simulation_artifacts`, `RemoteRunSeedCountMismatch`, the zarr/parquet helpers); the core keeps the archive landing (`land_composite_results`, `fold_analyses`, `land_ptools_tsvs`) byte for byte, read by the plugin through its module; `sms_legacy` no longer binds `land_remote_run` (one binding, `sms_landing`) and gains `land_artifacts_tail` (the SMS half of `remote_run_land_artifacts`, whose guards stay core); a PTools golden test (paths, sha256, `analyses.json`, run id, computed before the move) pins the layout; ratchet 22 → 20, route-ratchet pairs 7 → 6 (after Runs c2 and b); no behaviour change with providers on | wb#1679 | **done**, merged 2026-11-19 |
+| P2 Runs a2 | The four SMS-only routes (`/api/remote-run-start`, `-status`, `-build`, `-pinned-build`) move verbatim from `api/app.py` to the plugin's `routes.py`, served through the new `Provider.router() -> ProviderRouter` (routes + the paths a read-only deployment keeps); their views (the legacy pipeline submit, the build phase, `_resolve_repo_branch`) move to `vivarium_workbench_sms/remote_pipeline_views.py`, which only `routes` imports (env workers never load `remote_run_jobs`); `create_app` adds the routes flat before the SPA catch-all and refuses a clash or a foreign allowlisted path; the read-only allowlist is the app's own (`app.state.readonly_allowed_mutations`); new contract: the plugin does not import `api.app`; OpenAPI and the read-only route set identical with providers on; with providers off the routes are absent (POST 405, GET 404); ratchet 20 → 18, route-ratchet pairs 6 → 5 (after Runs c2, b and c1) | wb#1678 | in review (2026-11-19) |
 | P2 | Split the mixed modules area by area (§2.5): SMS parts into the plugin, core callers through `backends` and facets, facet routes stay core, SMS-only routes into the plugin's router | — | in progress: the rows above are its PRs so far; Runs, Builds, Remote tab, Routes, Models remain |
 | P3 | Opaque string run ids end to end; the UI shows the nine SMS-today features (§2.5) by declared feature; launch panel quarantined (`sms-launch.js`); core tests run without the plugin | — | not started |
 | P4 | `vivarium_workbench_sms` moves into the viva-api repository as its own distribution, found by entry point; the Stanford image installs it | — | not started |
@@ -120,7 +121,10 @@ class Backend:
     artifacts: ArtifactFacet | None    # a run's analysis files, figures, PTools files, data downloads (SMS today)
     analyses: AnalysisFacet | None     # re-run analyses on a finished run (SMS today)
     builds: BuildFacet | None          # environments this backend can run: build, list, switch, pin (SMS today)
+    unrouted: UnroutedFacet | None     # P2 Runs a1: lifecycle requests no run record routes (SMS today)
 ```
+
+- **`unrouted`** answers the lifecycle requests (submit, land, status, progress, cancel) that name no run the core can route by its record: no run id at all, or a build / analysis id riding along. Its methods are `sms_legacy`'s `*_tail` signatures, so SMS's own checks (its 401) still come first; at most one backend may declare it, and with providers off the core answers those requests itself. It shrinks to "no id at all" once the Builds and Analyses areas take the build and analysis ids.
 
 - **Facets are named by capability, and their interfaces carry no SMS terms** (Jim, 2026-11-19).
   - A facet says what it does (`listing`, `artifacts`, `analyses`, `builds`), not how SMS does it.
@@ -149,7 +153,8 @@ class Provider(Protocol):
     # added by later steps:
     def check_config(self) -> None: ...                        # startup refusal (BackendConfigError) (P3)
     def features(self) -> frozenset[str]: ...                  # what the UI may show (P3)
-    def router(self) -> APIRouter | None: ...                  # routes only this provider serves
+    # P2 Runs a2 (lib/backends/provider.py):
+    def router(self) -> ProviderRouter | None: ...             # routes only this provider serves, built per call
     # P2 Workers (lib/backends/provider.py):
     def worker_launcher(self) -> WorkerLauncher | None: ...    # hosted env workers: viva-api's env-worker surface,
                                                                #   /env-worker/v1, sent as /viva/v1/workers when the
@@ -166,6 +171,11 @@ class Command:                                                 # P2 CLI: the cor
     configure: Callable[[argparse.ArgumentParser], None]       # adds its arguments
     run: Callable[[argparse.Namespace], int]                   # the handler (exit code)
     uses_backend: bool                                         # joins cli.BACKEND_COMMANDS' start-up checks
+
+@dataclass(frozen=True)
+class ProviderRouter:                                          # P2 Runs a2
+    router: APIRouter                                          # its routes (TYPE_CHECKING import: no FastAPI in workers)
+    readonly_allowed: frozenset[str]                           # its POST/DELETE paths a read-only deployment keeps
 ```
 
 - **The core owns:**
@@ -190,7 +200,7 @@ class Command:                                                 # P2 CLI: the cor
   - **The run lifecycle is already core and shared with compose-api:** `/api/remote-run-submit`, `-poll`, `-land`, `-cancel`, `-chain-progress`, `-trace-support` and `-trace`.
   - **Only SMS-only routes go to the plugin's `router()`**:
     - `/api/remote-run-pinned-build` and `/api/remote-run-build`;
-    - the old pipeline `/api/remote-run-start` and `/api/remote-run-status`, which no browser code calls but which are on the read-only allowlist;
+    - the old pipeline `/api/remote-run-start` and `/api/remote-run-status`, which no browser code calls; read-only mode keeps both (start is declared read-only-safe; status is a GET, always kept);
     - the `/api/source/builds`, `build-remote` and `switch-build` build routes.
 
     If `builds` is later made generic, those move to the core with it. `remote-health` stays in the core, on the core ping.
@@ -198,7 +208,13 @@ class Command:                                                 # P2 CLI: the cor
     - `/api/remote-dispatch-preflight` already has compose-api and viva-core branches; only its "build on cloud / switch build" branch is SMS (`builds`).
     - `/api/remote-run-config` reports the pin (SMS, `builds`) and the named backend's profile (core).
     - `/api/composite-run/{id}/status` and `/stop` branch on `remote-sim-<int>` ids (`composite_run_views`, `composite_stop_views`; Loom polls them). They should go through `for_existing`.
-  - The plugin router is mounted before the app's read-only filter and before the SPA catch-all route. The provider declares which of its routes are read-only-safe.
+  - **The plugin router (P2 Runs a2, done for the four Runs routes).** `create_app` calls `_include_provider_routers` after every core route and before the SPA catch-all, then the read-only filter.
+    - It adds each provider route to the app itself, flat, as `@app.post` would (`api.app._add_route_like`), not with `app.include_router`: from FastAPI 0.138 that adds one lazy entry that hides its routes from `app.router.routes`, so the read-only filter, the AI tool index and the clash check would not see them. The app-level dependencies (`_plain_identifiers`), the middleware (CSRF, Host, session) and the exception handlers apply to them as to the core's.
+    - It refuses (`RuntimeError`) a (path, method) the app already serves, and a `readonly_allowed` path that is not one of the router's own routes: a plugin cannot re-enable a core route that read-only mode drops.
+    - The effective read-only allowlist is the app's own, `app.state.readonly_allowed_mutations` (the core's `_READONLY_ALLOWED_MUTATIONS` ∪ the providers'), never a mutated module global, so providers-on and providers-off apps in one process do not leak into each other. `_apply_readonly_filter(app)` defaults to it.
+    - The SMS router declares `remote-run-start` and `-build`; `remote-run-pinned-build` stays dropped in read-only mode, as before.
+    - With providers off the SMS-only routes do not exist: a POST answers 405 (the GET-only catch-all matches the path) and a GET 404, which is how read-only mode already answers a dropped route.
+    - A provider that fails to load now raises at `create_app()`, not at first backend use (a broken plugin must not look absent).
 - **CLI (P2, done).** `run-remote` is wholly SMS (`--sms-api-url`, `SmsApiClient`); it is the SMS provider's `cli()` (`vivarium_workbench_sms/cli.py`), and since Runs b it calls the plugin's `deployment_run.run` directly with its own client (no backend selection). The core adds provider commands at the slot `run-remote` always had, so `--help` is unchanged with providers on; a name that collides with a core subcommand raises. `Command.uses_backend` puts a command with `cli.BACKEND_COMMANDS`, so the one-backend check and the hosted-worker check run before it. With providers off (or the plugin absent) the command does not exist (argparse "invalid choice", exit 2; a pointed message is P3). A provider that fails to load is a warning in the CLI and only its subcommands are dropped, so `doctor` still runs; the backend commands still refuse to start (`check_worker_config` asks the providers again). A provider subcommand whose `configure` raises, or whose name collides, still fails the whole parser: a plugin bug its tests catch, to revisit when P4 makes the plugin an external package.
 - **Hosted env workers (P2 Workers, done).** `env_worker_launcher.default_launcher()` asks the providers, in order, for a launcher (`Provider.worker_launcher()`). The core keeps the `WorkerLauncher` protocol and `LocalWorkerLauncher`; the proxy and dial-back launchers are the SMS plugin's (`vivarium_workbench_sms/env_workers.py`).
   - **The refusal rule.** The core knows only the names by which a deployment asks for hosted workers, `env_worker_launcher.HOSTED_WORKER_ENV` (`ENV_WORKER_PROXY_BASE`, `ENV_WORKER_ADVERTISE_HOST`, under either env prefix), and keeps them only to refuse, as P4 refuses an alias. When one is set and no provider supplies a launcher (providers off, plugin absent), the workbench refuses: `serve`, `api/__main__`, the commands in `cli.BACKEND_COMMANDS` and the provider commands with `Command.uses_backend` exit 2 at startup, and a pool call raises `BackendConfigError` (never cached, never `EnvWorkerUnavailable`, logged at ERROR once per pool). It never falls back to a local subprocess.
@@ -265,6 +281,7 @@ vivarium_workbench_sms/   # the plugin, from P1b (module names kept from lib/, s
     remote_run_jobs.py, sms_legacy.py, viva_core.py
     sms_landing.py     # the SMS store landing (P2 Runs c1): land_remote_run, land_remote_simulation_artifacts
     provider.py        # SmsProvider (P1c)
+    routes.py, remote_pipeline_views.py   # SmsProvider.router() and its views (P2 Runs a2); only router() imports them
 ```
 
 **The registry loads lazily, and the move must not create an import cycle.**
@@ -289,7 +306,7 @@ vivarium_workbench_sms/   # the plugin, from P1b (module names kept from lib/, s
     - from the half-SMS core modules, until P2 splits them;
     - the registry's one provider import, until P4.
   - That list **is the ratchet**. Each later PR removes entries, and none may add one. An unmatched entry fails the check, so stale entries can't linger.
-  - **As landed in P1b:** 38 edges, generated with grimp after the move (`pyproject.toml`, the contract named "the core does not import the SMS plugin"). The route ratchet's `ALLOWED` list holds the core's 13 remaining (module, method) pairs. **After P2 Runs c2, b and c1:** 20 edges and 6 pairs.
+  - **As landed in P1b:** 38 edges, generated with grimp after the move (`pyproject.toml`, the contract named "the core does not import the SMS plugin"). The route ratchet's `ALLOWED` list holds the core's 13 remaining (module, method) pairs. **After P2 Runs (a1, a2, b, c1, c2):** 18 edges and 5 pairs.
 - **The route-literal ratchet** (`tests/test_sms_route_ratchet.py`).
   - Its `ALLOWED` list becomes "SMS client methods and `/api/v1` / `/core/v1` literals outside the plugin". After P1b that is exactly the mixed core modules.
   - The list shrinks with P2 and is empty when P2 ends.
@@ -306,7 +323,9 @@ vivarium_workbench_sms/   # the plugin, from P1b (module names kept from lib/, s
     - `test_plugin_import_allowlist.py`;
     - `test_no_ai_deps.py`;
     - the conftest's `sys.modules.get(...)` resets (`sms_api_client`, and `remote_link._links`), which move to the new names.
-- **The plugin's router is included before the read-only filter and before the SPA catch-all** (`/{rel:path}`). Otherwise the catch-all route answers its GET requests first.
+- **The plugin's router is included before the read-only filter and before the SPA catch-all** (`/{rel:path}`). Otherwise the catch-all route answers its GET requests first. `tests/test_backend_providers.py` pins the order, the guards on the moved routes, the read-only set and the clash refusals.
+- **Contracts from P2** (`pyproject.toml`): the plugin does not import `lib.remote_run_views` (Runs a1; the reverse seam) and does not import `api.app` (Runs a2; `app → provider → routes → app` would be a cycle). Both are `forbidden` with `allow_indirect_imports`.
+- **Ratchet counts as of P2 Runs a2:** 23 `ignore_imports` edges; the route ratchet's `ALLOWED` holds 11 (module, method) pairs.
 
 ### 2.5 What has to change
 
@@ -340,11 +359,11 @@ This list comes from greps and a grimp import graph on 2026-11-19, checked by tw
 | Area | Whole modules (P1b) | SMS parts of mixed modules (P2) | Core sees it through |
 |---|---|---|---|
 | Client (P2, done) | `sms_api_client` (less the config split out) | the capability contract (`fetch_capabilities`, `require_capabilities`, `ServerCapabilities`, `CapabilityUnsupportedError`, the slugs) → `sms_api_client`; the core keeps the dispatch vocabulary, compose-api detection, the profile cache and the reachability rule | `Provider.probe_client`; providers off: `backend_config.ProbeClient` |
-| Runs | `backends/sms_legacy`, `backends/viva_core`, `remote_run_viva_v1`, `remote_run_jobs` (correction: `remote_trace` did not move in P1b; it is still core, `lib/remote_trace.py`, and mixed) | ~~`remote_run.run_remote` (called by `run_runner`)~~ done in Runs b: its SMS half is `vivarium_workbench_sms/deployment_run.py`, the core keeps the dispatcher; deferred: `backend_environment` (Builds), the trace (b2 or Routes), SMS parts of `remote_run_views`, ~~`remote_run_landing.land_remote_run` and `land_remote_simulation_artifacts`~~ (c1: `sms_landing`), ~~`run_jobs.refresh_submitted`'s SMS half (`compose_status_batch`, interim `/viva/v1/compose`)~~ (c2: `sms_legacy.status_batch`) | `runs` |
+| Runs | `backends/sms_legacy`, `backends/viva_core`, `remote_run_viva_v1`, `remote_run_jobs` (correction: `remote_trace` did not move in P1b; it is still core, `lib/remote_trace.py`, and mixed) | **a (a1 + a2, done):** the SMS parts of `remote_run_views` (constants, login check, the no-id lifecycle tails behind `unrouted`; the legacy pipeline and build-phase views and their four routes → `remote_pipeline_views` + `routes`, `Provider.router`), except `land_artifacts` / `analysis` / `_sms_only` (Analyses) and `_remote_run_config` (Builds). **b (done):** `remote_run.run_remote`'s SMS half → `vivarium_workbench_sms/deployment_run.py`, the core keeps the dispatcher. **c (done):** `remote_run_landing.land_remote_run` and `land_remote_simulation_artifacts` → `sms_landing` (c1); `run_jobs.refresh_submitted`'s SMS half → `sms_legacy.status_batch` (c2). Deferred: `backend_environment` (Builds), the trace (b2 or Routes) | `runs`, `unrouted`, `Provider.router` |
 | Builds and pinning | `remote_pinned`, `remote_build_source`, `source_build_views` | build-source half of `workspace_deps_views`, the vEcoli dispatch in `study_runs`, discovery in `composite_test_run_views` | `builds`, `Provider.select` |
 | Remote tab and store | `remote_simulations`, `remote_reconcile` | `simulations_index._append_remote_simulations`, `resolve_or_fetch_store`; `investigations_index`'s `list_remote_simulations_swr` | `listing`, `artifacts` |
 | Analyses and figures | `remote_analysis_figures` | — | `artifacts`, `analyses`; the routes stay core and dispatch by facet (§2.2) |
-| Routes | — | `api/app.py`: imports of 4 plugin modules (`source_build_views`, `remote_run_jobs`, `remote_analysis_figures`, `remote_simulations`), inline `SmsApiClient(...)` at the figure routes, `_sms_only`; its read-only allowlist names SMS routes | facet routes stay core and dispatch by facet; SMS-only routes go to the plugin's `router()` (§2.2) |
+| Routes | — | `api/app.py`: imports of 3 plugin modules (`source_build_views`, `remote_analysis_figures`, `remote_simulations`; `remote_run_jobs` went with Runs a2), inline `SmsApiClient(...)` at the figure routes, `_sms_only`; its read-only allowlist names SMS routes (Runs a2 moved `remote-run-start` / `-build` to the plugin's declaration) | facet routes stay core and dispatch by facet; SMS-only routes go to the plugin's `router()` (§2.2) |
 | Workers (P2, wb#1668) | — | the launchers and the stamp read move whole (`ProxyWorkerLauncher`, `RemoteWorkerLauncher`, their workers, `.viv-build.json`'s `commit`) to `vivarium_workbench_sms/env_workers.py`; `env_worker_pool`, `env_worker_dialback`, `env_worker_client`: wording only | `Provider.worker_launcher` |
 | CLI and startup (P2, done) | — | `run-remote` → `vivarium_workbench_sms/cli.py`; the startup breaker probe runs on core config (`backend_config.start_probe(configured_base_url())`); the startup checks in `cli`, `startup`, `api/__main__` are core (`backend_config`, `check_worker_config`) | `Provider.cli`; `check_config` is P3 (the one SMS fact left in the checks is the alias env-var names in `backend_config`, which may not ask providers) |
 | Models and bundle | — | sms-api status + remote-provenance models in `models.py` (feed `generate_ts`) | P3 decides |

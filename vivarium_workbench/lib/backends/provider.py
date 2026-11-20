@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING, Callable, Optional, Protocol
 if TYPE_CHECKING:
     import argparse
 
+    from fastapi import APIRouter
+
     from vivarium_workbench.lib.backend_config import OpenApiProbe
     from vivarium_workbench.lib.backends import Backend
     from vivarium_workbench.lib.env_worker_launcher import WorkerLauncher
@@ -58,6 +60,17 @@ class Command:
     uses_backend: bool
 
 
+@dataclass(frozen=True)
+class ProviderRouter:
+    """Routes only a provider serves (``Provider.router``). ``create_app`` adds ``router``'s routes to the app, flat,
+    just before the SPA catch-all (``api.app._include_provider_routers``): a path and method the app already serves is
+    refused, and so is a ``readonly_allowed`` path that is not one of ``router``'s own routes. ``readonly_allowed`` is
+    the POST/DELETE paths a read-only deployment keeps (GETs are always kept)."""
+
+    router: "APIRouter"
+    readonly_allowed: frozenset[str]
+
+
 class Provider(Protocol):
     """What a backend plugin registers. Only the methods a step needs exist; later steps add theirs (§2.1)."""
 
@@ -91,6 +104,12 @@ class Provider(Protocol):
     def cli(self) -> "tuple[Command, ...]":
         """Its subcommands. Built on every call (the CLI calls it once per process), never cached, so a test can patch
         a handler on the provider's module."""
+        ...
+
+    # -- P2 Runs a --
+    def router(self) -> "Optional[ProviderRouter]":
+        """Routes only this provider serves, or ``None``. Built on every call (``create_app`` calls it once per app),
+        so FastAPI and the route models load only in a process that builds an app, never in an env worker."""
         ...
 
 

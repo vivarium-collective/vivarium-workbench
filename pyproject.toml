@@ -289,7 +289,6 @@ source_modules = ["vivarium_workbench"]
 forbidden_modules = ["vivarium_workbench_sms"]
 ignore_imports = [
     "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_analysis_figures",
-    "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_run_jobs",
     "vivarium_workbench.api.app -> vivarium_workbench_sms.remote_simulations",
     "vivarium_workbench.api.app -> vivarium_workbench_sms.source_build_views",
     "vivarium_workbench.lib.backends.provider -> vivarium_workbench_sms.provider",  # the registry (P4: entry point)
@@ -299,7 +298,6 @@ ignore_imports = [
     "vivarium_workbench.lib.composite_test_run_views -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.investigations_index -> vivarium_workbench_sms.remote_simulations",
     "vivarium_workbench.lib.remote_run_views -> vivarium_workbench_sms.remote_pinned",
-    "vivarium_workbench.lib.remote_run_views -> vivarium_workbench_sms.remote_run_jobs",
     "vivarium_workbench.lib.remote_run_views -> vivarium_workbench_sms.sms_legacy",
     "vivarium_workbench.lib.remote_trace -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.simulations_index -> vivarium_workbench_sms.remote_simulations",
@@ -318,6 +316,16 @@ name = "the SMS plugin does not import lib.remote_run_views"
 type = "forbidden"
 source_modules = ["vivarium_workbench_sms"]
 forbidden_modules = ["vivarium_workbench.lib.remote_run_views"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+# docs/backend-adapters.md §2.2, step P2 (Runs a2): the plugin's router (vivarium_workbench_sms.routes) declares its
+# routes with api.deps, never api.app -- create_app imports the router (app -> provider -> routes), so a plugin import
+# of the app would be a cycle. Direct imports only: an indirect chain through other core modules is not a cycle.
+name = "the SMS plugin does not import the app (api.app)"
+type = "forbidden"
+source_modules = ["vivarium_workbench_sms"]
+forbidden_modules = ["vivarium_workbench.api.app"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -492,6 +500,8 @@ files = [
     "vivarium_workbench/lib/backends/provider.py",
     "vivarium_workbench_sms/sms_legacy.py",
     "vivarium_workbench_sms/sms_landing.py",
+    "vivarium_workbench_sms/routes.py",
+    "vivarium_workbench_sms/remote_pipeline_views.py",
     "vivarium_workbench/lib/auth_views.py",
     "vivarium_workbench/lib/git_commit_views.py",
     "vivarium_workbench/lib/work_mutations.py",
