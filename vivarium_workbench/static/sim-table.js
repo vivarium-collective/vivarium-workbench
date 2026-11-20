@@ -350,7 +350,7 @@
     // Decided by the run's features, not its id's form: an all-digit id on a backend without `artifacts` lands
     // too. Shown at any status: the server answers an unfinished run with a plain "not finished yet" rather than
     // downloading anything, and refuses one it cannot land.
-    add("DOWNLOAD", (isRemote && remoteSimId !== "" && !runHas("artifacts") && !isSnapshot && study(row))
+    add("DOWNLOAD", (isRemote && /[1-9]|[^0-9\s]/.test(String(remoteSimId).trim()) && !runHas("artifacts") && !isSnapshot && study(row))
       ? '<button type="button" class="action-btn js-authoring land-viva-btn" ' +
         'title="Bring this run\'s results from the backend into this study">⬇ Land results</button>' : "",
       "Bring the run's results into this study");
