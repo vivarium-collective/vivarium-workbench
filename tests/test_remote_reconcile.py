@@ -8,11 +8,28 @@ import pytest
 
 from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib import run_log
-from vivarium_workbench_sms import remote_reconcile
 from vivarium_workbench.lib.simulations_index import (
     backfill_index_into_jsonl,
     build_simulations_data,
 )
+
+
+class _PluginModule:
+    """A plugin module imported on first attribute use, so this module collects without the plugin (step P3, K2c):
+    only the ``plugin``-marked tests touch it. Read-only -- monkeypatch the real module (``_PluginModule.load()``)."""
+
+    def __init__(self, name):
+        self._name = name
+
+    def load(self):
+        import importlib
+        return importlib.import_module(self._name)
+
+    def __getattr__(self, attr):
+        return getattr(self.load(), attr)
+
+
+remote_reconcile = _PluginModule("vivarium_workbench_sms.remote_reconcile")
 
 
 @pytest.fixture(autouse=True)
@@ -104,6 +121,7 @@ def test_delete_run_tombstones_and_does_not_reappear_after_fold(tmp_path):
 # --- d2: reconciler ---------------------------------------------------------
 
 
+@pytest.mark.plugin
 def test_reconcile_completed_becomes_not_landed(tmp_path):
     ws_root, study_dir = _make_workspace(tmp_path)
     _write_placeholder(study_dir, ws_root, 100)
@@ -125,6 +143,7 @@ def test_reconcile_completed_becomes_not_landed(tmp_path):
     assert "completed, not landed" in folded["remote-pending-100"]["label"]
 
 
+@pytest.mark.plugin
 def test_reconcile_failed(tmp_path):
     ws_root, study_dir = _make_workspace(tmp_path)
     _write_placeholder(study_dir, ws_root, 101)
@@ -134,6 +153,7 @@ def test_reconcile_failed(tmp_path):
     assert _folded_status(ws_root, "remote-pending-101") == "failed"
 
 
+@pytest.mark.plugin
 def test_reconcile_404_orphaned(tmp_path):
     ws_root, study_dir = _make_workspace(tmp_path)
     _write_placeholder(study_dir, ws_root, 102)
@@ -152,6 +172,7 @@ def test_reconcile_404_orphaned(tmp_path):
     assert _folded_status(ws_root, "remote-pending-102") == "orphaned"
 
 
+@pytest.mark.plugin
 def test_reconcile_running_left_pending(tmp_path):
     """A placeholder whose sim is still running stays 'running' (not terminalized)."""
     ws_root, study_dir = _make_workspace(tmp_path)
@@ -162,6 +183,7 @@ def test_reconcile_running_left_pending(tmp_path):
     assert _folded_status(ws_root, "remote-pending-103") == "running"
 
 
+@pytest.mark.plugin
 def test_reconcile_unknown_id_left_pending(tmp_path):
     """A placeholder absent from live_status (unresolved) is left alone."""
     ws_root, study_dir = _make_workspace(tmp_path)
@@ -190,6 +212,7 @@ class _StubClient:
         return {"status": self._statuses.get(sim_id)}
 
 
+@pytest.mark.plugin
 def test_enrich_placeholder_status_adds_ids_and_maps_404(tmp_path):
     ws_root, study_dir = _make_workspace(tmp_path)
     _write_placeholder(study_dir, ws_root, 200)
@@ -221,6 +244,7 @@ def test_reconcile_belt_and_braces_synthesizes_remote_origin(tmp_path):
     assert (row.get("remote_origin") or {}).get("simulation_id") == 300
 
 
+@pytest.mark.plugin
 def test_another_deployments_placeholder_is_never_reconciled(tmp_path, monkeypatch):
     """Step 1c-2: a placeholder written for another deployment is not asked about here, so this server's 404 (or a
     colliding id's status) never marks it orphaned or finished."""

@@ -11,6 +11,9 @@ from vivarium_workbench_sms import sms_api_client as sac
 from vivarium_workbench.lib import workspace_deps_views as wdv
 from vivarium_workbench_sms.sms_api_client import SmsApiError
 
+#: Every test here exercises the SMS plugin (step P3, K2c): the core-only run ignores this module.
+pytestmark = pytest.mark.plugin
+
 
 def _ping_with(monkeypatch, client_cls):
     """step P1a (patch target moved): remote_health pings through backend_config.ping, not SmsApiClient.ping."""

@@ -10,6 +10,9 @@ import pytest
 
 import vivarium_workbench_sms.remote_simulations as rs
 
+#: Every test here exercises the SMS plugin (step P3, K2c): the core-only run ignores this module.
+pytestmark = pytest.mark.plugin
+
 
 # ---- fake sms-api ---------------------------------------------------------
 

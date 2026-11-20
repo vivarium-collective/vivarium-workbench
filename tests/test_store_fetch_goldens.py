@@ -21,6 +21,9 @@ from vivarium_workbench_sms import sms_api_client
 from vivarium_workbench_sms.remote_pinned import remote_deployment_name
 from vivarium_workbench_sms.sms_api_client import SmsApiError
 
+#: Goldens recorded with providers on, through the SMS plugin (step P3, K2c): the core-only run ignores this module.
+pytestmark = pytest.mark.plugin
+
 DOWNLOAD = "/api/simulation-run-download"
 
 #: The tar's members (arcname -> bytes), as viva-api's ``/data`` endpoint streams them.

@@ -15,9 +15,16 @@ import pytest
 from test_backends_existing import HERE, _record, asked, ws  # noqa: F401 -- fixtures, found by name
 from vivarium_workbench.lib import backends
 from vivarium_workbench.lib import remote_run_views as rrv
-from vivarium_workbench_sms import sms_landing, sms_legacy
 
-PLUGIN_MODULE = Path(__file__).resolve().parent.parent / "vivarium_workbench_sms" / "analyses.py"
+
+def _sms_legacy():
+    from vivarium_workbench_sms import sms_legacy
+    return sms_legacy
+
+
+def _sms_landing():
+    from vivarium_workbench_sms import sms_landing
+    return sms_landing
 
 
 @pytest.fixture
@@ -38,6 +45,7 @@ def recorded(monkeypatch):
 
 # --- dispatch, providers on ------------------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("given", [12, "12", " 12 "])
 def test_a_run_goes_to_its_backends_facet_with_the_normalised_id(ws, asked, recorded, given):
     assert rrv.remote_run_land_artifacts(ws, {"simulation_id": given, "run_id": " r1 ", "study": "s"}) == ({"ok": 1}, 200)
@@ -58,37 +66,43 @@ def test_a_run_goes_to_its_backends_facet_with_the_normalised_id(ws, asked, reco
     ({"simulation_id": "0", "run_id": "r"}, {"run_id": "r"}),        # a dead id is dropped, run_id kept
     ({"simulation_id": 12, "run_id": " "}, {"simulation_id": 12, "run_id": " "}),  # an id, no folder: as given
 ])
+@pytest.mark.plugin
 def test_a_land_that_names_no_run_goes_to_the_unrouted_backends_facet(ws, asked, recorded, body, forwarded):
     rrv.remote_run_land_artifacts(ws, body)
     assert recorded == [("land", forwarded)]
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("body, forwarded", [({}, {}), ({"simulation_id": 0, "study": "s"}, {"study": "s"})])
 def test_a_rerun_that_names_no_run_goes_to_the_unrouted_backends_facet(ws, asked, recorded, body, forwarded):
     rrv.remote_run_analysis(ws, body)
     assert recorded == [("rerun", forwarded)]
 
 
+@pytest.mark.plugin
 def test_with_no_id_the_sms_login_check_still_comes_first(ws, asked, monkeypatch):
-    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: False)
+    monkeypatch.setattr(_sms_legacy(), "_run_auth_ok", lambda: False)
     assert rrv.remote_run_land_artifacts(ws, {"run_id": "r"}) == ({"error": "not authenticated"}, 401)
     assert rrv.remote_run_analysis(ws, {}) == ({"error": "not authenticated"}, 401)
     assert asked == []
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("limit, max_runs", [(None, 10), (0, 10), (4, 4), (99, 30), (-5, 1)])
 def test_the_study_gallery_asks_the_offering_facet_with_the_clamped_limit(ws, recorded, limit, max_runs):
     assert rrv.study_figures(ws, "s", limit) == ({"available": True, "study": "s", "sims": []}, 200)
     assert recorded == [("study", "s", max_runs)]
 
 
+@pytest.mark.plugin
 def test_the_study_gallery_without_a_study_is_the_old_400(ws, recorded):
     assert rrv.study_figures(ws, "", 10) == ({"error": "study required"}, 400) and recorded == []
 
 
+@pytest.mark.plugin
 def test_the_declared_ordering_record_before_login(ws, asked, monkeypatch):
     """DECLARED: another backend's run is refused by its record before SMS's login check (as remote_run_land is)."""
-    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: pytest.fail("the SMS login check was consulted"))
+    monkeypatch.setattr(_sms_legacy(), "_run_auth_ok", lambda: pytest.fail("the SMS login check was consulted"))
     _record(ws, "simulation-V", "viva-core", HERE)
     for call in (lambda: rrv.remote_run_land_artifacts(ws, {"simulation_id": "simulation-V", "run_id": "r"}),
                  lambda: rrv.remote_run_analysis(ws, {"simulation_id": "simulation-V"})):
@@ -97,19 +111,21 @@ def test_the_declared_ordering_record_before_login(ws, asked, monkeypatch):
     assert asked == []
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("run_id", ["../x", "a/b", "..", "/abs"])
 def test_the_core_refuses_a_landing_folder_that_is_a_path(ws, asked, monkeypatch, run_id):
     """DECLARED: ``run_id`` becomes ``.pbg/runs/<run_id>``; the view refuses a path itself (the app-wide guard covers
     only requests that come through a route)."""
-    monkeypatch.setattr(sms_landing, "land_remote_simulation_artifacts", lambda *a, **k: pytest.fail("landed"))
+    monkeypatch.setattr(_sms_landing(), "land_remote_simulation_artifacts", lambda *a, **k: pytest.fail("landed"))
     assert rrv.remote_run_land_artifacts(ws, {"simulation_id": 12, "run_id": run_id}) == (
         {"error": "invalid run_id: it must be a plain name, not a path"}, 400)
     assert asked == []
 
 
+@pytest.mark.plugin
 def test_a_non_string_landing_folder_is_read_as_text(ws, asked, monkeypatch):
     landed: list = []
-    monkeypatch.setattr(sms_landing, "land_remote_simulation_artifacts",
+    monkeypatch.setattr(_sms_landing(), "land_remote_simulation_artifacts",
                         lambda ws_root, sim, run_id, client: landed.append((sim, run_id)) or {"run_id": run_id})
     assert rrv.remote_run_land_artifacts(ws, {"simulation_id": 12, "run_id": 5}) == ({"run_id": "5"}, 200)
     assert landed == [(12, "5")]
@@ -142,6 +158,7 @@ def test_with_no_available_gallery_the_first_answer_is_returned(ws, monkeypatch)
     assert rrv.study_figures(ws, "s", 10) == first
 
 
+@pytest.mark.plugin
 def test_the_figure_routing_answer_is_memoised(ws, monkeypatch):
     calls = []
     real = rrv.backends.for_existing
@@ -172,11 +189,14 @@ def test_remote_run_views_binds_no_facet_seam():
     assert not hasattr(app_module, "_remote_analysis_figures")
 
 
+@pytest.mark.plugin
 def test_the_plugin_module_reads_its_seams_through_their_modules():
     """One patch target per seam: ``analyses.py`` never from-imports a name the tests patch on its module
     (``remote_analysis_figures``' functions, ``sms_legacy``'s seams, the landing), and imports
     ``study_run_post.build_analysis_options`` only at call time (a module-level binding would outlive a patch)."""
-    tree = ast.parse(PLUGIN_MODULE.read_text(encoding="utf-8"))
+    from vivarium_workbench_sms import analyses
+
+    tree = ast.parse(Path(analyses.__file__).read_text(encoding="utf-8"))
     anywhere = {"vivarium_workbench_sms.remote_analysis_figures", "vivarium_workbench_sms.sms_legacy",
                 "vivarium_workbench_sms.sms_landing", "vivarium_workbench.lib.remote_run_landing"}
     bad = [n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module in anywhere]

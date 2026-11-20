@@ -17,8 +17,15 @@ fix maps ``experiment_id`` substrings -> study slugs via the workspace's
 """
 import textwrap
 
+import pytest
+
 from vivarium_workbench.lib.remote_study_map import infer_study_slug, load_rules
-from vivarium_workbench_sms.remote_simulations import _normalize
+
+
+def _normalize(rec):
+    """The SMS listing's row normaliser (plugin); only the ``plugin``-marked tests call it."""
+    from vivarium_workbench_sms.remote_simulations import _normalize as normalize
+    return normalize(rec)
 
 # The real CD2 remote_run_study_map (sms-ecoli workspace.yaml), so this pins the
 # actual deployed rules rather than a toy map.
@@ -104,6 +111,7 @@ def test_unmatched_experiment_id_maps_to_none_not_a_wrong_study(tmp_path):
 # --- orphan hygiene: an unmapped remote run is an explicit signal -----------
 
 
+@pytest.mark.plugin
 def test_unmapped_remote_run_normalizes_to_explicit_unassociated_row():
     """A remote record whose experiment_id matches no rule must surface as an
     explicit remote row (study_slug=None, empty studies, but a remote_origin
@@ -125,6 +133,7 @@ def test_unmapped_remote_run_normalizes_to_explicit_unassociated_row():
     assert row["run_id"] == rec["experiment_id"]
 
 
+@pytest.mark.plugin
 def test_unmapped_row_is_not_counted_into_any_study():
     """The study-count reducer keys on a TRUTHY study_slug (investigations_index
     ._remote_study_run_counts), so an unmapped row contributes to no study —

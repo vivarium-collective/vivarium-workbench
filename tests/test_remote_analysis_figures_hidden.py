@@ -6,6 +6,9 @@ import pytest
 
 from vivarium_workbench_sms import remote_analysis_figures as raf
 
+#: Every test here exercises the SMS plugin (step P3, K2c): the core-only run ignores this module.
+pytestmark = pytest.mark.plugin
+
 
 def test_figure_base_name_strips_variant_suffix():
     assert raf._figure_base_name(

@@ -17,6 +17,9 @@ from vivarium_workbench_sms.remote_link import (
 )
 from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
 
+#: Every test here exercises the SMS plugin (step P3, K2c): the core-only run ignores this module.
+pytestmark = pytest.mark.plugin
+
 
 class _Resp(io.BytesIO):
     status = 200

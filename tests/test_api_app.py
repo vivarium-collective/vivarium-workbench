@@ -185,6 +185,7 @@ def test_switching_tabs_does_not_steal_a_different_tabs_cookie(
     assert r.headers.get("X-VW-Session") == "tab-B"
 
 
+@pytest.mark.plugin
 def test_switch_build_aligns_cookie_on_its_own_response(client, monkeypatch):
     """item 78: /api/source/switch-build must align the cookie on ITS OWN
     response, the same as /api/source/switch already does — this is what a
@@ -241,6 +242,12 @@ def test_simulations_empty_workspace(client):
     body = r.json()
     assert body["simulations"] == [] and body["current"] is None
     assert body["total"] == 0 and body["offset"] == 0 and body["limit"] is None
+
+
+@pytest.mark.plugin
+def test_simulations_empty_workspace_reports_the_remote_source(client):
+    """Providers on, the SMS listing answers ``remote`` (with no listing backend it is ``None``)."""
+    body = client.get("/api/simulations").json()
     # SWR remote-source provenance (added with non-blocking remote fetch): shape is
     # stable; the state value varies (refreshing/stale/unavailable) so don't pin it.
     assert set(body["remote"]) == {"state", "as_of", "error"}
@@ -2705,6 +2712,9 @@ class TestWorkCompositeDiffRoute:
 # ---------------------------------------------------------------------------
 
 class TestSourceBuildsRoute:
+    #: The SMS provider's route (step P3, K2c): without the plugin it is not mounted.
+    pytestmark = pytest.mark.plugin
+
     def test_always_200(self, client, monkeypatch):
         """GET /api/source/builds always returns HTTP 200."""
         from vivarium_workbench_sms import source_build_views as sbv
@@ -4189,6 +4199,7 @@ class TestJobStatusRoutes:
 
     # -- remote-run-status (lib.remote_run_jobs.manager) ---------------------
 
+    @pytest.mark.plugin
     def test_remote_run_jobs_list_200(self, client, monkeypatch):
         from vivarium_workbench_sms import remote_run_jobs
         monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(recent=[{"job_id": "rr1"}]))
@@ -4196,6 +4207,7 @@ class TestJobStatusRoutes:
         assert r.status_code == 200
         assert r.json() == {"jobs": [{"job_id": "rr1"}]}
 
+    @pytest.mark.plugin
     def test_remote_run_single_job_200(self, client, monkeypatch):
         from vivarium_workbench_sms import remote_run_jobs
         job = _FakeJob({"job_id": "rr9", "steps": [{"name": "fetch", "status": "done"}]})
@@ -4204,6 +4216,7 @@ class TestJobStatusRoutes:
         assert r.status_code == 200
         assert r.json() == {"job_id": "rr9", "steps": [{"name": "fetch", "status": "done"}]}
 
+    @pytest.mark.plugin
     def test_remote_run_missing_404(self, client, monkeypatch):
         from vivarium_workbench_sms import remote_run_jobs
         monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(jobs={}))
@@ -4213,10 +4226,16 @@ class TestJobStatusRoutes:
 
     def test_routes_in_openapi(self, client):
         paths = client.get("/openapi.json").json()["paths"]
-        for p in ("/api/investigation-run-unblocked-status", "/api/remote-run-status"):
+        for p in ("/api/investigation-run-unblocked-status",):
             assert p in paths and "get" in paths[p], p
         schemas = client.get("/openapi.json").json()["components"]["schemas"]
         assert "JobStatusPayload" in schemas
+
+    @pytest.mark.plugin
+    def test_the_remote_run_status_route_in_openapi(self, client):
+        """The SMS provider's job-status route (mounted only with the plugin)."""
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/remote-run-status" in paths and "get" in paths["/api/remote-run-status"]
 
 
 # ===========================================================================
@@ -4398,6 +4417,9 @@ class TestSourceSwitchRoute:
 # (sms-api NETWORK routes — every test monkeypatches the lib sms-api names)
 # ===========================================================================
 class TestSourceBuildRemoteRoute:
+    #: The SMS provider's route (step P3, K2c): without the plugin it is not mounted.
+    pytestmark = pytest.mark.plugin
+
     def test_missing_repo_branch_400(self, client):
         r = client.post("/api/source/build-remote", json={"repo": "x"})
         assert r.status_code == 400
@@ -4483,6 +4505,9 @@ class TestSourceBuildRemoteRoute:
 
 
 class TestSourceSwitchBuildRoute:
+    #: The SMS provider's route (step P3, K2c): without the plugin it is not mounted.
+    pytestmark = pytest.mark.plugin
+
     @staticmethod
     def _entry(sim_id=5):
         return {
@@ -4612,6 +4637,9 @@ class TestSourceSwitchBuildRoute:
 # view's modules (remote_pipeline_views, step P2 Runs a2) — no real network/git/auth.
 # ===========================================================================
 class TestRemoteRunStartRoute:
+    #: The SMS provider's route (step P3, K2c): without the plugin it is not mounted.
+    pytestmark = pytest.mark.plugin
+
     def test_not_authenticated_401(self, client, monkeypatch):
         from vivarium_workbench_sms import remote_pipeline_views as pv
         monkeypatch.setattr(pv.github_auth, "current_session", lambda: None)

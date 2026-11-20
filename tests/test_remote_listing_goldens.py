@@ -15,6 +15,9 @@ import pytest
 import vivarium_workbench_sms.remote_simulations as rs
 from vivarium_workbench.lib import simulations_index as si
 
+#: Goldens recorded with providers on, through the SMS plugin (step P3, K2c): the core-only run ignores this module.
+pytestmark = pytest.mark.plugin
+
 BASE = "http://sms.golden.test"
 REPO = "https://github.com/acme/model"
 

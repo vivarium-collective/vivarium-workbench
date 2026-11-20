@@ -17,9 +17,6 @@ import pytest
 
 from vivarium_workbench.lib import backends
 from vivarium_workbench.lib import simulations_index as si
-from vivarium_workbench_sms import sms_legacy
-from vivarium_workbench_sms.analyses import SmsArtifacts
-from vivarium_workbench_sms.sms_api_client import SmsApiError
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -114,7 +111,12 @@ def test_the_core_names_no_sms_download():
         assert name not in src, name
 
 
-# --- SMS's half ------------------------------------------------------------------------------------------------------
+# --- SMS's half (the plugin: these tests are marked ``plugin``) ------------------------------------------------------
+
+def SmsArtifacts():  # noqa: N802 -- the plugin's facet class, imported when a plugin test builds one
+    from vivarium_workbench_sms.analyses import SmsArtifacts as _SmsArtifacts
+    return _SmsArtifacts()
+
 
 def _tar_bytes(tree: dict) -> bytes:
     buf = io.BytesIO()
@@ -129,6 +131,8 @@ def _tar_bytes(tree: dict) -> bytes:
 @pytest.fixture
 def client(monkeypatch):
     """``sms_legacy.SmsApiClient`` / ``sms_legacy._sms_api_base``: the seams' one patch target each."""
+    from vivarium_workbench_sms import sms_legacy
+
     seen: list = []
 
     class Client:
@@ -151,6 +155,7 @@ def client(monkeypatch):
     return Client
 
 
+@pytest.mark.plugin
 def test_sms_fetch_store_extracts_the_tar_into_dest_extracted(tmp_path, client):
     store = SmsArtifacts().fetch_store("113", tmp_path)
     assert store == tmp_path / "extracted"
@@ -158,18 +163,23 @@ def test_sms_fetch_store_extracts_the_tar_into_dest_extracted(tmp_path, client):
     assert client.seen == [("base", "http://configured"), ("download", 113, tmp_path)]
 
 
+@pytest.mark.plugin
 def test_sms_fetch_store_answers_none_for_an_sms_api_error(tmp_path, client):
+    from vivarium_workbench_sms.sms_api_client import SmsApiError
+
     client.outcome = SmsApiError("sms-api unreachable")
     assert SmsArtifacts().fetch_store("113", tmp_path) is None
     assert not (tmp_path / "extracted").exists()
 
 
+@pytest.mark.plugin
 def test_sms_fetch_store_lets_another_error_propagate(tmp_path, client):
     client.outcome = OSError("disk full")
     with pytest.raises(OSError, match="disk full"):
         SmsArtifacts().fetch_store("113", tmp_path)
 
 
+@pytest.mark.plugin
 def test_sms_fetch_store_refuses_a_tar_member_that_escapes(tmp_path, client):
     client.outcome = {"../escape.txt": b"x"}
     with pytest.raises(tarfile.FilterError):
@@ -177,9 +187,13 @@ def test_sms_fetch_store_refuses_a_tar_member_that_escapes(tmp_path, client):
     assert not (tmp_path / "escape.txt").exists()
 
 
+@pytest.mark.plugin
 def test_the_plugin_reads_fetch_store_tail_through_sms_legacy():
-    """One patch target per seam: no plugin module binds ``fetch_store_tail`` by name."""
-    for path in (ROOT / "vivarium_workbench_sms").rglob("*.py"):
+    """One patch target per seam: no plugin module binds ``fetch_store_tail`` by name. (The plugin's sources are found
+    through its import, so without the plugin this fails instead of passing over no files.)"""
+    import vivarium_workbench_sms
+
+    for path in Path(vivarium_workbench_sms.__file__).parent.rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("sms_legacy"):
                 assert "fetch_store_tail" not in {a.name for a in node.names}, path

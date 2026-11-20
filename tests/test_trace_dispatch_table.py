@@ -27,7 +27,6 @@ from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib import remote_run_compose
 from vivarium_workbench.lib import server_capabilities as sc
 from vivarium_workbench.lib.backends import records
-from vivarium_workbench_sms import sms_api_client as sac
 
 HERE = "http://api:8000"
 ELSEWHERE = "http://other:8000"
@@ -76,9 +75,11 @@ def app():
 
 @pytest.fixture
 def world(ws, app, monkeypatch):
+    """The table's world: providers on, the SMS client's class patched (so a test using it is marked ``plugin``)."""
     from fastapi.testclient import TestClient
 
     from vivarium_workbench.api.app import get_workspace
+    from vivarium_workbench_sms import sms_api_client as sac
 
     for v in (*backend_config.BACKEND_BASE_ENV_VARS, "VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT",
               "VIVARIUM_WORKBENCH_BACKEND_PROVIDERS"):
@@ -224,11 +225,13 @@ SUPPORT_CASES = [
 ]
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("case,query,named,mode", FETCH_CASES, ids=[c[0] for c in FETCH_CASES])
 def test_the_trace_route_answers_as_on_the_base(world, case, query, named, mode):
     assert world("/api/remote-run-trace", query, named=named, mode=mode) == GOLDEN[case]
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("case,named,mode", SUPPORT_CASES, ids=[c[0] for c in SUPPORT_CASES])
 def test_the_trace_support_route_answers_as_on_the_base(world, case, named, mode):
     assert world("/api/remote-run-trace-support", {}, named=named, mode=mode) == GOLDEN[case]

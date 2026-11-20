@@ -135,6 +135,7 @@ def test_parca_cache_error_generic_ws_degrades(tmp_path, monkeypatch):
     assert "remote_no_cache" not in body["build_error"]
 
 
+@pytest.mark.plugin
 def test_parca_cache_error_on_remote_build_soft_message(tmp_path, monkeypatch):
     """A materialized remote build (.viv-build.json) ships no local ParCa cache, so
     a local generator build fails with a cache error. build_composite_state degrades

@@ -31,8 +31,7 @@ TESTS = Path(__file__).parent
 
 UNMARKED_PLUGIN_IMPORTERS: frozenset[str] = frozenset({
     "test_C3_sms_client.py",
-    "test_analyses_facets.py",
-    "test_analyses_goldens.py",
+    "test_analyses_facets.py",                # through test_backends_existing (its own imports are per test since K2c)
     "test_backend_base_url.py",
     "test_backend_config.py",
     "test_backend_dispatch_compose.py",
@@ -45,22 +44,8 @@ UNMARKED_PLUGIN_IMPORTERS: frozenset[str] = frozenset({
     "test_composite_card_dispatch_table.py",
     "test_compose_composite_provenance.py",   # through test_backend_dispatch_compose
     "test_import_order.py",                   # MODULES = CORE + _plugin_modules() at import time
-    "test_listing_facet.py",
-    "test_non_root_store_roots.py",
-    "test_opaque_run_ids.py",
-    "test_payload_models.py",
-    "test_remote_analysis_figures_datasets.py",
-    "test_remote_analysis_figures_hidden.py",
-    "test_remote_build_source.py",
-    "test_remote_health.py",
-    "test_remote_link.py",
-    "test_remote_listing_goldens.py",
-    "test_remote_reconcile.py",
-    "test_remote_simulations.py",
-    "test_remote_study_slug_1to1.py",
-    "test_remote_trace.py",
+    "test_opaque_run_ids.py",                 # through test_backends_existing (its own imports are per test since K2c)
     "test_resolve_cloud_target.py",
-    "test_simulations_swr.py",
     "test_sms_api_client.py",
     "test_sms_api_environments.py",
     "test_sms_api_identity.py",
@@ -68,16 +53,13 @@ UNMARKED_PLUGIN_IMPORTERS: frozenset[str] = frozenset({
     "test_sms_capabilities.py",
     "test_source_branch.py",
     "test_source_build_views_lib.py",
-    "test_store_fetch.py",
-    "test_store_fetch_goldens.py",
-    "test_trace_dispatch_table.py",
     "test_viva_v1_client_contract.py",
 })
 
 #: The ratchet's ceiling: UNMARKED_PLUGIN_IMPORTERS's size when the core-only job arrived (K1). Each K2 PR that
 #: shrinks the set lowers this to the new size in the same PR; NEVER raise it -- a new module-level importer gets the
 #: mark instead.
-UNMARKED_PLUGIN_IMPORTERS_CEILING = 42
+UNMARKED_PLUGIN_IMPORTERS_CEILING = 24
 
 
 def _name(path: Path) -> str:
