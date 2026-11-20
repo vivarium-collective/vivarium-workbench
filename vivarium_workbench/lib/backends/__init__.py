@@ -218,7 +218,7 @@ class Backend:
 
     ``unrouted`` (optional) answers the lifecycle requests no run record routes (:class:`UnroutedFacet`).
     ``artifacts`` / ``analyses`` (optional, :class:`ArtifactFacet` / :class:`AnalysisFacet`): a backend without one
-    refuses those operations on its runs (409 ``not-sms`` until P3 renames the literal).
+    refuses those operations on its runs (409 ``not-offered``).
 
     ``builds`` (optional) runs the workspace as the backend's own build (:class:`BuildFacet`).
     ``listing`` (optional, :class:`ListingFacet`): the server's runs, listed beside the local ones."""

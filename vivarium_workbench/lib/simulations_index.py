@@ -2076,7 +2076,8 @@ _ACTIVE_RUN_STATUSES = {"queued", "running", "pending", "submitted", "in_progres
 def _sim_recency_key(r: dict) -> tuple:
     """Sort key for the merged Runs-DB list (used with ``reverse=True``):
     ACTIVE runs first, then newest-first by completion/start time, then by remote
-    ``simulation_id`` so the latest-dispatched cloud run leads among same-time rows.
+    ``simulation_id`` (the run's id on its backend, opaque) as a tiebreak among
+    same-time rows: an integer id orders by value; other ids tie.
     """
     status = str(r.get("status") or "").strip().lower()
     active = 1 if status in _ACTIVE_RUN_STATUSES else 0

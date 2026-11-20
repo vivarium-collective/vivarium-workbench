@@ -31,8 +31,8 @@ class RemoteOrigin(BaseModel):
     """
 
     deployment: str            # prov["source"], e.g. "smsvpctest"
-    # sms-api's integer simulation id, or a /viva/v1 run's own id (the backend's string, e.g.
-    # "simulation-E9Ec819") while that run is dispatched and not yet landed.
+    # The run's id on its backend: opaque, whatever its form (an SMS simulation's integer, a /viva/v1 run's
+    # "simulation-E9Ec819"); the run's record, not this form, says which backend ran it.
     simulation_id: Union[int, str]
     experiment_id: Optional[str] = None
     backend: Optional[str] = None       # e.g. "ray"

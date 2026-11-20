@@ -44,7 +44,8 @@ def _other_backend(rid):
 
 
 def _not_sms(rid, error):
-    return {"error": error, "reason": "not-sms", "phase": "not-sms", "terminal": True, "reachable": False,
+    # DECLARED (P3 I1): the wire literal is "not-offered" (it was "not-sms").
+    return {"error": error, "reason": "not-offered", "phase": "not-offered", "terminal": True, "reachable": False,
             "simulation_id": rid, "run": rid}
 
 
@@ -53,7 +54,7 @@ _NOT_SMS_ID = "run simulation-Z is not an SMS simulation id; this operation exis
 
 def _not_offered(rid, backend, what):
     # DECLARED: the text is neutral (the base said "...; this operation exists only for SMS simulations"); the wire
-    # literal "not-sms" and the rest of the body are unchanged.
+    # literal (now "not-offered", P3 I1) and the rest of the body are unchanged.
     return f"run {rid} ran on {backend}, which does not offer {what}"
 
 

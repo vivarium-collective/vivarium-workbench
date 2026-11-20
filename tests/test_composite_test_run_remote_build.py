@@ -227,7 +227,8 @@ def test_remote_sim_run_status_and_trajectory_map_to_sms_api(tmp_path, monkeypat
     # with the same integer id must not be taken for it)
     from vivarium_workbench_sms.remote_pinned import remote_deployment_name
 
-    assert calls["params"] == {"simulation_id": 909, "deployment": remote_deployment_name()}
+    # P3 I1: the suffix is passed on as the opaque string (SMS's status tail int()s it, as before)
+    assert calls["params"] == {"simulation_id": "909", "deployment": remote_deployment_name()}
 
     traj, tcode = crv.build_composite_run(tmp_path, "remote-sim-909")
     assert tcode == 200

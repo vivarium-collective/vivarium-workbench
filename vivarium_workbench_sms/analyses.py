@@ -37,7 +37,7 @@ def _not_an_sms_id(rid: object) -> "Optional[tuple[dict, int]]":
     text = str(rid).strip()
     if not (text.isascii() and text.isdigit()):
         return refusal(text, f"run {text} is not an SMS simulation id; this operation exists only for SMS simulations",
-                       reason="not-sms", phase="not-sms")
+                       reason="not-offered", phase="not-offered")
     return None
 
 

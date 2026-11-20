@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vivarium_workbench.lib import remote_run
+from vivarium_workbench.lib.backends.ids import remote_run_id
 from vivarium_workbench_sms import remote_pinned, sms_api_client
 
 if TYPE_CHECKING:
@@ -132,7 +133,7 @@ def _dispatch_build_image_run(simulator_id, overrides, emit_paths, config_filena
         return {"error": f"cloud dispatch failed: {e}",
                 "reason": "dispatch-failed", "run_target": "deployment"}, 502
     sim_db_id = sim.get("database_id") or sim.get("simulation_id")
-    return {"run_id": f"remote-sim-{sim_db_id}", "status": "running",
+    return {"run_id": remote_run_id(sim_db_id), "status": "running",
             "remote": True, "simulation_id": sim_db_id,
             "experiment_id": sim.get("experiment_id")}, 202
 

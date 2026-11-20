@@ -146,14 +146,15 @@ def _owner(ws_root: Path, rid: str, where: dict) -> "Union[Backend, tuple[dict, 
 def _not_offered(rid: str, backend: "Backend", what: str) -> tuple[dict, int]:
     from vivarium_workbench.lib.backends.records import refusal
 
-    # The wire literal stays "not-sms" until P3 renames it; callers read it only as "refused, terminal".
+    # "not-offered" (P3 I1; "not-sms" before it, which the browser still accepts): callers read it only as "refused,
+    # terminal".
     return refusal(rid, f"run {rid} ran on {backend.name}, which does not offer {what}",
-                   reason="not-sms", phase="not-sms")
+                   reason="not-offered", phase="not-offered")
 
 
 def _artifacts_of(ws_root: Path, rid: str, where: dict, *,
                   memo: bool = False) -> "Union[ArtifactFacet, tuple[dict, int]]":
-    """The ``artifacts`` facet of the backend that ran ``rid``, or the refusal (``_owner``'s, or 409 ``not-sms`` when
+    """The ``artifacts`` facet of the backend that ran ``rid``, or the refusal (``_owner``'s, or 409 ``not-offered`` when
     that backend offers none). ``memo`` (the per-image figure route) reuses an answer for :data:`_FACET_TTL`."""
     key = (str(ws_root), rid, where.get("deployment"), where.get("study"))
     if memo:
@@ -238,7 +239,7 @@ def remote_run_land_artifacts(ws_root: Path, body: dict) -> tuple[dict, int]:
     Body: ``{simulation_id, run_id}``. Idempotent.
 
     Step P2 (Analyses and figures): the run's record picks its backend, whose ``artifacts`` facet lands it (a backend
-    without one refuses, 409 ``not-sms``). A request that names no run goes to the ``unrouted`` backend's facet, so
+    without one refuses, 409 ``not-offered``). A request that names no run goes to the ``unrouted`` backend's facet, so
     its own answers come first (SMS: 401 before 400); with providers off the core answers the 400 itself.
     """
     body = body or {}
@@ -287,7 +288,7 @@ def remote_run_analysis(ws_root: Path, body: dict) -> tuple[dict, int]:
     Returns ``({analysis_id, analysis_name, simulation_id, phase}, 202)``.
 
     Step P2 (Analyses and figures): the run's record picks its backend, whose ``analyses`` facet runs it (SMS:
-    ``vivarium_workbench_sms.analyses.rerun_tail``); a backend without one refuses (409 ``not-sms``). A request that
+    ``vivarium_workbench_sms.analyses.rerun_tail``); a backend without one refuses (409 ``not-offered``). A request that
     names no run goes to the ``unrouted`` backend's facet (its 401 before its 400); providers off, the core's 400.
     """
     body = body or {}
