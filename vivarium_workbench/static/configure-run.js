@@ -143,7 +143,7 @@
 
   // Prefix a root-absolute /api path with the dashboard base path (e.g. /workbench)
   // so composite-explore run/resolve/status calls reach the workbench under the
-  // co-tenant ALB instead of misrouting to sms-api → 404. No-op at root.
+  // co-tenant ALB instead of misrouting to the backend → 404. No-op at root.
   function _api(p) {
     return (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl(p) : p;
   }
@@ -233,7 +233,7 @@
     };
   }
 
-  // item 20a: mirrors study-detail.js's _dispatchRemotePinned — before a
+  // item 20a: mirrors _dispatchRemotePinned in the launch plugin script — before a
   // remote-pinned deployment dispatches to AWS Batch, fetch the server-
   // resolved repo/branch/commit/simulator_id and require explicit
   // confirmation, so a workspace-identity mismatch is caught here, before

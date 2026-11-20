@@ -18,47 +18,32 @@ from typing import Optional
 import psutil
 
 # ---------------------------------------------------------------------------
-# GET /api/source/builds
+# GET /api/source/remote-health  (GET /api/source/builds is the SMS plugin's:
+# vivarium_workbench_sms.source_build_views.build_source_builds, step P2 Builds B3)
 # ---------------------------------------------------------------------------
 
-def _sms_api_base() -> str:
-    """Base URL of the viva-api (nee sms-api; the SSM tunnel by default).
-
-    Delegates to the single source of truth :func:`sms_api_client.sms_api_base`;
-    kept under this name because several modules import it from here.
-    """
-    from vivarium_workbench.lib.sms_api_client import sms_api_base
-
-    return sms_api_base()
-
-
-def build_source_builds() -> dict:
-    """Builder for GET /api/source/builds.
-
-    Mirrors ``server.Handler._get_source_builds``.  Env-based (``SMS_API_BASE``);
-    no ws_root needed.  Always returns a dict — best-effort (empty builds +
-    error reason when sms-api is down).
-    """
-    from vivarium_workbench.lib import remote_build_source
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient
-
-    return remote_build_source.list_build_sources(SmsApiClient(_sms_api_base()))
-
-
 def remote_health() -> dict:
-    """Reachability + config status of the remote sms-api endpoint (``SMS_API_BASE``).
+    """Reachability + config status of the configured remote backend (``backends.config.configured_base_url``).
 
     Powers the Source panel's health indicator and the startup log: tells a fresh
     operator (or Chris) whether the remote endpoint is even configured and whether
     it answers. Best-effort — never raises; returns
-    ``{configured, base_url, reachable, version, error}``.
+    ``{configured, base_url, reachable, version, error}``. With no URL to ask (no backend named and no active
+    provider supplies one: providers off, or the plugin absent) it asks nothing: ``base_url`` is ``None``.
     """
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient, backend_configured
+    from vivarium_workbench.lib import backend_config
+    from vivarium_workbench.lib.backends import config
 
-    base = _sms_api_base()
-    configured = backend_configured()
     try:
-        version = SmsApiClient(base).ping()
+        base = config.configured_base_url()
+        configured = config.backend_configured()
+    except Exception as exc:  # noqa: BLE001 — a broken provider: still an answer, never a 500
+        return {"configured": False, "base_url": None, "reachable": False, "version": None, "error": str(exc)}
+    if base is None:
+        return {"configured": configured, "base_url": None, "reachable": False, "version": None,
+                "error": "no remote backend is configured"}
+    try:
+        version = backend_config.ping(base)
         return {"configured": configured, "base_url": base, "reachable": True,
                 "version": version, "error": None}
     except Exception as exc:  # noqa: BLE001 — a health probe must never raise

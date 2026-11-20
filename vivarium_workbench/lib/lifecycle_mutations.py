@@ -376,7 +376,7 @@ def study_create_from_run(ws_root: Path, body: dict) -> "tuple[dict, int]":
     if not _SLUG_RE.match(name):
         return {"error": "name must be lowercase + dashes"}, 400
 
-    studies_root = Path(ws_root) / "studies"
+    studies_root = WorkspacePaths.load(Path(ws_root)).studies
     studies_root.mkdir(parents=True, exist_ok=True)
     dst = studies_root / name
     if dst.exists():

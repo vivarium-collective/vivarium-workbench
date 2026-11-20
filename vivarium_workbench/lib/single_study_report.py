@@ -1012,6 +1012,15 @@ def _provenance_info(ws_root: Optional[Path]) -> dict:
             )
             if r.returncode == 0 and r.stdout.strip():
                 info["workspace_commit"] = r.stdout.strip()
+            # Dirty-tree flag: `--porcelain` lists modified-tracked AND untracked
+            # paths, so an uncommitted study makes this True — the commit above
+            # does not fully capture the rendered state (issue #1618, bug 10).
+            d = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(ws_root), capture_output=True, text=True, timeout=10,
+            )
+            if d.returncode == 0:
+                info["workspace_dirty"] = bool(d.stdout.strip())
         except Exception:
             pass
     try:
@@ -1053,9 +1062,19 @@ def _render_provenance(info: dict) -> str:
         )
 
     commit = info.get("workspace_commit")
-    rows.append(_row("Workspace commit",
-                     f'<code>{_h(commit)}</code>' if commit
-                     else '<span style="color:var(--text-muted, #94a3b8)">unavailable (not a git checkout)</span>'))
+    if commit:
+        commit_html = f'<code>{_h(commit)}</code>'
+        # An uncommitted tree means this commit doesn't fully capture the state
+        # the report was rendered from (issue #1618, bug 10).
+        if info.get("workspace_dirty"):
+            commit_html += (
+                ' <span style="color:#b45309;font-weight:600;font-size:0.9em" '
+                'title="uncommitted changes present — this commit does not fully '
+                'capture the rendered state">+ uncommitted changes</span>'
+            )
+    else:
+        commit_html = '<span style="color:var(--text-muted, #94a3b8)">unavailable (not a git checkout)</span>'
+    rows.append(_row("Workspace commit", commit_html))
     plat = info.get("platform")
     py = info.get("python")
     plat_bits = " · ".join(_h(x) for x in (plat, f"Python {py}" if py else None) if x)

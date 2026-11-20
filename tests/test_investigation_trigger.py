@@ -198,6 +198,41 @@ def test_trigger_unknown_investigation_404(diamond_ws):
     assert status == 404
 
 
+def test_trigger_launch_keeps_the_refusal_of_a_named_backend_that_cannot_be_reached(
+        diamond_ws, tmp_path, monkeypatch):
+    """The launch is the Composites run: when the backend named for this workbench cannot be asked it is refused
+    (502 ``unreachable``). The trigger report still succeeds, and carries the refusal as the launch's own status and
+    body rather than as an anonymous 500 "launch failed"."""
+    from vivarium_workbench.lib import server_capabilities as sc
+
+    # The probe is an SmsApiClient call, which reads the GitHub login and caches it for the whole process: keep the
+    # developer's real one out (the other backend tests do the same), or later tests inherit it.
+    home = tmp_path / "no-login-home"
+    home.mkdir()
+    for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+              "VIVARIUM_WORKBENCH_GH_TOKEN", "VIVARIUM_DASHBOARD_GH_TOKEN"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    monkeypatch.setenv("GH_CONFIG_DIR", str(home / ".config" / "gh"))
+    monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.fail.Keyring")
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "http://127.0.0.1:9")
+    for v in ("VIVA_API_BASE", "SMS_API_BASE"):
+        monkeypatch.delenv(v, raising=False)
+    sc._PROFILE_CACHE.clear()
+    try:
+        body, status = investigation_trigger(diamond_ws, {
+            "investigation": "inv1", "target_study": "parca", "on_missing": "compute", "launch": True})
+    finally:
+        sc._PROFILE_CACHE.clear()
+    assert status == 200  # the report
+    assert body["launch_status"] == 502
+    run = body["run"]
+    assert (run["phase"], run["reachable"], run["reason"], run["backend"]) == (
+        "unreachable", False, "backend unreachable", "http://127.0.0.1:9")
+    assert "not started locally" in run["error"]
+
+
 # --------------------------------------------------------------------------
 # Live endpoint
 # --------------------------------------------------------------------------

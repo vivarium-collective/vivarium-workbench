@@ -13,6 +13,7 @@ permissions.
 """
 from __future__ import annotations
 
+import importlib
 import os
 import tempfile
 from pathlib import Path
@@ -21,19 +22,26 @@ import pytest
 
 from vivarium_workbench.lib import env_compat, github_auth
 from vivarium_workbench.lib import materialization as m
-from vivarium_workbench.lib import remote_build_source as rbs
-from vivarium_workbench.lib import repo_source as rs
 
-# (module, function name, env var, HOME-relative leaf parts)
+# (module name, function name, env var, HOME-relative leaf parts). Names, imported by the test, so the plugin's row
+# (marked ``plugin``) does not keep the core rows from collecting without the plugin (step P3, K2c).
 _ROOTS = [
-    (m, "store_root", "VIVARIUM_WORKBENCH_VENV_STORE", (".cache", "vivarium-workbench", "venvs")),
-    (rbs, "build_cache_root", "VIVARIUM_WORKBENCH_BUILD_CACHE", (".pbg", "build-cache")),
-    (rs, "store_root", "VIVARIUM_WORKBENCH_REPO_STORE", (".cache", "vivarium-workbench", "repos")),
+    ("vivarium_workbench.lib.materialization", "store_root", "VIVARIUM_WORKBENCH_VENV_STORE",
+     (".cache", "vivarium-workbench", "venvs")),
+    pytest.param("vivarium_workbench_sms.remote_build_source", "build_cache_root", "VIVARIUM_WORKBENCH_BUILD_CACHE",
+                 (".pbg", "build-cache"), marks=pytest.mark.plugin),
+    ("vivarium_workbench.lib.repo_source", "store_root", "VIVARIUM_WORKBENCH_REPO_STORE",
+     (".cache", "vivarium-workbench", "repos")),
 ]
+_ENV_VARS = ("VIVARIUM_WORKBENCH_VENV_STORE", "VIVARIUM_WORKBENCH_BUILD_CACHE", "VIVARIUM_WORKBENCH_REPO_STORE")
+
+
+def _root(mod: str, fn: str) -> Path:
+    return getattr(importlib.import_module(mod), fn)()
 
 
 def _unset_all_overrides(monkeypatch):
-    for _mod, _fn, env_var, _parts in _ROOTS:
+    for env_var in _ENV_VARS:
         monkeypatch.delenv(env_var, raising=False)
 
 
@@ -43,7 +51,7 @@ def test_env_override_wins(mod, fn, env_var, parts, tmp_path, monkeypatch):
     _unset_all_overrides(monkeypatch)
     target = tmp_path / "explicit-override"
     monkeypatch.setenv(env_var, str(target))
-    assert getattr(mod, fn)() == target
+    assert _root(mod, fn) == target
 
 
 # -- (b) HOME not writable -> falls back under tempfile.gettempdir() ---------
@@ -54,7 +62,7 @@ def test_home_not_writable_falls_back_to_tmp(mod, fn, env_var, parts, tmp_path, 
     monkeypatch.setattr(Path, "home", lambda: fake_home)
     monkeypatch.setattr(os, "access", lambda *a, **k: False)
 
-    got = getattr(mod, fn)()
+    got = _root(mod, fn)
 
     expected = Path(tempfile.gettempdir()) / "vivarium-workbench" / Path(*parts)
     assert got == expected
@@ -70,7 +78,7 @@ def test_home_writable_keeps_home_default(mod, fn, env_var, parts, tmp_path, mon
     monkeypatch.setattr(Path, "home", lambda: fake_home)
     # Real os.access is used here (untouched) — fake_home is a real, writable dir.
 
-    got = getattr(mod, fn)()
+    got = _root(mod, fn)
 
     assert got == fake_home.joinpath(*parts)
 

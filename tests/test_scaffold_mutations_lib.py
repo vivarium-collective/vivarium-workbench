@@ -24,6 +24,7 @@ import yaml
 
 from vivarium_workbench.lib.scaffold_mutations import (
     delete_investigation,
+    delete_study,
     investigation_create,
     iset_clone,
 )
@@ -207,6 +208,50 @@ def test_delete_investigation_not_found(ws: Path) -> None:
     resp, code = delete_investigation(ws, {"name": "ghost"})
     assert code == 404
     assert "ghost" in resp["error"]
+
+
+def test_delete_investigation_spares_same_named_study(ws: Path) -> None:
+    """#1618 bug 11: a study and an investigation can share a name; deleting the
+    investigation must leave the study on disk."""
+    investigation_create(ws, {"name": "shared"})
+    study = ws / "studies" / "shared"
+    study.mkdir(parents=True)
+    (study / "study.yaml").write_text("schema_version: 4\nname: shared\n")
+    resp, code = delete_investigation(ws, {"name": "shared"})
+    assert code == 200
+    assert not (ws / "investigations" / "shared").exists()
+    assert study.is_dir()                     # study untouched
+
+
+# ---------------------------------------------------------------------------
+# delete_study
+# ---------------------------------------------------------------------------
+
+
+def test_delete_study_happy(ws: Path) -> None:
+    study = ws / "studies" / "s-del"
+    study.mkdir(parents=True)
+    (study / "study.yaml").write_text("schema_version: 4\nname: s-del\n")
+    resp, code = delete_study(ws, {"name": "s-del"})
+    assert code == 200 and resp["ok"] is True
+    assert not study.exists()
+
+
+def test_delete_study_missing_name(ws: Path) -> None:
+    resp, code = delete_study(ws, {})
+    assert code == 400
+
+
+def test_delete_study_not_found(ws: Path) -> None:
+    resp, code = delete_study(ws, {"name": "ghost"})
+    assert code == 404
+
+
+def test_delete_study_refuses_investigation(ws: Path) -> None:
+    investigation_create(ws, {"name": "inv-x"})
+    resp, code = delete_study(ws, {"name": "inv-x"})
+    assert code == 409
+    assert (ws / "investigations" / "inv-x").is_dir()
 
 
 # ---------------------------------------------------------------------------

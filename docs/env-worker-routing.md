@@ -133,7 +133,7 @@ cannot run the code at all.
 
 ### 3. Honor the run target that already exists
 
-`remote_pinned.resolve_run_target` (backlog item 18) is already **the** authoritative
+`backends.resolve_run_target` (backlog item 18) is already **the** authoritative
 local-vs-deployment answer, and its docstring is emphatic: every run entrypoint must
 resolve it the same way, *"never by which button happened to be clicked"*. It returns
 `"deployment"` when the workspace carries `.viv-build.json` (the workspace picker

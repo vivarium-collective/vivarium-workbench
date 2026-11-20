@@ -78,7 +78,7 @@ def test_v3_on_a_deployment_target_no_longer_refuses(tmp_path, monkeypatch):
     would have converged the button onto a path it then blocks."""
     _v3(tmp_path)
     monkeypatch.setattr(
-        "vivarium_workbench.lib.remote_pinned.resolve_run_target",
+        "vivarium_workbench.lib.backends.resolve_run_target",
         lambda p: "deployment")
     monkeypatch.setattr(
         "vivarium_workbench.lib.run_unblocked_views.investigation_run_unblocked",
@@ -92,7 +92,7 @@ def test_v2_spec_still_refuses_a_deployment_target(tmp_path, monkeypatch):
     v2->studies translation here would be a migration wearing a run button."""
     _v2(tmp_path)
     monkeypatch.setattr(
-        "vivarium_workbench.lib.remote_pinned.resolve_run_target",
+        "vivarium_workbench.lib.backends.resolve_run_target",
         lambda p: "deployment")
     body, code = irv.investigation_run(tmp_path, {"name": "inv"})
     assert code == 409, body
@@ -107,7 +107,7 @@ def test_v2_spec_does_not_delegate(tmp_path, monkeypatch):
         "vivarium_workbench.lib.run_unblocked_views.investigation_run_unblocked",
         lambda ws, b: called.append(b) or ({"job_id": "x"}, 202))
     monkeypatch.setattr(
-        "vivarium_workbench.lib.remote_pinned.resolve_run_target", lambda p: "local")
+        "vivarium_workbench.lib.backends.resolve_run_target", lambda p: "local")
     irv.investigation_run(tmp_path, {"name": "inv"})
     assert called == [], "a v2 spec must not be handed to the v3 orchestrator"
 
@@ -124,7 +124,7 @@ def test_a_dir_with_both_shapes_keeps_the_v2_path(tmp_path, monkeypatch):
         "vivarium_workbench.lib.run_unblocked_views.investigation_run_unblocked",
         lambda ws_, b: called.append(b) or ({"job_id": "x"}, 202))
     monkeypatch.setattr(
-        "vivarium_workbench.lib.remote_pinned.resolve_run_target", lambda p: "local")
+        "vivarium_workbench.lib.backends.resolve_run_target", lambda p: "local")
     irv.investigation_run(tmp_path, {"name": "inv"})
     assert called == [], "spec.yaml present must keep the v2 path"
 

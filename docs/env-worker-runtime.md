@@ -13,11 +13,12 @@ This doc is the *operational* view those two leave implicit.
 > `sms-api-stanford-test`, and now **wired into request paths** (#952, corrected
 > by #954; deployed as 0.3.63–0.3.65). See [Current status](#current-status).
 >
-> A further decision is on record but **not built**: env-worker traffic is to be
-> proxied through sms-api, which would own queuing, durability and status — see
-> [`run-orchestration-consolidation.md`](run-orchestration-consolidation.md) §E.
-> Nothing below describes that yet; this doc still documents the direct
-> dial-back runtime as it runs today.
+> **Update (2026-11-19).** The proxy transport (env-worker traffic relayed through
+> viva-api, [`run-orchestration-consolidation.md`](run-orchestration-consolidation.md) §E)
+> has since been built, and the hosted Stanford workbench runs it
+> (`ENV_WORKER_PROXY_BASE=http://api:8000`). The table below names it; most of the
+> rest of this doc still describes the dial-back runtime. The hosted launchers now
+> come from the SMS backend provider (docs/backend-adapters.md, step P2).
 
 ---
 
@@ -27,16 +28,25 @@ This doc is the *operational* view those two leave implicit.
 |---|---|---|
 | Where the worker runs | subprocess of the workbench | its own **Kubernetes Job** |
 | Where the environment comes from | the workspace's own `.venv` | the simulator's **prebuilt image** for `(repo, commit)` |
-| Transport | `socketpair` (protocol §5) | **dial-back TCP** (protocol §5A) |
+| Transport | `socketpair` (protocol §5) | **proxy**: viva-api holds the socket and relays calls over HTTP (`ProxyWorkerLauncher`); or **dial-back TCP** (protocol §5A, `RemoteWorkerLauncher`) |
 | Who creates it | `subprocess.Popen` | **viva-api** — the workbench has no cluster access (§2B.2) |
-| Selected by | no dial-back host configured | `VIVARIUM_WORKBENCH_ENV_WORKER_ADVERTISE_HOST` is set |
+| Selected by | neither hosted variable set | `VIVARIUM_WORKBENCH_ENV_WORKER_PROXY_BASE` (proxy; it wins) or `VIVARIUM_WORKBENCH_ENV_WORKER_ADVERTISE_HOST` (dial-back) |
+
+The hosted Stanford workbench uses the proxy (`ENV_WORKER_PROXY_BASE=http://api:8000`).
 
 **The choice is structural, not a preference.** `env_worker_launcher.default_launcher()`
-returns the remote launcher **iff** the deployment declares where workers should
-dial back, and the local one otherwise — because a laptop has no cluster. One
-wiring decision at the composition root (§5C.4); there is no per-call switch to
-cherry-pick, which is what stops the two implementations drifting into
-alternatives someone chooses between.
+returns a hosted launcher **iff** the deployment asks for one, and the local one
+otherwise — because a laptop has no cluster. One wiring decision at the
+composition root (§5C.4); there is no per-call switch to cherry-pick, which is
+what stops the implementations drifting into alternatives someone chooses between.
+
+**The hosted launchers come from the backend provider** (docs/backend-adapters.md
+§2.2, step P2): the core keeps `LocalWorkerLauncher`, and the SMS plugin's
+`vivarium_workbench_sms/env_workers.py` supplies the proxy and dial-back launchers
+through `Provider.worker_launcher()`. **A deployment that sets a hosted variable
+when no provider supplies one is refused**: `serve` exits 2 at startup with the
+reason, and a pool call raises `BackendConfigError`. It never quietly falls back to
+a local subprocess.
 
 Hosted **never builds an environment.** The image *is* the environment coordinate
 (§2A.2): rebuilding it on the volume would be a second source of truth that can
@@ -134,7 +144,8 @@ sequenceDiagram
 
 | Setting | Side | Meaning |
 |---|---|---|
-| `VIVARIUM_WORKBENCH_ENV_WORKER_ADVERTISE_HOST` | workbench | Where workers dial back — this pod's IP, via the Downward API. **Setting it is what selects the remote launcher**; blank counts as unset. |
+| `VIVARIUM_WORKBENCH_ENV_WORKER_PROXY_BASE` | workbench | viva-api's URL for the proxy transport (`1`/`true`/`yes` = the configured viva-api). **Setting it selects the proxy launcher**, and it wins over `ADVERTISE_HOST`; blank counts as unset. |
+| `VIVARIUM_WORKBENCH_ENV_WORKER_ADVERTISE_HOST` | workbench | Where workers dial back — this pod's IP, via the Downward API. **Setting it (and not `PROXY_BASE`) selects the dial-back launcher**; blank counts as unset. |
 | `ENV_WORKER_MODULE_IMAGE` | viva-api | The workbench image a Job stages its worker module from. **Must equal the deployment's `vivarium-workbench` tag** — same code, or a workbench speaks a protocol its own workers don't. |
 | `ENV_WORKER_WORKSPACE_PATH` | viva-api | Workspace root inside the simulator image. Default `/app/v2ecoli`. |
 | `ENV_WORKER_POOL_MAX` (8) · `ENV_WORKER_IDLE_TTL` (900 s) · `ENV_WORKER_CALL_TIMEOUT` (60 s) | workbench | Warm-pool size, idle eviction, per-call socket timeout (protocol §17). |
@@ -179,7 +190,7 @@ nothing there has a `.venv`, so every job-class call raised
 `workspace has no .venv`. #954 corrected the axis.
 
 **Step 2a** (#957, 0.3.64) makes run entrypoints honor
-`remote_pinned.resolve_run_target`. **Step 2b**, the declared-scale precheck, is
+`backends.resolve_run_target`. **Step 2b**, the declared-scale precheck, is
 **not started and is now load-bearing**: with transport no longer standing in for
 a cost policy, nothing separates a small in-context run from one that must
 dispatch.

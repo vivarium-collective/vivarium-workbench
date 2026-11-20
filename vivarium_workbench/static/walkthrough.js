@@ -12,7 +12,7 @@
 
   // Prefix a root-absolute /api path with the dashboard base path (e.g. /workbench)
   // so composite-explore run/resolve/status calls reach the workbench under the
-  // co-tenant ALB instead of misrouting to sms-api → 404. No-op at root; composes
+  // co-tenant ALB instead of misrouting to the backend → 404. No-op at root; composes
   // safely with the global _base_path_shim (which skips already-prefixed URLs).
   function _api(p) {
     return (window.DataSource && window.DataSource.apiUrl) ? window.DataSource.apiUrl(p) : p;
@@ -497,25 +497,80 @@
   // Generic modal helpers
   // -------------------------------------------------------------------------
 
+  // Accessibility (issue #1618): remember what had focus before a dialog opened
+  // so it can be restored on close, and move focus into the dialog on open.
+  var _modalReturnFocus = null;
+
+  function _focusFirstInModal(el) {
+    // Prefer the first real text field (so you can type immediately — the
+    // audit's "focus stays on the page body" finding); fall back to any
+    // focusable control, then the dialog box itself.
+    var field = el.querySelector(
+      "input:not([type=hidden]):not([disabled]),textarea:not([disabled]),select:not([disabled])"
+    );
+    var target = field
+      || el.querySelector("button:not([disabled]),[href],[tabindex]:not([tabindex='-1'])")
+      || el.querySelector(".modal-box")
+      || el;
+    if (target) { try { target.focus(); } catch (e) { /* ignore */ } }
+  }
+
   function openModal(id) {
     var el = document.getElementById(id);
-    if (el) el.style.display = "flex";
+    if (!el) return;
+    _modalReturnFocus = document.activeElement;
+    el.style.display = "flex";
+    // Mark the dialog box for assistive tech and label it from its heading.
+    var box = el.querySelector(".modal-box") || el;
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    var heading = el.querySelector("h1,h2,h3,h4");
+    if (heading) {
+      if (!heading.id) heading.id = id + "-title";
+      box.setAttribute("aria-labelledby", heading.id);
+    }
+    _focusFirstInModal(el);
+  }
+
+  function _dismissModalEl(el) {
+    if (!el) return;
+    el.style.display = "none";
+    // Clear inline errors.
+    var errEl = el.querySelector(".form-error");
+    if (errEl) errEl.textContent = "";
+    // Restore focus to whatever held it before the dialog opened.
+    if (_modalReturnFocus && typeof _modalReturnFocus.focus === "function") {
+      try { _modalReturnFocus.focus(); } catch (e) { /* ignore */ }
+    }
+    _modalReturnFocus = null;
   }
 
   function closeModal(id) {
-    var el = document.getElementById(id);
-    if (el) {
-      el.style.display = "none";
-      // Clear inline errors.
-      var errEl = el.querySelector(".form-error");
-      if (errEl) errEl.textContent = "";
-    }
+    _dismissModalEl(document.getElementById(id));
   }
+
+  // Esc closes the top-most open dialog (audit: "Escape doesn't close them").
+  // No-op when no modal overlay is visible, so it never fights native controls
+  // or the inline-edit editor's own Esc-to-cancel.
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" && e.keyCode !== 27) return;
+    var overlays = document.querySelectorAll(".modal-overlay");
+    for (var i = overlays.length - 1; i >= 0; i--) {
+      var o = overlays[i];
+      try {
+        if (getComputedStyle(o).display !== "none") {
+          _dismissModalEl(o);
+          e.preventDefault();
+          break;
+        }
+      } catch (err) { /* ignore */ }
+    }
+  });
 
   // Close modals when clicking the overlay background.
   document.addEventListener("click", function (e) {
     if (e.target && e.target.classList.contains("modal-overlay")) {
-      e.target.style.display = "none";
+      _dismissModalEl(e.target);
     }
   });
 
@@ -2349,7 +2404,7 @@
       return;
     }
     // A target is keyed by `study` (a local study's exports) or `run` (a landed
-    // run's exports, e.g. a GovCloud compose analysis) — forward whichever is set.
+    // run's exports, e.g. a remote compose analysis) — forward whichever is set.
     var q = study ? '?study=' + encodeURIComponent(study)
           : (run ? '?run=' + encodeURIComponent(run) : '');
     var url = '/api/analysis-viewer/' + encodeURIComponent(uid) + '/launch' + q;
@@ -4219,7 +4274,7 @@
   // Composite Explorer Test Run panel) -- before a remote-pinned deployment
   // dispatches to AWS Batch, fetch the server-resolved
   // repo/branch/commit/simulator_id and require explicit confirmation
-  // (mirrors study-detail.js's _dispatchRemotePinned), so a workspace-
+  // (mirrors _dispatchRemotePinned in the launch plugin script), so a workspace-
   // identity mismatch is caught here, before money gets spent, not
   // discovered afterward via aws batch describe-jobs. A plain local-engine
   // run (unchanged, pre-existing behavior) fires with no confirm.
@@ -7366,15 +7421,38 @@
   }
   window._installFromMarketplace = _installFromMarketplace;
 
+  // Non-blocking confirm gate: uses the shared _confirmModal when present
+  // (doesn't freeze the event loop / browser automation — #1051), and falls
+  // back to native confirm() otherwise. Always returns a Promise<bool>.
+  function _confirmGate(message) {
+    if (typeof window._confirmModal === 'function') return window._confirmModal(message);
+    return Promise.resolve(window.confirm(message));
+  }
+  window._confirmGate = _confirmGate;
+
   function _proceedWithCatalogInstall(name, opts) {
-    if (!confirm("Install '" + name + "' on the active investigation branch?\n\nThis adds a submodule, pip installs the package, and appends it to pyproject.toml. Requires an active investigation branch.")) return;
+    _confirmGate("Install '" + name + "'?\n\nThis adds a submodule, pip installs the package, and appends it to pyproject.toml. If a workstream is active the change is committed to its branch.").then(function (_ok) {
+    if (!_ok) return;
     var body = {name: name};
     if (opts && opts.skip_system_deps_check) body.skip_system_deps_check = true;
     if (opts && opts.full_repo) body.full_repo = true;
+    // In-page progress: the install (submodule clone + pip install) routinely
+    // takes a minute. Without this the page sits silent after the confirm, with
+    // no sign anything is happening (issue #1618, bug 7). A persistent toast
+    // (durationMs:0 → until we clear it) is non-blocking, so it also doesn't
+    // freeze browser automation the way the old alert() did (#1051).
+    var _progress = (typeof _showToast === 'function')
+      ? _showToast('Installing ' + name + '… (cloning + pip install — this can take a minute)', { durationMs: 0 })
+      : null;
+    function _clearProgress() {
+      if (_progress && _progress.parentNode) _progress.parentNode.removeChild(_progress);
+      _progress = null;
+    }
     apiFetch('POST', '/api/catalog-install', body)
       .then(function(r) { return r.json().then(function(j) { return [r.ok, r.status, j]; }); })
       .then(function(parts) {
         var ok = parts[0], status = parts[1], json = parts[2];
+        _clearProgress();
         if (!ok) {
           // 409 = system-deps gate (defence-in-depth — UI should have
           // already shown the modal; re-show if it happens anyway).
@@ -7393,19 +7471,27 @@
             }, opts);
             return;
           }
-          alert(_renderInstallError(json));
+          var em = _renderInstallError(json);
+          // A rolled-back install leaves nothing staged — say so, so the user
+          // knows the Studies panel isn't about to fill with a half-installed
+          // module (issue #1618, bug 7).
+          if (json && json.rolled_back) em += "\n\n(Partial install rolled back — nothing was left staged.)";
+          if (typeof _showToast === 'function') _showToast(em, { danger: true }); else alert(em);
           return;
         }
-        var msg = "Installed " + name + ".\nCommit: " + (json.commit || 'n/a');
-        alert(msg);
+        var msg = "Installed " + name + "." + (json.commit ? "\nCommit: " + json.commit : '');
+        if (typeof _showToast === 'function') _showToast(msg); else alert(msg);
         window._registryLoaded = false;  // force registry reload on next switch
         apiFetch('POST', '/api/render').finally(function() {
           location.reload();
         });
       })
       .catch(function(err) {
-        alert("Network error: " + String(err));
+        _clearProgress();
+        var nm = "Network error: " + String(err);
+        if (typeof _showToast === 'function') _showToast(nm, { danger: true }); else alert(nm);
       });
+    });
   }
   window._proceedWithCatalogInstall = _proceedWithCatalogInstall;
 
@@ -10384,6 +10470,95 @@
       }).catch(function () { /* optional surface */ });
   }
   window._vivLoadEvidence = _vivLoadEvidence;
+
+  // ---- RFC-0007 validation panel (GET /api/validation-panel/{slug}) ----
+  // Census header, type x scope coverage matrix, grouped records, and the
+  // epistemic-separation check. Renders nothing when the response is empty
+  // (snapshot / published bundle / engine predating the validation layer).
+  function _vpRender(d) {
+    var types = d.types || [], scopes = d.scopes || [];
+    var execOnly = {};
+    (d.execution_only_types || []).forEach(function (t) { execOnly[t] = true; });
+    var c = d.census || {};
+    var h = '<div class="vp-head"><strong>Validation</strong>';
+    ['passed', 'failed', 'inconclusive', 'error'].forEach(function (k) {
+      h += '<span class="vp-chip vp-' + k + '">' + (c[k] || 0) + ' ' + k + '</span>';
+    });
+    h += '<span class="vp-chip">pass rate ' + Math.round((d.pass_rate || 0) * 100) + '%</span>';
+    h += '<span class="vp-chip' + (d.stale_count ? ' vp-stale' : '') + '">' + (d.stale_count || 0) + ' stale</span></div>';
+
+    var recs = d.records || [];
+    var counts = {};
+    recs.forEach(function (r) { var k = r.type + '|' + r.scope; counts[k] = (counts[k] || 0) + 1; });
+    h += '<table class="vp-matrix"><thead><tr><th></th>';
+    scopes.forEach(function (sc) { h += '<th>' + _esc(sc) + '</th>'; });
+    h += '</tr></thead><tbody>';
+    types.forEach(function (t) {
+      h += '<tr><th class="' + (execOnly[t] ? 'vp-exec' : '') + '" title="' +
+        (execOnly[t] ? 'Execution-only: cannot carry a scientific judgment' : 'May assert a scientific judgment') + '">' +
+        _esc(t) + (execOnly[t] ? ' *' : '') + '</th>';
+      scopes.forEach(function (sc) {
+        var ids = ((d.coverage || {})[t] || {})[sc] || [];
+        var n = counts[t + '|' + sc] || 0;
+        h += ids.length
+          ? '<td class="vp-cell-on" title="' + _esc(ids.join(', ')) + '">' + ids.length + ' validator' + (ids.length > 1 ? 's' : '') +
+            (n ? ' / ' + n + ' rec' : '') + '</td>'
+          : '<td class="vp-cell-off">—</td>';
+      });
+      h += '</tr>';
+    });
+    h += '</tbody></table><div class="vp-note">* execution-only type (structural / computational / visual)</div>';
+
+    var groups = {};
+    recs.forEach(function (r) {
+      var k = r.type + ' › ' + r.scope;
+      (groups[k] = groups[k] || []).push(r);
+    });
+    Object.keys(groups).sort().forEach(function (k) {
+      h += '<details class="vp-group"><summary>' + _esc(k) + ' (' + groups[k].length + ')</summary>';
+      groups[k].forEach(function (r) {
+        var j = r.scientific_judgment;
+        var jtxt = (j === null || j === undefined)
+          ? (execOnly[r.type] ? 'n/a — execution-only' : 'no judgment') : String(j);
+        h += '<details class="vp-rec"><summary><span class="vp-target">' + _esc(r.target) + '</span> ' +
+          '<span class="vp-chip vp-' + _esc(r.execution_status) + '">' + _esc(r.execution_status) + '</span> ' +
+          '<span class="vp-judg">' + _esc(jtxt) + '</span></summary>' +
+          '<pre class="vp-detail">' + _esc(JSON.stringify({findings: r.findings, evidence: r.evidence, criteria: r.criteria}, null, 2)) +
+          '</pre></details>';
+      });
+      h += '</details>';
+    });
+
+    var v = d.violations || [];
+    if (v.length) {
+      h += '<div class="vp-viol"><strong>Epistemic-separation violations (' + v.length + ')</strong><ul>';
+      v.forEach(function (x) { h += '<li>' + _esc(typeof x === 'string' ? x : JSON.stringify(x)) + '</li>'; });
+      h += '</ul></div>';
+    } else {
+      h += '<div class="vp-ok">Separation holds: no execution-only validator asserts a scientific judgment.</div>';
+    }
+    return h;
+  }
+  function _vivLoadValidationPanel(slug) {
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot' || !slug) return;
+    fetch('/api/validation-panel/' + encodeURIComponent(slug), {headers: {Accept: 'application/json'}})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (window._currentIset !== slug) return;
+        var host = document.getElementById('inv-validation-panel');
+        if (!d || !d.types || !d.records) { if (host) host.remove(); return; }
+        if (!host) {
+          var anchor = document.getElementById('investigation-intro');
+          if (!anchor || !anchor.parentNode) return;
+          host = document.createElement('details');
+          host.id = 'inv-validation-panel';
+          host.className = 'vp-panel';
+          anchor.parentNode.insertBefore(host, anchor.nextSibling);
+        }
+        host.innerHTML = '<summary>Validation (RFC-0007)</summary>' + _vpRender(d);
+      }).catch(function () { /* optional surface */ });
+  }
+  window._vivLoadValidationPanel = _vivLoadValidationPanel;
   window._vivPaintEvidence = _vivPaintEvidence;
 
   // The full Asks / Finds / plan body, from the study DATA (not the band-limited
@@ -10765,8 +10940,11 @@
   window._openAuditReport = _openAuditReport;
 
   // mode: 'investigation' | 'study' (explicit from the header cluster); falls
-  // back to the active browse tab when omitted.
-  function _openBrowseCreate(mode) {
+  // back to the active browse tab when omitted. presetInv (study mode only):
+  // slug of the investigation to pre-select in the dropdown, so "+ Add a study"
+  // from an investigation's own empty state lands on that investigation instead
+  // of defaulting to the first in the list (issue #1618, §1).
+  function _openBrowseCreate(mode, presetInv) {
     var isStudy = mode ? (mode === 'study') : (window._isetBrowseTab === 'studies');
     window._browseCreateMode = isStudy ? 'study' : 'investigation';
     document.getElementById('browse-create-title').textContent = isStudy ? 'New study' : 'New investigation';
@@ -10775,14 +10953,17 @@
       ? 'Describe the study — the question you want to answer'
       : 'Describe the investigation — the question you want to answer';
     document.getElementById('browse-create-inv-row').style.display = isStudy ? '' : 'none';
+    var sel = document.getElementById('browse-create-inv');
     if (isStudy) {
-      var sel = document.getElementById('browse-create-inv');
       sel.innerHTML = (window._isetIndex || []).map(function (i) {
         return '<option value="' + _esc(i.name) + '">' + _esc(i.title || i.name) + '</option>';
       }).join('');
     }
     var form = document.getElementById('form-browse-create');
     form.reset();
+    // Apply the preset AFTER form.reset() (reset would otherwise snap the
+    // select back to its first option).
+    if (isStudy && presetInv && sel) sel.value = presetInv;
     var nameInput = form.querySelector('[name=name]');
     if (nameInput) nameInput._touched = false;
     form.querySelector('.form-error').textContent = '';
@@ -10816,6 +10997,10 @@
           closeModal('modal-browse-create');
           window._investigationsLoaded = false;
           if (typeof _loadInvestigations === 'function') _loadInvestigations();
+          // Also refresh the iset index (bug 2): _loadInvestigations only
+          // reloads the flat study list, leaving the Studies panel / rail /
+          // dropdown showing stale data until a full reload.
+          if (typeof _loadInvestigationSets === 'function') _loadInvestigationSets();
           if (typeof _vivOpenInvestigationFromRail === 'function') _vivOpenInvestigationFromRail(name);
         });
     } else {
@@ -10824,14 +11009,18 @@
         .then(function (p) {
           if (!p[0]) { errEl.textContent = p[1].error || 'Create failed.'; return; }
           var created = (p[1] && p[1].name) || name;
-          // Seed the question on the scaffolded study (best-effort).
-          apiFetch('PATCH', '/api/study/' + encodeURIComponent(created), { narrative: { path: 'purpose.question', value: prompt } })
-            .catch(function () {}).then(function () {
-              closeModal('modal-browse-create');
-              window._investigationsLoaded = false;
-              if (typeof _loadInvestigations === 'function') _loadInvestigations();
-              _openStudyEmbeddedNewTab(created);
-            });
+          // The question is now persisted server-side by study-create (issue
+          // #1618, bug 1) — it writes a live top-level `question:` on the
+          // scaffold. The old best-effort PATCH to `purpose.question` wrote the
+          // wrong (non-canonical, non-allowlisted) path and silently failed.
+          closeModal('modal-browse-create');
+          window._investigationsLoaded = false;
+          if (typeof _loadInvestigations === 'function') _loadInvestigations();
+          // Refresh the iset index too so the parent investigation's study
+          // count + Studies panel reflect the new study immediately, instead of
+          // "0 · No studies" until reload (issue #1618, bug 2).
+          if (typeof _loadInvestigationSets === 'function') _loadInvestigationSets();
+          _openStudyEmbeddedNewTab(created);
         });
     }
   }
@@ -11991,6 +12180,7 @@
       .then(function(d) {
         window._currentIsetData = d;
         try { _vivLoadEvidence(name); } catch (_) {}
+        try { _vivLoadValidationPanel(name); } catch (_) {}
         document.getElementById('investigation-detail-title').textContent = d.title || d.name;
         // Also refresh the VISIBLE chrome header (#ws-title) from the authoritative
         // detail payload. _showInvestigationWorkspace set it from _isetIndex, which
@@ -12099,6 +12289,20 @@
   // "All clear" explainer popover: says what the deterministic needs-attention
   // scan means and lists the checks behind it (all passing when all-clear), so
   // the user can see there's nothing to act on — or what would be flagged.
+  // The honest headline for an investigation the scan flagged NOTHING in. "All
+  // clear" (green) is reserved for an investigation that has member studies AND
+  // at least one has run — otherwise there is simply nothing evaluated yet, which
+  // is a neutral state, not a validated one (issue #1618, bug 3: "✓ All clear" on
+  // an empty / never-run investigation read as if the work had passed).
+  function _naQuietState(summary) {
+    summary = summary || {};
+    var members = (summary.member_count != null) ? summary.member_count : null;
+    var evaluated = (summary.evaluated_count != null) ? summary.evaluated_count : null;
+    if (members === 0) return { label: 'No studies yet', cls: 'aig-na-quiet', color: '#475569' };
+    if (evaluated === 0) return { label: 'No runs yet', cls: 'aig-na-quiet', color: '#475569' };
+    return { label: '✓ All clear', cls: 'aig-na-clear', color: '#166534' };
+  }
+
   function _aigCloseAllClearInfo() { var p = document.getElementById('aig-allclear-pop'); if (p) p.remove(); }
   function _aigShowAllClearInfo(anchor) {
     if (document.getElementById('aig-allclear-pop')) { _aigCloseAllClearInfo(); return; }   // toggle
@@ -12172,6 +12376,13 @@
         + '</li>';
     }).join('');
     var clear = total === 0;
+    // Honest headline: "✓ All clear" only when something was actually evaluated;
+    // otherwise "No studies yet" / "No runs yet" (neutral), never a green pass.
+    var _quiet = _naQuietState(summary);
+    var _headColor = clear ? _quiet.color : '#b45309';
+    var _headline = clear
+      ? _quiet.label
+      : '⚠ ' + total + ' need' + (total === 1 ? 's' : '') + ' attention';
     var pop = document.createElement('div');
     pop.id = 'aig-allclear-pop';
     pop.setAttribute('role', 'dialog');
@@ -12181,8 +12392,8 @@
       + 'max-height:78vh;overflow:auto;font-size:0.85em;color:#334155;line-height:1.32';
     pop.innerHTML =
       '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:2px">'
-        + '<span style="font-weight:700;color:' + (clear ? '#166534' : '#b45309') + '">'
-          + (clear ? '✓ All clear' : '⚠ ' + total + ' need' + (total === 1 ? 's' : '') + ' attention') + '</span>'
+        + '<span style="font-weight:700;color:' + _headColor + '">'
+          + _headline + '</span>'
         + (memberCount != null ? '<span class="muted" style="font-size:0.9em;white-space:nowrap">' + memberCount + ' member stud' + (memberCount === 1 ? 'y' : 'ies') + ' scanned</span>' : '')
       + '</div>'
       + '<ul style="margin:4px 0 0;padding:0;list-style:none">' + rows + '</ul>'
@@ -12235,11 +12446,13 @@
       var lbl = '<span class="muted" style="font-size:0.85em">code-computed by the needs-attention scan (deterministic)</span>';
       var total = (d.summary.total) || 0;
       if (!total) {
-        // All-clear: a compact chip — now CLICKABLE to explain what it means and
-        // show the (passing) checks behind it.
+        // Nothing flagged — but only call it a green "✓ All clear" when a study
+        // has actually run; an empty / never-run investigation gets a neutral
+        // "No studies yet" / "No runs yet" chip instead (issue #1618, bug 3).
+        var _q = _naQuietState(d.summary);
         if (chip) chip.innerHTML =
-          '<button type="button" class="aig-na-chip aig-na-clear" onclick="window._aigShowAllClearInfo(this)" '
-          + 'title="Click to see what the needs-attention scan checked">✓ All clear</button>';
+          '<button type="button" class="aig-na-chip ' + _q.cls + '" onclick="window._aigShowAllClearInfo(this)" '
+          + 'title="Click to see what the needs-attention scan checked">' + _q.label + '</button>';
         return;
       }
       var bySev = d.summary.by_severity || {};
@@ -13171,7 +13384,19 @@
     edgesSvg.innerHTML  = '';
 
     if (!studies.length) {
-      nodesHost.innerHTML = '<p class="empty-state" style="padding:24px">No studies in this investigation.</p>';
+      // Offer the next step from the empty state instead of making the user
+      // hunt for "+ Study" (issue #1618, §1 — "Offer the next step in every
+      // empty state"). Pre-select THIS investigation in the dialog.
+      var _emptyInv = window._currentInvestigation || '';
+      nodesHost.innerHTML =
+        '<div class="empty-state" style="padding:24px;text-align:center">' +
+          '<p style="margin:0 0 10px">No studies in this investigation yet.</p>' +
+          '<button type="button" class="action-btn" id="iset-empty-add-study">+ Add a study</button>' +
+        '</div>';
+      var _emptyAddBtn = document.getElementById('iset-empty-add-study');
+      if (_emptyAddBtn) _emptyAddBtn.addEventListener('click', function () {
+        _openBrowseCreate('study', _emptyInv);
+      });
       return;
     }
 
@@ -15008,12 +15233,14 @@
   window._vivRunStudyFromRow = function (ev, slug) {
     if (ev) ev.stopPropagation();
     if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') return;
-    if (!confirm("Run this study's current baseline spec as a new run?")) return;
-    apiFetch('POST', '/api/study-run-baseline', {study: slug}).then(function (r) { return r.json(); }).then(function (j) {
-      var id = j && (j.run_id || j.simulation_id);
-      var msg = id ? ('Run launched — ' + id) : ('Run: ' + ((j && j.error) || 'done'));
-      if (typeof _showToast === 'function') _showToast(msg); else alert(msg);
-    }).catch(function (e) { alert('Run failed: ' + e); });
+    _confirmGate("Run this study's current baseline spec as a new run?").then(function (_ok) {
+      if (!_ok) return;
+      apiFetch('POST', '/api/study-run-baseline', {study: slug}).then(function (r) { return r.json(); }).then(function (j) {
+        var id = j && (j.run_id || j.simulation_id);
+        var msg = id ? ('Run launched — ' + id) : ('Run: ' + ((j && j.error) || 'done'));
+        if (typeof _showToast === 'function') _showToast(msg); else alert(msg);
+      }).catch(function (e) { alert('Run failed: ' + e); });
+    });
   };
   // ↻ reproduce — replay a study's most recent run's recorded manifest (live
   // only). Resolves the latest run id from /api/simulations first.
@@ -17225,7 +17452,7 @@
         '<hr style="margin:20px 0;border:none;border-top:1px solid #eee">' +
         '<p class="panel-lead">Analyses to run at dispatch time — which of the workspace\'s <code>v2ecoli.' +
           'workflow.analysis.ANALYSIS_REGISTRY</code> entries to compute. Translated ' +
-          'into <code>analysis_options</code> for remote (sms-api) dispatch and the local post-run pipeline ' +
+          'into <code>analysis_options</code> for remote dispatch and the local post-run pipeline ' +
           'alike.</p>' +
         '<div id="inv-analyses-list">' +
           (window.ProgressTrack ? window.ProgressTrack.loadingHtml('Loading analyses…') : '<p class="empty-state">Loading analyses…</p>') +
@@ -18742,7 +18969,7 @@
   window._runInvestigation = _runInvestigation;
 
   function _deleteInvestigation(name) {
-    if (!confirm('Delete investigation "' + name + '"? This removes its runs.db, visualizations, and spec.yaml.')) return;
+    if (!confirm('Delete investigation "' + name + '"? This removes the investigations/' + name + '/ folder (its investigation.yaml and any member studies stored under it). A same-named top-level study is not affected.')) return;
     apiFetch('POST', '/api/investigation-delete', {name: name}).then(function(r) { return r.json(); }).then(function(j) {
       if (!j.ok) { alert('Delete failed: ' + (j.error || 'unknown')); return; }
       var detail = document.getElementById('investigation-detail');
@@ -19387,7 +19614,7 @@
   // Statuses that mean "not finished" — a run the user just launched and is
   // actively watching. These ALWAYS pin to the top of the Runs list, regardless
   // of the column sort: remote list timestamps come from an unreliable bulk
-  // `last_updated` (every GovCloud run shows the same frozen time), so a live
+  // `last_updated` (every remote run shows the same frozen time), so a live
   // cloud run can't otherwise rise above the wall of old completed runs.
   var _ACTIVE_RUN_STATUSES = { queued: 1, running: 1, pending: 1, submitted: 1,
                                in_progress: 1, started: 1, dispatching: 1 };
@@ -19397,9 +19624,15 @@
   function _sortActiveRuns(list) {
     // Newest dispatch first among the active runs — the remote simulation_id is
     // monotonic and trustworthy (unlike the frozen timestamp), else fall to time.
+    // Opaque run ids: only an integer id is ordered by value; any other id (a /viva/v1 or
+    // compose-api string) counts as 0 here and falls through to the time order.
+    function _simIdNum(r) {
+      var v = (r.remote_origin || {}).simulation_id;
+      return /^\d+$/.test(String(v == null ? '' : v).trim()) ? Number(v) : 0;
+    }
     return list.slice().sort(function (a, b) {
-      var ai = ((a.remote_origin || {}).simulation_id) || 0;
-      var bi = ((b.remote_origin || {}).simulation_id) || 0;
+      var ai = _simIdNum(a);
+      var bi = _simIdNum(b);
       if (ai !== bi) return bi - ai;
       return (b.completed_at || b.started_at || 0) - (a.completed_at || a.started_at || 0);
     });
@@ -19609,7 +19842,7 @@
 
     // Phase 1 — local-first: fetch the fast local index (include_remote=false)
     // so the table + count paint in ~seconds instead of blocking on the slow
-    // (~tens-of-seconds) remote (GovCloud) fetch. Snapshot mode has no live
+    // (~tens-of-seconds) remote-backend fetch. Snapshot mode has no live
     // backend, so its baked list is already complete — load it in one call.
     var snapshot = (window.__DASH_CONFIG__ || {}).mode === 'snapshot';
     window.DataSource.loadSimulations(snapshot ? undefined : { includeRemote: false })
@@ -19624,7 +19857,7 @@
         }
         // Never shrink back to the local-only set once the remote-enriched rows
         // have loaded: a quiet auto-refresh's fast local-only fetch must not clobber
-        // the (slow) GovCloud rows while they're still valid — that collapse-to-local
+        // the (slow) remote rows while they're still valid — that collapse-to-local
         // then re-fetch was the visible flap.
         var _incoming = data.simulations || [];
         if (!window._simRemoteLoaded || _incoming.length >= (window._simRows || []).length) {
@@ -19643,7 +19876,8 @@
         // Phase 2 — merge in the remote runs (slow ~100s) in the background.
         // On a quiet auto-refresh this only re-fires after a backoff and never
         // while one is in flight, so the 15s poll can't restart the slow fetch.
-        if (!snapshot) _maybeLoadRemoteSims(quiet);
+        // Only when a backend lists its runs (the `listing` feature).
+        if (!snapshot) _whenListingOffered(function () { _maybeLoadRemoteSims(quiet); });
       })
       .catch(function (err) {
         if (quiet) return;
@@ -19655,12 +19889,25 @@
   window._initSimulations = _initSimulations;
 
   // Phase 2 of the Runs load: fetch local+remote (the second call includes the
-  // GovCloud runs, deduped server-side) and merge into the table. Best-effort:
-  // a down tunnel leaves the local-only view in place.
-  // Don't re-pull the slow GovCloud list more than ~every 3 min on the quiet
+  // remote backend's runs, deduped server-side) and merge into the table.
+  // Best-effort: an unreachable backend leaves the local-only view in place.
+  // Don't re-pull the slow remote list more than ~every 3 min on the quiet
   // auto-refresh; the deployed /simulations endpoint can take ~100s, so a 15s
   // poll firing it repeatedly never settles.
   var REMOTE_REFRESH_MS = 180000;
+
+  // Phase 2 is an optional request: run `fn` only when the declared features
+  // include `listing` (static/backend-features.js, docs/backend-adapters.md
+  // §2.2). Known features without it skip phase 2 — the server would list no
+  // remote runs. UNKNOWN features (no BackendFeatures, or its request failed)
+  // behave as before: phase 2 runs.
+  function _whenListingOffered(fn) {
+    var bf = window.BackendFeatures;
+    if (!bf || typeof bf.ready !== 'function') { fn(); return; }
+    bf.ready().then(function (r) {
+      if (!r || !r.known || (r.features || []).indexOf('listing') !== -1) fn();
+    }, function () { fn(); });
+  }
 
   function _maybeLoadRemoteSims(quiet) {
     // First load / explicit refresh: always. Quiet auto-refresh: only after the
@@ -19696,8 +19943,8 @@
   function _setSimRemoteStatus(state) {
     var el = document.getElementById('sim-remote-status');
     if (!el) return;
-    el.textContent = state === 'loading' ? '· loading GovCloud runs…'
-      : state === 'error' ? '· GovCloud runs unavailable'
+    el.textContent = state === 'loading' ? '· loading remote runs…'
+      : state === 'error' ? '· remote runs unavailable'
       : '';
   }
 
@@ -19771,37 +20018,54 @@
       if (!chipHost) continue;
       var simId = tr.getAttribute('data-remote-sim-id');
       if (!simId) continue;
+      // The run's deployment and study, so the server finds its record (docs/backend-adapters.md step 1c); the
+      // cache is keyed by both, since two deployments can each have a run with the same integer id.
+      var where = {deployment: tr.getAttribute('data-remote-deployment') || '',
+                   study: tr.getAttribute('data-study') || ''};
+      var cacheKey = where.deployment + '|' + simId;
 
       // Already known terminal from an earlier poll this page session --
       // reapply immediately (no request, no visible flicker) instead of
       // leaving this tick's fresh-from-DB "running" render stand until the
       // next poll gets around to it.
-      var cachedPhase = window._remoteTerminalCache[simId];
+      var cachedPhase = window._remoteTerminalCache[cacheKey];
       if (cachedPhase) {
         chipHost.innerHTML = window.SimTable.statusChip(cachedPhase);
+        if (window._remoteRefusalReason && window._remoteRefusalReason[cacheKey]) {
+          chipHost.title = window._remoteRefusalReason[cacheKey];  // the refusal's reason survives a re-render
+        }
         continue;
       }
 
       if (!/running/i.test(chipHost.textContent)) continue;
       if (checked >= 20) continue;  // defensive cap, not expected to bind in practice
       checked++;
-      (function (host, id) {
-        apiFetch('GET', '/api/remote-run-poll?simulation_id=' + encodeURIComponent(id))
+      (function (host, id, key, where) {
+        apiFetch('GET', '/api/remote-run-poll?simulation_id=' + encodeURIComponent(id) +
+                 (where.deployment ? '&deployment=' + encodeURIComponent(where.deployment) : '') +
+                 (where.study ? '&study=' + encodeURIComponent(where.study) : ''))
           .then(function (r) { return r.json(); })
           .then(function (body) {
             var phase = body && body.phase;
             if (phase === 'done') {
-              window._remoteTerminalCache[id] = 'completed';
+              window._remoteTerminalCache[key] = 'completed';
               host.innerHTML = window.SimTable.statusChip('completed');
             } else if (phase === 'failed') {
-              window._remoteTerminalCache[id] = 'failed';
+              window._remoteTerminalCache[key] = 'failed';
               host.innerHTML = window.SimTable.statusChip('failed');
+            } else if (body && body.terminal) {
+              // Refused: the run belongs to another backend. Never re-polled; the reason is the chip's tooltip.
+              window._remoteTerminalCache[key] = 'other backend';
+              window._remoteRefusalReason = window._remoteRefusalReason || {};
+              window._remoteRefusalReason[key] = body.error || '';
+              host.innerHTML = window.SimTable.statusChip('other backend');
+              host.title = body.error || '';
             }
             // running / queued / unreachable: leave the chip as-is, the next
             // 15s auto-refresh tick will check again.
           })
           .catch(function () { /* transient -- next tick retries */ });
-      })(chipHost, simId);
+      })(chipHost, simId, cacheKey, where);
     }
   }
 
@@ -20595,6 +20859,12 @@
       // the existing Open-PR button. Otherwise fall back to inline append
       // for layouts that still embed everything inside #viv-git-status.
       var actions = [];
+      // Start workstream — the primary CTA when no investigation branch is
+      // active yet (blocker C / #1618: _startWork existed but nothing called it,
+      // so a new user could not begin an investigation branch from the GUI).
+      if (!s.has_active_workstream) {
+        actions.push('<button class="ws-btn ws-primary" onclick="_startWork()" title="Create an investigation branch off ' + _esc(s.base) + ' to group your authoring work">Start workstream</button>');
+      }
       if (!s.upstream_repo) {
         actions.push(s.gh_available
           ? '<button class="ws-btn ws-primary" onclick="_linkBranch()">Link branch to upstream</button>'

@@ -6,6 +6,8 @@ study's own runs.db, forwards the explicit spec_id/params/n_steps to
 invoke_run, and builds + forwards a manifest carrying emitter/emit_paths/
 runtime through to the (stubbed) launch+flush helper.
 """
+import pytest
+
 from vivarium_workbench.lib import study_runs
 
 
@@ -43,7 +45,7 @@ def test_launch_into_study_explicit_inputs_and_manifest(tmp_path, monkeypatch):
     assert "studies/s1/runs.db" in seen["db_path"].replace("\\", "/")
     assert seen["spec_id"] == "some.composite" and seen["config"].get("seed") == 3
     # item 18: launch_into_study now resolves + threads the target explicitly
-    # (remote_pinned.resolve_run_target) rather than leaving invoke_run to
+    # (backends.resolve_run_target) rather than leaving invoke_run to
     # fall back to its own .viv-build.json-only check — a plain tmp_path
     # workspace (no .viv-build.json, pinned mode off) resolves "local".
     assert seen["target"] == "local"
@@ -114,6 +116,7 @@ def test_launch_into_study_threads_reran_from(tmp_path, monkeypatch):
     assert flush_kwargs[-1]["reran_from"] == "orig-run-1"
 
 
+@pytest.mark.plugin
 def test_launch_into_study_remote_build_guard_409(tmp_path, monkeypatch):
     """A remote-build workspace (.viv-build.json) rejects before any flush —
     mirrors run_study_baseline's existing 409 guard."""
@@ -133,6 +136,7 @@ def test_launch_into_study_remote_build_guard_409(tmp_path, monkeypatch):
     assert not called
 
 
+@pytest.mark.plugin
 def test_launch_into_study_pinned_deployment_guard_409(tmp_path, monkeypatch):
     """Item 18: a deployment-wide pin (VIVARIUM_WORKBENCH_REMOTE_PINNED), with
     NO .viv-build.json in this workspace, must ALSO reject before any flush —
@@ -140,7 +144,7 @@ def test_launch_into_study_pinned_deployment_guard_409(tmp_path, monkeypatch):
     run_target_for fallback), so a pinned deployment with a plain workspace
     silently fell through to a local subprocess. Mirrors
     test_launch_into_study_remote_build_guard_409 but for the pin condition."""
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
     (tmp_path / "studies" / "s1").mkdir(parents=True)
     assert not (tmp_path / ".viv-build.json").exists()  # the pin alone must be sufficient
     monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: True)

@@ -9,13 +9,15 @@ The distinction these pin is WHICH TRANSPORT, not which method. A local
 subprocess and a dial-back worker are both held by this process, so there is
 nowhere durable for a task record to live — routing to a task tier that does not
 exist would be worse than not routing.
+
+The pool's routing is core; ``ProxyEnvWorker`` is the SMS plugin's, so its tests (below) import it through
+``_worker`` and are marked ``plugin`` (docs/backend-adapters.md step P3, K2b).
 """
 from __future__ import annotations
 
 import pytest
 
 from vivarium_workbench.lib.env_worker_client import EnvWorkerError, EnvWorkerUnavailable
-from vivarium_workbench.lib.env_worker_launcher import ProxyEnvWorker
 from vivarium_workbench.lib.env_worker_pool import WorkerPool
 
 
@@ -125,12 +127,16 @@ class _Client:
         return {}
 
 
-def _worker(client) -> ProxyEnvWorker:
+def _worker(client):
+    """A ``ProxyEnvWorker`` (the SMS plugin's) on ``client``, polling without a pause."""
+    from vivarium_workbench_sms.env_workers import ProxyEnvWorker
+
     w = ProxyEnvWorker(client, "job-1", "/ws", timeout=30)
     w.TASK_POLL_INTERVAL = 0  # type: ignore[misc]
     return w
 
 
+@pytest.mark.plugin
 def test_call_task_polls_to_completion_and_returns_the_result():
     client = _Client([{"status": "queued"}, {"status": "running"},
                       {"status": "completed", "result": {"run_refs": [1, 2]}}])
@@ -139,23 +145,27 @@ def test_call_task_polls_to_completion_and_returns_the_result():
     assert client.polls == 3
 
 
+@pytest.mark.plugin
 def test_a_failed_task_raises_with_the_workers_own_message():
     client = _Client([{"status": "failed", "error_message": "study spec is invalid"}])
     with pytest.raises(EnvWorkerError, match="study spec is invalid"):
         _worker(client).call_task("run_study")
 
 
+@pytest.mark.plugin
 def test_a_cancelled_task_is_an_error_not_a_silent_none():
     client = _Client([{"status": "cancelled", "error_message": "cancelled by kr0@stanford.edu"}])
     with pytest.raises(EnvWorkerError, match="cancelled by"):
         _worker(client).call_task("run_study")
 
 
+@pytest.mark.plugin
 def test_a_submit_with_no_task_id_fails_loudly():
     with pytest.raises(EnvWorkerUnavailable, match="no task_id"):
         _worker(_Client([], submit={})).call_task("run_study")
 
 
+@pytest.mark.plugin
 def test_losing_the_poll_says_the_work_may_still_be_running():
     """A lost poll is not a lost task: the record is durable, so the error must
     point at the task rather than imply the work died."""
@@ -167,6 +177,7 @@ def test_losing_the_poll_says_the_work_may_still_be_running():
     assert "task 7" in msg
 
 
+@pytest.mark.plugin
 def test_a_timeout_does_not_cancel_and_says_so():
     """Giving up watching must not be mistaken for stopping the work — that
     confusion is how the double-run started."""
@@ -178,6 +189,7 @@ def test_a_timeout_does_not_cancel_and_says_so():
     assert "NOT cancelled" in str(ei.value)
 
 
+@pytest.mark.plugin
 def test_a_closed_worker_does_not_submit():
     client = _Client([])
     w = _worker(client)

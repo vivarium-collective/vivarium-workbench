@@ -105,6 +105,16 @@ bash scripts/serve.sh                     # convenience wrapper
 `serve --workspace <workspace-root>`. The dashboard renders the workspace once,
 picks a free port (or `--port`), prints the URL, and serves until Ctrl-C.
 
+**Idle self-shutdown.** A detached local server (`serve --detach`, as the
+`/viva-workbench` skill launches it) is meant to outlive the shell that started
+it, but nothing used to reap it — across many sessions these servers pile up and
+leak memory. So a **loopback** server now **shuts itself down after ~90 minutes
+with no HTTP requests** (an open, polling dashboard tab keeps resetting the
+timer, so an actively-used one stays up). Tune or disable it with
+`--idle-timeout <minutes>` / `VIVARIUM_WORKBENCH_IDLE_TIMEOUT` (`0` = never).
+A `0.0.0.0` / `--base-path` deployment (container / behind an ALB) is treated as
+long-lived and stays up unless you pass `--idle-timeout` explicitly.
+
 ---
 
 ## Local development against a sibling checkout

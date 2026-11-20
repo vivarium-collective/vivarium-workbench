@@ -4,6 +4,9 @@ The choice is a deployment-wide decision at one composition root (§2A.8 /
 REFACTOR-PLAN §5C.4), not a per-call switch, so the tests here are mostly about
 *which* launcher a deployment gets and what the remote one does when the pod
 never calls home — the failure that would otherwise hang a session.
+
+The local-launcher tests are core; the remote launcher is the SMS plugin's (``vivarium_workbench_sms.env_workers``),
+so its tests import it where they run and are marked ``plugin`` (docs/backend-adapters.md step P3, K2b).
 """
 import json
 import socket
@@ -14,11 +17,7 @@ from pathlib import Path
 import pytest
 
 from vivarium_workbench.lib.env_worker_client import EnvWorkerUnavailable
-from vivarium_workbench.lib.env_worker_launcher import (
-    LocalWorkerLauncher,
-    RemoteWorkerLauncher,
-    default_launcher,
-)
+from vivarium_workbench.lib.env_worker_launcher import LocalWorkerLauncher, default_launcher
 
 
 class _FakeClient:
@@ -54,6 +53,13 @@ class _FakeClient:
         return {"status": "deleted"}
 
 
+def _remote_launcher(*a, **k):
+    """The SMS plugin's ``RemoteWorkerLauncher`` (imported here, so the core tests above collect without it)."""
+    from vivarium_workbench_sms.env_workers import RemoteWorkerLauncher
+
+    return RemoteWorkerLauncher(*a, **k)
+
+
 def _stamped(tmp_path: Path, commit: str = "234dc76") -> Path:
     (tmp_path / ".viv-build.json").write_text(json.dumps({"simulator_id": 82, "commit": commit}))
     return tmp_path
@@ -66,11 +72,15 @@ def test_deployment_without_an_advertise_host_gets_the_local_launcher(monkeypatc
     assert isinstance(default_launcher(), LocalWorkerLauncher)
 
 
+@pytest.mark.plugin
 def test_deployment_that_declares_a_dial_back_host_gets_the_remote_launcher(monkeypatch):
     monkeypatch.setenv("VIVARIUM_WORKBENCH_ENV_WORKER_ADVERTISE_HOST", "10.99.45.175")
+    from vivarium_workbench_sms.env_workers import RemoteWorkerLauncher
+
     assert isinstance(default_launcher(), RemoteWorkerLauncher)
 
 
+@pytest.mark.plugin
 def test_remote_launcher_talks_to_the_configured_api_not_localhost(monkeypatch):
     """A bare SmsApiClient() takes its localhost:8080 default, which inside a pod
     is the workbench itself — every launch would fail to reach viva-api. Caught
@@ -91,9 +101,10 @@ def test_blank_host_is_treated_as_unset_not_as_a_dial_back_target(monkeypatch):
 
 # --- the remote path --------------------------------------------------------
 
+@pytest.mark.plugin
 def test_remote_launcher_asks_for_the_workspaces_own_commit(tmp_path):
     client = _FakeClient()
-    launcher = RemoteWorkerLauncher(client, advertise_host="10.0.0.7", bind_host="127.0.0.1")
+    launcher = _remote_launcher(client, advertise_host="10.0.0.7", bind_host="127.0.0.1")
     worker = launcher.launch(str(_stamped(tmp_path)), interpreter=None, timeout=30)
     try:
         req = client.started[0]
@@ -104,32 +115,35 @@ def test_remote_launcher_asks_for_the_workspaces_own_commit(tmp_path):
         worker.close()
 
 
+@pytest.mark.plugin
 def test_closing_a_remote_worker_deletes_its_job(tmp_path):
     """Otherwise a pod outlives its only client and is reachable by nobody —
     the leak the TTL backstop exists to catch, not the normal path."""
     client = _FakeClient()
-    launcher = RemoteWorkerLauncher(client, advertise_host="10.0.0.7", bind_host="127.0.0.1")
+    launcher = _remote_launcher(client, advertise_host="10.0.0.7", bind_host="127.0.0.1")
     worker = launcher.launch(str(_stamped(tmp_path)), interpreter=None, timeout=30)
     worker.close()
     assert client.stopped == ["env-worker-234dc76-abc"]
 
 
+@pytest.mark.plugin
 def test_unstamped_workspace_is_refused_with_the_reason(tmp_path):
     """Hosted requires every served workspace to be image-backed (§2A.8)."""
     client = _FakeClient()
-    launcher = RemoteWorkerLauncher(client, advertise_host="10.0.0.7", bind_host="127.0.0.1")
+    launcher = _remote_launcher(client, advertise_host="10.0.0.7", bind_host="127.0.0.1")
     with pytest.raises(EnvWorkerUnavailable, match="viv-build.json"):
         launcher.launch(str(tmp_path), interpreter=None, timeout=30)
     assert client.started == []          # never asked for a Job it could not name
 
 
+@pytest.mark.plugin
 def test_worker_that_never_dials_back_is_cleaned_up_and_reports_its_logs(tmp_path, monkeypatch):
     """A pod that fails to start would otherwise linger until TTL, and the
     timeout alone says nothing about why."""
     monkeypatch.setattr(
-        "vivarium_workbench.lib.env_worker_launcher.REMOTE_START_TIMEOUT", 0.4)
+        "vivarium_workbench_sms.env_workers.REMOTE_START_TIMEOUT", 0.4)
     client = _FakeClient(dial=False, logs="unrecognized arguments: --connect-to")
-    launcher = RemoteWorkerLauncher(client, advertise_host="10.0.0.7", bind_host="127.0.0.1")
+    launcher = _remote_launcher(client, advertise_host="10.0.0.7", bind_host="127.0.0.1")
     with pytest.raises(EnvWorkerUnavailable, match="did not connect") as exc:
         launcher.launch(str(_stamped(tmp_path)), interpreter=None, timeout=30)
     assert "unrecognized arguments" in str(exc.value)     # the worker's own reason

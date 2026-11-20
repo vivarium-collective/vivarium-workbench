@@ -6,6 +6,7 @@ the fixture workspaces (``_fixtures/<name>/<pbg_pkg>``) on sys.path for
 end-to-end tests that import the workspace's own package.
 """
 from __future__ import annotations
+import ast
 import json
 import os
 import socket
@@ -22,6 +23,349 @@ for fixture_ws in _FIXTURES.iterdir() if _FIXTURES.is_dir() else []:
         p = str(fixture_ws)
         if p not in sys.path:
             sys.path.insert(0, p)
+
+# ---------------------------------------------------------------------------
+# Core-only mode: the suite without the SMS plugin (docs/backend-adapters.md step P3, K1)
+# ---------------------------------------------------------------------------
+#
+# CORE_MODE is
+#   "absent"  the plugin cannot be imported: physically removed (the `core-only` CI job, authoritative), or hidden
+#             in this process by VIVARIUM_WORKBENCH_TEST_NO_PLUGIN=1 (a local convenience, BEST-EFFORT: subprocesses
+#             the tests spawn -- `dashboard_client`, the CLI -- still see the plugin);
+#   "off"     the plugin is installed but VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none turns providers off;
+#   None      the normal suite.
+#
+# Absent: a test module whose top-level runtime statements import the plugin cannot be collected and is ignored, as
+# is a module marked `plugin` whole (module_needs_plugin_to_collect); any other test marked `plugin` becomes
+# xfail(strict=True) -- a setup error or failure counts as xfailed, a pass is a strict XPASS (a failure: the mark is
+# stale). Off: a `plugin` test is skipped.
+
+PLUGIN_PACKAGE = "vivarium_workbench_sms"
+NO_PLUGIN_ENV = "VIVARIUM_WORKBENCH_TEST_NO_PLUGIN"
+_PROVIDERS_ENV = "VIVARIUM_WORKBENCH_BACKEND_PROVIDERS"   # lib.backends.provider.PROVIDERS_ENV
+
+
+def _is_plugin_module(name: str) -> bool:
+    return name == PLUGIN_PACKAGE or name.startswith(PLUGIN_PACKAGE + ".")
+
+
+class _NoPlugin:
+    """Every plugin import fails, as if the package were not installed (same finder as
+    tests/test_core_imports_without_plugin.py)."""
+
+    def find_spec(self, fullname, path=None, target=None):
+        if _is_plugin_module(fullname):
+            raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+        return None
+
+
+def _core_mode() -> str | None:
+    import importlib.util
+
+    if os.environ.get(NO_PLUGIN_ENV, "").strip() not in ("", "0"):
+        if not any(isinstance(f, _NoPlugin) for f in sys.meta_path):
+            sys.meta_path.insert(0, _NoPlugin())
+        for name in [n for n in sys.modules if _is_plugin_module(n)]:
+            del sys.modules[name]
+        return "absent"
+    try:
+        if importlib.util.find_spec(PLUGIN_PACKAGE) is None:
+            return "absent"
+    except (ImportError, ValueError):
+        return "absent"
+    if (os.environ.get(_PROVIDERS_ENV) or "").strip().lower() == "none":
+        return "off"
+    return None
+
+
+CORE_MODE = _core_mode()
+
+_GUARDING_EXCEPTIONS = {"ImportError", "ModuleNotFoundError", "Exception", "BaseException"}
+
+
+def _is_type_checking(test) -> bool:
+    return ((isinstance(test, ast.Name) and test.id == "TYPE_CHECKING")
+            or (isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"))
+
+
+def _guards_import_error(handler: ast.ExceptHandler) -> bool:
+    if handler.type is None:
+        return True
+    names = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+    return any((isinstance(n, ast.Name) and n.id in _GUARDING_EXCEPTIONS)
+               or (isinstance(n, ast.Attribute) and n.attr in _GUARDING_EXCEPTIONS) for n in names)
+
+
+def plugin_imports_at_module_level(source: str, local_needs_plugin=None) -> list[int]:
+    """The line numbers of the plugin imports a module runs when it is imported (so: when pytest collects it).
+
+    Counted, in the module body and in the bodies of top-level ``if`` / ``with`` / ``try`` / ``for`` / ``while`` /
+    ``match`` / ``class`` statements, and in every expression those run at import time -- simple statements (assign,
+    expression, ``assert``, ``raise``, ...), compound-statement headers (``if`` / ``while`` tests, ``for`` iterables,
+    ``with`` items, ``match`` subjects), function and class decorators (``@pytest.mark.parametrize(..., _ids())``),
+    default arguments, and class bases / keywords:
+    - ``import`` / ``from ... import`` of the plugin, and ``importlib.import_module("<plugin>...")``;
+    - an import of a sibling test-tree module (``from test_backends_existing import ws``) for which
+      ``local_needs_plugin(name)`` is true -- the plugin arrives transitively;
+    - a call to a function of this module whose body imports the plugin, directly or through another such function
+      (``MODULES = CORE + _plugin_modules()``).
+    Not counted: an import inside a function that is not called at import time, an ``if TYPE_CHECKING:`` body (its
+    ``else`` is counted), and the body of a ``try`` whose handlers catch ``ImportError`` (or a parent of it) --
+    collection survives those.
+    """
+    tree = ast.parse(source)
+    lines: list[int] = []
+
+    def _is_plugin_call(node) -> bool:
+        return (isinstance(node, ast.Call) and isinstance(node.func, (ast.Attribute, ast.Name))
+                and (getattr(node.func, "attr", None) or getattr(node.func, "id", None)) == "import_module"
+                and bool(node.args) and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str) and _is_plugin_module(node.args[0].value))
+
+    def _needs(module: str | None) -> bool:
+        if not module:
+            return False
+        if _is_plugin_module(module):
+            return True
+        return local_needs_plugin is not None and bool(local_needs_plugin(module.split(".")[0]))
+
+    def _imports_anywhere(node) -> bool:
+        for n in ast.walk(node):
+            if isinstance(n, ast.Import) and any(_needs(a.name) for a in n.names):
+                return True
+            if isinstance(n, ast.ImportFrom) and n.level == 0 and _needs(n.module):
+                return True
+            if _is_plugin_call(n):
+                return True
+        return False
+
+    # The module's functions that import the plugin when called (a fixpoint over calls between them).
+    functions = {f.name: f for f in tree.body if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    importing = {name for name, f in functions.items() if _imports_anywhere(f)}
+    changed = True
+    while changed:
+        changed = False
+        for name, f in functions.items():
+            if name not in importing and any(
+                    isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in importing
+                    for n in ast.walk(f)):
+                importing.add(name)
+                changed = True
+
+    def _runs_plugin_import(node) -> bool:
+        # Like ast.walk, but a lambda's body does not run at import time.
+        todo = [node]
+        while todo:
+            n = todo.pop()
+            if isinstance(n, ast.Lambda):
+                continue
+            if _is_plugin_call(n) or (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                                      and n.func.id in importing):
+                return True
+            todo.extend(ast.iter_child_nodes(n))
+        return False
+
+    def check(*exprs) -> None:
+        """The expressions a statement evaluates at import time (its body aside): count the first that imports."""
+        for e in exprs:
+            if e is not None and _runs_plugin_import(e):
+                lines.append(e.lineno)
+                return
+
+    def visit(body) -> None:
+        for stmt in body:
+            if isinstance(stmt, ast.Import):
+                if any(_needs(a.name) for a in stmt.names):
+                    lines.append(stmt.lineno)
+            elif isinstance(stmt, ast.ImportFrom):
+                if stmt.level == 0 and _needs(stmt.module):
+                    lines.append(stmt.lineno)
+            elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                # The body runs when called; the decorators and defaults run now. (Annotations are skipped: the
+                # test tree uses `from __future__ import annotations`.)
+                check(*stmt.decorator_list, *stmt.args.defaults, *stmt.args.kw_defaults)
+            elif isinstance(stmt, ast.ClassDef):
+                check(*stmt.decorator_list, *stmt.bases, *(k.value for k in stmt.keywords))
+                visit(stmt.body)
+            elif isinstance(stmt, ast.If):
+                check(stmt.test)
+                if not _is_type_checking(stmt.test):
+                    visit(stmt.body)
+                visit(stmt.orelse)
+            elif isinstance(stmt, ast.Try) or type(stmt).__name__ == "TryStar":
+                if not any(_guards_import_error(h) for h in stmt.handlers):
+                    visit(stmt.body)
+                for h in stmt.handlers:
+                    visit(h.body)
+                visit(stmt.orelse)
+                visit(stmt.finalbody)
+            elif isinstance(stmt, (ast.With, ast.AsyncWith, ast.For, ast.AsyncFor, ast.While)):
+                if isinstance(stmt, (ast.With, ast.AsyncWith)):
+                    check(*(item.context_expr for item in stmt.items))
+                elif isinstance(stmt, ast.While):
+                    check(stmt.test)
+                else:
+                    check(stmt.iter)
+                visit(stmt.body)
+                visit(getattr(stmt, "orelse", []))
+            elif isinstance(stmt, ast.Match):
+                check(stmt.subject, *(c.guard for c in stmt.cases))
+                for case in stmt.cases:
+                    visit(case.body)
+            elif _runs_plugin_import(stmt):
+                # Any other simple statement (assign, expression, assert, raise, del, ...) runs whole at import.
+                lines.append(stmt.lineno)
+
+    visit(tree.body)
+    return sorted(lines)
+
+
+def declares_plugin_mark(source: str) -> bool:
+    """A top-level ``pytestmark = ...`` whose value names the ``plugin`` mark (alone or in a list)."""
+    for stmt in ast.parse(source).body:
+        targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target] if isinstance(
+            stmt, ast.AnnAssign) else []
+        if any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in targets) and stmt.value is not None:
+            for node in ast.walk(stmt.value):
+                if isinstance(node, ast.Attribute) and node.attr == "plugin" and isinstance(
+                        node.value, ast.Attribute) and node.value.attr == "mark":
+                    return True
+    return False
+
+
+_PLUGIN_IMPORT_CACHE: dict[tuple[str, int, bool], bool] = {}
+
+
+def module_imports_plugin(path: Path, _visiting: frozenset[str] = frozenset(), *, count_marked: bool = False) -> bool:
+    """Whether importing this test-tree module imports the plugin, directly or through a sibling module it imports
+    (``from test_backends_existing import ws``). AST only; cached by path and mtime; an import cycle counts as no.
+
+    ``count_marked=True`` (what collection uses: ``module_needs_plugin_to_collect``) also counts a module that declares
+    a whole-module ``pytestmark`` naming ``plugin``, and a module importing such a sibling."""
+    try:
+        key = (str(path), path.stat().st_mtime_ns, count_marked)
+    except OSError:
+        return False
+    if key in _PLUGIN_IMPORT_CACHE:
+        return _PLUGIN_IMPORT_CACHE[key]
+    if str(path) in _visiting:
+        return False
+    visiting = _visiting | {str(path)}
+
+    def _sibling_needs_plugin(name: str) -> bool:
+        sibling = path.parent / f"{name}.py"
+        return sibling != path and sibling.is_file() and module_imports_plugin(
+            sibling, visiting, count_marked=count_marked)
+
+    try:
+        source = path.read_text(encoding="utf-8")
+        result = (count_marked and declares_plugin_mark(source)) or bool(
+            plugin_imports_at_module_level(source, _sibling_needs_plugin))
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        result = False      # let pytest report it
+    if result or not _visiting:     # inside a cycle a "no" may be provisional; a "yes" is always final
+        _PLUGIN_IMPORT_CACHE[key] = result
+    return result
+
+
+def module_needs_plugin_to_collect(path: Path) -> bool:
+    """Whether the core-only run ignores this module: it imports the plugin at module level (as far as the AST
+    detector sees), OR it declares a whole-module ``pytestmark = pytest.mark.plugin`` (or imports such a sibling).
+
+    The second clause makes marking a pure-plugin module whole ALWAYS a valid fix, even for an import-time plugin use
+    the detector misses. Trade-off: such a module's tests are not collected in the core-only run at all, so they are
+    never strict-xfailed there -- a stale whole-module mark (a module that no longer needs the plugin) is not caught
+    by an XPASS. tests/test_plugin_test_marking.py's hollow-mark check (the module must reference the plugin) is the
+    guard for that instead."""
+    return module_imports_plugin(path, count_marked=True)
+
+
+def _test_modules() -> list[Path]:
+    root = Path(__file__).parent
+    return sorted(p for p in root.rglob("test_*.py") if "_fixtures" not in p.relative_to(root).parts)
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "plugin: needs the SMS plugin (vivarium_workbench_sms) installed with providers on; strict-xfail when the "
+        "plugin is absent, skipped with VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none (step P3 core-only job)")
+
+
+def pytest_ignore_collect(collection_path, config):
+    if CORE_MODE != "absent":
+        return None
+    if collection_path.suffix == ".py" and collection_path.name.startswith("test_") \
+            and module_needs_plugin_to_collect(collection_path):
+        return True
+    return None
+
+
+def pytest_collection_modifyitems(config, items):
+    if CORE_MODE is None:
+        return
+    if CORE_MODE == "absent":
+        mark = pytest.mark.xfail(strict=True, reason="core-only: needs the SMS plugin (absent)")
+    else:
+        mark = pytest.mark.skip(reason=f"core-only: needs the SMS plugin with providers on ({_PROVIDERS_ENV}=none)")
+    for item in items:
+        if item.get_closest_marker("plugin") is not None:
+            item.add_marker(mark)
+
+
+#: Core-only counts for the job summary. pytest_runtest_logreport also runs on the xdist controller (the reports
+#: carry their keywords), so on the controller these cover every worker.
+_CORE_ONLY_COUNTS: dict[str, set[str]] = {"plugin_items": set(), "xfailed": set(), "xpassed": set()}
+
+
+def pytest_runtest_logreport(report):
+    if CORE_MODE is None or "plugin" not in report.keywords:
+        return
+    state = _CORE_ONLY_COUNTS
+    state["plugin_items"].add(report.nodeid)
+    if getattr(report, "wasxfail", None) is not None and report.skipped:
+        state["xfailed"].add(report.nodeid)
+    elif report.when == "call" and report.failed and "XPASS" in str(report.longrepr or ""):
+        state["xpassed"].add(report.nodeid)
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    if CORE_MODE is None or hasattr(config, "workerinput"):
+        return
+    state = _CORE_ONLY_COUNTS
+    ignored = [p.name for p in _test_modules() if module_needs_plugin_to_collect(p)] if CORE_MODE == "absent" else []
+    collect_errors = sorted({r.nodeid or str(getattr(r, "fspath", "?")) for r in terminalreporter.stats.get("error", [])
+                             if getattr(r, "when", None) == "collect"})
+    lines = [f"### Core-only mode: plugin {CORE_MODE}", ""]
+    if collect_errors or exitstatus == pytest.ExitCode.INTERRUPTED:
+        lines += [
+            f"> [!CAUTION]\n> **{len(collect_errors)} test module(s) failed to COLLECT** (exit status "
+            f"{int(exitstatus)}): their tests did not run at all. A module that imports the plugin at import time "
+            "without the detector seeing it (tests/conftest.py `plugin_imports_at_module_level`) lands here.",
+            "",
+            *[f"- collection error: `{e}`" for e in collect_errors],
+            "",
+        ]
+    lines += [
+        f"- test modules ignored (import the plugin at module level, or marked `plugin` whole): **{len(ignored)}**",
+        f"- `plugin`-marked tests run in this job: **{len(state['plugin_items'])}**",
+        f"- of those xfailed: **{len(state['xfailed'])}**; strict XPASS (stale mark): **{len(state['xpassed'])}**",
+    ]
+    terminalreporter.write_line("")
+    for line in lines:
+        terminalreporter.write_line(line)
+    out = os.environ.get("GITHUB_STEP_SUMMARY")
+    if out:
+        with open(out, "a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+            if ignored:
+                fh.write("\n<details><summary>ignored modules</summary>\n\n"
+                         + "\n".join(f"- `{n}`" for n in ignored) + "\n\n</details>\n")
+    if out:   # GitHub annotations, so the run page shows them without opening the log
+        for e in collect_errors:
+            terminalreporter.write_line(
+                f"::error title=core-only collection error::{e} failed to collect; its tests did not run")
+
 
 # ---------------------------------------------------------------------------
 # Global catalog isolation
@@ -84,7 +428,7 @@ UNREACHABLE_VIVA_API_BASE = "http://127.0.0.1:1"
 def _isolate_viva_api_base():
     """Point the viva-api client at a closed port for the whole run.
 
-    ``workspace_deps_views._sms_api_base()`` falls back to
+    ``sms_api_client.sms_api_base()`` falls back to
     ``http://localhost:8080`` when neither ``VIVA_API_BASE`` nor
     ``SMS_API_BASE`` is set — and **8080 is exactly where a developer's SSM
     tunnel to the live dev deployment listens** (``sms-proxy.sh -s smsvpctest``,
@@ -508,6 +852,71 @@ def _restore_composite_spec_registry():
         cs.clear_registry()
         for spec in before.values():
             cs.register(spec)
+
+
+#: Every process-level cache keyed by a backend URL, as ``(module, attribute)``. The backend tests start stub servers
+#: on ephemeral ports and several name the same fixed dead URL, so anything one test learns about a URL (its circuit
+#: breaker, its profile, its identity, a failure remembered for a few seconds) is otherwise still there for the next
+#: test that names it. A module not yet imported has nothing to forget; an attribute the module does not have (code
+#: that predates or postdates it) is skipped.
+BACKEND_CACHES = (
+    # The circuit breakers live in backend_config (step P1a); remote_link re-exports the same registry.
+    ("vivarium_workbench.lib.backend_config", "_links"),
+    ("vivarium_workbench_sms.remote_link", "_links"),
+    ("vivarium_workbench.lib.server_capabilities", "_PROFILE_CACHE"),
+    ("vivarium_workbench.lib.backends.records", "_IDENTITY"),
+    ("vivarium_workbench.lib.backends.records", "_FAILED"),
+    ("vivarium_workbench.lib.backends.records", "_REFRESHED"),
+    ("vivarium_workbench_sms.sms_api_client", "_ENV_IDS"),
+    ("vivarium_workbench_sms.sms_api_client", "COMPOSE_API_BASES"),  # absent since compose-api identities moved
+    ("vivarium_workbench.lib.remote_run_views", "_FACET_MEMO"),
+    ("vivarium_workbench_sms.remote_analysis_figures", "_caps_cache"),
+    ("vivarium_workbench_sms.remote_simulations", "_REMOTE_CACHE"),
+    ("vivarium_workbench_sms.remote_simulations", "_REMOTE_META"),
+)
+
+
+def forget_backend_caches() -> None:
+    import sys
+
+    for name, attr in BACKEND_CACHES:
+        module = sys.modules.get(name)
+        cache = getattr(module, attr, None)
+        if cache is None:
+            continue
+        lock = getattr(module, "_links_lock", None) if attr == "_links" else None
+        if lock is not None:
+            with lock:
+                cache.clear()
+        else:
+            cache.clear()
+
+
+def forget_the_github_session() -> None:
+    """``github_auth.current_session()`` caches the first session it finds for the life of the process -- and on a
+    developer's machine that is their real ``gh auth`` login, found by any test that merely sends a request
+    (``caller_identity()`` reads it for the identity header). A later test that hides ``gh`` and the keyring to
+    assert "not authenticated" would still see the cached login. CI has no ``gh`` login, so this only failed
+    locally."""
+    import sys
+
+    auth = sys.modules.get("vivarium_workbench.lib.github_auth")
+    if auth is None:
+        return
+    auth._set_cached_session(None)
+    with auth._STATE_LOCK:
+        auth._PENDING_FLOWS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _forget_what_the_process_learned_about_backends():
+    """What the process learns about a backend URL, or about who is signed in, must not outlive the test that
+    learned it: see :data:`BACKEND_CACHES` and :func:`forget_the_github_session`."""
+    forget_backend_caches()
+    forget_the_github_session()
+    yield
+    forget_backend_caches()
+    forget_the_github_session()
 
 
 @pytest.fixture(autouse=True)

@@ -18,7 +18,7 @@ work runs**, so a fix applied to one silently misses the others:
 | `/api/investigation-run` | inline `textwrap` script + `subprocess`, **synchronous** | **no — zero references** |
 | `prepare-investigation` CLI | pbg composite, blocking `StudySteps` | refuses since 2a (#957) |
 
-`remote_pinned.resolve_run_target` is the user's own local-vs-deployment choice —
+`backends.resolve_run_target` is the user's own local-vs-deployment choice —
 set by which workspace they picked (a session build stamps `.viv-build.json`), or
 by `VIVARIUM_WORKBENCH_REMOTE_PINNED`, which `sms-api-stanford-test` sets for
 *every* workspace. Measured there:

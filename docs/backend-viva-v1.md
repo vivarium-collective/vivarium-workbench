@@ -85,14 +85,26 @@ So an arbitrary workspace composite cannot be dispatched by id. The general rout
   * `environment`: `{"name": "runtime"}` (default; the **only** name `NAMED_ENVIRONMENTS` accepts in
     viva-core — `deployment-default` is merely the label a legacy compose submission is *recorded*
     under), or `{"id": "<env id>"}` via `VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT=id:<env id>`.
+    This reading of the variable is the SMS plugin's (`vivarium_workbench_sms/remote_run_viva_v1.backend_environment`,
+    moved out of the core's `remote_run` in step P2 Builds B2); its readers are the study page's submit, the
+    composite card's `VivaCoreRuns.dispatch_composite` (the git preflight runs only for a named environment) and the
+    detached run (`deployment_run`). compose-api reads the same variable in its own `name:` form
+    (docs/backend-compose-api.md).
   * `execution.options` (closed set, `extra=forbid`): `interval_time` (= steps, 0..100000);
     for a named environment `extra_pip_deps` = `git+<origin>.git@<HEAD>` (+ the workspace's pinned
     framework versions) so the workspace code is installed in the container — the same contract as
     legacy `/compose/v1`, including the server's `compose_allow_list`; a named environment **refuses**
     `num_nodes` / `analysis_options`; for an environment id `analysis_options` is sent and no pip deps.
   * A named-environment dispatch requires a clean, pushed workspace (`remote_dispatch_preflight`).
-* `legacy`: anything else (no capabilities route, or a run surface without documents) — unchanged
-  `/compose/v1` + `/api/v1/simulations`.
+  * An environment id (`id:<env id>`) runs its prebuilt image and **ships nothing from the workspace's git tree**:
+    the card, the study page and the detached run (`deployment_run`, which skips `git_pip_url` and the pinned deps
+    for it) never need a clean or pushed tree. `/api/remote-dispatch-preflight` answers `ok: true` for it; when the
+    tree is dirty or unpushed it adds a non-blocking `warnings` list ("uncommitted changes are not used by this
+    environment ..."), which the composite card's run-target badge shows as an ⓘ on `Runs: Cloud` with the note in
+    its tooltip, without blocking a Run (step P2 Builds B2b, Finding F).
+* `legacy`: any other backend that answers (no capabilities route, or a run surface without documents) —
+  unchanged `/compose/v1` + `/api/v1/simulations`. A named backend that does not answer is not `legacy`: see
+  "When the named backend cannot be reached" below.
 
 **Unverified (needs a real run, the owner's call):** that the `runtime` image plus `extra_pip_deps`
 resolves a given workspace's processes, and that the repo is on the backend's allow-list.
@@ -109,24 +121,48 @@ cached 30 s). A session build (`.viv-build.json`) or the pinned-build config kee
 |---|---|
 | `serve` start-up | probe `/version`, `GET /viva/v1/capabilities` + `/health`; prints `backend dispatch: <mode>` |
 | `GET /api/remote-run-config` | unchanged payload + `backend: {dispatch, version, capabilities, services, reachable, error}` (key absent when no backend is named) |
-| Run target (`remote_pinned.resolve_run_target`) | `deployment` when the above holds |
+| Run target (`backends.resolve_run_target`) | `deployment` when the above holds |
 | Study baseline / variant run, `POST /api/remote-run-submit` (no `simulator_id`) | `POST /viva/v1/composites` (document); answer `{run_id, phase, backend}` |
-| Composites-tab / detached run (`run_remote`) | `POST /viva/v1/composites`, poll `/composites/{id}/status`, results `GET /viva/v1/compose/simulation/{n}/results` (see below for `n`), emitter history landed into the run's own `runs.db` |
+| Composites-tab / detached run (`run_remote` -> `runs.run_composite`, the plugin's `deployment_run.run`) | `POST /viva/v1/composites`, poll `/composites/{id}/status`, results `GET /viva/v1/compose/simulation/{n}/results` (see below for `n`), emitter history landed into the run's own `runs.db` |
 | `POST /api/remote-run-land {study, simulation_id: <run id>}` (Runs table: **⬇ Land results**) | `GET /composites/{id}` (409 unless `completed`), `n` lookup, results archive, emitter history into the study's `runs.db` as a completed run; provenance under `viva_v1` (run id, simulation id, job id, installed commit) |
 | `GET /api/remote-run-poll?run_id=` or `?simulation_id=<run id>` | `/composites/{id}/status` |
 | `GET /api/remote-run-chain-progress?run_id=` | `/composites/{id}/progress` (`simulation` jobs = seeds) |
 | `POST /api/remote-run-cancel {simulation_id: <run id>}` | `DELETE /composites/{id}` |
-| `GET /api/remote-dispatch-preflight` | clean+pushed check; `dispatch: viva-v1-document` |
+| `GET /api/remote-dispatch-preflight` | clean+pushed check for a named environment; an `id:` environment is always `ok`, with `warnings` for a dirty/unpushed tree; `dispatch: viva-v1-document` |
 
 Not yet wired to `/viva/v1` (still legacy, or unsupported against a viva-core-only backend):
 analyses (`/api/v1/analyses*`), build/branch pickers, `/composites/{id}/{jobs,datasets,log,events}`
 (client methods exist, no UI consumer yet), and the ecoli pinned flow (`simulator_id`).
 
+### When the named backend cannot be reached
+
+Naming a backend says "run there", so a run is never started locally in its place. When the profile read cannot
+reach it (a refused or dropped connection, a timeout, an HTTP error other than a 404 from `/viva/v1/capabilities`,
+or a connection failure or 5xx from `/openapi.json`, which decides between legacy and compose-api), every run start
+that resolves a target answers `502` with `phase: unreachable`: `resolve_run_target` (the study baseline and variant,
+the Composites card, investigation runs) and `remote_run_submit` without a `simulator_id` (unless a pinned or session
+build sends it to SMS). The preflight answers `200` with `ok: false` and the same fields; `vwb run` prints the body
+and exits 1; the investigation trigger answers `200` with `launch_status: 502` and the body in `run`. A dry-run
+preview starts nothing and still answers.
+
+The failure is remembered for 5 s, counted from the end of the probe (a success keeps its 30 s). The probe goes
+through the circuit breaker like every other call: a dropped connection on ANY call to that URL opens it for a
+minute, not only one in the profile read, and while it is open the profile answers "unreachable" without a network
+call, so a dead or hung backend is not asked by every request. One blip therefore refuses every run start (the local
+runs of a named legacy backend included) until RemoteLink's own probe (every 30 s while `serve` runs, on the one URL
+`sms_api_base()` names at start-up) or the first call after the minute is up closes it; the profile reads the
+backend again within the 5 s after that: about half a minute when the probe watches that URL, up to a minute
+otherwise. A named backend that does answer, as a legacy one, still runs locally.
+
+Not covered: `/api/investigation-resolve` and `/api/investigation-run-one` never ask which backend is named
+(`artifacts/pipeline.py` calls `run_core.invoke_run` with no target; `investigation_run_one_views.py` runs a local
+subprocess), before or after this.
+
 ## Fetching results
 
 | Deployment | Route | Note |
 |---|---|---|
-| any with the compose surface | `GET /viva/v1/compose/simulation/{n}/results` (`application/zip` from SLURM, `application/gzip` from object storage) | verified live. **`n` is NOT the number in the run's `job_id`** (`compose:<m>`: that is the `compose_hpcrun` row; container builds take rows too, so they drift -- `compose:46` was simulation 43). No route maps one to the other, so the workbench reads `GET /viva/v1/compose/simulations/status/batch` over `ids` up to `m` and accepts only the row whose `correlation_id` is the run id AND `database_id` is `m` (`remote_run.compose_simulation_id`); none -> an error, never a guess. A zip's `emitter_history.json` (`{<emitter>: [state per step]}`) lands one `history` row per step (`remote_run_landing.land_composite_results`) |
+| any with the compose surface | `GET /viva/v1/compose/simulation/{n}/results` (`application/zip` from SLURM, `application/gzip` from object storage) | verified live. **`n` is NOT the number in the run's `job_id`** (`compose:<m>`: that is the `compose_hpcrun` row; container builds take rows too, so they drift -- `compose:46` was simulation 43). No route maps one to the other, so the workbench reads `GET /viva/v1/compose/simulations/status/batch` over `ids` up to `m` and accepts only the row whose `correlation_id` is the run id AND `database_id` is `m` (`remote_run_viva_v1.compose_simulation_id`); none -> an error, never a guess. A zip's `emitter_history.json` (`{<emitter>: [state per step]}`) lands one `history` row per step (`remote_run_landing.land_composite_results`) |
 | with a dataset store | `GET /viva/v1/composites/{id}/datasets` then `GET /viva/v1/datasets/{dataset_id}/content` | live: store absent (503) |
 | SMS (full viva-api) | viva-api's own smoke still downloads via legacy `GET /api/v1/simulations?experiment_id=` then `/api/v1/simulations/{id}/data` | **no `/viva/v1` equivalent yet for an `ecoli-simulation` run's output** |
 
@@ -137,6 +173,11 @@ Listing/registering simulators and branch builds (`/core/v1/simulator/*`, partly
 `/chain-progress`, `/api/v1/analyses*` (analysis dispatch/status/plots), `/api/v1/simulations/discovery`,
 `/api/v1/simulations/{id}/data` downloads, trace (`/viva/v1/composites/{id}/trace` is used where advertised).
 These stay on the legacy `SmsApiClient` methods.
+
+The trace lives in the plugin since P2 Runs b2 (`vivarium_workbench_sms/sms_trace.py`): a recorded viva-core run
+(the Runs tab sends its id as `simulation_id`) goes to `VivaCoreRuns.trace` -> `GET /viva/v1/composites/{id}/trace`
+after the `viva-v1-trace` capability check, and a recorded sms-legacy simulation to `SmsLegacyRuns.trace` ->
+`GET /api/v1/simulations/{id}/trace`; anything no record routes goes to the SMS `unrouted` facet, unchanged.
 
 ## Identity / auth
 

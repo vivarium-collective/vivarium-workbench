@@ -12,8 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from vivarium_workbench.lib import remote_run_landing as rrl
 from vivarium_workbench.lib import remote_run_views as rrv
+from vivarium_workbench_sms import sms_landing, sms_legacy
+
+#: The landing and the SMS run auth are the SMS plugin's: every test here needs it (step P3, K2b; the core's own
+#: providers-off 400 is pinned in test_backend_providers.py).
+pytestmark = pytest.mark.plugin
 
 
 def _make_results_tar(dst: Path) -> Path:
@@ -53,7 +57,7 @@ def _ws(tmp_path):
 
 def test_lands_ptools_and_analyses_into_run_dir(_ws, tmp_path):
     tar = _make_results_tar(tmp_path / "src")
-    result = rrl.land_remote_simulation_artifacts(_ws, 501, "exp-a", client=_FakeClient(tar))
+    result = sms_landing.land_remote_simulation_artifacts(_ws, 501, "exp-a", client=_FakeClient(tar))
     run_dir = _ws / ".pbg" / "runs" / "exp-a"
     assert (run_dir / "ptools" / "genes.tsv").is_file()
     assert result["run_id"] == "exp-a"
@@ -72,14 +76,14 @@ def test_no_ptools_in_tar_lands_zero(_ws, tmp_path):
     tar = tmp_path / "sim_9.tar.gz"
     with tarfile.open(tar, "w:gz") as t:
         t.add(stage, arcname=".")
-    result = rrl.land_remote_simulation_artifacts(_ws, 9, "exp-empty", client=_FakeClient(tar))
+    result = sms_landing.land_remote_simulation_artifacts(_ws, 9, "exp-empty", client=_FakeClient(tar))
     assert result == {"run_id": "exp-empty", "ptools": 0, "analyses": False}
 
 
 # ---- the HTTP-shaped view ------------------------------------------------
 
 def test_view_requires_simulation_id_and_run_id(_ws, monkeypatch):
-    monkeypatch.setattr(rrv, "_run_auth_ok", lambda: True)
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
     body, status = rrv.remote_run_land_artifacts(_ws, {"run_id": "exp-a"})
     assert status == 400
     body, status = rrv.remote_run_land_artifacts(_ws, {"simulation_id": 501})
@@ -87,10 +91,10 @@ def test_view_requires_simulation_id_and_run_id(_ws, monkeypatch):
 
 
 def test_view_returns_landing_result(_ws, tmp_path, monkeypatch):
-    monkeypatch.setattr(rrv, "_run_auth_ok", lambda: True)
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda *a, **k: object())
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda *a, **k: object())
     monkeypatch.setattr(
-        "vivarium_workbench.lib.remote_run_landing.land_remote_simulation_artifacts",
+        "vivarium_workbench_sms.sms_landing.land_remote_simulation_artifacts",
         lambda ws, sid, rid, client: {"run_id": rid, "ptools": 3, "analyses": True},
     )
     body, status = rrv.remote_run_land_artifacts(_ws, {"simulation_id": 501, "run_id": "exp-a"})
@@ -99,14 +103,26 @@ def test_view_returns_landing_result(_ws, tmp_path, monkeypatch):
 
 
 def test_view_shapes_sms_api_error(_ws, monkeypatch):
-    from vivarium_workbench.lib.sms_api_client import SmsApiError
-    monkeypatch.setattr(rrv, "_run_auth_ok", lambda: True)
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda *a, **k: object())
+    from vivarium_workbench_sms.sms_api_client import SmsApiError
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda *a, **k: object())
 
     def _boom(ws, sid, rid, client):
         raise SmsApiError("GET /data -> 502: 502 Bad Gateway", status=502)
     monkeypatch.setattr(
-        "vivarium_workbench.lib.remote_run_landing.land_remote_simulation_artifacts", _boom)
+        "vivarium_workbench_sms.sms_landing.land_remote_simulation_artifacts", _boom)
     body, status = rrv.remote_run_land_artifacts(_ws, {"simulation_id": 1, "run_id": "x"})
     assert status == 502
     assert "sms-api unavailable" in body["error"]
+
+
+def test_view_shapes_any_other_failure_as_a_500(_ws, monkeypatch):
+    """Step P2 Runs c1: the tail moved into ``sms_legacy.land_artifacts_tail`` with the same error shaping."""
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda *a, **k: object())
+
+    def _boom(ws, sid, rid, client):
+        raise OSError("disk full")
+    monkeypatch.setattr(sms_landing, "land_remote_simulation_artifacts", _boom)
+    body, status = rrv.remote_run_land_artifacts(_ws, {"simulation_id": "3", "run_id": "x"})
+    assert (status, body) == (500, {"error": "land failed: OSError: disk full"})

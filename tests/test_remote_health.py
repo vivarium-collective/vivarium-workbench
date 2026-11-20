@@ -6,9 +6,18 @@ degrade cleanly (never raise) so a fresh operator/Chris always gets a clear sign
 """
 import pytest
 
-from vivarium_workbench.lib import sms_api_client as sac
+from vivarium_workbench.lib import backend_config
+from vivarium_workbench_sms import sms_api_client as sac
 from vivarium_workbench.lib import workspace_deps_views as wdv
-from vivarium_workbench.lib.sms_api_client import SmsApiError
+from vivarium_workbench_sms.sms_api_client import SmsApiError
+
+#: Every test here exercises the SMS plugin (step P3, K2c): the core-only run ignores this module.
+pytestmark = pytest.mark.plugin
+
+
+def _ping_with(monkeypatch, client_cls):
+    """step P1a (patch target moved): remote_health pings through backend_config.ping, not SmsApiClient.ping."""
+    monkeypatch.setattr(backend_config, "ping", lambda base, timeout=None: client_cls(base).ping(timeout))
 
 
 class _OkClient:
@@ -33,7 +42,7 @@ def test_remote_health_reachable(monkeypatch):
     # legacy alias specifically (cf. test_env_worker_launcher, same pattern).
     monkeypatch.delenv("VIVA_API_BASE", raising=False)
     monkeypatch.setenv("SMS_API_BASE", "http://sms-api.example:8080")
-    monkeypatch.setattr(sac, "SmsApiClient", _OkClient)
+    _ping_with(monkeypatch, _OkClient)
     assert wdv.remote_health() == {
         "configured": True,
         "base_url": "http://sms-api.example:8080",
@@ -49,7 +58,7 @@ def test_remote_health_unreachable_does_not_raise(monkeypatch):
     # legacy alias specifically (cf. test_env_worker_launcher, same pattern).
     monkeypatch.delenv("VIVA_API_BASE", raising=False)
     monkeypatch.setenv("SMS_API_BASE", "http://sms-api.example:8080")
-    monkeypatch.setattr(sac, "SmsApiClient", _DownClient)
+    _ping_with(monkeypatch, _DownClient)
     h = wdv.remote_health()
     assert h["configured"] is True
     assert h["reachable"] is False
@@ -62,7 +71,7 @@ def test_remote_health_unconfigured_uses_default_and_flags_it(monkeypatch):
     # test_remote_run_endpoints.test_sms_api_base_default_and_override.
     monkeypatch.delenv("VIVA_API_BASE", raising=False)
     monkeypatch.delenv("SMS_API_BASE", raising=False)
-    monkeypatch.setattr(sac, "SmsApiClient", _DownClient)
+    _ping_with(monkeypatch, _DownClient)
     h = wdv.remote_health()
     assert h["configured"] is False
     assert h["base_url"] == "http://localhost:8080"

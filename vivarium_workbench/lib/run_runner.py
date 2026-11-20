@@ -109,12 +109,11 @@ class RunRequest:
     # wins on name collision. Empty/absent = a no-op merge (composite defaults
     # flow through unchanged), never a crash.
     declared_results: dict = None  # type: ignore[assignment]
-    # Cloud-run-against-build: when a deployment run targets a SELECTED registered
-    # build (the Environment picker's chosen Cloud build), this carries that
-    # build's identity {simulator_id, repo_url, commit}. run_remote then installs
-    # the workspace code from build_ref['commit'] instead of the local git tree —
-    # so a Cloud run needs no local push. Absent/None = the stock deployment path
-    # (pinned config, else the clean+pushed local tree via git_pip_url).
+    # A build reference the backend's ``runs.dispatch_composite`` returned
+    # (``Detached.build_ref``, step P2 Builds B2), carried unread through
+    # run_remote to ``runs.run_composite``. (The SMS plugin's: the Environment
+    # picker's selected build {simulator_id, repo_url, commit}, installed instead
+    # of the local git tree.) Absent/None = the backend's stock deployment path.
     build_ref: dict = None  # type: ignore[assignment]
 
     @classmethod
@@ -972,16 +971,16 @@ def _render_default_viz(*, db_file: str, run_id: str, core) -> dict:
 def _remote_failure_reason(exc: Exception) -> str:
     """A clean, actionable one-line reason for a failed remote run.
 
-    Maps the known failure modes (poll timeout, unreachable sms-api, dirty/unpushed
+    Maps the known failure modes (poll timeout, unreachable backend, dirty/unpushed
     workspace) to a hint an external user can act on, instead of surfacing only a
     raw Python traceback in the run's error excerpt.
     """
     msg = str(exc)
     low = msg.lower()
     if isinstance(exc, TimeoutError):
-        return f"{msg}  [the run may still be executing on the deployment — check sms-api before retrying]"
+        return f"{msg}  [the run may still be executing on the deployment — check the remote backend before retrying]"
     if "unreachable" in low or "is the tunnel up" in low or "still reachable" in low:
-        return f"{msg}  [remote sms-api not reachable — is the tunnel/endpoint up? (SMS_API_BASE)]"
+        return f"{msg}  [remote backend not reachable (check the configured backend URL)]"
     if "uncommitted" in low or "untracked" in low or "not pushed" in low:
         return f"{msg}  [commit and push the workspace before running remotely — the remote build installs it from git]"
     return f"{type(exc).__name__}: {msg}"
@@ -992,7 +991,7 @@ def _remote_analysis_options(req: RunRequest, run_dir: Path) -> "dict | None":
 
     Composite-auto-results Task 8: the composite deployment path (this module)
     submitted no ``analysis_options`` at all, unlike the study path
-    (``remote_run_views.py``'s ``build_analysis_options`` call). Mirrors that:
+    (the remote study submit's own ``build_analysis_options`` call). Mirrors that:
     merges the composite's own ``@composite_generator(analyses=[...])``
     declarations (``composite_flush._composite_analyses`` — returns ``[]`` when
     ``process_bigraph.composite_generator`` isn't importable, e.g. a
@@ -1032,10 +1031,11 @@ def _remote_analysis_options(req: RunRequest, run_dir: Path) -> "dict | None":
 
 
 def _execute_remote(req: RunRequest, run_dir: Path) -> int:
-    """Dispatch a 'deployment'-target run to sms-api and land results. Returns 0/1.
+    """Dispatch a 'deployment'-target run to the selected backend and land results. Returns 0/1.
 
-    SP-D2: delegates to the already-built ``remote_run.run_remote`` (export .pbg →
-    ``/compose/v1`` submit → poll → download results.tar.gz), writing the SAME
+    SP-D2: delegates to ``remote_run.run_remote`` (the backend's ``runs.run_composite``; for SMS,
+    the plugin's ``deployment_run.run``: export .pbg → ``/compose/v1`` submit → poll → download
+    results.tar.gz), writing the SAME
     ``composite-runs.db`` status rows the local path does so the browser's existing
     ``/api/composite-run/<id>/status`` polling works unchanged. Unpacking the landed
     tar.gz into a viewable emitter store (viz/chart rendering) is still a
@@ -1053,7 +1053,7 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
     compose-results-land-p0 T5c: once ``run_remote`` returns a landed
     tar.gz path, extract it and fold any analysis manifest into
     ``analyses.json`` via ``remote_run_landing.fold_analyses`` directly —
-    deliberately NOT via ``land_remote_run``, which is study-shaped and mints
+    deliberately NOT via the plugin's ``sms_landing.land_remote_run``, which is study-shaped and mints
     its OWN ``run_id`` (would fork a second, disconnected run row vs
     ``req.run_id`` and break the browser's status polling). This call is
     unconditional (no separate ``auto_results`` check — the send-side gate in
@@ -1098,6 +1098,16 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
                         emitter=STUDY_EMITTER if remote_emit_paths else None)
                 except (ValueError, zipfile.BadZipFile) as land_exc:
                     _write_log(req, f"\nREMOTE RESULTS NOT LANDED: {land_exc}\n")
+                # compose-api's record of the run (environment version, image, SLURM job) goes in the manifest
+                # the launch wrote. A record that cannot be had does not fail a run that completed. Printed, not
+                # _write_log'd: the detached run's stdout IS its log (opened "w"), and the closing line below
+                # would overwrite text appended behind its back.
+                try:
+                    from vivarium_workbench.lib import remote_run_compose
+
+                    remote_run_compose.record_provenance(conn, req.run_id, Path(results_path))
+                except Exception as prov_exc:  # noqa: BLE001 -- best-effort, like the landing above
+                    print(f"\nPROVENANCE NOT RECORDED: {prov_exc}", flush=True)
             elif results_path is not None:
                 try:
                     with tempfile.TemporaryDirectory() as td:

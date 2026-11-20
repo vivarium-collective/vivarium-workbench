@@ -55,7 +55,9 @@ def test_js_has_no_remote_run_handlers():
     functions below came back, and `/api/remote-run-build`/`-land`/`-poll`
     are still unused; only `/api/remote-run-submit` (+`-config`, to read
     pinned status) is now a legitimate, deliberate caller."""
-    js = _js_text()
+    # The remote launch UI now lives in sms-launch.js (quarantined SMS UI);
+    # check the two files together so neither reintroduces the old client.
+    js = _js_text() + (Path(vivarium_workbench.__file__).parent / "static" / "sms-launch.js").read_text(encoding="utf-8")
     for name in (
         "_submitRemoteRun", "_pollBuild", "_pollRun", "_submitRun",
         "_landRemoteRun", "_renderRemoteRunProgress", "_initRemoteRunPinned",

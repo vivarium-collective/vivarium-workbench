@@ -18,7 +18,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
+from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
+
+#: The relay client is the SMS plugin's ``SmsApiClient``: every test here needs the plugin (step P3, K2b).
+pytestmark = pytest.mark.plugin
 
 DELAY = 2.0          # how long the stand-in viva-api takes to answer a relay POST
 CLIENT_DEFAULT = 0.5  # the client's default timeout: shorter than DELAY, as 30-60 s is shorter than a cold start

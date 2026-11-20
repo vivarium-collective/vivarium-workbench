@@ -153,13 +153,13 @@ def _degrade_build_error(
     # expected-for-Cloud wording as the notice rather than a raw build trace.
     if _is_parca_cache_error(err_str):
         try:
-            from vivarium_workbench.lib.remote_simulations import _read_build_meta
-            _meta = _read_build_meta(ws_root)
+            from vivarium_workbench.lib import backends
+            _build = backends.session_build(ws_root)
         except Exception:
-            _meta = None
-        if _meta is not None:
-            _sim = _meta.get("simulator_id")
-            _commit = str(_meta.get("commit") or "")[:7]
+            _build = None
+        if _build is not None and _build.readable:
+            _sim = _build.id
+            _commit = str(_build.commit or "")[:7]
             who = (f"remote build #{_sim}" if _sim is not None else "this remote build") \
                 + (f" @ {_commit}" if _commit else "")
             build_error["notice"] = (

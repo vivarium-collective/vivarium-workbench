@@ -16,9 +16,13 @@ class RunTargetUnavailable(RuntimeError):
 
 
 def run_target_for(workspace: Path) -> str:
-    """A materialized remote build (WS3's .viv-build.json stamp) runs on the
-    deployment; a plain local workspace runs locally."""
-    return "deployment" if (Path(workspace) / ".viv-build.json").is_file() else "local"
+    """A session build (a provider's checkout of one of its builds,
+    ``backends.session_build``) runs on the deployment; a plain local workspace
+    runs locally -- and so does every workspace with providers off or the plugin
+    absent."""
+    from vivarium_workbench.lib import backends  # lazy: backends sits above run_core
+
+    return "deployment" if backends.session_build(Path(workspace)) is not None else "local"
 
 
 @dataclass
@@ -43,8 +47,8 @@ def invoke_run(workspace, *, spec_id, config, db_path,
     """Resolve the run id + execution target for a composite run.
 
     SP-D2: the ``deployment`` target is now BUILT — it dispatches to
-    ``remote_run.run_remote`` (export .pbg → sms-api ``/compose/v1`` → poll →
-    land) through the same detached-runner model the local target uses. The
+    ``remote_run.run_remote`` (the selected backend's ``runs.run_composite``: run →
+    poll → land) through the same detached-runner model the local target uses. The
     caller writes a run-request carrying ``plan.target``; ``run_runner.execute``
     branches on it. (``RunTargetUnavailable`` is retained for callers that still
     want to reject a target explicitly, but ``invoke_run`` no longer raises it.)

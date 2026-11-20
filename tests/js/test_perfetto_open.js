@@ -306,6 +306,22 @@ async function testOpenTraceErrorClosesWindow() {
   assert.ok(/viva-v1-trace/.test(last[1]), 'the server error is shown');
 }
 
+// Step 1c-2: a row's deployment and study travel with the trace request, so the server routes the run by its
+// record and refuses one of another backend (that refusal is a 409 with the error shown, as above).
+async function testRowDeploymentAndStudyAreSent() {
+  P._reset();
+  const f = fetchStub({
+    '/api/remote-run-trace-support': () => ({ ok: true, json: () => Promise.resolve({
+      supported: true, viewer: { mode: 'external', url: 'https://ui.perfetto.dev/' } }) }),
+    '/api/remote-run-trace': () => ({ ok: false, status: 409,
+      json: () => Promise.resolve({ error: 'this run was dispatched to prod', terminal: true }) }),
+  });
+  const w = { closed: false, close() { this.closed = true; }, postMessage() {} };
+  await P.openTrace({ simulation_id: 5, deployment: 'stanford test', study: 's1' },
+    { fetch: f, location: { origin: 'x' }, open: () => w, notify: () => {} });
+  assert.ok(f.seen.includes('/api/remote-run-trace?simulation_id=5&deployment=stanford%20test&study=s1'), f.seen);
+}
+
 async function testSnapshotNeverAsks() {
   P._reset();
   globalThis.__DASH_CONFIG__ = { mode: 'snapshot' };
@@ -321,7 +337,8 @@ async function testSnapshotNeverAsks() {
   for (const t of [testViewerUrl, testPingUntilPongThenPost, testIgnoresPongFromElsewhere,
     testClosedWindowGivesUp, testUnparseableViewerUrlPostsNothing, testOpenTraceBundledEndToEnd, testOpenTraceErrorClosesWindow,
     testEmptyTraceNeverReachesPerfetto, testServerCountWinsOverTheDocument, testTraceEventCount,
-    testProgressStaysUntilPerfettoAnswers, testStatusBoxInTheDom, testSnapshotNeverAsks]) {
+    testProgressStaysUntilPerfettoAnswers, testStatusBoxInTheDom, testSnapshotNeverAsks,
+    testRowDeploymentAndStudyAreSent]) {
     await t();
     console.log('ok -', t.name);
   }

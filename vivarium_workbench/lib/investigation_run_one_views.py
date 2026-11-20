@@ -104,6 +104,31 @@ def investigation_run_one(ws_root: Path, body: dict) -> tuple[dict, int]:
     if not inv:
         return {"error": "investigation required"}, 400
 
+    # #1630 follow-up: this ad-hoc "Duplicate run" executes the composite in a
+    # LOCAL detached subprocess (below). `resolve_run_target` is item 18's
+    # authoritative local-vs-deployment answer, and this route never consulted
+    # it — so on a pinned deployment, a session switched to a materialized build,
+    # or an operator-named backend, the run silently executed on the workbench
+    # host instead of where the run target points. Refuse (409) rather than run
+    # local, exactly as the synchronous `investigation_run` route does: this flow
+    # runs inline and cannot honor a deployment target. A NAMED backend that
+    # cannot be reached raises APIError (502 "unreachable") here and propagates
+    # unchanged (the app's APIError handler renders it) — never a local run in
+    # its place. With no pin, build stamp, or named backend this resolves to
+    # "local" with no network call and nothing changes. The gate sits after
+    # request validation so a malformed request keeps its own 4xx.
+    from vivarium_workbench.lib import backends
+    if backends.resolve_run_target(Path(ws_root)) == "deployment":
+        return {
+            "error": "investigation run-one resolves to the 'deployment' run target",
+            "name": inv,
+            "run_target": "deployment",
+            "hint": "This ad-hoc single-run flow executes inline on the workbench "
+                    "host and cannot honor a deployment target. Use the Composites "
+                    "run (POST /api/composite-test-run) or the study Run launcher, "
+                    "which resolve the same target and dispatch to the named backend.",
+        }, 409
+
     spec_path = study_spec.study_spec_path(ws_root, inv)
     if not spec_path.is_file():
         return {"error": "spec.yaml not found"}, 404

@@ -140,21 +140,20 @@ class TestRemoteRepoUrl:
         assert gs.remote_repo_url(tmp_path) is None
 
     def test_success_normalizes_url(self, monkeypatch, tmp_path: Path) -> None:
-        # The .git suffix is stripped by the reused lib _normalize_repo_url.
+        # The .git suffix is stripped by normalize_repo_url.
         monkeypatch.setattr(
             gs.subprocess, "run",
             lambda *a, **k: _cp(returncode=0, stdout="https://github.com/x/y.git\n"),
         )
         assert gs.remote_repo_url(tmp_path) == "https://github.com/x/y"
 
-    def test_uses_lib_normalize_not_a_new_copy(self, monkeypatch, tmp_path: Path) -> None:
-        """remote_repo_url routes through lib.source_build_views._normalize_repo_url."""
-        from vivarium_workbench.lib import source_build_views as sbv
+    def test_uses_normalize_repo_url(self, monkeypatch, tmp_path: Path) -> None:
+        """remote_repo_url routes through git_status.normalize_repo_url."""
         monkeypatch.setattr(
             gs.subprocess, "run",
             lambda *a, **k: _cp(returncode=0, stdout="ssh://git@host/r.git"),
         )
-        monkeypatch.setattr(sbv, "_normalize_repo_url", lambda u: "SENTINEL")
+        monkeypatch.setattr(gs, "normalize_repo_url", lambda u: "SENTINEL")
         assert gs.remote_repo_url(tmp_path) == "SENTINEL"
 
 
@@ -307,13 +306,17 @@ class TestBuildGitStatus:
         }
         assert expected_keys.issubset(result.keys())
 
-    def test_dirty_count_zero_no_origin(self, repo: Path) -> None:
-        """Without an origin remote, build_git_status returns early before
-        computing dirty_count (matches original _get_git_status behaviour)."""
+    def test_dirty_count_counts_files_without_origin(self, repo: Path) -> None:
+        """A local-only workspace (no origin remote) still reports its
+        uncommitted files. Regression for issue #1618 bug 6: build_git_status
+        used to return early on the missing-origin check, before dirty_count
+        was computed, so the "Commit all" panel never appeared for an un-pushed
+        workspace (dirty_count: 0 with files uncommitted)."""
         (repo / "dirty.txt").write_text("change\n")
         result = gs.build_git_status(repo)
-        # Returns early after origin check fails → dirty_count stays at default 0
-        assert result["dirty_count"] == 0
+        assert result["upstream_repo"] is None       # still no origin
+        assert result["push_state"] == "no_origin"
+        assert result["dirty_count"] >= 1             # but files are counted now
 
 
 # ---------------------------------------------------------------------------

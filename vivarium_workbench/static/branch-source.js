@@ -9,6 +9,46 @@
   var NEW_BRANCH_SENTINEL = "__new_branch__";
   var pollTimer = null;
 
+  // Remote builds are the `builds` feature (docs/backend-adapters.md §2.1, step
+  // P3 F3): the Cloud scope, the remote-health row, the build rows/actions and
+  // the /api/source/builds request all need it, and so does VivEnv's Cloud scope
+  // (the loom and the composite cards route by it). "Off" only when the declared
+  // features are KNOWN and lack `builds`; unknown (no answer yet, a failed fetch,
+  // no BackendFeatures on the page) behaves as before this step, and the server
+  // refuses what it cannot do.
+  var FEATURES_WAIT_MS = 1500;   // longest the first paint waits for the features
+  function _features() {
+    var F = window.BackendFeatures;
+    return (F && typeof F.ready === "function" && typeof F.known === "function") ? F : null;
+  }
+  function _buildsOff() {
+    var F = _features();
+    return !!(F && F.known() && !F.has("builds"));
+  }
+  // Resolves once the features are settled (known or unknown); never rejects.
+  function _featuresSettled() {
+    var F = _features();
+    if (!F) return Promise.resolve();
+    return Promise.resolve().then(function () { return F.ready(); }).then(function () {}, function () {});
+  }
+  // A Cloud scope held from before the features were known (the active source
+  // was a materialized build, or a card flipped the scope) reads Local once they
+  // are known without `builds`. Returns whether it changed.
+  function _dropCloudScope() {
+    if (state.scope !== "remote" || !_buildsOff()) return false;
+    state.scope = "local";
+    state.repo = null; state.branch = null; state.newBranch = ""; state.showAllBuilds = false;
+    state.entries = []; state.error = null; state.health = null;
+    return true;
+  }
+  // The help text's build-only items (index.html.j2, data-feature="builds").
+  function _hideBuildHelp() {
+    if (!_buildsOff() || typeof document.querySelectorAll !== "function") return;
+    try {
+      document.querySelectorAll('[data-feature="builds"]').forEach(function (el) { el.style.display = "none"; });
+    } catch (e) { /* no DOM */ }
+  }
+
   // Snapshot (published static bundle): no live backend. The Source panel
   // becomes a navigator across the SIBLING published workspaces listed in a
   // static manifest (default ../workspaces.json), and "Switch" navigates to the
@@ -88,7 +128,7 @@
   // Session-per-tab (pinned-for-life): a tab is one source for its life, so a
   // selection OPENS A NEW TAB bound to it rather than re-pointing this one.
   //   local workspace → /?workspace=<catalog-name>   (session.js binds by name)
-  //   sms-api build    → /?build=<simulator_id>        (…→ switch-build, materialize)
+  //   remote build     → /?build=<simulator_id>        (…→ switch-build, materialize)
   // session.js's bootstrap force-mints a fresh per-tab session in the new tab and
   // performs the bind; session-status.js shows the ⏳ favicon while a build
   // materializes. A local entry with no catalog name falls back to the in-place
@@ -217,7 +257,7 @@
         ? await rb.json().catch(function () { return { error: "bad response" }; })
         : { error: "unreachable" };
       if (db.error) {
-        // Transient outage (the sms-api tunnel reconnecting): ride it out. Keep
+        // Transient outage (the remote backend reconnecting): ride it out. Keep
         // the last-known builds on screen instead of blanking the panel —
         // _render shows a quiet "reconnecting" chip, not the raw error.
         state.error = db.error;
@@ -246,7 +286,7 @@
     return out.sort();
   }
 
-  // Remote sms-api health indicator row (state.health = {configured, base_url,
+  // Remote backend health indicator row (state.health = {configured, base_url,
   // reachable, version, error} from /api/source/remote-health).
   function _healthRow() {
     var h = state.health;
@@ -258,14 +298,14 @@
     if (!h) {
       color = "#93a1b5"; txt = "checking remote endpoint…";
     } else if (!h.configured && !h.reachable) {
-      color = "#5d6b7e"; txt = "SMS_API_BASE not set — remote disabled";
+      color = "#5d6b7e"; txt = "No remote backend configured — remote disabled";
     } else if (h.reachable) {
       color = "#41d886";
-      txt = h.base_url + (h.version ? "  ·  sms-api v" + h.version : "") + "  ·  reachable ✓";
+      txt = (h.base_url || "") + (h.version ? "  ·  backend v" + h.version : "") + "  ·  reachable ✓";
       dot.style.boxShadow = "0 0 6px " + color;
     } else {
       color = "#ff5d6c";
-      txt = h.base_url + " — unreachable ✗ (is the tunnel up?)";
+      txt = (h.base_url || "remote backend") + " — unreachable ✗ (is the tunnel up?)";
       if (h.error) row.title = h.error;
     }
     dot.style.background = color;
@@ -283,27 +323,32 @@
     host.appendChild(_el("h3", "viv-bs-title", "Environment"));
     // One-line scope cue so the two cards read as distinct jobs: this card is
     // "where the tab runs"; the GitHub card below is "sync & collaborate".
-    var _sub = _el("div", "viv-bs-subtitle", "Choose where to work with this project. Local uses a checkout on your computer; Cloud uses a reusable environment managed by Workbench.");
+    var buildsOff = _buildsOff();
+    var _sub = _el("div", "viv-bs-subtitle", buildsOff
+      ? "Choose where to work with this project. Local uses a checkout on your computer."
+      : "Choose where to work with this project. Local uses a checkout on your computer; Cloud uses a reusable environment managed by Workbench.");
     _sub.style.cssText = "color:#93a1b5; font-size:12px; margin:-4px 0 12px";
     host.appendChild(_sub);
 
     // Read-only (remote-server) mode: the switchable sources are the workspaces
     // checked out ON the server — these are the "local" workspace-catalog entries
     // (path-based, switched in-process via /api/source/switch). The "remote"
-    // scope (sms-api repo@commit builds) is a separate capability that needs the
-    // sms-api tunnel; keep it available but do NOT force it (forcing remote routed
+    // scope (remote repo@commit builds) is a separate capability that needs the
+    // remote backend; keep it available but do NOT force it (forcing remote routed
     // the Switch button to the simulator_id path, which on-disk workspaces lack →
     // the button silently did nothing). Labels are clarified for the remote client.
     var RO = !!((window._uiConfig || {}).readonly);
 
     // Scope toggle — wrap the buttons in a segmented group so they share one grid
     // cell (otherwise each button lands in its own cell and "Remote" wraps).
+    // Without `builds` there is only Local: no toggle.
+    if (!buildsOff) {
     var scopeRow = _el("div", "viv-bs-row");
     scopeRow.appendChild(_el("label", "viv-bs-key", "Environment"));
     var scopeGroup = _el("div", "viv-bs-scope-group");
     ["local", "remote"].forEach(function (s) {
       var label = RO
-        ? (s === "local" ? "Workspaces" : "sms-api builds")
+        ? (s === "local" ? "Workspaces" : "Remote builds")
         : (s === "local" ? "Local" : "Cloud");
       var b = _el("button", "viv-bs-toggle" + (state.scope === s ? " active" : ""), label);
       b.addEventListener("click", function () { state.scope = s; state.repo = null; state.branch = null; state.newBranch = ""; state.showAllBuilds = false; refresh(); });
@@ -311,8 +356,9 @@
     });
     scopeRow.appendChild(scopeGroup);
     host.appendChild(scopeRow);
+    }
 
-    // Remote endpoint health indicator: a 🟢/🔴 dot + the configured SMS_API_BASE,
+    // Remote endpoint health indicator: a 🟢/🔴 dot + the configured base URL,
     // so a user knows whether the remote deployment is even reachable *before* they
     // pick a build (no more silent hangs on an unreachable tunnel).
     if (state.scope === "remote") host.appendChild(_healthRow());
@@ -335,7 +381,7 @@
     var inRepo = state.entries.filter(function (e) { return e.repo === state.repo; });
     // Order the branch list for usefulness, not alphabetically (clearer remote
     // selection): `main` first, then most-recently-built branch first (recency =
-    // the branch's highest sms-api build id). Local scope has no build ids, so it
+    // the branch's highest remote build id). Local scope has no build ids, so it
     // falls back to main-first + the alphabetical order _distinct already gives.
     function _branchRecency(br) {
       var t = 0;
@@ -351,10 +397,10 @@
       if (b === "main" && a !== "main") return 1;
       return _branchRecency(b) - _branchRecency(a);
     });
-    // Remote scope: `branches` only ever covers branches with an existing sms-api
+    // Remote scope: `branches` only ever covers branches with an existing remote
     // build (state.entries is sourced from /api/source/builds) — registering a
     // brand-new branch's build already works server-side (/api/source/build-remote
-    // resolves any real branch's live HEAD via sms-api), the picker just never
+    // resolves any real branch's live HEAD via the remote backend), the picker just never
     // offered a way to type one (item 67). Append a sentinel option that reveals a
     // free-text branch input instead of forcing a pick from already-built ones.
     var branchOptions = branches.slice();
@@ -519,7 +565,7 @@
           alert("Build failed: network error");
         });
     });
-    actions.appendChild(buildBtn);
+    if (!buildsOff) actions.appendChild(buildBtn);
 
     var syncBtn = _el("button", "viv-bs-action", "Run locally"); syncBtn.id = "viv-bs-sync";
     syncBtn.title = "Get a copy of this exact source on YOUR machine: pops a "
@@ -546,17 +592,17 @@
         // Builds already on screen → a transient blip (tunnel reconnecting).
         // Quiet indicator only; the selectors/list above keep the last-known
         // builds, and this clears itself the moment a poll succeeds.
-        var chip = _el("div", "viv-bs-note", "⟳ sms-api reconnecting… showing last-known builds");
+        var chip = _el("div", "viv-bs-note", "⟳ remote backend reconnecting… showing last-known builds");
         chip.style.cssText = "color:#92740e;font-size:0.82em;opacity:0.8;margin-top:6px";
         host.appendChild(chip);
       } else {
         // No builds yet (first-load failure): a calm, actionable message — not
         // the raw urlopen error.
-        var errNote = _el("div", "viv-bs-note", "sms-api not reachable — is the tunnel up?"
+        var errNote = _el("div", "viv-bs-note", "Remote backend not reachable — is the tunnel up?"
           + (state.scope === "remote" ? " Auto-retrying every 5s…" : ""));
         var retryBtn = _el("button", "viv-bs-toggle", "Retry");
         retryBtn.style.marginLeft = "8px";
-        retryBtn.title = "Re-check sms-api now";
+        retryBtn.title = "Re-check the remote backend now";
         retryBtn.addEventListener("click", function () { _stopBuildsPoll(); refresh(); });
         errNote.appendChild(retryBtn);
         host.appendChild(errNote);
@@ -612,7 +658,7 @@
       }
       // Newest-first (remote builds carry a monotonic simulator_id), with the
       // active source floated to the very top, then any build of the commit the
-      // workspace is on. sms-api accumulates a build per register/upload and has
+      // workspace is on. The backend accumulates a build per register/upload and has
       // no delete, so this history gets long — hence the sort + collapse below.
       rows = rows.slice().sort(function (a, b) {
         var ac = a.current ? 2 : (a.matchesWorkspace ? 1 : 0);
@@ -936,7 +982,7 @@
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
 
-  // While a Remote source is selected but sms-api is unreachable, keep
+  // While a Remote source is selected but the backend is unreachable, keep
   // re-checking in the background so a recovered tunnel clears the error and
   // populates the builds on its own — no manual page reload needed.
   function _ensureBuildsPoll() {
@@ -955,16 +1001,23 @@
     if (!host) return;
     if (SNAP) { await _loadSnapshotEntries(); _renderSnapshot(); return; }
     _stopBuildsPoll();
+    // /api/workspaces is slow (git status across every workspace). Start it NOW,
+    // before the features wait, so a slow features answer never delays it; it is
+    // fetched ONCE and reused for both `current` and the local entries.
+    var wsFetch = fetch("/api/workspaces").catch(function () { return null; });
+    // Wait (briefly, bounded) for the declared features so a workbench without
+    // `builds` never flashes the Cloud toggle; usually already settled. Only the
+    // render is gated on this race, not the workspaces fetch above.
+    await Promise.race([_featuresSettled(), new Promise(function (res) { setTimeout(res, FEATURES_WAIT_MS); })]);
+    _dropCloudScope();
+    _hideBuildHelp();
     // Paint the Source shell (title + Scope toggle + selectors) IMMEDIATELY so it
     // appears on the first visit even while the workspace/builds fetches are in
     // flight — those can take many seconds, and the panel previously stayed blank
     // until they finished. A second _render() below fills in the loaded entries.
     state.loading = true;
     _render();
-    // /api/workspaces is slow (git status across every workspace). Fetch it ONCE
-    // here and reuse it for both `current` and the local entries (was fetched
-    // twice, doubling the wait).
-    var r = await fetch("/api/workspaces").catch(function () { return null; });
+    var r = await wsFetch;
     var wsData = (r && r.ok) ? await r.json().catch(function () { return {}; }) : {};
     state._wsData = wsData;
     var cur = wsData.current || null;
@@ -985,7 +1038,7 @@
     // honor the user's explicit scope toggle.
     if (!state.inited) {
       state.inited = true;
-      state.scope = state.currentSimId != null ? "remote" : "local";
+      state.scope = (state.currentSimId != null && !_buildsOff()) ? "remote" : "local";
       state.repo = null; state.branch = null;
     }
     // `cur` (from /api/workspaces) carries only {name, path} — the DISPLAY name,
@@ -996,8 +1049,12 @@
     // (e.g. "3d-ecoli"). Seed from the matching workspaces-list entry (curEntry,
     // computed above) which carries the real repo name.
     state.current = cur ? { repo: (curEntry && curEntry.repo) || cur.name } : null;
+    _dropCloudScope();
     await _loadEntries();
     state.loading = false;
+    // The features arrived (known, without `builds`) while a Cloud load was in
+    // flight: start over as Local rather than show remote builds.
+    if (_dropCloudScope()) return refresh();
     // Seed the selectors from the active remote build so it shows as current.
     if (state.currentSimId != null) {
       var cb = state.entries.filter(function (e) { return e.simulator_id === state.currentSimId; })[0];
@@ -1020,11 +1077,14 @@
   // runBuild() returns the resolved Cloud build (state.selected already defaults
   // to the branch's latest, carrying {simulator_id, repo_url, commit}), or null
   // when the scope is Cloud but no build is available (Q3 — block the Run).
+  // Without `builds` (known) the scope is always Local: isCloud() is false even
+  // when a Cloud scope is still held, and setScope("remote") is a no-op. While
+  // the features are unknown the held scope stands, as before step P3 F3.
   window.VivEnv = {
-    scope: function () { return state.scope; },
-    isCloud: function () { return state.scope === "remote"; },
+    scope: function () { return _buildsOff() ? "local" : state.scope; },
+    isCloud: function () { return state.scope === "remote" && !_buildsOff(); },
     runBuild: function () {
-      if (state.scope !== "remote") return null;
+      if (state.scope !== "remote" || _buildsOff()) return null;
       var s = state.selected;
       if (s && s.simulator_id != null) return s;
       // Local checkout, no explicit build picked: if the workspace's checked-out
@@ -1050,6 +1110,7 @@
     // Source panel isn't mounted, still fire viv:envchange so the cards update.
     setScope: function (s) {
       if (s !== "local" && s !== "remote") return;
+      if (s === "remote" && _buildsOff()) return;
       if (state.scope === s) return;
       state.scope = s;
       state.repo = null; state.branch = null; state.newBranch = ""; state.showAllBuilds = false;
@@ -1060,6 +1121,17 @@
       }
     }
   };
+  if (!SNAP) {
+    _featuresSettled().then(function () {
+      if (!_buildsOff()) return;
+      var changed = _dropCloudScope();
+      _hideBuildHelp();
+      // A refresh in flight re-checks the scope itself (above); otherwise
+      // re-render the mounted panel without the Cloud controls.
+      if (!state.loading && state.inited && document.getElementById("viv-branch-source")) refresh();
+      if (changed) { try { window.dispatchEvent(new Event('viv:envchange')); } catch (e) { /* older browsers */ } }
+    });
+  }
   document.addEventListener("DOMContentLoaded", function () {
     if (document.getElementById("viv-branch-source")) refresh();
   });

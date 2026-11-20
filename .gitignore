@@ -42,3 +42,11 @@ vivarium_workbench/loom/_dist
 # demos/v2ecoli pins sibling checkouts by path; its lock only records their HEADs
 # at lock time and goes stale as they move, so it is local, not committed.
 demos/v2ecoli/uv.lock
+
+# Artifacts the test suite generates inside fixture workspaces (registry/composite caches, a rendered report).
+# They are not tracked: commit 3f52a96e added them by accident (removed in the PR that added these lines).
+# Only these four directories -- ws_emitter_demo's composite-state-cache IS tracked on purpose.
+tests/_fixtures/ws_federation_demo/.pbg/registry-catalog/
+tests/_fixtures/ws_federation_demo/reports/
+tests/_fixtures/ws_increase_demo/.pbg/composite-state-cache/
+tests/_fixtures/ws_increase_demo/.pbg/registry-catalog/

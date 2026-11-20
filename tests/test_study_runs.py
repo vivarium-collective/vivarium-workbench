@@ -8,6 +8,7 @@ import pytest
 # SP-A: remote-build workspace → 409 guard
 # ---------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_study_run_baseline_on_remote_build_409(tmp_path, monkeypatch):
     """A workspace stamped with .viv-build.json is a remote build; study runs
     must return 409 (RunTargetUnavailable) rather than attempting a local
@@ -21,6 +22,7 @@ def test_study_run_baseline_on_remote_build_409(tmp_path, monkeypatch):
     assert status == 409
 
 
+@pytest.mark.plugin
 def test_study_run_baseline_on_pinned_deployment_409(tmp_path, monkeypatch):
     """Item 18, the confirmed real bug (backlog items 18/20, 2026-08-04): a
     deployment-wide pin (VIVARIUM_WORKBENCH_REMOTE_PINNED) with NO
@@ -31,7 +33,7 @@ def test_study_run_baseline_on_pinned_deployment_409(tmp_path, monkeypatch):
     checked remote_pinned.is_pinned_enabled() directly, so the two run
     entrypoints disagreed on the exact same deployment. Mirrors
     test_study_run_baseline_on_remote_build_409 but for the pin condition."""
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
     from vivarium_workbench.lib import study_runs
     assert not (tmp_path / ".viv-build.json").exists()  # the pin alone must be sufficient
     monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: True)
@@ -41,6 +43,7 @@ def test_study_run_baseline_on_pinned_deployment_409(tmp_path, monkeypatch):
     assert status == 409
 
 
+@pytest.mark.plugin
 def test_study_run_baseline_pinned_deployment_409_over_real_http(
     tmp_path, inproc_client, monkeypatch
 ):
@@ -50,7 +53,7 @@ def test_study_run_baseline_pinned_deployment_409_over_real_http(
     POST /api/study-run-baseline with a real 409 JSON response, not silently
     run the composite locally and return 200 -- exercising the real FastAPI
     route (api/app.py), the real CSRF/origin guard, and the real
-    lib.remote_pinned.resolve_run_target env-var resolution together, not just
+    lib.backends.resolve_run_target env-var resolution together, not just
     the lib function called directly."""
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -112,37 +115,49 @@ def test_study_run_baseline_local_unaffected_over_real_http(
 
 # ---------------------------------------------------------------------------
 # item 83: default-baseline deployment dispatch now delegates to the ONE
-# proven, real remote-dispatch mechanism (remote_run_submit) instead of an
+# proven, real remote-dispatch mechanism (the SMS submit) instead of an
 # unconditional 409 — the confirmed real bug found live during item 80's
 # UI-dispatch walkthrough (study_runs.py resolved the deployment target
 # correctly via resolve_run_target, then refused to act on it in every
-# branch). Scoped narrowly to what remote_run_submit actually supports: the
+# branch). Scoped narrowly to what that submit actually supports: the
 # study's DEFAULT baseline entry, real (non-dry-run) dispatch — see
 # study_runs.run_study_baseline's own inline comment for why a non-default
 # ?composite= override and dry_run both still fall through to the pre-
 # existing 409 unchanged.
+#
+# Step P2 Builds B3: the dispatch is the selected backend's ``builds.run_study``
+# (SMS: ``sms_legacy.SmsLegacyBuilds``), reached through ``backends.active``.
+# The pin is turned on through ``remote_pinned.is_pinned_enabled`` (what
+# ``SmsProvider.select`` reads), and the submit is faked at
+# ``sms_legacy.submit_tail``, which ``run_study`` calls.
 # ---------------------------------------------------------------------------
 
-def test_study_run_baseline_on_deployment_delegates_to_remote_run_submit(tmp_path, monkeypatch):
-    """The real, positive case: pinned deployment + a resolvable build +
-    the study's default baseline entry → a REAL call into remote_run_submit,
-    not a 409. Faking remote_run_submit itself (not the sms-api boundary it
-    calls) proves the delegation wiring — remote_run_submit's own internal
-    behavior is independently covered by test_remote_run_views_lib.py."""
-    from vivarium_workbench.lib import remote_pinned, study_runs
-    from vivarium_workbench.lib import remote_run_views
+def _pinned_on(monkeypatch, simulator_id):
+    """SMS selected by its pin, and the build it resolves; returns what reaches the SMS submit."""
+    from vivarium_workbench_sms import remote_pinned, sms_legacy
 
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws_root: "deployment")
-    monkeypatch.setattr(remote_pinned, "resolve_pinned_simulator_id", lambda client, ws_root: 75)
-
-    captured = {}
+    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: True)
+    monkeypatch.setattr(remote_pinned, "resolve_pinned_simulator_id", lambda client, ws_root: simulator_id)
+    captured: list = []
 
     def fake_submit(ws_root, body):
-        captured["body"] = body
+        captured.append(body)
         return {"simulation_id": 999, "phase": "running"}, 202
 
-    monkeypatch.setattr(remote_run_views, "remote_run_submit", fake_submit)
+    monkeypatch.setattr(sms_legacy, "submit_tail", fake_submit)
+    return captured
 
+
+@pytest.mark.plugin
+def test_study_run_baseline_on_deployment_delegates_to_the_sms_submit(tmp_path, monkeypatch):
+    """The real, positive case: pinned deployment + a resolvable build +
+    the study's default baseline entry → a REAL call into the SMS submit,
+    not a 409. Faking the submit itself (not the sms-api boundary it
+    calls) proves the delegation wiring — its own internal behavior is
+    independently covered by test_remote_run_views_lib.py."""
+    from vivarium_workbench.lib import study_runs
+
+    captured = _pinned_on(monkeypatch, 75)
     sd = tmp_path / "studies" / "demo"
     sd.mkdir(parents=True)
     (sd / "study.yaml").write_text(
@@ -152,34 +167,24 @@ def test_study_run_baseline_on_deployment_delegates_to_remote_run_submit(tmp_pat
     body, status = study_runs.run_study_baseline(tmp_path, {"study": "demo"})
     assert status == 202
     assert body == {"simulation_id": 999, "phase": "running"}
-    assert captured["body"] == {
+    assert captured == [{
         "study": "demo",
         "simulator_id": 75,
         "num_generations": 10,
         "num_seeds": 1000,
         "run_parca": True,
         "extra_params": None,
-    }
+    }]
 
 
+@pytest.mark.plugin
 def test_study_run_baseline_on_deployment_forwards_extra_composite_params(tmp_path, monkeypatch):
     """Backlog items 86/88: any baseline param beyond n_seeds/n_generations rides through
-    to remote_run_submit as a generic extra_params dict, keyed by whatever the composite
+    to the SMS submit as a generic extra_params dict, keyed by whatever the composite
     itself declares — never silently dropped, never inspected by name here."""
-    from vivarium_workbench.lib import remote_pinned, study_runs
-    from vivarium_workbench.lib import remote_run_views
+    from vivarium_workbench.lib import study_runs
 
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws_root: "deployment")
-    monkeypatch.setattr(remote_pinned, "resolve_pinned_simulator_id", lambda client, ws_root: 75)
-
-    captured = {}
-
-    def fake_submit(ws_root, body):
-        captured["body"] = body
-        return {"simulation_id": 999, "phase": "running"}, 202
-
-    monkeypatch.setattr(remote_run_views, "remote_run_submit", fake_submit)
-
+    captured = _pinned_on(monkeypatch, 75)
     sd = tmp_path / "studies" / "demo"
     sd.mkdir(parents=True)
     (sd / "study.yaml").write_text(
@@ -189,51 +194,70 @@ def test_study_run_baseline_on_deployment_forwards_extra_composite_params(tmp_pa
     body, status = study_runs.run_study_baseline(tmp_path, {"study": "demo"})
     assert status == 202
     assert body == {"simulation_id": 999, "phase": "running"}
-    assert captured["body"]["extra_params"] == {"custom_composite_knob": {"nested": True}}
+    assert captured[0]["extra_params"] == {"custom_composite_knob": {"nested": True}}
     # n_seeds/n_generations are never duplicated into extra_params
-    assert "n_seeds" not in captured["body"]["extra_params"]
-    assert "n_generations" not in captured["body"]["extra_params"]
+    assert "n_seeds" not in captured[0]["extra_params"]
+    assert "n_generations" not in captured[0]["extra_params"]
 
 
+_TWO_ENTRIES = (
+    "name: demo\nbaseline:\n"
+    "  - {name: core, composite: pkg.composites.cell, params: {n_seeds: 1, n_generations: 1}}\n"
+    "  - {name: alt, composite: pkg.composites.alt, params: {n_seeds: 1, n_generations: 1}}\n"
+)
+
+
+@pytest.mark.plugin
 def test_study_run_baseline_explicit_composite_on_deployment_still_409s(tmp_path, monkeypatch):
-    """remote_run_submit has no way to select a specific composite — it
-    dispatches whatever the pinned simulator's own build contains. An
-    explicit non-default ?composite= override on a deployment target must
-    NOT silently delegate (which would run the wrong composite); it keeps
-    the existing, honest 409 instead."""
-    from vivarium_workbench.lib import remote_pinned, study_runs
-    from vivarium_workbench.lib import remote_run_views
+    """A build has no way to select a specific composite — it runs whatever
+    the pinned simulator's own build contains. An explicit non-default
+    ?composite= override on a deployment target must NOT silently delegate
+    (which would run the wrong composite); it keeps the existing, honest 409
+    instead. The positive control below proves the patched submit IS on this
+    path for the default entry, so this patch cannot go silently dead."""
+    from vivarium_workbench.lib import study_runs
+    from vivarium_workbench_sms import sms_legacy
 
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws_root: "deployment")
+    _pinned_on(monkeypatch, 75)
 
     def fail_if_called(*a, **k):
-        raise AssertionError("remote_run_submit must not be called for a non-default composite")
+        raise AssertionError("the SMS submit must not be called for a non-default composite")
 
-    monkeypatch.setattr(remote_run_views, "remote_run_submit", fail_if_called)
+    monkeypatch.setattr(sms_legacy, "submit_tail", fail_if_called)
 
     sd = tmp_path / "studies" / "demo"
     sd.mkdir(parents=True)
-    (sd / "study.yaml").write_text(
-        "name: demo\nbaseline:\n"
-        "  - {name: core, composite: pkg.composites.cell, params: {n_seeds: 1, n_generations: 1}}\n"
-        "  - {name: alt, composite: pkg.composites.alt, params: {n_seeds: 1, n_generations: 1}}\n"
-    )
+    (sd / "study.yaml").write_text(_TWO_ENTRIES)
     body, status = study_runs.run_study_baseline(
         tmp_path, {"study": "demo", "composite": "alt"})
     assert status == 409
 
 
+@pytest.mark.plugin
+def test_study_run_baseline_default_entry_reaches_the_patched_submit(tmp_path, monkeypatch):
+    """Positive control for the test above: the same setup (pin on, two entries) with the default entry reaches
+    ``sms_legacy.submit_tail``."""
+    from vivarium_workbench.lib import study_runs
+
+    captured = _pinned_on(monkeypatch, 75)
+    sd = tmp_path / "studies" / "demo"
+    sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(_TWO_ENTRIES)
+    body, status = study_runs.run_study_baseline(tmp_path, {"study": "demo"})
+    assert status == 202
+    assert [c["simulator_id"] for c in captured] == [75]
+
+
+@pytest.mark.plugin
 def test_study_run_baseline_deployment_no_resolvable_build_409s_cleanly(tmp_path, monkeypatch):
     """resolve_pinned_simulator_id returning None (pinned mode off, or no
     build exists yet) must degrade to a clear 409, not an unhandled
     exception — this is the exact path test_study_run_baseline_pinned_
     deployment_409_over_real_http exercises end to end via the real
     (unreachable-in-tests) sms-api boundary."""
-    from vivarium_workbench.lib import remote_pinned, study_runs
+    from vivarium_workbench.lib import study_runs
 
-    monkeypatch.setattr(remote_pinned, "resolve_run_target", lambda ws_root: "deployment")
-    monkeypatch.setattr(remote_pinned, "resolve_pinned_simulator_id", lambda client, ws_root: None)
-
+    captured = _pinned_on(monkeypatch, None)
     sd = tmp_path / "studies" / "demo"
     sd.mkdir(parents=True)
     (sd / "study.yaml").write_text(
@@ -243,6 +267,7 @@ def test_study_run_baseline_deployment_no_resolvable_build_409s_cleanly(tmp_path
     body, status = study_runs.run_study_baseline(tmp_path, {"study": "demo"})
     assert status == 409
     assert "no remote build resolved" in body["error"].lower()
+    assert captured == []
 
 
 @pytest.fixture

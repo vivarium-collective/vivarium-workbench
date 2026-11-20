@@ -969,11 +969,18 @@ def test_build_zip_unknown_run_404s(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _remote_only_row(run_id, *, simulation_id, s3_uri):
+def _current_deployment() -> str:
+    from vivarium_workbench_sms.remote_pinned import remote_deployment_name
+
+    return remote_deployment_name()
+
+
+def _remote_only_row(run_id, *, simulation_id, s3_uri, deployment=None):
     """A row shaped exactly like remote_simulations.py's _normalize() output —
     a run known to sms-api but never (or no longer) landed into a local
     runs.db, e.g. because the session/build checkout it landed into didn't
-    survive a pod restart. db_path is None; store_path is the s3:// URI."""
+    survive a pod restart. db_path is None; store_path is the s3:// URI.
+    ``deployment`` defaults to the current one (the SMS plugin's name for it)."""
     return {
         "run_id": run_id, "spec_id": "", "sim_name": run_id, "label": run_id,
         "status": "completed", "n_steps": None, "progress_step": None,
@@ -981,12 +988,14 @@ def _remote_only_row(run_id, *, simulation_id, s3_uri):
         "db_path": None, "store_path": s3_uri, "emitter": "xarray",
         "studies": [], "study_slug": None, "investigation_slug": None,
         "remote_origin": {
-            "deployment": "build #50", "simulation_id": simulation_id,
+            # _normalize() stamps the CURRENT deployment's name (step 1c-2 checks it before fetching)
+            "deployment": deployment or _current_deployment(), "simulation_id": simulation_id,
             "experiment_id": run_id, "backend": "aws", "s3_uri": s3_uri,
         },
     }
 
 
+@pytest.mark.plugin
 def test_build_zip_falls_back_to_sms_api_for_s3_only_store(tmp_path, monkeypatch):
     """A run whose store_path is an s3:// URI (nothing local to zip) — and
     whose remote_origin carries a simulation_id — must fetch the run's native
@@ -1016,7 +1025,7 @@ def test_build_zip_falls_back_to_sms_api_for_s3_only_store(tmp_path, monkeypatch
         return out
 
     monkeypatch.setattr(
-        "vivarium_workbench.lib.sms_api_client.SmsApiClient.download_data",
+        "vivarium_workbench_sms.sms_api_client.SmsApiClient.download_data",
         _fake_download_data,
     )
 
@@ -1039,7 +1048,7 @@ def test_build_zip_s3_only_store_with_no_remote_origin_404s(tmp_path, monkeypatc
     from vivarium_workbench.lib import simulations_index as _si
 
     ws = tmp_path / "ws"
-    row = _remote_only_row("r-s3-orphan", simulation_id=None, s3_uri="s3://bucket/orphan")
+    row = _remote_only_row("r-s3-orphan", simulation_id=None, s3_uri="s3://bucket/orphan", deployment="unused")
     row["remote_origin"] = None
     monkeypatch.setattr(_si, "list_simulations", lambda workspace: [row])
 
@@ -1048,6 +1057,7 @@ def test_build_zip_s3_only_store_with_no_remote_origin_404s(tmp_path, monkeypatc
     assert data == b""
 
 
+@pytest.mark.plugin
 def test_build_zip_sms_api_failure_404s_not_crashes(tmp_path, monkeypatch):
     """sms-api unreachable/erroring during the fallback fetch must fail closed
     (404), not raise SmsApiError up through the route handler."""
@@ -1059,11 +1069,11 @@ def test_build_zip_sms_api_failure_404s_not_crashes(tmp_path, monkeypatch):
     monkeypatch.setattr(_si, "list_simulations", lambda workspace: [row])
 
     def _raise(self, simulation_id, dest_dir, timeout=None):
-        from vivarium_workbench.lib.sms_api_client import SmsApiError
+        from vivarium_workbench_sms.sms_api_client import SmsApiError
         raise SmsApiError("sms-api unreachable")
 
     monkeypatch.setattr(
-        "vivarium_workbench.lib.sms_api_client.SmsApiClient.download_data", _raise
+        "vivarium_workbench_sms.sms_api_client.SmsApiClient.download_data", _raise
     )
 
     data, filename, status = build_simulation_run_zip(ws, "r-s3-down")

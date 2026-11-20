@@ -16,6 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from vivarium_workbench.lib import run_registry
+from vivarium_workbench.lib.backends.ids import REMOTE_RUN_PREFIX
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 # outcome from run_registry.stop_run → HTTP status
@@ -40,13 +41,13 @@ def stop_composite_run(ws_root: Path, run_id: str) -> tuple[dict, int]:
     run_id = (run_id or "").strip()
     if not run_id:
         return {"error": "missing run_id"}, 400
-    # Plan B: a "remote-sim-<id>" run executes on GovCloud and has no local
-    # process to signal (and sms-api exposes no simulation cancel). Return a
-    # graceful, honest outcome — the loom's Stop detaches from a cloud run
-    # rather than pretending to cancel it, and the run continues on GovCloud.
-    if run_id.startswith("remote-sim-"):
+    # A remote composite run (``REMOTE_RUN_PREFIX`` + its id on its backend)
+    # executes on its backend and has no local process to signal. Return a
+    # graceful, honest outcome — the loom's Stop detaches from a remote run
+    # rather than pretending to cancel it, and the run continues on its backend.
+    if run_id.startswith(REMOTE_RUN_PREFIX):
         return {"run_id": run_id, "outcome": "remote-uncancellable",
-                "note": "Cloud runs continue on GovCloud — track it in the Runs tab."}, 200
+                "note": "Remote runs continue on their backend — track it in the Runs tab."}, 200
     db_file = WorkspacePaths.load(ws_root).pbg / "composite-runs.db"
     result = run_registry.stop_run(db_file, run_id, workspace=ws_root)
     status = _OUTCOME_STATUS.get(result.get("outcome"), 200)

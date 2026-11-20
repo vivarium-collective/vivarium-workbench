@@ -280,6 +280,22 @@ def test_manifest_environments_primary_matches_code_version(tmp_path):
     assert p["lockfile_hash"]  # the uv.lock hash landed
 
 
+def test_manifest_declared_environment_keeps_a_resolved_commit_and_simulator():
+    """A declaration that already carries its resolution (``commit``, ``simulator_id``) lands in the manifest as
+    given. No production caller supplies them today; the path stays covered (was in test_comparison_pinning)."""
+    m = cr.build_run_manifest(spec_id="s", params={}, n_steps=1,
+                              emitter="sqlite", emit_paths=[], runtime={},
+                              origin="study",
+                              declared_environment={"repo": "CovertLabEcoli/vEcoli-private",
+                                                    "ref": "1d80baa",
+                                                    "commit": "1d80baa99990000aaaa",
+                                                    "simulator_id": 67})
+    d = m["environments"][1]
+    assert d["role"] == "declared"
+    assert d["commit"] == "1d80baa99990000aaaa"
+    assert d["simulator_id"] == 67
+
+
 def test_manifest_declared_environment_recorded_unresolved():
     m = cr.build_run_manifest(spec_id="s", params={}, n_steps=1,
                               emitter="sqlite", emit_paths=[], runtime={},

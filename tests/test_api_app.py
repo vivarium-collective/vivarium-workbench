@@ -185,6 +185,7 @@ def test_switching_tabs_does_not_steal_a_different_tabs_cookie(
     assert r.headers.get("X-VW-Session") == "tab-B"
 
 
+@pytest.mark.plugin
 def test_switch_build_aligns_cookie_on_its_own_response(client, monkeypatch):
     """item 78: /api/source/switch-build must align the cookie on ITS OWN
     response, the same as /api/source/switch already does — this is what a
@@ -195,8 +196,9 @@ def test_switch_build_aligns_cookie_on_its_own_response(client, monkeypatch):
     session_registry.clear()
 
     import vivarium_workbench.api.app as api_app
+    from vivarium_workbench_sms import source_build_views as sbv  # the SMS provider's route (step P2 Builds B3)
     monkeypatch.setattr(
-        api_app._source_build_views, "switch_build",
+        sbv, "switch_build",
         lambda body, **kw: (
             {"ok": True, "source": {"path": "/tmp/managed-build", "name": None}},
             200,
@@ -240,6 +242,12 @@ def test_simulations_empty_workspace(client):
     body = r.json()
     assert body["simulations"] == [] and body["current"] is None
     assert body["total"] == 0 and body["offset"] == 0 and body["limit"] is None
+
+
+@pytest.mark.plugin
+def test_simulations_empty_workspace_reports_the_remote_source(client):
+    """Providers on, the SMS listing answers ``remote`` (with no listing backend it is ``None``)."""
+    body = client.get("/api/simulations").json()
     # SWR remote-source provenance (added with non-blocking remote fetch): shape is
     # stable; the state value varies (refreshing/stale/unavailable) so don't pin it.
     assert set(body["remote"]) == {"state", "as_of", "error"}
@@ -2704,26 +2712,29 @@ class TestWorkCompositeDiffRoute:
 # ---------------------------------------------------------------------------
 
 class TestSourceBuildsRoute:
+    #: The SMS provider's route (step P3, K2c): without the plugin it is not mounted.
+    pytestmark = pytest.mark.plugin
+
     def test_always_200(self, client, monkeypatch):
         """GET /api/source/builds always returns HTTP 200."""
-        from vivarium_workbench.lib import workspace_deps_views as wdv
-        monkeypatch.setattr(wdv, "build_source_builds", lambda: {"builds": [], "error": None})
+        from vivarium_workbench_sms import source_build_views as sbv
+        monkeypatch.setattr(sbv, "build_source_builds", lambda: {"builds": [], "error": None})
         r = client.get("/api/source/builds")
         assert r.status_code == 200
 
     def test_returns_builds_list_and_error(self, client, monkeypatch):
         """Body carries builds[] and error (null or string)."""
-        from vivarium_workbench.lib import workspace_deps_views as wdv
-        monkeypatch.setattr(wdv, "build_source_builds", lambda: {"builds": [], "error": None})
+        from vivarium_workbench_sms import source_build_views as sbv
+        monkeypatch.setattr(sbv, "build_source_builds", lambda: {"builds": [], "error": None})
         body = client.get("/api/source/builds").json()
         assert "builds" in body
         assert isinstance(body["builds"], list)
 
     def test_degraded_when_sms_api_down(self, client, monkeypatch):
         """When sms-api is down, builds=[] and error carries a reason (still 200)."""
-        from vivarium_workbench.lib import workspace_deps_views as wdv
+        from vivarium_workbench_sms import source_build_views as sbv
         monkeypatch.setattr(
-            wdv, "build_source_builds",
+            sbv, "build_source_builds",
             lambda: {"builds": [], "error": "connection refused"},
         )
         r = client.get("/api/source/builds")
@@ -2732,9 +2743,13 @@ class TestSourceBuildsRoute:
         assert body["builds"] == []
         assert body["error"] == "connection refused"
 
+    @pytest.mark.plugin
     def test_source_builds_in_openapi(self, client):
+        # The SMS plugin's model (vivarium_workbench_sms.models, step P3 M1), served under the same schema name.
+        from vivarium_workbench_sms.models import SourceBuilds
+
         components = client.get("/openapi.json").json()["components"]["schemas"]
-        assert "SourceBuilds" in components
+        assert components[SourceBuilds.__name__]["properties"].keys() == SourceBuilds.model_fields.keys()
 
 
 class TestWorkspacesRoute:
@@ -4184,23 +4199,26 @@ class TestJobStatusRoutes:
 
     # -- remote-run-status (lib.remote_run_jobs.manager) ---------------------
 
+    @pytest.mark.plugin
     def test_remote_run_jobs_list_200(self, client, monkeypatch):
-        from vivarium_workbench.lib import remote_run_jobs
+        from vivarium_workbench_sms import remote_run_jobs
         monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(recent=[{"job_id": "rr1"}]))
         r = client.get("/api/remote-run-status")
         assert r.status_code == 200
         assert r.json() == {"jobs": [{"job_id": "rr1"}]}
 
+    @pytest.mark.plugin
     def test_remote_run_single_job_200(self, client, monkeypatch):
-        from vivarium_workbench.lib import remote_run_jobs
+        from vivarium_workbench_sms import remote_run_jobs
         job = _FakeJob({"job_id": "rr9", "steps": [{"name": "fetch", "status": "done"}]})
         monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(jobs={"rr9": job}))
         r = client.get("/api/remote-run-status?job_id=rr9")
         assert r.status_code == 200
         assert r.json() == {"job_id": "rr9", "steps": [{"name": "fetch", "status": "done"}]}
 
+    @pytest.mark.plugin
     def test_remote_run_missing_404(self, client, monkeypatch):
-        from vivarium_workbench.lib import remote_run_jobs
+        from vivarium_workbench_sms import remote_run_jobs
         monkeypatch.setattr(remote_run_jobs, "manager", _FakeManager(jobs={}))
         r = client.get("/api/remote-run-status?job_id=ghost")
         assert r.status_code == 404
@@ -4208,10 +4226,16 @@ class TestJobStatusRoutes:
 
     def test_routes_in_openapi(self, client):
         paths = client.get("/openapi.json").json()["paths"]
-        for p in ("/api/investigation-run-unblocked-status", "/api/remote-run-status"):
+        for p in ("/api/investigation-run-unblocked-status",):
             assert p in paths and "get" in paths[p], p
         schemas = client.get("/openapi.json").json()["components"]["schemas"]
         assert "JobStatusPayload" in schemas
+
+    @pytest.mark.plugin
+    def test_the_remote_run_status_route_in_openapi(self, client):
+        """The SMS provider's job-status route (mounted only with the plugin)."""
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/api/remote-run-status" in paths and "get" in paths["/api/remote-run-status"]
 
 
 # ===========================================================================
@@ -4393,20 +4417,23 @@ class TestSourceSwitchRoute:
 # (sms-api NETWORK routes — every test monkeypatches the lib sms-api names)
 # ===========================================================================
 class TestSourceBuildRemoteRoute:
+    #: The SMS provider's route (step P3, K2c): without the plugin it is not mounted.
+    pytestmark = pytest.mark.plugin
+
     def test_missing_repo_branch_400(self, client):
         r = client.post("/api/source/build-remote", json={"repo": "x"})
         assert r.status_code == 400
         assert r.json() == {"error": "repo and branch are required"}
 
     def test_no_commit_502(self, client, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench_sms import source_build_views as sbv
 
         class _Client:
             def __init__(self, base=None):
                 pass
 
             def register_branch_head(self, repo, branch):
-                from vivarium_workbench.lib.sms_api_client import register_branch_head_legacy
+                from vivarium_workbench_sms.sms_api_client import register_branch_head_legacy
                 return register_branch_head_legacy(self, repo, branch)
 
             def latest_simulator(self, repo, branch):
@@ -4418,15 +4445,15 @@ class TestSourceBuildRemoteRoute:
         assert r.json() == {"error": "could not resolve branch HEAD via sms-api"}
 
     def test_sms_api_error_502(self, client, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
-        from vivarium_workbench.lib.sms_api_client import SmsApiError
+        from vivarium_workbench_sms import source_build_views as sbv
+        from vivarium_workbench_sms.sms_api_client import SmsApiError
 
         class _Client:
             def __init__(self, base=None):
                 pass
 
             def register_branch_head(self, repo, branch):
-                from vivarium_workbench.lib.sms_api_client import register_branch_head_legacy
+                from vivarium_workbench_sms.sms_api_client import register_branch_head_legacy
                 return register_branch_head_legacy(self, repo, branch)
 
             def latest_simulator(self, repo, branch):
@@ -4438,14 +4465,14 @@ class TestSourceBuildRemoteRoute:
         assert r.json() == {"error": "sms-api: boom"}
 
     def test_happy_path(self, client, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench_sms import source_build_views as sbv
 
         class _Client:
             def __init__(self, base=None):
                 pass
 
             def register_branch_head(self, repo, branch):
-                from vivarium_workbench.lib.sms_api_client import register_branch_head_legacy
+                from vivarium_workbench_sms.sms_api_client import register_branch_head_legacy
                 return register_branch_head_legacy(self, repo, branch)
 
             def latest_simulator(self, repo, branch):
@@ -4465,15 +4492,22 @@ class TestSourceBuildRemoteRoute:
             "repo": "https://github.com/x/y", "branch": "main", "commit": "c0ffee",
         }
 
+    @pytest.mark.plugin
     def test_route_in_openapi(self, client):
         paths = client.get("/openapi.json").json()["paths"]
         assert "/api/source/build-remote" in paths
         assert "post" in paths["/api/source/build-remote"]
+        # The SMS plugin's model (vivarium_workbench_sms.models, step P3 M1), served under the same schema name.
+        from vivarium_workbench_sms.models import BuildRemoteResponse
+
         schemas = client.get("/openapi.json").json()["components"]["schemas"]
-        assert "BuildRemoteResponse" in schemas
+        assert schemas[BuildRemoteResponse.__name__]["properties"].keys() == BuildRemoteResponse.model_fields.keys()
 
 
 class TestSourceSwitchBuildRoute:
+    #: The SMS provider's route (step P3, K2c): without the plugin it is not mounted.
+    pytestmark = pytest.mark.plugin
+
     @staticmethod
     def _entry(sim_id=5):
         return {
@@ -4488,7 +4522,7 @@ class TestSourceSwitchBuildRoute:
         assert r.json() == {"error": "missing 'simulator_id'"}
 
     def test_listing_error_502(self, client, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench_sms import source_build_views as sbv
         monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
         monkeypatch.setattr(
             sbv, "list_build_sources",
@@ -4499,7 +4533,7 @@ class TestSourceSwitchBuildRoute:
         assert r.json() == {"error": "sms-api unavailable: tunnel down"}
 
     def test_not_found_404(self, client, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench_sms import source_build_views as sbv
         monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
         monkeypatch.setattr(
             sbv, "list_build_sources", lambda c: {"builds": [self._entry(99)]},
@@ -4509,8 +4543,8 @@ class TestSourceSwitchBuildRoute:
         assert r.json() == {"error": "build 5 not found"}
 
     def test_materialize_error_502(self, client, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
-        from vivarium_workbench.lib.sms_api_client import SmsApiError
+        from vivarium_workbench_sms import source_build_views as sbv
+        from vivarium_workbench_sms.sms_api_client import SmsApiError
         monkeypatch.setattr(sbv, "SmsApiClient", lambda base=None: object())
         monkeypatch.setattr(
             sbv, "list_build_sources", lambda c: {"builds": [self._entry(5)]},
@@ -4528,7 +4562,7 @@ class TestSourceSwitchBuildRoute:
         assert r.json() == {"error": "materialize failed: no tarball"}
 
     def test_happy_path_repoints(self, client, tmp_path, monkeypatch):
-        from vivarium_workbench.lib import source_build_views as sbv
+        from vivarium_workbench_sms import source_build_views as sbv
         from vivarium_workbench.lib import _root
         cache = tmp_path / "session-clone"
         cache.mkdir()
@@ -4599,54 +4633,58 @@ class TestSourceSwitchBuildRoute:
 
 # ===========================================================================
 # C-state-3c: POST /api/remote-run-start (manager.submit pipeline job)
-# Every external (auth, git, sms-api, manager) is monkeypatched on the lib
-# builder — no real network/git/auth.
+# Every external (auth, git, sms-api, manager) is monkeypatched on the plugin
+# view's modules (remote_pipeline_views, step P2 Runs a2) — no real network/git/auth.
 # ===========================================================================
 class TestRemoteRunStartRoute:
+    #: The SMS provider's route (step P3, K2c): without the plugin it is not mounted.
+    pytestmark = pytest.mark.plugin
+
     def test_not_authenticated_401(self, client, monkeypatch):
-        from vivarium_workbench.lib import remote_run_views as rrv
-        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: None)
+        from vivarium_workbench_sms import remote_pipeline_views as pv
+        monkeypatch.setattr(pv.github_auth, "current_session", lambda: None)
         r = client.post("/api/remote-run-start", json={"study": "s"})
         assert r.status_code == 401
         assert r.json() == {"error": "not authenticated"}
 
     def test_missing_study_400(self, client, monkeypatch):
-        from vivarium_workbench.lib import remote_run_views as rrv
-        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
+        from vivarium_workbench_sms import remote_pipeline_views as pv
+        monkeypatch.setattr(pv.github_auth, "current_session", lambda: object())
         r = client.post("/api/remote-run-start", json={"study": "   "})
         assert r.status_code == 400
         assert r.json() == {"error": "study is required"}
 
     def test_happy_path_202(self, client, tmp_path, monkeypatch):
-        from vivarium_workbench.lib import remote_run_views as rrv
+        from vivarium_workbench_sms import remote_pipeline_views as pv
+        from vivarium_workbench_sms import sms_legacy
 
         class _Job:
             job_id = "JX"
 
         captured = {}
 
-        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
-        monkeypatch.setattr(rrv.git_status, "has_origin_remote", lambda ws: True)
-        monkeypatch.setattr(rrv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
+        monkeypatch.setattr(pv.github_auth, "current_session", lambda: object())
+        monkeypatch.setattr(pv.git_status, "has_origin_remote", lambda ws: True)
+        monkeypatch.setattr(pv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
         spec_file = tmp_path / "study.yaml"
         spec_file.write_text("baseline: []\n")
-        monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
-        monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
-        monkeypatch.setattr(rrv, "load_spec", lambda p: {"baseline": [], "readouts": []})
+        monkeypatch.setattr(pv.study_spec, "study_spec_path", lambda ws, name: spec_file)
+        monkeypatch.setattr(pv.study_spec, "study_dir", lambda ws, name: tmp_path)
+        monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [], "readouts": []})
         import subprocess as _sp
         monkeypatch.setattr(
-            rrv.subprocess, "run",
+            pv.subprocess, "run",
             lambda *a, **k: _sp.CompletedProcess(args=[], returncode=0, stdout="feature/x\n"),
         )
-        monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: object())
-        monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+        monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: object())
+        monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
 
         def _submit(study, worker_fn):
             captured["study"] = study
             captured["worker"] = worker_fn
             return _Job()
 
-        monkeypatch.setattr(rrv.manager, "submit", _submit)
+        monkeypatch.setattr(pv.remote_run_jobs.manager, "submit", _submit)
 
         r = client.post("/api/remote-run-start", json={"study": "study-a"})
         assert r.status_code == 202
@@ -4654,57 +4692,63 @@ class TestRemoteRunStartRoute:
         assert captured["study"] == "study-a"
         assert callable(captured["worker"])
 
-    def _wire_happy(self, rrv, tmp_path, monkeypatch, captured):
+    def _wire_happy(self, pv, tmp_path, monkeypatch, captured):
         """Monkeypatch every external for a happy submit; capture PipelineCtx kwargs."""
+        from vivarium_workbench_sms import sms_legacy
+
         class _Job:
             job_id = "JX"
-        monkeypatch.setattr(rrv.github_auth, "current_session", lambda: object())
-        monkeypatch.setattr(rrv.git_status, "has_origin_remote", lambda ws: True)
-        monkeypatch.setattr(rrv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
+        monkeypatch.setattr(pv.github_auth, "current_session", lambda: object())
+        monkeypatch.setattr(pv.git_status, "has_origin_remote", lambda ws: True)
+        monkeypatch.setattr(pv.git_status, "remote_repo_url", lambda ws: "https://github.com/x/y")
         spec_file = tmp_path / "study.yaml"
         spec_file.write_text("baseline: []\n")
-        monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
-        monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
-        monkeypatch.setattr(rrv, "load_spec", lambda p: {"baseline": [], "readouts": []})
+        monkeypatch.setattr(pv.study_spec, "study_spec_path", lambda ws, name: spec_file)
+        monkeypatch.setattr(pv.study_spec, "study_dir", lambda ws, name: tmp_path)
+        monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [], "readouts": []})
         import subprocess as _sp
         monkeypatch.setattr(
-            rrv.subprocess, "run",
+            pv.subprocess, "run",
             lambda *a, **k: _sp.CompletedProcess(args=[], returncode=0, stdout="feature/x\n"),
         )
-        monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: object())
-        monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+        monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: object())
+        monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
 
         def _ctx(**kwargs):
             captured.update(kwargs)
             return object()
-        monkeypatch.setattr(rrv, "PipelineCtx", _ctx)
-        monkeypatch.setattr(rrv, "run_remote_pipeline", lambda j, ctx: None)
-        monkeypatch.setattr(rrv.manager, "submit", lambda study, worker_fn: _Job())
+        monkeypatch.setattr(pv.remote_run_jobs, "PipelineCtx", _ctx)
+        monkeypatch.setattr(pv.remote_run_jobs, "run_remote_pipeline", lambda j, ctx: None)
+        monkeypatch.setattr(pv.remote_run_jobs.manager, "submit", lambda study, worker_fn: _Job())
 
     def test_run_parca_defaults_true_when_omitted(self, client, tmp_path, monkeypatch):
         # Legacy raw-JSON contract: an OMITTED run_parca runs ParCa (.get(..., True)).
         # The route must not let pydantic's None default flip it to False.
-        from vivarium_workbench.lib import remote_run_views as rrv
+        from vivarium_workbench_sms import remote_pipeline_views as pv
         captured = {}
-        self._wire_happy(rrv, tmp_path, monkeypatch, captured)
+        self._wire_happy(pv, tmp_path, monkeypatch, captured)
         r = client.post("/api/remote-run-start", json={"study": "study-a"})
         assert r.status_code == 202
         assert captured["run_parca"] is True
 
     def test_run_parca_explicit_false_preserved(self, client, tmp_path, monkeypatch):
-        from vivarium_workbench.lib import remote_run_views as rrv
+        from vivarium_workbench_sms import remote_pipeline_views as pv
         captured = {}
-        self._wire_happy(rrv, tmp_path, monkeypatch, captured)
+        self._wire_happy(pv, tmp_path, monkeypatch, captured)
         r = client.post("/api/remote-run-start", json={"study": "study-a", "run_parca": False})
         assert r.status_code == 202
         assert captured["run_parca"] is False
 
+    @pytest.mark.plugin
     def test_route_in_openapi(self, client):
         paths = client.get("/openapi.json").json()["paths"]
         assert "/api/remote-run-start" in paths
         assert "post" in paths["/api/remote-run-start"]
+        # The SMS plugin's model (vivarium_workbench_sms.models, step P3 M1), served under the same schema name.
+        from vivarium_workbench_sms.models import RemoteRunStartResponse
+
         schemas = client.get("/openapi.json").json()["components"]["schemas"]
-        assert "RemoteRunStartResponse" in schemas
+        assert schemas[RemoteRunStartResponse.__name__]["properties"].keys() == RemoteRunStartResponse.model_fields.keys()
 
 
 # ===========================================================================

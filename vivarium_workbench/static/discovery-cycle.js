@@ -480,6 +480,15 @@
     propose_viz: "propose a figure",
     build_model: "build a model mechanism",
     seed: "seed a follow-up study",
+    // Engine generation-kind + frontier-kind vocabulary (keep in sync with
+    // discovery_engine.phases.generation.KINDS + projection.engine._PRIORITY).
+    propose_study: "propose a study",
+    acquire_model: "acquire / build a model",
+    explain: "write the explanation",
+    visualize: "render a figure",
+    hypothesize: "author a hypothesis",
+    critique: "author a critique",
+    coverage_gap: "probe an unasked dimension",
   };
   function kindLabel(k) { return KIND_LABELS[k] || String(k == null ? "" : k).replace(/_/g, " "); }
 
@@ -878,7 +887,9 @@
       var v = (r.value && r.value.score != null) ? " · value " + r.value.score : "";
       var col = r.gate === "auto" ? "#2e7d32" : "#b26a00";
       var gate = '<span style="font-size:11px;font-weight:600;color:' + col + '">[' + esc(r.gate) + "]</span>";
-      return '<li style="margin:3px 0">' + gate + ' <code>' + esc(r.kind) + "</code> " + esc(r.target) + v +
+      // The /viva-* skill a filler triggers for this request (engine stamp).
+      var skill = r.skill ? ' <span style="font-size:11px;color:#2563eb" title="skill a filler triggers">→ ' + esc(r.skill) + "</span>" : "";
+      return '<li style="margin:3px 0">' + gate + ' <code>' + esc(r.kind) + "</code>" + skill + " " + esc(r.target) + v +
         (r.rationale ? '<div style="font-size:12px;opacity:.75;margin-left:16px">' + esc(r.rationale) + "</div>" : "") +
         "</li>";
     }).join("");

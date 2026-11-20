@@ -498,6 +498,8 @@ def read_runs_db_for_study(ws_root: Path, name: str) -> list[dict]:
             ):
                 try:
                     params = _json.loads(r["params_json"] or "{}")
+                    if isinstance(params, dict):
+                        params.pop("remote", None)  # where the run went (internal URLs): never shown or published
                 except Exception:
                     params = {}
                 rows_by_id[r["run_id"]] = {
@@ -564,7 +566,8 @@ def read_runs_db_for_study(ws_root: Path, name: str) -> list[dict]:
         for _rid, _rec in fold_runs_jsonl(ws_root).items():
             if _rec.get("study_slug") != name or _rid in rows_by_id:
                 continue
-            _params = _rec.get("params") if isinstance(_rec.get("params"), dict) else {}
+            _params = dict(_rec.get("params")) if isinstance(_rec.get("params"), dict) else {}
+            _params.pop("remote", None)  # where the run went (internal URLs): never shown or published
             rows_by_id[_rid] = {
                 "run_id":        _rid,
                 "spec_id":       _rec.get("spec_id") or name,

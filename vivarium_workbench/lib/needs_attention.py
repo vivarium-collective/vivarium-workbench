@@ -36,6 +36,7 @@ from vivarium_workbench.lib import linkage_index
 from vivarium_workbench.lib.investigation_members import investigation_member_slugs
 from discovery_engine.reporting import rigor
 from discovery_engine.viz import freshness as viz_freshness
+from vivarium_workbench.lib.cycle_cache import cached_run_cycle
 # ---------------------------------------------------------------------------
 # Item shape + ranking
 # ---------------------------------------------------------------------------
@@ -603,6 +604,35 @@ def _narrative_gap_items(ws_root: Path, inv_slug: str, wp: "WorkspacePaths",
     return out
 
 
+# Run statuses that count as "the study produced evidence" — matches the set
+# discovery_engine.study.status treats as a completed run when deriving the
+# execution axis. A study with none of these has not run, so the run-derived
+# checks below have nothing to verify for it (and must not report it as passing).
+_COMPLETED_RUN_STATUSES = frozenset({"complete", "completed", "ran", "done"})
+
+# Checks whose verdict is read from a study's latest RUN artifacts (report.json,
+# test_diff.json). For a study that has never run there is no artifact to read, so
+# it is "none to check" — NOT a silent pass. These use the evaluated-study count
+# as their denominator instead of the full member count (issue #1618, bug 3).
+_RUN_DERIVED_KINDS = frozenset({"hard_gate", "test_regression"})
+
+
+def _study_has_completed_run(ws_root: Path, slug: str, spec: dict,
+                             wp: WorkspacePaths) -> bool:
+    """True when the study has at least one completed run (study.yaml ``runs[]``
+    or its runs.db). Best-effort; never raises. Mirrors the run-evidence signal
+    the status-axis derivation uses, so "evaluated" here means the same thing the
+    graph card means by "Completed"."""
+    try:
+        from vivarium_workbench.lib.investigation_status import study_run_rows
+        for r in study_run_rows(ws_root, slug, spec, wp):
+            if str(r.get("status") or "").strip().lower() in _COMPLETED_RUN_STATUSES:
+                return True
+    except Exception:  # noqa: BLE001
+        return False
+    return False
+
+
 def scan_investigation(
     ws_root: Path | str,
     inv_slug: str,
@@ -670,7 +700,17 @@ def scan_investigation(
     except Exception:  # noqa: BLE001
         _known_ids = set()
 
+    # How many member studies have actually run (produced ≥1 completed run). The
+    # run-derived checks use this as their denominator so a never-run study reads
+    # "none to check" rather than being counted as silently passing.
+    evaluated_count = 0
+
     for slug, spec in member_pairs:
+        try:
+            if _study_has_completed_run(ws_root, slug, spec, wp):
+                evaluated_count += 1
+        except Exception:  # noqa: BLE001
+            pass
         try:
             items.extend(_unresolved_composite_items(slug, spec, _known_ids))
         except Exception:  # noqa: BLE001
@@ -741,12 +781,16 @@ def scan_investigation(
     summary["member_count"] = member_count
     summary["ac_total"] = ac_total
     summary["ac_covered"] = ac_covered
+    # Studies that have run — so the UI can distinguish "nothing to attend to"
+    # (genuinely all clear) from "nothing has run yet" (not clear, just unevaluated).
+    summary["evaluated_count"] = evaluated_count
 
     return {
         "investigation": inv_slug,
         "items": items,
         "summary": summary,
         "checks": _checks(summary, member_count, ac_total, ac_covered,
+                          evaluated_count=evaluated_count,
                           include_phantom=observables_for_ref is not None),
     }
 
@@ -773,12 +817,21 @@ _CHECK_CATALOG = [
 
 
 def _checks(summary: dict, member_count: int, ac_total: int, ac_covered: int,
-            *, include_phantom: bool) -> list[dict]:
+            *, include_phantom: bool, evaluated_count: int | None = None) -> list[dict]:
     """Per-check live rollup: {kind, label, mode, flagged, examined, passing}.
 
     Pure projection of the summary + denominators — invents no new judgment.
+
+    ``evaluated_count`` is how many member studies have actually run. The
+    run-derived checks (``_RUN_DERIVED_KINDS``) use it as their denominator so a
+    never-run study reads "none to check" (examined 0) instead of being counted
+    as a silent pass — the dishonest "Hard gates passing" / "No behavior-test
+    regressions" on an unrun study (issue #1618, bug 3). Defaults to
+    ``member_count`` so a direct caller that omits it keeps the old behavior.
     """
     by_kind = summary.get("by_kind") or {}
+    if evaluated_count is None:
+        evaluated_count = member_count
     out: list[dict] = []
     for kind, label, mode in _CHECK_CATALOG:
         if kind == "phantom_observable" and not include_phantom:
@@ -787,7 +840,8 @@ def _checks(summary: dict, member_count: int, ac_total: int, ac_covered: int,
         if mode == "coverage":
             examined, passing = ac_total, ac_covered
         else:
-            examined, passing = member_count, max(0, member_count - flagged)
+            denom = evaluated_count if kind in _RUN_DERIVED_KINDS else member_count
+            examined, passing = denom, max(0, denom - flagged)
         out.append({
             "kind": kind, "label": label, "mode": mode,
             "flagged": flagged, "examined": examined, "passing": passing,
@@ -886,7 +940,7 @@ def viz_figure_records(ws_root, inv_slug: str, only_study: str | None = None) ->
         # Source the figure records from the cycle the frontier itself runs (the public
         # `discover.run_cycle` path) rather than reaching into `validation._figure_freshness`,
         # so this stays within the engine import allowlist and the two cannot disagree.
-        cyc = discover.run_cycle(_inv, studies, viz_state=vstate)
+        cyc = cached_run_cycle(discover, _inv, studies, viz_state=vstate)
         vals = (cyc.get("validations") if isinstance(cyc, dict) else []) or []
         return [r for r in vals
                 if isinstance(r, dict) and r.get("type") == "visual" and r.get("scope") == "figure"]

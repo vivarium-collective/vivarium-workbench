@@ -124,7 +124,8 @@ All read through `lib/env_compat.get_env`, which prefers
 | `DISABLE_CSRF`, `TRUST_PROXY`, `ALLOWED_ORIGINS`, `ALLOWED_HOSTS` | request-guard tuning; `TRUST_PROXY` only behind a proxy you control; `ALLOWED_HOSTS` (comma-separated bare names) adds `Host` names a loopback-bound server accepts besides `localhost` / `127.0.0.1` / `[::1]` |
 | `REMOTE_PINNED`, `REMOTE_REPO_URL`, `REMOTE_BRANCH` | pinned-run mode; **`REMOTE_PINNED` alone is not enough — `REMOTE_REPO_URL` must also be set** or `pinned_config()` returns `None` |
 | `REMOTE_DEPLOYMENT` | Origin name for remote runs; defaults to `smsvpctest` |
-| `ENV_WORKER_ADVERTISE_HOST` | **selects the remote launcher** — set ⇒ worker-as-image, unset ⇒ local subprocess |
+| `ENV_WORKER_PROXY_BASE` | **selects the proxy launcher** (viva-api relays the worker over HTTP) and wins over `ENV_WORKER_ADVERTISE_HOST` |
+| `ENV_WORKER_ADVERTISE_HOST` | without `ENV_WORKER_PROXY_BASE`, **selects the dial-back launcher** — set ⇒ worker-as-image, neither set ⇒ local subprocess. Either set with no backend provider ⇒ refused at startup |
 | `REQUIRE_WORKSPACE_VENV` | strict mode: no venv ⇒ raise rather than fall back to the server's interpreter |
 | `ENV_WORKER_POOL_MAX`, `ENV_WORKER_IDLE_TTL`, `ENV_WORKER_CALL_TIMEOUT` | warm-pool bounds |
 | `BUILD_CACHE`, `REPO_STORE`, `VENV_STORE` | cache relocation |
@@ -148,7 +149,7 @@ are not centralized — they are spread across the variables above.
 | concern | laptop | hosted (e.g. `sms-api-stanford-test`) |
 |---|---|---|
 | workspace source | a real git checkout the user owns | scaffold seeded by an initContainer; science arrives by switching to a build |
-| env-worker transport | local subprocess, workspace's own `.venv` | worker-as-image (`ENV_WORKER_ADVERTISE_HOST` set) |
+| env-worker transport | local subprocess, workspace's own `.venv` | worker-as-image (`ENV_WORKER_PROXY_BASE`, else `ENV_WORKER_ADVERTISE_HOST`) |
 | interpreter for a venv-less workspace | borrows the base workspace's venv (#937 bridge) | n/a — the image *is* the environment |
 | run target | `local`, unless the tab switched to a build | `deployment` for **every** workspace (the pin) |
 | authoring | **this is where it happens** — GitHub, user's own credentials | runs and inspects; not where work originates |

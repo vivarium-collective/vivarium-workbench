@@ -1,43 +1,16 @@
-"""Land a remote simulation's NATIVE store into a study's run directory.
+"""Archive landing shared by every remote path (docs/backend-adapters.md §3).
 
-Mirror-the-store-format: extract the run's `/data` tar.gz and place the native
-store unmodified where the dashboard's native chart reader expects it
-(`<study>/runs.<run_id>.zarr` for zarr; `<study>/parquet-runs/<experiment_id>/`
-for parquet), then record a runs_meta row. No reconstruction of leaf data — a
-remote `seed_NN/store.zarr` is internally identical to the dashboard's expected
-`runs.<run_id>.zarr`; only the path differs.
-
-A multi-seed dispatch ships ONE `seed_NN/store.zarr` per seed in the same tar,
-each independently rooted (confirmed against real GovCloud/Ray output: every
-seed writes its own top-level zarr group). Landing merges every seed found
-into the same destination root — each seed's `experiment_id=*-seedNN`
-partition is already uniquely named per seed, so a plain union of top-level
-children is safe there.
-
-A second, DIFFERENT zarr convention is also landed here: BatchBaselineRunner /
-LineageProcess's own native per-lineage store, named
-`<experiment_id>_v<variant>_s<seed>.zarr` at the filesystem level (see
-v2ecoli.steps.batch_baseline_runner._lineage_store_path) — the real shape a
-batch produces when dispatched through the generic run_pbg.py runner (backlog
-items 26/27), since that path never restructures its own output the way
-scripts/run_batch_baseline_ray.py used to. Unlike the seed_NN convention,
-EVERY lineage in one batch shares the SAME experiment_id, so uniqueness only
-appears two levels inside each store (`experiment_id=X/variant=Y/lineage_seed=Z`
-— confirmed against a real fixture, `viva_emitters`' XArrayEmitter always nests
-this 3-level partition path). A plain top-level union would keep only the
-first-processed lineage and silently drop every other seed's data — the exact
-shape of bug #674, recurring one convention later. `_merge_zarr_tree` recurses
-past whatever depth a collision actually occurs at, so both conventions land
-correctly through the same merge logic without hardcoding either one's depth.
+``land_composite_results`` lands a compose-api / generic composite results archive into the run store;
+``fold_analyses`` folds a landed tree's ``analysis.json`` files into ``.pbg/runs/<run_id>/analyses.json``;
+``land_ptools_tsvs`` copies its PTools exports (the PTools writer, §3). The SMS store landing (``seed_NN`` and
+native-lineage zarr, parquet, seed counts) is the plugin's: ``vivarium_workbench_sms.sms_landing`` (step P2,
+Runs c1), which reads these helpers through this module.
 """
 
 from __future__ import annotations
 
 import json
 import shutil
-import tarfile
-import tempfile
-import time as _time
 import zipfile
 from pathlib import Path
 
@@ -98,14 +71,6 @@ def land_composite_results(archive: Path, db_file: Path, run_id: str, emitter: "
     finally:
         conn.close()
     return len(rows)
-
-
-class RemoteRunSeedCountMismatch(RuntimeError):
-    """The number of seed/lineage stores actually found in a landed tar does
-    not match what was requested/expected for the dispatch (P1-11, audit
-    §3.9). Raised BEFORE anything is written to ``study_dir`` or ``runs.db``
-    -- a partially-arrived campaign must never be recorded as a completed,
-    trustworthy run."""
 
 
 def _fold_one_analysis_json(analysis_json_path: Path, extract_root: Path) -> list[dict]:
@@ -199,318 +164,44 @@ def fold_analyses(extract_root: Path, ws_root: Path, run_id: str) -> None:
     (run_dir / "analyses.json").write_text(json.dumps(entries, indent=2), encoding="utf-8")
 
 
-def land_ptools_tsvs(extract_root: Path, ws_root: Path, run_id: str) -> int:
+def land_ptools_tsvs(
+    extract_root: Path, ws_root: Path, run_id: str, study_dest: "Path | None" = None
+) -> int:
     """Copy any PTools TSV exports (``**/ptools/*.tsv``) out of a landed remote-run
-    tar into ``<ws>/.pbg/runs/<run_id>/ptools/``, so the PTools Omics Viewer
-    discovers this run the same way it discovers a local study's exports
-    (v2ecoli.workbench_viewers._ptools_targets globs ``**/ptools/*.tsv``). Without
-    this, a GovCloud run's ptools TSVs — present in the tar our backend-aware
-    ``/results`` route streams — would be extracted to a temp dir and discarded
-    with everything but ``analyses.json``.
+    tar into ``<ws>/.pbg/runs/<run_id>/ptools/`` (the run's own artifacts), and, when
+    ``study_dest`` is given, ALSO into ``<study_dest>/ptools/``. Without this, a
+    GovCloud run's ptools TSVs — present in the tar our backend-aware ``/results``
+    route streams — would be extracted to a temp dir and discarded with everything
+    but ``analyses.json``.
 
-    Returns the number of TSVs landed. Best-effort / idempotent (overwrites); the
-    caller wraps it so a copy failure never fails an otherwise-completed run.
+    Why the study copy: the Pathway Tools plugin (pbg-ptools) discovers
+    ``<study>/**/ptools/*.tsv`` only, and its server fetches each TSV over HTTP from
+    this workbench, which never serves a dot-segment such as ``.pbg``
+    (``static_serving.is_servable``). The run-folder copy is therefore invisible to
+    the viewer and unreachable for it; a landing INTO A STUDY leaves the exports
+    under the study directory, in the run's own subfolder so two landed runs never
+    collide.
+
+    Returns the number of TSVs landed in the run folder. Best-effort / idempotent
+    (overwrites); a copy failure is skipped, never raised, so an otherwise-completed
+    run still lands.
     """
     tsvs = sorted(extract_root.glob("**/ptools/*.tsv"))
     if not tsvs:
         return 0
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
-    dest = WorkspacePaths.load(ws_root).pbg / "runs" / run_id / "ptools"
-    dest.mkdir(parents=True, exist_ok=True)
+    dests = [WorkspacePaths.load(ws_root).pbg / "runs" / run_id / "ptools"]
+    if study_dest is not None:
+        dests.append(Path(study_dest) / "ptools")
     n = 0
-    for src in tsvs:
-        try:
-            shutil.copy2(src, dest / src.name)
-            n += 1
-        except OSError:
-            continue
+    for i, dest in enumerate(dests):
+        dest.mkdir(parents=True, exist_ok=True)
+        for src in tsvs:
+            try:
+                shutil.copy2(src, dest / src.name)
+                if i == 0:
+                    n += 1
+            except OSError:
+                continue
     return n
-
-
-def land_remote_simulation_artifacts(ws_root: Path, simulation_id: int, run_id: str,
-                                     client) -> dict:
-    """Land a remote run's analyses + PTools exports into ``.pbg/runs/<run_id>/``
-    WITHOUT a study — the study-less path for a Runs-table remote row (a GovCloud
-    run that isn't investigation-organized). Downloads the sim's result tar from
-    sms-api, extracts it, folds ``analyses.json`` and copies ``ptools/*.tsv`` via
-    the same helpers the study-shaped and composite paths use.
-
-    This is the "land on demand" backend: after it runs, the Analyses artifact
-    (``.pbg/runs/<run_id>/analyses.json``) resolves and the run appears in the
-    PTools Omics Viewer's run menu (``_ptools_targets`` globs ``.pbg/runs/*``).
-    Idempotent (overwrites). Returns ``{run_id, analyses: bool, ptools: int}``;
-    raises SmsApiError / OSError on a failed download/extract so the caller can
-    shape the HTTP status.
-    """
-    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
-
-    with tempfile.TemporaryDirectory() as td:
-        tar_path = client.download_data(int(simulation_id), Path(td))
-        extract_root = Path(td) / "extract"
-        extract_root.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(tar_path, "r:gz") as tar:
-            tar.extractall(extract_root, filter="data")
-        fold_analyses(extract_root, ws_root, run_id)
-        ptools_n = land_ptools_tsvs(extract_root, ws_root, run_id)
-    run_dir = WorkspacePaths.load(ws_root).pbg / "runs" / run_id
-    return {
-        "run_id": run_id,
-        "analyses": (run_dir / "analyses.json").is_file(),
-        "ptools": ptools_n,
-    }
-
-
-def _detect_and_locate_all(extract_root: Path) -> tuple[str, list[Path]]:
-    """Find every native store under an extracted tar. Returns (kind, source_paths):
-    one entry per lineage/seed for zarr, or a single entry for parquet.
-
-    Two zarr layouts are recognized (see module docstring): the restructured
-    `seed_NN/store.zarr` shape, and BatchBaselineRunner/LineageProcess's own
-    native per-lineage naming (`<experiment_id>_v<variant>_s<seed>.zarr`).
-    """
-    seed_stores = sorted(extract_root.glob("**/seed_*/store.zarr"))
-    if seed_stores:
-        return "zarr", [s for s in seed_stores if s.is_dir()]
-    native_stores = sorted(p for p in extract_root.glob("**/*_v*_s*.zarr") if p.is_dir())
-    if native_stores:
-        return "zarr", native_stores
-    # parquet: locate the experiment dir that contains a history/ subtree of .pq files
-    pq = next(extract_root.glob("**/history/**/*.pq"), None)
-    if pq is not None:
-        # the experiment root is the parent of the `history` dir
-        for parent in pq.parents:
-            if parent.name == "history":
-                return "parquet", [parent.parent]
-    raise FileNotFoundError(
-        "no zarr (seed_NN/store.zarr or <experiment_id>_v<variant>_s<seed>.zarr) "
-        f"or parquet (history/**/*.pq) store in {extract_root}"
-    )
-
-
-def _merge_zarr_tree(src: Path, dest: Path) -> None:
-    """Merge src's children into dest, recursing into a name collision instead of
-    skipping it outright.
-
-    The fast path (no collision) is an untouched bulk `shutil.copytree`/`copy2` —
-    identical to the old shallow union, and what every level of the seed_NN/store.zarr
-    convention always takes, since its top-level partition names never collide across
-    seeds. A collision only arises for a convention whose uniqueness lives deeper than
-    the top level (the native per-lineage store's shared `experiment_id=X/variant=Y`
-    prefix — see module docstring) — recursing past it, rather than skipping the whole
-    subtree, is what actually merges every lineage's data instead of keeping only the
-    first one processed. A genuine leaf-level collision (both sides are the SAME file,
-    e.g. the trivial shared zarr group marker) is left as first-wins, matching a745f899.
-    """
-    dest.mkdir(parents=True, exist_ok=True)
-    for child in src.iterdir():
-        target = dest / child.name
-        if not target.exists():
-            if child.is_dir():
-                shutil.copytree(child, target)
-            else:
-                shutil.copy2(child, target)
-        elif child.is_dir() and target.is_dir():
-            _merge_zarr_tree(child, target)
-        # else: both exist and at least one is a file -- dest's version wins.
-
-
-def _count_parquet_rows(source_dir: Path) -> int | None:
-    """Best-effort REAL step count for a landed parquet store: the row count
-    of its own ``history/**/*.pq`` files (mirrors the same technique already
-    used by ``explorer_data.list_runs`` for locally-discovered parquet runs).
-    This is ground truth from the data that actually landed, not a guess —
-    returns ``None`` (never 0) when pyarrow isn't installed or no history
-    files are found, so a genuinely-unknown count isn't confused with a real
-    zero-step run."""
-    try:
-        import pyarrow.parquet as pq
-    except ImportError:
-        return None
-    total = 0
-    found = False
-    for f in sorted(source_dir.rglob("*.pq")):
-        try:
-            total += pq.read_metadata(str(f)).num_rows
-            found = True
-        except Exception:  # noqa: BLE001 — best-effort, never block landing
-            continue
-    return total if found else None
-
-
-def land_remote_run(
-    study_dir: Path,
-    *,
-    spec_id: str,
-    simulation_id: int,
-    experiment_id: str,
-    commit: str,
-    tar_path: Path,
-    ws_root: Path | None = None,
-    label: str | None = None,
-    s3_uri: str | None = None,
-    image: str | None = None,
-    composite_doc_hash: str | None = None,
-    merged_config_hash: str | None = None,
-    n_steps: int | None = None,
-    expected_seeds: int | None = None,
-) -> str:
-    """Extract tar_path, place the native store(s) in study_dir, record runs_meta; return run_id.
-
-    ``ws_root`` is optional (defaults to no analyses-folding) so existing callers
-    that only land simulation output, with no analysis ever triggered for that
-    run, are unaffected.
-
-    Provenance (P1-11, audit §3.9) — every one of these must be sourced from
-    sms-api (the server that actually executed the run), NEVER inferred from
-    the landing laptop's own checkout:
-
-    ``commit``
-        The commit sms-api actually built and ran (e.g. resolved from the
-        simulation's ``simulator_id`` against sms-api's own simulator
-        registry) — not the workspace's local HEAD. Recording the laptop's
-        HEAD here was the found bug: the two can differ any time the operator
-        has switched branches locally since dispatching.
-    ``image``
-        The tag/digest of the container image sms-api actually ran (e.g. the
-        commit-derived ECR tag sms-api registered for this ``simulator_id``).
-    ``composite_doc_hash`` / ``merged_config_hash``
-        Hashes of the composite document and the fully-merged run config
-        sms-api resolved server-side, when the caller has them (e.g. hashing
-        the ``config`` sms-api's own ``GET /simulations/{id}`` returns). Pass
-        ``None`` rather than a value recomputed from a local/possibly-stale
-        copy — an absent hash is honest; a wrong one is not.
-    ``n_steps``
-        The real number of steps executed. When the caller doesn't know it
-        (sms-api doesn't track it as a scalar today — see follow-up in
-        PR description), a parquet-landed run's real count is derived here
-        from the landed data itself (``_count_parquet_rows``); a zarr-landed
-        run without deps to read it back stays ``None`` rather than a
-        fabricated 0.
-    ``expected_seeds``
-        The seed count requested/expected for this dispatch. Checked against
-        the number of seed/lineage stores actually found in the tar; a
-        mismatch raises :class:`RemoteRunSeedCountMismatch` before anything
-        is written, so an incomplete campaign is never recorded as a
-        trustworthy, completed run.
-    """
-    study_dir = Path(study_dir)
-    study_dir.mkdir(parents=True, exist_ok=True)
-
-    from vivarium_workbench.lib.remote_pinned import remote_deployment_name
-    deployment = remote_deployment_name()
-
-    provenance = {
-        "simulation_id": simulation_id,
-        "experiment_id": experiment_id,
-        "commit": commit,
-        "image": image,
-        "composite_doc_hash": composite_doc_hash,
-        "merged_config_hash": merged_config_hash,
-        "backend": "ray",
-        "source": deployment,
-        "s3_uri": s3_uri,
-    }
-    run_id = cr.generate_run_id(spec_id, params=provenance)
-
-    with tempfile.TemporaryDirectory() as td:
-        extract_root = Path(td)
-        with tarfile.open(tar_path, "r:gz") as tar:
-            tar.extractall(extract_root, filter="data")  # noqa: S202 — trusted internal artifact from our own API
-        kind, sources = _detect_and_locate_all(extract_root)
-
-        landed_seeds = len(sources)
-        provenance["landed_seeds"] = landed_seeds
-        if expected_seeds is not None and landed_seeds != expected_seeds:
-            raise RemoteRunSeedCountMismatch(
-                f"simulation {simulation_id}: landed {landed_seeds} seed(s)/"
-                f"lineage(s) but {expected_seeds} were requested — refusing "
-                "to record this as a completed run (sms-api may still be "
-                "writing output, or a seed's dispatch failed silently)"
-            )
-
-        if kind == "zarr":
-            dest = study_dir / f"runs.{run_id}.zarr"
-            if dest.exists():
-                shutil.rmtree(dest)
-            dest.mkdir(parents=True)
-            # Merge every seed/lineage's store into one root -- see _merge_zarr_tree
-            # for why this recurses into collisions rather than skipping them.
-            for src in sources:
-                _merge_zarr_tree(src, dest)
-        else:
-            dest = study_dir / "parquet-runs" / experiment_id
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if dest.exists():
-                shutil.rmtree(dest)
-            shutil.copytree(sources[0], dest)
-            if n_steps is None:
-                n_steps = _count_parquet_rows(dest)
-
-        if ws_root is not None:
-            fold_analyses(extract_root, ws_root, run_id)
-            land_ptools_tsvs(extract_root, ws_root, run_id)
-
-    provenance["store_path"] = str(dest)
-    resolved_n_steps = n_steps if n_steps is not None else 0
-    started = _time.time()
-
-    # Build the replay manifest OURSELVES, with ws_root=None -- a remote run
-    # never executed in the landing laptop's workspace checkout, so its
-    # code_version/environments must never be inferred from that checkout
-    # (the "partly wrong" half of the found bug). Passing this manifest
-    # explicitly to save_metadata also SKIPS its own auto-build-from-
-    # workspace fallback, which is what previously overwrote a correct
-    # `commit` with the local HEAD.
-    manifest = cr.build_run_manifest(
-        spec_id=spec_id, params=provenance, n_steps=resolved_n_steps,
-        emitter=kind, emit_paths=[], runtime={}, origin="remote",
-        study=None, generation_id=None, ws_root=None,
-    )
-    manifest["code_version"] = {
-        "git_sha": commit or None,
-        "package": None,
-        "repo": None,
-        "remote_url": None,
-        "image": image,
-    }
-    manifest["environments"] = [{
-        "role": "primary",
-        "repo": None,
-        "ref": None,
-        "commit": commit or None,
-        "remote_url": None,
-        "lockfile_hash": None,
-        "image": image,
-    }]
-
-    conn = cr.connect(study_dir / "runs.db")
-    try:
-        cr.save_metadata(
-            conn,
-            spec_id=spec_id,
-            run_id=run_id,
-            params=provenance,
-            label=label or f"Remote run ({deployment})",
-            started_at=started,
-            n_steps=resolved_n_steps,
-            # Still pass the workspace (for the durable JSONL run-log append
-            # only) — `manifest` above is what makes save_metadata skip its
-            # own local-checkout-inferring auto-build.
-            workspace=ws_root,
-            manifest=manifest,
-        )
-        cr.complete_metadata(conn, run_id=run_id, n_steps=resolved_n_steps, status="completed")
-        # item 84: remove the dispatch-time pending placeholder (remote_run_
-        # submit's own `remote-pending-<simulation_id>` row, written so the
-        # Runs tab shows the campaign immediately instead of only once landed)
-        # now that this real row supersedes it. Safe to call unconditionally —
-        # deleting a run_id that was never written (any simulation landed via
-        # an older/other path, or a simulation never dispatched through
-        # remote_run_submit at all) is a silent no-op.
-        cr.delete_run(conn, run_id=f"remote-pending-{simulation_id}",
-                      workspace=ws_root)
-    finally:
-        conn.close()
-
-    return run_id

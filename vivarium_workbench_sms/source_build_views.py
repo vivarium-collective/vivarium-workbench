@@ -1,0 +1,156 @@
+"""Pure builders for the three sms-api source-build routes (``GET /api/source/builds``,
+``POST /api/source/build-remote``, ``POST /api/source/switch-build``), served by the SMS provider's router
+(``vivarium_workbench_sms/routes.py``, step P2 Builds B3).
+
+Behaviour-preserving ports of the stdlib handlers
+``server.Handler._post_source_build_remote`` and ``_post_source_switch_build``.
+Both talk to the sms-api over the network via the existing testable lib clients
+(:class:`lib.sms_api_client.SmsApiClient`, :mod:`lib.remote_build_source`), so
+they are pure builders returning ``(body, status)`` — the FastAPI route wraps a
+non-200 in ``JSONResponse``.  No ``import server`` here.
+
+The network names — :class:`SmsApiClient`, :class:`SmsApiError`,
+:func:`list_build_sources`, :func:`materialize_build` — are bound at module
+level so tests monkeypatch them with fakes and never touch a real network.
+``build_source_builds`` (moved from ``lib.workspace_deps_views``) keeps its own seams instead: it reads
+``sms_api_client.SmsApiClient`` and ``remote_build_source.list_build_sources`` through their modules, as it did there.
+
+``switch_build`` re-points the active workspace via the 3a shared lib switch
+``active_workspace.switch_workspace`` (sets ``lib._root`` + invalidates the lib
+caches).
+
+The base URL is ``sms_api_client.sms_api_base()``, read through its module at call time. ``normalize_repo_url`` is
+imported from the core :mod:`lib.git_status`.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from vivarium_workbench.lib import active_workspace
+from vivarium_workbench.lib.git_status import normalize_repo_url
+from vivarium_workbench_sms import remote_build_source, sms_api_client
+from vivarium_workbench_sms.remote_build_source import (
+    ensure_git_workspace,
+    list_build_sources,
+    materialize_build,
+    materialize_session_build,
+)
+from vivarium_workbench_sms.sms_api_client import BranchHeadUnresolved, SmsApiClient, SmsApiError
+
+
+def build_source_builds() -> dict:
+    """Builder for GET /api/source/builds (moved from ``lib.workspace_deps_views``, step P2 Builds B3).
+
+    Mirrors ``server.Handler._get_source_builds``.  Env-based (``SMS_API_BASE``);
+    no ws_root needed.  Always returns a dict — best-effort (empty builds +
+    error reason when sms-api is down).
+    """
+    return remote_build_source.list_build_sources(sms_api_client.SmsApiClient(sms_api_client.sms_api_base()))
+
+
+def build_remote(body: dict) -> tuple[dict, int]:
+    """Register a repo+branch HEAD as an sms-api build. Returns ``(body, status)``.
+
+    Behaviour-preserving port of ``_post_source_build_remote``:
+
+      * missing repo/branch  → ``({"error": "repo and branch are required"}, 400)``
+      * unresolved HEAD      → ``({"error": "could not resolve branch HEAD via sms-api"}, 502)``
+      * ``SmsApiError``      → ``({"error": f"sms-api: {e}"}, 502)``
+      * happy path           → ``({"ok": True, "simulator_id", "repo", "branch", "commit"}, 200)``
+    """
+    repo = (body or {}).get("repo") or ""
+    branch = (body or {}).get("branch") or ""
+    if not repo or not branch:
+        return {"error": "repo and branch are required"}, 400
+    repo = normalize_repo_url(repo)
+    client = SmsApiClient(sms_api_client.sms_api_base())
+    try:
+        # One call on a server advertising viva-v1-environments-build (it resolves
+        # the head itself); the latest + register pair otherwise (W2).
+        reg = client.register_branch_head(repo, branch)
+    except BranchHeadUnresolved:
+        return {"error": "could not resolve branch HEAD via sms-api"}, 502
+    except SmsApiError as e:
+        return {"error": f"sms-api: {e}"}, 502
+    commit = reg.get("git_commit_hash") or ""
+    if not commit:
+        return {"error": "could not resolve branch HEAD via sms-api"}, 502
+    return (
+        {"ok": True, "simulator_id": reg.get("database_id"),
+         "repo": repo, "branch": branch, "commit": commit},
+        200,
+    )
+
+
+def switch_build(body: dict, *, switch_active: bool = True, session_key: str | None = None) -> tuple[dict, int]:
+    """Materialize a build's workspace (cached) + re-point. ``(body, status)``.
+
+    ``switch_active`` (default ``True``) keeps the legacy **process-global**
+    re-point via ``active_workspace.switch_workspace``. The FastAPI
+    ``/api/source/switch-build`` route passes ``switch_active=False`` so the
+    switch is **per session** (the route binds the caller's session to the
+    materialized cache dir instead — mirrors ``/api/source/switch``, slice 4).
+
+    ``session_key``, when given, resolves to that session's OWN exclusive
+    clone of the build (``materialize_session_build`` — item 20's fix) instead
+    of the shared immutable base every session used to bind to directly. Kept
+    optional (default ``None`` → old shared-cache-dir behavior) so callers
+    that genuinely want the raw shared base (and every existing test in this
+    file, none of which pass a session key) are unaffected.
+
+    Behaviour-preserving port of ``_post_source_switch_build``:
+
+      * missing ``simulator_id`` → ``({"error": "missing 'simulator_id'"}, 400)``
+      * sms-api unreachable      → ``({"error": f"sms-api unavailable: {err}"}, 502)``
+      * build not found          → ``({"error": f"build {sim_id} not found"}, 404)``
+      * materialize ``SmsApiError`` → ``({"error": f"materialize failed: {e}"}, 502)``
+      * happy path               → ``({"ok": True, "source": {"path", "name"}}, 200)``
+    """
+    sim_id = (body or {}).get("simulator_id")
+    if sim_id is None:
+        return {"error": "missing 'simulator_id'"}, 400
+    client = SmsApiClient(sms_api_client.sms_api_base())
+    listing = list_build_sources(client)
+    entry = next((b for b in listing["builds"] if b["simulator_id"] == sim_id), None)
+    if entry is None:
+        if listing.get("error"):
+            return {"error": f"sms-api unavailable: {listing['error']}"}, 502
+        return {"error": f"build {sim_id} not found"}, 404
+    try:
+        if session_key is not None:
+            cache_dir = materialize_session_build(client, session_key, sim_id, entry["commit"])
+        else:
+            cache_dir = materialize_build(client, sim_id, entry["commit"])
+    except SmsApiError as e:
+        return {"error": f"materialize failed: {e}"}, 502
+    # Stamp build provenance into the cache dir so the rail chip can show
+    # "<branch> @ <commit> · remote build #<id>" (a materialized build is not
+    # a git repo, so the chip can't derive branch/commit from git). This MUST
+    # run BEFORE ensure_git_workspace so the single baseline commit
+    # (`git add -A` inside ensure_git_workspace) captures this file — otherwise
+    # the on-disk stamp never matches the committed tree and the workspace stays
+    # dirty (`M .viv-build.json`), tripping remote_run's clean-tree guard (#858).
+    # On subsequent switches ensure_git_workspace no-ops (.git exists) and
+    # re-writing identical content produces no diff — the tree stays clean.
+    try:
+        (Path(cache_dir) / ".viv-build.json").write_text(json.dumps({
+            "simulator_id": sim_id, "repo": entry.get("repo", ""),
+            "branch": entry.get("branch", ""), "commit": entry.get("commit", ""),
+            "repo_url": entry.get("repo_url", ""),
+        }), encoding="utf-8")
+    except Exception:
+        pass  # provenance stamp is best-effort, never block the switch
+    # Idempotent/self-healing: a bare tarball extraction has no `.git`, so a
+    # session bound to it can never dispatch (remote_run_views's push-based
+    # "Run on remote" 409s with "no GitHub remote configured" — found live
+    # trying to dispatch a pilot run from a switched sms-ecoli build). Runs on
+    # every switch, not just first materialize — cheap (one stat) once `.git`
+    # already exists, and still self-heals wherever build-cache ISN'T on
+    # durable storage (see remote_build_source.build_cache_root's docstring for
+    # where it is / isn't in each deployment).
+    ensure_git_workspace(Path(cache_dir), entry.get("repo_url", ""), entry.get("branch", ""), entry["commit"], sim_id)
+    if switch_active:
+        active_workspace.switch_workspace(cache_dir)
+    return {"ok": True, "source": {"path": str(cache_dir), "name": entry["label"]}}, 200

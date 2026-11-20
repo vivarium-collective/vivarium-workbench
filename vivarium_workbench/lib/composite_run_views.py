@@ -23,6 +23,7 @@ import zipfile
 from pathlib import Path
 
 from vivarium_workbench.lib import composite_runs as cr
+from vivarium_workbench.lib.backends.ids import REMOTE_RUN_PREFIX
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 _TERMINAL_STATUSES = {"completed", "failed", "orphaned"}
@@ -69,11 +70,11 @@ def build_composite_run(ws_root: Path, run_id: str) -> tuple[dict, int]:
       rows for ``run_id``).
     * HTTP 200 ``{"run_id": ..., "trajectory": [...]}`` — success.
     """
-    # Plan B (image-backed Cloud run): a "remote-sim-<id>" run has no local
-    # trajectory — its data lives on the cloud and surfaces in the Simulations/
+    # A remote composite run (``REMOTE_RUN_PREFIX`` + its id on its backend) has
+    # no local trajectory — its data lives on its backend and surfaces in the
     # Runs tab. Return an empty trajectory so the loom degrades gracefully (no
     # inline graph) instead of throwing on a 404.
-    if run_id.startswith("remote-sim-"):
+    if run_id.startswith(REMOTE_RUN_PREFIX):
         return {"run_id": run_id, "trajectory": [], "remote": True}, 200
     db = _db_file(ws_root)
     if not db.is_file():
@@ -167,18 +168,28 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
       ``JSONDecodeError``.
     """
     ws_root = Path(ws_root)
-    # Plan B (image-backed Cloud run): a composite-card Cloud run dispatched via
-    # run_simulation has no local run row — its state lives on sms-api. The loom
-    # polls this endpoint with the synthetic "remote-sim-<id>" run_id; map it to
-    # the sms-api simulation status so the run bar shows running -> completed. The
-    # run itself surfaces in the Simulations/Runs tab via remote_simulations.
-    if run_id.startswith("remote-sim-"):
-        try:
-            sim_id = int(run_id[len("remote-sim-"):])
-        except ValueError:
-            return {"error": "run not found"}, 404
+    # A remote composite run (``REMOTE_RUN_PREFIX`` + its id on its backend) has no local run row; its state lives on
+    # its backend. The loom (and viva-superpowers' skills, which read ``status``) poll this endpoint with the synthetic
+    # run id; map it to the backend's run status so the run bar shows running -> completed. The run itself surfaces
+    # in the Runs tab through the backend's listing facet.
+    if run_id.startswith(REMOTE_RUN_PREFIX):
         from vivarium_workbench.lib import remote_run_views as _rrv
-        st, code = _rrv.remote_run_status({"simulation_id": sim_id})
+        from vivarium_workbench.lib.backends.config import deployment_name as remote_deployment_name
+
+        # Opaque run ids: the suffix is the run's id on its backend, whatever its form, passed on as a string;
+        # remote_run_status routes it by its record. An integer spelling is normalised as every route's query
+        # parameter is (``opaque_run_id``: "+12", "0012" -> "12"). Every spelling of zero ("0", "00", "+0", "-0", which
+        # the old ``int()`` read as 0) becomes "" (no id), which the status view answers with the old "required" 400.
+        suffix = run_id[len(REMOTE_RUN_PREFIX):].strip()
+        if not suffix:  # no id at all (as before); a zero still goes on to the old "required" answer
+            return {"error": "run not found"}, 404
+        rid = _rrv.opaque_run_id(suffix)
+        if rid[:1] == "-" and rid[1:].isascii() and rid[1:].isdigit() and not rid[1:].strip("0"):
+            rid = ""  # "-0": opaque_run_id keeps a minus sign (no id has one), but int() read it as 0
+        # This process dispatched it, to its own deployment (step 1c-2: an older row of another deployment with
+        # the same integer id must not be taken for it).
+        st, code = _rrv.remote_run_status({"simulation_id": rid, "deployment": remote_deployment_name()},
+                                          ws_root=ws_root)
         if code != 200:
             return st, code
         phase = str(st.get("phase") or "")
@@ -190,7 +201,8 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
             "n_steps": None,
             "heartbeat_at": None,
             "remote": True,
-            "simulation_id": sim_id,
+            # The run's id on its backend, as its backend answers it (SMS's status body: the integer), else the suffix.
+            "simulation_id": st.get("simulation_id", rid),
             "raw_status": st.get("raw_status"),
         }, 200
     db = _db_file(ws_root)

@@ -335,6 +335,10 @@ def _source_from_manifest(manifest_json: str | None) -> dict | None:
         # flag it so the UI shows it as approximate, same as the read-time
         # inferred fallback.
         "inferred": bool(cv.get("backfilled")),
+        # True when the workspace tree was dirty at launch: the recorded commit
+        # does not fully capture what ran (issue #1618, bug 10). None = unknown
+        # (legacy manifest written before dirty was tracked).
+        "dirty": cv.get("git_dirty"),
     }
 
 
@@ -358,6 +362,8 @@ def _inferred_workspace_source(workspace) -> dict | None:
         "commit_url": _commit_url(ident.get("remote_url"), commit),
         "package": None,
         "inferred": True,
+        # The workspace's CURRENT tree state (this is the current-HEAD fallback).
+        "dirty": ident.get("dirty"),
     }
 
 
@@ -609,6 +615,7 @@ _RUN_PROVENANCE_KEYS = frozenset({
     "source", "simulation_id", "experiment_id", "backend", "s3_uri", "store_path",
     "viva_v1",  # a landed /viva/v1 run's record of itself (remote_run_viva_v1.land)
     "compose",  # a landed compose-api run's record of itself (remote_run_compose.land)
+    "remote",  # where any remote run went (lib/backends/records.py, step 1c); never sent to the UI as config
 })
 
 
@@ -1537,35 +1544,127 @@ def _emitter_tag(emitter) -> str:
     return emitter.lower() if isinstance(emitter, str) else ""
 
 
-def _append_remote_simulations(sims: list, ws_root: Path, *, fresh: bool = False) -> list:
-    """Append the active remote build's server-side runs (scoped to the build's
-    commit/repo) to the local Simulations-DB rows. No-op for local workspaces
-    or when sms-api is unreachable — single source for the local+remote merge,
-    shared by ``build_simulations_data`` and the ``/api/simulations`` handler.
-
-    By default this routes through the NON-blocking stale-while-revalidate helper
-    (``list_remote_simulations_swr``): it returns whatever the SWR cache holds
-    immediately and refreshes in the background, so a cold/slow/wedged tunnel can
-    never pin the request thread. ``fresh=True`` (threaded from ``?refresh=true``)
-    takes the blocking path but bounds it with a short timeout and one retry so
-    even the explicit refresh can't hang the request for minutes."""
+def _listing_backends() -> list:
+    """``(kind, listing facet)`` of every backend in ``backends.offering("listing")`` (step P2 Remote tab R1), in its
+    order: found by facet presence, a registry read -- never ``active()``, a profile or a record, any of which could
+    block (#1106). Empty when no backend lists runs (providers off, the plugin absent) or a broken provider makes the
+    registry raise."""
     try:
-        from vivarium_workbench.lib import remote_simulations as _rs
-        if fresh:
-            remote = _rs.list_remote_simulations(
-                ws_root, use_cache=False,
-                timeout=_rs._FRESH_TIMEOUT, max_retries=_rs._FRESH_MAX_RETRIES)
-        else:
-            remote = _rs.list_remote_simulations_swr(ws_root)
-    except Exception:
-        remote = []
-    if not remote:
-        return sims
+        from vivarium_workbench.lib import backends
+        return [(b.name, b.listing) for b in backends.offering("listing") if b.listing is not None]
+    except Exception:  # noqa: BLE001 -- the listing then stays local
+        return []
+
+
+def _listings() -> list:
+    """The listing facets of :func:`_listing_backends`, in its order."""
+    return [listing for _kind, listing in _listing_backends()]
+
+
+def list_remote_runs(ws_root: Path, *, fresh: bool = False, local: "list | None" = None,
+                     kinds: "dict | None" = None) -> list:
+    """The runs every backend's ``listing`` facet reports (:func:`_listings`), deduped by ``run_id`` against the
+    ``local`` rows and across backends: a run_id already listed is not listed again (one backend's own rows are kept
+    as it gave them). ``[]`` when no backend lists runs or its server is unreachable. Shared by the Simulations-DB
+    merge and the study cards' remote counts (``investigations_index._remote_study_run_stats``).
+
+    By default each listing answers from its cache without blocking (stale-while-revalidate: a cold/slow/wedged
+    tunnel can never pin the request thread). ``fresh=True`` (threaded from ``?refresh=true``) asks for the bounded
+    blocking fetch.
+
+    ``kinds`` (optional, filled in): each listed row's ``run_id`` -> the kind of the backend that listed it (step P3
+    F0: a listed run's features are its listing backend's)."""
+    per_backend: list = []
+    for kind, listing in _listing_backends():
+        try:
+            per_backend.append((kind, listing.list_runs(ws_root, fresh=fresh) or []))
+        except Exception:  # noqa: BLE001 -- one bad listing never hides another, nor the local rows
+            pass
+    have = {s.get("run_id") for s in (local or []) if isinstance(s, dict)}
+    extra: list = []
+    for kind, remote in per_backend:
+        mine = [r for r in remote if r.get("run_id") not in have]
+        have.update(r.get("run_id") for r in mine)
+        if kinds is not None:
+            kinds.update((r.get("run_id"), kind) for r in mine)
+        extra += mine
+    return extra
+
+
+def _append_remote_simulations(sims: list, ws_root: Path, *, fresh: bool = False,
+                               kinds: "dict | None" = None) -> list:
+    """Append the backends' listed runs (:func:`list_remote_runs`) to the local Simulations-DB rows -- single source
+    for the local+remote merge, shared by ``build_simulations_data`` and the ``/api/simulations`` handler. No-op
+    when no backend lists runs or its server is unreachable."""
     # Dedup: a landed remote run is already a local row (same run_id/experiment_id)
     # — don't list it twice. Keep the local (richer, has store/analyses) copy.
-    have = {s.get("run_id") for s in sims if isinstance(s, dict)}
-    extra = [r for r in remote if r.get("run_id") not in have]
+    extra = list_remote_runs(ws_root, fresh=fresh, local=sims, kinds=kinds)
     return list(sims) + extra if extra else sims
+
+
+def _record_kind(rec: "dict | None") -> "str | None":
+    """The ``kind`` of a folded run record's ``params.remote`` block (``lib/backends/records.py``), or ``None``."""
+    params = rec.get("params") if isinstance(rec, dict) else None
+    remote = params.get("remote") if isinstance(params, dict) else None
+    kind = remote.get("kind") if isinstance(remote, dict) else None
+    return kind if isinstance(kind, str) and kind else None
+
+
+def _annotate_run_features(sims: list, folded: dict, listed_kinds: dict) -> None:
+    """Step P3 F0: give every row that has a ``remote_origin`` its run's features, ``remote_origin.features`` (sorted;
+    ``backends.features.run_features``) -- one pass over the merged list, so JSONL rows (``remote-pending-``
+    placeholders included) and listed rows are covered alike. The run's backend is, in order: the backend that listed
+    it, the kind its record names (``params.remote.kind``), the backend that owns its ``simulation_id``'s form.
+
+    Registry reads only (#1106): no record lookup, profile or network call. ``remote_origin`` is replaced by a copy
+    (a listed row may be a listing cache's own dict). Never raises: a row it cannot place gets ``[]``."""
+    import vivarium_workbench.lib.backends.features as _features
+
+    by_kind: dict = {}
+
+    def _for(kind: "str | None") -> list:
+        if kind not in by_kind:
+            try:
+                by_kind[kind] = sorted(_features.run_features(kind))
+            except Exception:  # noqa: BLE001 -- a broken registry declares nothing
+                by_kind[kind] = []
+        return by_kind[kind]
+
+    for row in sims:
+        ro = row.get("remote_origin") if isinstance(row, dict) else None
+        if not isinstance(ro, dict):
+            continue
+        rid = row.get("run_id")
+        kind = listed_kinds.get(rid) or _record_kind(folded.get(rid))
+        if kind is None:
+            try:
+                kind = _features.kind_by_id_form(ro.get("simulation_id"))
+            except Exception:  # noqa: BLE001
+                kind = None
+        row["remote_origin"] = {**ro, "features": list(_for(kind))}
+
+
+def _remote_listing_state(ws_root: Path) -> "dict | None":
+    """The ``remote`` key of ``/api/simulations``: the first non-``None`` ``listing.state`` (:func:`_listings`), or
+    ``None``. Never raises."""
+    for listing in _listings():
+        try:
+            state = listing.state(ws_root)
+        except Exception:  # noqa: BLE001 -- provenance is best-effort; it never breaks the local listing
+            continue
+        if state is not None:
+            return state
+    return None
+
+
+def forget_remote_listings() -> None:
+    """``?refresh=true``: every listing forgets its cached rows (``listing.invalidate``) before the fresh fetch, so a
+    server that is down now reports "unavailable", not "stale". Never raises."""
+    for listing in _listings():
+        try:
+            listing.invalidate()
+        except Exception:  # noqa: BLE001 -- one backend's failure never keeps another's cache
+            pass
 
 
 # Shared emitter-kind -> display-label map (one place to add a kind's label).
@@ -2052,7 +2151,8 @@ _ACTIVE_RUN_STATUSES = {"queued", "running", "pending", "submitted", "in_progres
 def _sim_recency_key(r: dict) -> tuple:
     """Sort key for the merged Runs-DB list (used with ``reverse=True``):
     ACTIVE runs first, then newest-first by completion/start time, then by remote
-    ``simulation_id`` so the latest-dispatched cloud run leads among same-time rows.
+    ``simulation_id`` (the run's id on its backend, opaque) as a tiebreak among
+    same-time rows: an integer id orders by value; other ids tie.
     """
     status = str(r.get("status") or "").strip().lower()
     active = 1 if status in _ACTIVE_RUN_STATUSES else 0
@@ -2149,8 +2249,9 @@ def _build_simulations_data(ws_root: Path, include_remote: bool = True,
               reverse=True)
 
     remote_state: dict | None = None
+    listed_kinds: dict = {}
     if include_remote:
-        sims = _append_remote_simulations(sims, ws_root, fresh=fresh)
+        sims = _append_remote_simulations(sims, ws_root, fresh=fresh, kinds=listed_kinds)
         # Re-sort the MERGED local+remote list. _append_remote_simulations appends
         # remote rows AFTER the local-only sort above, so without this a just-
         # dispatched cloud run (a remote row) lands at the bottom instead of the
@@ -2164,11 +2265,10 @@ def _build_simulations_data(ws_root: Path, include_remote: bool = True,
         # Provenance of the remote source, so the Runs tab can show
         # "as of HH:MM (refreshing…)" instead of a spinner. Best-effort: a
         # failure here must never break the local listing.
-        try:
-            from vivarium_workbench.lib import remote_simulations as _rs
-            remote_state = _rs.remote_state(ws_root)
-        except Exception:  # noqa: BLE001
-            remote_state = None
+        remote_state = _remote_listing_state(ws_root)
+
+    # Each remote row's own features (step P3 F0), in one pass over the merged list.
+    _annotate_run_features(sims, folded, listed_kinds)
 
     # Capability-matched analysis tools + their launch URLs, per row (Simulations
     # DB "launch into tool" affordance). Best-effort at every layer already
@@ -2197,12 +2297,18 @@ def _build_simulations_data(ws_root: Path, include_remote: bool = True,
 
 
 def resolve_or_fetch_store(workspace: Path, row: dict) -> "tuple[Path | None, tempfile.TemporaryDirectory | None]":
-    """Resolve a run's native store, falling back to sms-api when local
+    """Resolve a run's native store, falling back to the run's backend when local
     resolution fails and the row's ``remote_origin`` carries a
-    ``simulation_id`` — the same S3-streaming fetch
-    :func:`build_simulation_run_zip` uses for Results, reused here so
-    Viz/Report can render real data for a run whose local materialization
-    is gone.
+    ``simulation_id`` — the same fetch :func:`build_simulation_run_zip` uses
+    for Results, reused here so Viz/Report can render real data for a run
+    whose local materialization is gone.
+
+    The fetch is the backend's ``artifacts.fetch_store`` (docs/backend-adapters.md
+    §2.1, step P2 Remote tab R2): the run's record picks the backend
+    (``backends.for_existing``), and a backend without ``artifacts`` (or a
+    refusal) has nothing to fetch. This function owns the temporary directory
+    the facet downloads into, and removes it when the facet returns ``None``
+    or raises.
 
     Returns ``(store_path, tmp_handle)``. ``tmp_handle`` is a
     ``tempfile.TemporaryDirectory`` when a remote fetch happened (the caller
@@ -2210,8 +2316,6 @@ def resolve_or_fetch_store(workspace: Path, row: dict) -> "tuple[Path | None, te
     ``None`` when the store resolved locally (nothing to clean up) or
     couldn't be resolved at all (``store_path`` is also ``None`` in that case).
     """
-    import tarfile
-
     workspace = Path(workspace)
 
     def _resolve(p: "str | None") -> "Path | None":
@@ -2233,20 +2337,25 @@ def resolve_or_fetch_store(workspace: Path, row: dict) -> "tuple[Path | None, te
     sim_id = remote_origin.get("simulation_id")
     if sim_id is None:
         return None, None
+    # Step 1c-2: only the run's own backend is asked (another deployment's run must not be fetched from this one), and
+    # only one that offers ``artifacts`` has a store to fetch (step P2 R2; today sms-legacy).
+    from vivarium_workbench.lib import backends
 
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
-    from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
+    chosen = backends.for_existing(workspace, sim_id, deployment=remote_origin.get("deployment"),
+                                   study=row.get("study_slug"))
+    if not isinstance(chosen, backends.Backend) or chosen.artifacts is None:
+        return None, None
+
     tmp = tempfile.TemporaryDirectory()
     try:
-        tar_path = SmsApiClient(_sms_api_base()).download_data(int(sim_id), Path(tmp.name))
-    except SmsApiError:
+        store = chosen.artifacts.fetch_store(str(sim_id), Path(tmp.name))
+    except BaseException:
+        tmp.cleanup()
+        raise
+    if store is None:
         tmp.cleanup()
         return None, None
-    extract_dir = Path(tmp.name) / "extracted"
-    extract_dir.mkdir()
-    with tarfile.open(tar_path) as tf:
-        tf.extractall(extract_dir, filter="data")  # noqa: S202 — sms-api's own tar, not user input
-    return extract_dir, tmp
+    return store, tmp
 
 
 def build_simulation_run_zip(workspace: Path, run_id: str) -> "tuple[bytes, str, int]":
@@ -2256,12 +2365,12 @@ def build_simulation_run_zip(workspace: Path, run_id: str) -> "tuple[bytes, str,
     NO filesystem path is trusted from the client. Prefers the native
     zarr/parquet store directory; falls back to the SQLite ``runs.db`` that holds
     the run's rows. Remote (``s3://``) stores can't be zipped as-is, so those
-    fall back to fetching the run's native store from sms-api (which already
-    streams it out of S3 with no disk touch on its side) via the run's recorded
-    ``remote_origin.simulation_id`` — the same call the remote-run-land flow
-    already makes at dispatch time (:mod:`lib.remote_run_views`), reused here
-    for an already-landed run whose local materialization no longer exists
-    (e.g. the session/build directory it ran in didn't survive a pod restart).
+    fall back to fetching the run's native store from the run's backend
+    (:func:`resolve_or_fetch_store`: its ``artifacts.fetch_store``; for SMS the
+    same download the remote-run-land flow makes) via the run's recorded
+    ``remote_origin.simulation_id``, for an already-landed run whose local
+    materialization no longer exists (e.g. the session/build directory it ran
+    in didn't survive a pod restart).
 
     Returns ``(zip_bytes, filename, status)``:
       200 — zip built;  404 — run not found, and no local or remote store to fetch it from.

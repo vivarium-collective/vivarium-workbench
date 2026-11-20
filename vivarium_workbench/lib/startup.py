@@ -23,6 +23,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 class _BasePathStripMiddleware:
@@ -56,7 +57,8 @@ class _BasePathStripMiddleware:
 GRACEFUL_SHUTDOWN_S = 10
 
 
-def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path: str = "") -> int:
+def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path: str = "",
+                  idle_timeout_minutes: Optional[float] = None) -> int:
     """Boot the FastAPI dashboard app under uvicorn against ``workspace``.
 
     ``host`` defaults to loopback; pass ``0.0.0.0`` to bind every interface
@@ -65,6 +67,24 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     """
     workspace = Path(workspace).resolve()
 
+    # One remote backend per process (docs/backend-adapters.md step 1c). cli.main and cmd_serve check first; this
+    # covers a caller that set the environment directly and boots the app without them.
+    from vivarium_workbench.lib.backend_config import BackendConfigError
+    from vivarium_workbench.lib.backends import config as backend_cfg
+
+    try:
+        backend_cfg.check_config()
+    except BackendConfigError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
+        print(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+    # A provider alias set while no provider is active to read it (providers off, or the plugin absent) is ignored;
+    # say so (step P3 C1; step P4 refuses it).
+    for var in backend_cfg.stray_backend_env():
+        print(f"warning: {var} is set but no backend provider is active; it is ignored", file=sys.stderr)
+
     # Configure structured logging so the access-log middleware actually emits.
     # basicConfig is a no-op if the root logger is already configured.
     import logging
@@ -72,6 +92,20 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+
+    # Hosted env workers asked for (ENV_WORKER_PROXY_BASE / _ADVERTISE_HOST) but no backend provider supplies them:
+    # refuse to start rather than run them as local subprocesses (docs/backend-adapters.md step P2). After
+    # basicConfig, so the launcher's "env workers: PROXY ..." line is logged. No network call.
+    from vivarium_workbench.lib.env_worker_launcher import check_worker_config
+
+    try:
+        check_worker_config()
+    except BackendConfigError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
+        print(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
 
     # Surface stale framework deps at startup. A stale process-bigraph (no
     # `artifacts`) or viva-superpowers (no test_audit/loop_state) otherwise fails
@@ -88,28 +122,12 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     except Exception:  # noqa: BLE001
         pass
 
-    # Surface the remote viva-api config at startup so a fresh operator (or Chris
+    # Surface the remote backend config at startup so a fresh operator (or Chris
     # trying "switch to remote") sees immediately whether the endpoint is reachable.
-    # Only probe when VIVA_API_BASE/SMS_API_BASE is explicitly set — a local-only
-    # user hasn't opted into remote and shouldn't pay a probe delay. Best-effort:
-    # never blocks/raises.
-    from vivarium_workbench.lib.sms_api_client import backend_configured
-
-    if backend_configured():
-        try:
-            from vivarium_workbench.lib.workspace_deps_views import remote_health
-            _h = remote_health()
-            if _h["reachable"]:
-                print(f"remote sms-api: {_h['base_url']} — reachable ✓ (v{_h['version']})")
-            else:
-                print(
-                    f"remote sms-api: {_h['base_url']} — UNREACHABLE ✗ "
-                    f'("switch to remote" unavailable until the endpoint/tunnel is up)',
-                    file=sys.stderr,
-                )
-        except Exception as e:  # noqa: BLE001
-            print(f"warning: remote sms-api health check failed: {e}", file=sys.stderr)
-
+    # Only probe when a backend is configured (named, or an active provider's own
+    # setting: backends.config.backend_configured) — a local-only user hasn't opted
+    # into remote and shouldn't pay a probe delay. Best-effort: never blocks/raises.
+    if backend_cfg.backend_configured():
         # A backend named with --backend-base-url: say which dispatch route its
         # capabilities give this workspace (best-effort; never blocks or raises).
         try:
@@ -122,19 +140,36 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
                     print(f"backend dispatch: {_p['dispatch']} (server v{_p['version']}; "
                           f"capabilities: {', '.join(_p['capabilities']) or 'none advertised'})")
             elif _p is not None:
-                print(f"backend dispatch: legacy (capabilities unavailable: {_p['error']})",
-                      file=sys.stderr)
+                print(f"backend dispatch: UNREACHABLE ({_p['error']}); a run is refused, never started locally, "
+                      "until it answers", file=sys.stderr)
         except Exception as e:  # noqa: BLE001
             print(f"warning: backend capability check failed: {e}", file=sys.stderr)
 
+        try:
+            from vivarium_workbench.lib.workspace_deps_views import remote_health
+            _h = remote_health()
+            if _h["reachable"]:
+                print(f"remote backend: {_h['base_url']} — reachable ✓ (v{_h['version']})")
+            else:
+                print(
+                    f"remote backend: {_h['base_url']} — UNREACHABLE ✗ "
+                    f'("switch to remote" unavailable until the endpoint is up)',
+                    file=sys.stderr,
+                )
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: remote backend health check failed: {e}", file=sys.stderr)
+
         # Start the RemoteLink circuit-breaker probe so a wedged tunnel is
-        # detected in the background (~3s probe every 30s) and every sms-api call
-        # site fails fast instead of burning its 91.5s timeout budget. Opt-in:
+        # detected in the background (~3s probe every 30s) and every remote-backend
+        # call site fails fast instead of burning its 91.5s timeout budget. Opt-in:
         # only when the remote endpoint is configured (this branch), so tests and
         # the CLI never spawn the thread. Best-effort; never blocks/raises.
+        # The breaker and its target are core config (step P2): the configured URL, the one it always probed.
         try:
-            from vivarium_workbench.lib.remote_link import start_probe
-            start_probe()
+            from vivarium_workbench.lib import backend_config
+            _base = backend_cfg.configured_base_url()
+            if _base:
+                backend_config.start_probe(_base)
         except Exception as e:  # noqa: BLE001
             print(f"warning: remote-link probe failed to start: {e}", file=sys.stderr)
 
@@ -298,6 +333,20 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
     # (Not the CSRF fix — an AWS ALB omits X-Forwarded-Host, so the allowlist is
     # what actually admits the browser origin; this just keeps request metadata
     # honest for logging and any forwarded-aware code.)
+    # Idle self-shutdown: an ephemeral loopback server reaps itself once nobody
+    # is talking to it, so detached servers stop piling up across sessions. A
+    # non-loopback / base-path (container/ALB) bind stays up unless asked for
+    # explicitly. The request middleware (_idle_activity_mw) keeps it reset.
+    from vivarium_workbench.lib import idle_shutdown
+    idle_s = idle_shutdown.resolve_idle_seconds(idle_timeout_minutes, host=host, base_path=base_path)
+    if idle_s > 0:
+        logging.getLogger("vivarium_workbench").info(
+            "idle self-shutdown armed: graceful exit after %.0f min with no requests "
+            "(--idle-timeout 0 or VIVARIUM_WORKBENCH_IDLE_TIMEOUT=0 to disable)",
+            idle_s / 60.0,
+        )
+        idle_shutdown.start_idle_watchdog(idle_s)
+
     uvicorn.run(
         served, host=host, port=port, log_level="info",
         proxy_headers=True, forwarded_allow_ips="*",

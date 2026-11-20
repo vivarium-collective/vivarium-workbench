@@ -94,7 +94,7 @@
   function composite(row) {
     var cid = row && row.spec_id ? String(row.spec_id) : "";
     if (!cid) {
-      // A remote GovCloud run arrives from sms-api as a config/experiment with no
+      // A remote run arrives from its backend as a config/experiment with no
       // registered-composite ref — expected, not an anomaly — so render it neutral.
       // The red ⚠ stays only for a LOCAL run that genuinely should map to a
       // registered composite but doesn't (the real case the warning was for).
@@ -130,12 +130,14 @@
       return '<span style="color:#9ca3af;">—</span>';
     }
     var inferred = !!s.inferred;
+    var dirty = s.dirty === true;
     var color = inferred ? "#9ca3af" : "#374151";
     var short = s.commit_short || (s.commit ? String(s.commit).slice(0, 7) : "");
     var tip = (s.remote_url ? s.remote_url + "\n" : "") +
       (s.commit ? "commit " + s.commit : "") +
       (s.package ? "\npackage " + s.package : "") +
-      (inferred ? "\n(inferred from workspace HEAD — approximate, not the run's exact commit)" : "");
+      (inferred ? "\n(inferred from workspace HEAD — approximate, not the run's exact commit)" : "") +
+      (dirty ? "\n(uncommitted changes present at run time — this commit does not fully capture what ran)" : "");
     var commitHtml = "";
     if (short) {
       if (s.commit_url) {
@@ -151,8 +153,13 @@
     var repoHtml = s.repo
       ? '<span style="font-size:11px;color:' + color + ';">' + esc(s.repo) + "</span>" : "";
     var sep = (repoHtml && commitHtml) ? '<span style="color:#d1d5db;">@</span>' : "";
+    // A dirty-at-run-time marker: the recorded commit doesn't fully capture what
+    // ran (e.g. the study was never committed — #1618 bug 10).
+    var dirtyHtml = dirty
+      ? ' <span style="font-size:10px;color:#b45309;font-weight:600;" ' +
+        'title="uncommitted changes present at run time">+uncommitted</span>' : "";
     return '<span title="' + esc(tip) + '" style="white-space:nowrap;overflow:hidden;' +
-      'text-overflow:ellipsis;display:block;">' + prefix + repoHtml + sep + commitHtml + "</span>";
+      'text-overflow:ellipsis;display:block;">' + prefix + repoHtml + sep + commitHtml + dirtyHtml + "</span>";
   }
 
   // Config cell — the exact generator params that reproduce this run. Shows the
@@ -280,18 +287,27 @@
         'href="' + BP + '/api/composite-run/' + runIdEnc + '/artifact/' + name + suffix +
         '" style="text-decoration:none;">' + label + '</a>';
     }
-    // A remote run's viz is never landed locally (⬇ Land folds only analyses.json
-    // + ptools/*.tsv), so the local artifact link 404s. Route a remote row's Viz
-    // to the S3 figure gallery instead (fast by-id endpoints, not the slow
-    // /simulations list). Local runs keep the artifact link.
-    var _remoteSimId = row && row.remote_origin && row.remote_origin.simulation_id;
+    var isSnapshot = _snapshot;
+    // Remote vs local FIRST: only a remote row (one with a remote_origin run id) has features. The server gives
+    // each its run's own, remote_origin.features (step P3 F0: "artifacts" / "analyses" when the run's backend
+    // offers them; [] with providers off). A remote row without the key (an old payload) declares nothing, so its
+    // optional controls stay hidden. Features only hide optional controls; the server still decides, and refuses,
+    // every action (docs/backend-adapters.md §2.2).
+    var remoteSimId = row && row.remote_origin && row.remote_origin.simulation_id;
+    var isRemote = remoteSimId != null;
+    var runFeatures = (isRemote && Array.isArray(row.remote_origin.features)) ? row.remote_origin.features : [];
+    function runHas(name) { return runFeatures.indexOf(name) !== -1; }
+    // A remote run's viz is never landed locally (landing folds only analyses.json + ptools/*.tsv), so the local
+    // artifact link 404s. A remote row whose backend offers `artifacts` opens the backend's figure gallery instead
+    // (fast by-id endpoints, not the slow /simulations list); one whose backend does not has no figures to show.
+    // The published snapshot is unchanged: its rows keep the button they had. Local runs keep the artifact link.
     var viz = completed
-      ? (_remoteSimId != null
-          ? '<button type="button" class="action-btn js-authoring viz-remote-btn" title="Open this remote run\'s visualizations (from S3)">📊 Viz</button>'
+      ? (isRemote
+          ? ((isSnapshot || runHas("artifacts"))
+              ? '<button type="button" class="action-btn js-authoring viz-remote-btn" title="Open this remote run\'s visualizations (from its backend)">📊 Viz</button>'
+              : "")
           : (hasRun ? _art("viz", "📊 Viz", "Open this run's visualizations (GIF + plots)", false) : ""))
       : "";
-    var isSnapshot = (window.__DASH_CONFIG__ || {}).mode === "snapshot";
-    var remoteSimId = row && row.remote_origin && row.remote_origin.simulation_id;
 
     // Actions are grouped VIEW / DOWNLOAD / RE-RUN with a short inline description
     // so the overflow menu reads without hovering. Each entry: {group, html, desc}.
@@ -312,28 +328,29 @@
       "Open the report card");
 
     // --- DOWNLOAD ---
-    // ⬇ Analysis files (analyses.json). For a REMOTE run this replaces the old
-    // separate ⬇ Land button: one click lands the artifacts (POST
-    // /api/remote-run-land-artifacts folds analyses.json + ptools/*.tsv into
-    // .pbg/runs/<run_id>/) and then downloads — the delegated handler below reads
-    // run_id + sim id from the <tr>. Local runs download directly (nothing to land).
+    // ⬇ Analysis files (analyses.json). For a REMOTE run whose backend offers `artifacts`, one click lands the
+    // artifacts (POST /api/remote-run-land-artifacts folds analyses.json + ptools/*.tsv into .pbg/runs/<run_id>/)
+    // and then downloads — the delegated handler below reads run_id + sim id from the <tr>. A remote run whose
+    // backend does not offer them has ⬇ Land results instead. Local runs download directly (nothing to land).
     var analysisFiles;
-    if (completed && remoteSimId != null && hasRun && !isSnapshot) {
-      analysisFiles = '<button type="button" class="action-btn js-authoring analysis-files-remote-btn" ' +
-        'title="Pull this remote run\'s analysis files here (analyses.json + PTools exports), then download">' +
-        '⬇ Analysis files</button>';
+    if (completed && isRemote && hasRun && !isSnapshot) {
+      analysisFiles = runHas("artifacts")
+        ? '<button type="button" class="action-btn js-authoring analysis-files-remote-btn" ' +
+          'title="Pull this remote run\'s analysis files here (analyses.json + PTools exports), then download">' +
+          '⬇ Analysis files</button>'
+        : "";
     } else {
       analysisFiles = (completed && hasRun)
         ? _art("analyses", "⬇ Analysis files", "Download this run's analyses (analyses.json)", true) : "";
     }
     add("DOWNLOAD", analysisFiles,
       remoteSimId != null ? "analyses.json — lands from the deployment, then downloads" : "analyses.json");
-    // ⬇ Land results — a run dispatched to a /viva/v1 backend (serve --backend-base-url) is recorded by the
-    // backend's own run id (a string, e.g. "simulation-E9Ec819"), and its results are brought into this study's
-    // run store on request (POST /api/remote-run-land). Shown at any status: the server answers an unfinished
-    // run with a plain "not finished yet" rather than downloading anything.
-    var vivaRunId = (typeof remoteSimId === "string" && !/^\d+$/.test(remoteSimId)) ? remoteSimId : null;
-    add("DOWNLOAD", (vivaRunId && !isSnapshot && study(row))
+    // ⬇ Land results — a remote run whose backend does not offer `artifacts` (the run lifecycle's land, a core
+    // operation) has its results brought into this study's run store on request (POST /api/remote-run-land).
+    // Decided by the run's features, not its id's form: an all-digit id on a backend without `artifacts` lands
+    // too. Shown at any status: the server answers an unfinished run with a plain "not finished yet" rather than
+    // downloading anything, and refuses one it cannot land.
+    add("DOWNLOAD", (isRemote && /[1-9]|[^0-9\s]/.test(String(remoteSimId).trim()) && !runHas("artifacts") && !isSnapshot && study(row))
       ? '<button type="button" class="action-btn js-authoring land-viva-btn" ' +
         'title="Bring this run\'s results from the backend into this study">⬇ Land results</button>' : "",
       "Bring the run's results into this study");
@@ -343,15 +360,14 @@
       "Raw emitter data (.zip)");
 
     // --- RE-RUN ---
-    // 🧪 Re-run analysis — recompute the analysis phase (cd1_*/ptools_*) on an
-    // existing, completed REMOTE simulation (POST /api/remote-run-analysis ->
-    // viva-api POST /simulations/{id}/analysis). Remote+completed only. The
-    // delegated handler reads the id from the enclosing <tr data-remote-sim-id>.
-    add("RERUN", (remoteSimId != null && completed && !isSnapshot)
+    // 🧪 Re-run analysis — recompute the analysis phase on an existing, completed REMOTE run whose backend offers
+    // `analyses` (POST /api/remote-run-analysis). The delegated handler reads the id from the enclosing
+    // <tr data-remote-sim-id>.
+    add("RERUN", (isRemote && runHas("analyses") && completed && !isSnapshot)
       ? '<button type="button" class="action-btn js-authoring run-analysis-btn" ' +
         'title="Re-run this simulation\'s analysis phase (cd1_*/ptools_*) on the remote deployment">' +
         '🧪 Re-run analysis</button>' : "",
-      "Recompute cd1_*/ptools_* on GovCloud");
+      "Recompute the run's analyses on its backend");
     // ↻ Re-run simulation — REPRODUCES this run (replays its recorded manifest
     // verbatim via POST /api/study-reproduce). No run_id in markup: the delegated
     // listener resolves it from <tr data-run-id data-study> (see _onRerunButtonClick).
@@ -479,8 +495,37 @@
 
   // Land-on-demand for a remote run: POST /api/remote-run-land-artifacts (fold
   // analyses.json + copy ptools/*.tsv into .pbg/runs/<run_id>/), then refresh so
-  // ⬇ Analyses resolves and the run appears in the PTools viewer. Same delegated,
+  // ⬇ Analyses resolves (the PTools viewer reads study folders only: landing into a
+  // study, remote-run-land, is what makes a run viewable there). Same delegated,
   // capture-phase, read-id-from-<tr> idiom as ↻ Rerun above.
+  // A remote row's run id and the deployment it was dispatched to, as <tr> attributes. The deployment is sent back
+  // with every action on the run, so the server routes it by its own record and refuses one that belongs to
+  // another backend (docs/backend-adapters.md step 1c).
+  function _remoteAttrs(row) {
+    var ro = row && row.remote_origin;
+    var simId = ro && ro.simulation_id;
+    if (simId == null) return "";
+    return ' data-remote-sim-id="' + esc(simId) + '"' +
+      (ro.deployment ? ' data-remote-deployment="' + esc(ro.deployment) + '"' : "");
+  }
+
+  // Where the row's run went, for the server's record lookup: {deployment, study} from the button's <tr>.
+  function _rowWhere(btn) {
+    var tr = btn && btn.closest ? btn.closest("tr") : null;
+    return {
+      deployment: (tr && tr.getAttribute("data-remote-deployment")) || "",
+      study: (tr && tr.getAttribute("data-study")) || "",
+    };
+  }
+  function _whereQuery(where) {
+    return (where.deployment ? "&deployment=" + encodeURIComponent(where.deployment) : "") +
+      (where.study ? "&study=" + encodeURIComponent(where.study) : "");
+  }
+
+  // Opaque run ids (docs/backend-adapters.md §2.5): a remote run's id is sent as the string the row carries, never
+  // coerced with Number() -- a compose-api / viva-core id would become NaN -> null. The server routes it by the run's
+  // record and refuses a run whose backend does not offer the operation with 409 `not-offered`; an integer id ("12")
+  // is read exactly as 12 was.
   function _landRemote(runId, simId, btn) {
     if (!runId || simId == null || simId === "") return;
     var orig = btn ? btn.textContent : "";
@@ -488,7 +533,7 @@
     function _reset() { if (btn) { btn.disabled = false; btn.textContent = orig || "⬇ Land"; } }
     fetch("/api/remote-run-land-artifacts", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ simulation_id: Number(simId), run_id: runId }),
+      body: JSON.stringify(Object.assign({ simulation_id: String(simId), run_id: runId }, _rowWhere(btn))),
     }).then(function (r) {
       return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
         .catch(function () { return { ok: r.ok, status: r.status, body: {} }; });
@@ -528,7 +573,7 @@
     }
     fetch((window.__BASE_PATH__ || "") + "/api/remote-run-land", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ study: studySlug, simulation_id: vivaRunId }),
+      body: JSON.stringify({ study: studySlug, simulation_id: vivaRunId, deployment: _rowWhere(btn).deployment }),
     }).then(function (r) {
       return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
         .catch(function () { return { ok: r.ok, status: r.status, body: {} }; });
@@ -574,7 +619,7 @@
     if (btn) { btn.disabled = true; btn.textContent = "… landing"; }
     fetch("/api/remote-run-land-artifacts", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ simulation_id: Number(simId), run_id: runId }),
+      body: JSON.stringify(Object.assign({ simulation_id: String(simId), run_id: runId }, _rowWhere(btn))),
     }).then(function (r) {
       return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
         .catch(function () { return { ok: r.ok, status: r.status, body: {} }; });
@@ -605,7 +650,7 @@
   }
   document.addEventListener("click", _onAnalysisFilesRemoteClick, true);
 
-  // Open a remote run's S3 figures. The local artifact link 404s for a remote
+  // Open a remote run's figures from its backend. The local artifact link 404s for a remote
   // run (viz is never landed), so fetch the figure list by-id
   // (/api/remote-analysis-figures?simulation_id=… — fast, not the slow list
   // endpoint) and embed each figure from /api/remote-analysis-figure into a
@@ -627,10 +672,15 @@
       w.document.close();
     };
     shell('<p>Loading figures for simulation ' + esc(simId) + '…</p>');
-    fetch(BP + "/api/remote-analysis-figures?simulation_id=" + encodeURIComponent(simId))
+    var where = _rowWhere(btnEl);
+    fetch(BP + "/api/remote-analysis-figures?simulation_id=" + encodeURIComponent(simId) + _whereQuery(where))
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (btnEl) { btnEl.disabled = false; btnEl.textContent = orig || "📊 Viz"; }
+        if (d && d.terminal && d.error) {  // refused: the run belongs to another backend (step 1c)
+          if (w) shell('<p>' + esc(d.error) + '</p>'); else _toast(d.error);
+          return;
+        }
         if (!d || !d.available) {
           var reason = (d && d.reason) || "no-figures";
           var msg = 'No rendered figures for simulation ' + esc(simId) + ' yet (' + esc(reason) +
@@ -648,7 +698,7 @@
           figs.forEach(function (f) {
             nFigs++;
             var url = BP + "/api/remote-analysis-figure?simulation_id=" + encodeURIComponent(simId) +
-              "&analysis=" + encodeURIComponent(a.name) + "&path=" + encodeURIComponent(f.path);
+              "&analysis=" + encodeURIComponent(a.name) + "&path=" + encodeURIComponent(f.path) + _whereQuery(where);
             html += /\.(svg|png|gif|jpe?g)$/i.test(f.path)
               ? '<div style="margin:8px 0"><img src="' + url + '" style="max-width:100%;border:1px solid #e2e8f0"></div>'
               : '<iframe src="' + url + '" style="width:100%;height:520px;border:1px solid #e2e8f0" loading="lazy"></iframe>';
@@ -675,13 +725,13 @@
   document.addEventListener("click", _onVizRemoteClick, true);
 
   // One-click analysis re-run for a completed REMOTE simulation:
-  // POST /api/remote-run-analysis -> viva-api POST /simulations/{id}/analysis.
+  // POST /api/remote-run-analysis (the run's backend recomputes its analyses).
   // Then poll /api/remote-run-poll?analysis_id=… so the operator gets a real
   // terminal signal (the analysis job pulls a multi-GB image before it runs, so
   // "launched" alone is not useful feedback). Polling is a courtesy: giving up
   // never means the analysis failed, and the toast says so.
   var ANALYSIS_POLL_MS = 10000;
-  var ANALYSIS_POLL_MAX = 30;  // ~5 min ceiling, matching lib/remote_run_views.py
+  var ANALYSIS_POLL_MAX = 30;  // ~5 min ceiling, matching vivarium_workbench_sms/sms_legacy.py
 
   function _toast(msg) {
     if (typeof _showToast === "function") _showToast(msg); else alert(msg);
@@ -703,7 +753,7 @@
           return;
         }
         if (phase === "failed") {
-          _toast("Analysis " + analysisId + " failed: " + (body.error || "see viva-api logs"));
+          _toast("Analysis " + analysisId + " failed: " + (body.error || "see the backend's logs"));
           return;
         }
         setTimeout(function () { _pollAnalysis(analysisId, attempt + 1); }, ANALYSIS_POLL_MS);
@@ -720,7 +770,8 @@
     fetch("/api/remote-run-analysis", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ simulation_id: Number(simulationId), study: studySlug || "" }),
+      body: JSON.stringify({ simulation_id: String(simulationId), study: studySlug || "",
+                             deployment: _rowWhere(btnEl).deployment }),
     }).then(function (r) {
       return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; })
         .catch(function () { return { ok: r.ok, status: r.status, body: {} }; });
@@ -729,7 +780,7 @@
       var body = res.body || {};
       if (!res.ok) {
         // Surface the server's real error (the handler returns 502 {error, …} on
-        // an sms-api failure, 400/401/404 for known cases) plus the HTTP status,
+        // a backend failure, 400/401/404 for known cases) plus the HTTP status,
         // rather than a bare generic message — so the actual cause is visible.
         _toast("Analysis failed to start (HTTP " + res.status + "): " +
           (body.error || body.detail || "no error detail returned by the server"));
@@ -753,12 +804,12 @@
     var tr = btn.closest("tr[data-remote-sim-id]");
     var simId = tr ? tr.getAttribute("data-remote-sim-id") : "";
     if (!simId) return;
-    // Confirm before dispatch — this fires a REAL GovCloud compute job (a K8s
-    // Job on the deployment), not a local action. An accidental per-row click of
+    // Confirm before dispatch — this fires a REAL compute job on the run's
+    // backend, not a local action. An accidental per-row click of
     // this class previously caused a 36-job misfire, so gate it.
     if (!window.confirm(
         "Re-run analysis for simulation " + simId + "?\n\n" +
-        "This dispatches a real GovCloud compute job (recomputes cd1_*/ptools_* on the deployment).")) {
+        "This dispatches a real compute job on the run's backend (it recomputes the run's analyses).")) {
       return;
     }
     _runSimAnalysis(simId, btn, tr ? tr.getAttribute("data-study") : "");
@@ -809,7 +860,7 @@
       td('<span class="run-status-live">' + statusChip(row.status) + "</span>") +
       td('<div class="run-actions">' + _globalActions(row) + "</div>", "vertical-align:middle;");
     var remoteSimId = row.remote_origin && row.remote_origin.simulation_id;
-    var remoteAttr = remoteSimId != null ? ' data-remote-sim-id="' + esc(remoteSimId) + '"' : "";
+    var remoteAttr = _remoteAttrs(row);
     return '<tr data-run-id="' + esc(runId) + '" data-study="' + esc(study(row)) + '"' + remoteAttr +
       ' style="border-bottom:1px solid #f3f4f6;cursor:pointer;" ' +
       'title="Click to open this run">' + cells + "</tr>";
@@ -852,7 +903,7 @@
     // than having it interpolated into an inline onclick= string (same reason as
     // data-run-id — see _actions).
     var remoteSimId = row.remote_origin && row.remote_origin.simulation_id;
-    var remoteAttr = remoteSimId != null ? ' data-remote-sim-id="' + esc(remoteSimId) + '"' : "";
+    var remoteAttr = _remoteAttrs(row);
     return '<tr data-run-id="' + esc(runId) + '" data-study="' + esc(study(row)) + '"' + remoteAttr + " " +
       'style="border-bottom:1px solid #f3f4f6;cursor:pointer;" ' +
       'title="Click to open this run — its study, or the Composite Explorer">' + cells + "</tr>";
@@ -1051,5 +1102,6 @@
     originLabel: originLabel, fmtTime: fmtTime, location: location, study: study,
     investigation: investigation, composite: composite, sourceCell: sourceCell, toolsCell: toolsCell,
     renderRow: renderRow, renderTable: renderTable, dropEmptyColumns: dropEmptyColumns,
+    rowWhere: _rowWhere, whereQuery: _whereQuery, actionList: _actionList,
   };
 })();

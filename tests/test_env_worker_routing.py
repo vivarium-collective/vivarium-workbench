@@ -210,7 +210,7 @@ def test_no_scale_warning_on_a_laptop(tmp_path, caplog, monkeypatch):
     pool = WorkerPool()
     with caplog.at_level("WARNING"):
         pool.call(tmp_path, "run_study")
-    assert not [r for r in caplog.records if "dispatch to viva-api" in r.getMessage()]
+    assert not [r for r in caplog.records if "should dispatch to the run's backend" in r.getMessage()]
 
 
 def test_scale_is_a_separate_axis_from_transport(routed, tmp_path, caplog):
@@ -222,7 +222,7 @@ def test_scale_is_a_separate_axis_from_transport(routed, tmp_path, caplog):
         pool.call(tmp_path, "run_study")
         pool.call(tmp_path, "run_study")
         pool.call(tmp_path, "registry_catalog")
-    warnings = [r for r in caplog.records if "dispatch to viva-api" in r.getMessage()]
+    warnings = [r for r in caplog.records if "should dispatch to the run's backend" in r.getMessage()]
     assert len(warnings) == 1, [r.getMessage() for r in warnings]
     assert "run_study" in warnings[0].getMessage()
 
@@ -257,7 +257,7 @@ def test_study_step_refuses_to_run_a_deployment_target_in_a_worker(tmp_path, mon
     from vivarium_workbench.lib import investigation_steps
 
     monkeypatch.setattr(
-        "vivarium_workbench.lib.remote_pinned.resolve_run_target", lambda p: "deployment")
+        "vivarium_workbench.lib.backends.resolve_run_target", lambda p: "deployment")
 
     def _boom(*a, **k):
         raise AssertionError("must not reach the env worker on a deployment target")
@@ -272,7 +272,7 @@ def test_study_step_still_uses_the_worker_on_a_local_target(tmp_path, monkeypatc
     from vivarium_workbench.lib import investigation_steps
 
     monkeypatch.setattr(
-        "vivarium_workbench.lib.remote_pinned.resolve_run_target", lambda p: "local")
+        "vivarium_workbench.lib.backends.resolve_run_target", lambda p: "local")
 
     class _Pool:
         def call(self, ws, method, params=None):

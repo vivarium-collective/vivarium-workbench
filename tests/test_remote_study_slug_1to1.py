@@ -17,11 +17,15 @@ fix maps ``experiment_id`` substrings -> study slugs via the workspace's
 """
 import textwrap
 
-from vivarium_workbench.lib.remote_simulations import (
-    _infer_study_slug,
-    _load_remote_study_map,
-    _normalize,
-)
+import pytest
+
+from vivarium_workbench.lib.remote_study_map import infer_study_slug, load_rules
+
+
+def _normalize(rec):
+    """The SMS listing's row normaliser (plugin); only the ``plugin``-marked tests call it."""
+    from vivarium_workbench_sms.remote_simulations import _normalize as normalize
+    return normalize(rec)
 
 # The real CD2 remote_run_study_map (sms-ecoli workspace.yaml), so this pins the
 # actual deployed rules rather than a toy map.
@@ -50,7 +54,7 @@ def _write_ws(tmp_path, body):
 
 
 def _rules(tmp_path):
-    return _load_remote_study_map(_write_ws(tmp_path, _REAL_MAP))
+    return load_rules(_write_ws(tmp_path, _REAL_MAP))
 
 
 def _matching_slugs(experiment_id, rules):
@@ -81,7 +85,7 @@ def test_each_cd2_experiment_id_maps_to_exactly_one_study(tmp_path):
             f"inference is not 1:1 (an overlapping rule would let "
             f"first-match-wins silently mask a mis-association)")
         # and the public entry point returns that same single study
-        assert _infer_study_slug(eid, rules) == expected
+        assert infer_study_slug(eid, rules) == expected
 
 
 def test_k4_coupled_and_cellonly_do_not_cross_match(tmp_path):
@@ -89,8 +93,8 @@ def test_k4_coupled_and_cellonly_do_not_cross_match(tmp_path):
     rules = _rules(tmp_path)
     coupled = "sim301-cd2-run1-k4-coupled-lam050"
     cellonly = "sim302-cd2-run1-k4-cellonly-lam050"
-    assert _infer_study_slug(coupled, rules) == "cd2-run1-k4-coupled"
-    assert _infer_study_slug(cellonly, rules) == "cd2-run1-k4-cellonly"
+    assert infer_study_slug(coupled, rules) == "cd2-run1-k4-coupled"
+    assert infer_study_slug(cellonly, rules) == "cd2-run1-k4-cellonly"
     assert "cd2-run1-k4-cellonly" not in _matching_slugs(coupled, rules)
     assert "cd2-run1-k4-coupled" not in _matching_slugs(cellonly, rules)
 
@@ -101,12 +105,13 @@ def test_unmatched_experiment_id_maps_to_none_not_a_wrong_study(tmp_path):
     for eid in ("sim999-cd2-run5-unknown-arm-xyz",
                 "sim000-some-adhoc-smoke-test"):
         assert _matching_slugs(eid, rules) == []
-        assert _infer_study_slug(eid, rules) is None
+        assert infer_study_slug(eid, rules) is None
 
 
 # --- orphan hygiene: an unmapped remote run is an explicit signal -----------
 
 
+@pytest.mark.plugin
 def test_unmapped_remote_run_normalizes_to_explicit_unassociated_row():
     """A remote record whose experiment_id matches no rule must surface as an
     explicit remote row (study_slug=None, empty studies, but a remote_origin
@@ -128,6 +133,7 @@ def test_unmapped_remote_run_normalizes_to_explicit_unassociated_row():
     assert row["run_id"] == rec["experiment_id"]
 
 
+@pytest.mark.plugin
 def test_unmapped_row_is_not_counted_into_any_study():
     """The study-count reducer keys on a TRUTHY study_slug (investigations_index
     ._remote_study_run_counts), so an unmapped row contributes to no study —

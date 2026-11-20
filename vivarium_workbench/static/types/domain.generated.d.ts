@@ -1,9 +1,8 @@
-// AUTO-GENERATED from vivarium_workbench/lib/models.py — do not edit by hand.
-// Regenerate: python -m vivarium_workbench.lib.generate_ts
+// AUTO-GENERATED from vivarium_workbench/lib/models.py and each backend provider's
+// payload_types() — do not edit by hand.
+// Regenerate (providers on): python -m vivarium_workbench.lib.generate_ts
 
 export type EmitterKind = 'xarray' | 'parquet' | 'sqlite';
-
-export type RemoteJobStatus = 'unknown' | 'waiting' | 'pending' | 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
 
 export interface RemoteOrigin {
   deployment: string;
@@ -11,6 +10,11 @@ export interface RemoteOrigin {
   experiment_id: string | null;
   backend: string | null;
   s3_uri: string | null;
+  features: string[];
+}
+
+export interface BackendFeatures {
+  features: string[];
 }
 
 export interface StudyRef {
@@ -51,24 +55,6 @@ export interface SimulationsPayload {
   total: number | null;
   offset: number;
   limit: number | null;
-}
-
-export interface RemoteRunStep {
-  name: string;
-  status: string;
-  message: string;
-}
-
-export interface RemoteRunJob {
-  job_id: string;
-  study: string;
-  status: RemoteJobStatus;
-  steps: RemoteRunStep[];
-  run_id: string | null;
-  simulation_id: number | null;
-  error: string | null;
-  started_at: string | null;
-  completed_at: string | null;
 }
 
 export interface ChartPayload {
@@ -463,9 +449,6 @@ export interface StudyComparison {
   jobs: ComparisonJob[];
 }
 
-export interface SourceBuilds {
-}
-
 export interface WorkspacesList {
 }
 
@@ -483,18 +466,6 @@ export interface SourceSwitchSource {
 export interface SourceSwitchResponse {
   ok: boolean;
   source: SourceSwitchSource;
-}
-
-export interface BuildRemoteResponse {
-  ok: boolean;
-  simulator_id: number | null;
-  repo: string;
-  branch: string;
-  commit: string;
-}
-
-export interface RemoteRunStartResponse {
-  job_id: string;
 }
 
 export interface AuthPayload {
@@ -560,4 +531,41 @@ export interface RenderResponse {
 
 export interface VisualizationAcceptResponse {
   ok: boolean;
+}
+
+// Backend provider 'sms': its payload_types().
+
+export type RemoteJobStatus = 'unknown' | 'waiting' | 'pending' | 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
+
+export interface RemoteRunStep {
+  name: string;
+  status: string;
+  message: string;
+}
+
+export interface RemoteRunJob {
+  job_id: string;
+  study: string;
+  status: RemoteJobStatus;
+  steps: RemoteRunStep[];
+  run_id: string | null;
+  simulation_id: number | null;
+  error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface SourceBuilds {
+}
+
+export interface BuildRemoteResponse {
+  ok: boolean;
+  simulator_id: number | null;
+  repo: string;
+  branch: string;
+  commit: string;
+}
+
+export interface RemoteRunStartResponse {
+  job_id: string;
 }

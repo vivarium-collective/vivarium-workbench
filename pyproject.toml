@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vivarium-workbench"
-version = "0.5.3"
+version = "0.5.5"
 description = "Web-based workbench for Vivarium / process-bigraph workspaces"
 authors = [{name = "Vivarium Collective", email = "team@vivarium-collective.org"}]
 requires-python = ">=3.11"
@@ -13,7 +13,7 @@ dependencies = [
     # related to os.kill. As before, psutil is being imported to manage process checks
     # across systems.
     "psutil>=5.9",
-    # boto3: the remote analysis figures read S3 directly (lib/remote_analysis_figures.py,
+    # boto3: the remote analysis figures read S3 directly (vivarium_workbench_sms/remote_analysis_figures.py,
     # #1072/#1078). Without it that path reports s3-unavailable in the image.
     "boto3>=1.34",
     "jinja2",
@@ -124,7 +124,7 @@ dependencies = [
     # `discovery_engine` (see root_packages + import-linter below). Pinned to a
     # PyPI semver range, not git branch=main, so installs are coherent and bumps
     # are visible Renovate PRs rather than silent commit drift.
-    "viva-discovery-engine>=0.3,<0.4",
+    "viva-discovery-engine>=0.3,<0.8",
     # viva-superpowers requires viva-basic-processes, which is not yet on
     # PyPI. Declare it BARE here and supply the git URL via [tool.uv.sources]
     # below — NOT as an inline `pkg @ git+...` direct reference. A baked-in
@@ -192,9 +192,16 @@ vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 # the URL OUT of the published metadata so it never conflicts with the bare
 # requirement from pbg-superpowers.
 [tool.uv.sources]
-# viva-discovery-engine: resolves from PyPI (>=0.2,<0.3 -> 0.2.1). The AI-drivable
-# generation contract (emit/apply/runner) and the consistent_with_zero evidence
-# grading (DE #43) are published there.
+# viva-discovery-engine: resolves from PyPI (>=0.3,<0.8 -> 0.7.x). Ceiling raised
+# 0.7->0.8 so the workbench resolves alongside viva-superpowers>=0.27 (which floors
+# DE at >=0.7); DE 0.7 is purely additive over 0.6 for every API the workbench
+# imports (phases/study/reporting/projection/investigation/discover), so pin-only.
+# The AI-drivable
+# generation contract (emit/apply/runner), the consistent_with_zero evidence
+# grading (DE #43), and the 0.4-0.6 additions (generative cycle, engine-native
+# CLI verbs, linkage_index relocation, versioned EvidenceSnapshot) are published
+# there. 0.3->0.6 is additive: no discovery_engine modules deleted or renamed
+# (the subpackage reorg already landed in 0.3.0), full suite shows no regression.
 # viva-superpowers: sourced from git (NOT PyPI 0.22.0) because only main has
 # migrated off pbg-emitters onto viva-emitters>=0.2.3 — the whole point of this
 # change. Pinned to a REV, not `branch = "main"`, matching the deliberate choice
@@ -254,7 +261,62 @@ investigation-contracts = { git = "https://github.com/vivarium-collective/invest
 # the interface without dragging in an implementation, and a cloud adapter swaps
 # in without the port changing. Enforced in CI (`lint-imports`).
 [tool.importlinter]
-root_packages = ["vivarium_workbench", "viva_superpowers", "discovery_engine"]
+root_packages = ["vivarium_workbench", "vivarium_workbench_sms", "viva_superpowers", "discovery_engine"]
+
+[[tool.importlinter.contracts]]
+# docs/backend-adapters.md step P1a: the core's generic backend plumbing never reaches into SMS code or the
+# backends package (which imports the SMS adapters). Otherwise compose-api and the run records would import SMS
+# code through it, and the SMS client's module-level import of it would become a cycle. P1b adds the package-level
+# contract (vivarium_workbench must not import vivarium_workbench_sms) beside this one.
+name = "backend_config imports no SMS code and not lib.backends"
+type = "forbidden"
+source_modules = ["vivarium_workbench.lib.backend_config"]
+forbidden_modules = [
+    "vivarium_workbench_sms",
+    "vivarium_workbench.lib.server_capabilities",
+    "vivarium_workbench.lib.backends",
+]
+
+[[tool.importlinter.contracts]]
+# docs/backend-adapters.md §2.4: the core does not import the SMS plugin. Since step P2 closed (Routes Rt3) the
+# only edge is the registry's (lib.backends.provider finds the provider by importing it); step P4's entry point
+# removes it and the list is empty. Nothing may be added (an entry that matches no import fails the check).
+name = "the core does not import the SMS plugin (vivarium_workbench_sms), except the listed edges"
+type = "forbidden"
+source_modules = ["vivarium_workbench"]
+forbidden_modules = ["vivarium_workbench_sms"]
+ignore_imports = [
+    "vivarium_workbench.lib.backends.provider -> vivarium_workbench_sms.provider",  # the registry (P4: entry point)
+]
+
+[[tool.importlinter.contracts]]
+# docs/backend-adapters.md §2.4, step P2 (Runs a1): the SMS plugin no longer reads its seams back through
+# lib.remote_run_views (the reverse seam); remote_run_views reads them through sms_legacy instead. Indirect chains
+# through other core modules are fine; the direct read-back is what this forbids.
+name = "the SMS plugin does not import lib.remote_run_views"
+type = "forbidden"
+source_modules = ["vivarium_workbench_sms"]
+forbidden_modules = ["vivarium_workbench.lib.remote_run_views"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+# docs/backend-adapters.md §2.2, step P2 (Runs a2): the plugin's router (vivarium_workbench_sms.routes) declares its
+# routes with api.deps, never api.app -- create_app imports the router (app -> provider -> routes), so a plugin import
+# of the app would be a cycle. Direct imports only: an indirect chain through other core modules is not a cycle.
+name = "the SMS plugin does not import the app (api.app)"
+type = "forbidden"
+source_modules = ["vivarium_workbench_sms"]
+forbidden_modules = ["vivarium_workbench.api.app"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+# api/deps.py holds the route dependencies (get_workspace, ...) so a router module -- e.g. a backend plugin's
+# Provider.router(), docs/backend-adapters.md section 2.2 -- can declare routes without importing api/app.py, which
+# will import that router. If deps imported app.py, that would be a cycle again.
+name = "route dependencies do not import the app"
+type = "forbidden"
+source_modules = ["vivarium_workbench.api.deps"]
+forbidden_modules = ["vivarium_workbench.api.app"]
 
 [[tool.importlinter.contracts]]
 name = "ports are pure interfaces (no adapter / no git-impl imports)"
@@ -347,6 +409,7 @@ python_version = "3.11"
 # (server.py, the dict-building helpers) is intentionally not checked yet.
 files = [
     "vivarium_workbench/lib/startup.py",
+    "vivarium_workbench/lib/backend_config.py",
     "vivarium_workbench/lib/models.py",
     "vivarium_workbench/lib/field_migrate.py",
     "vivarium_workbench/lib/structured_resources.py",
@@ -383,6 +446,7 @@ files = [
     "vivarium_workbench/lib/static_serving.py",
     "vivarium_workbench/lib/study_page.py",
     "vivarium_workbench/api/app.py",
+    "vivarium_workbench/api/deps.py",
     "vivarium_workbench/lib/env_resolver.py",
     "vivarium_workbench/lib/materialization.py",
     "vivarium_workbench/lib/repo_source.py",
@@ -390,6 +454,7 @@ files = [
     "vivarium_workbench/lib/session_env.py",
     "vivarium_workbench/lib/env_worker_client.py",
     "vivarium_workbench/lib/env_worker_pool.py",
+    "vivarium_workbench/lib/env_worker_launcher.py",
     "vivarium_workbench/lib/session_registry.py",
     "vivarium_workbench/lib/workspace_context.py",
     "vivarium_workbench/lib/metadata_mutations.py",
@@ -407,8 +472,23 @@ files = [
     "vivarium_workbench/lib/csrf.py",
     "vivarium_workbench/lib/path_safety.py",
     "vivarium_workbench/lib/source_switch_views.py",
-    "vivarium_workbench/lib/source_build_views.py",
+    "vivarium_workbench_sms/source_build_views.py",
     "vivarium_workbench/lib/remote_run_views.py",
+    "vivarium_workbench/lib/backends/__init__.py",
+    "vivarium_workbench/lib/backends/compose_api.py",
+    "vivarium_workbench/lib/remote_study_map.py",
+    "vivarium_workbench_sms/viva_core.py",
+    "vivarium_workbench_sms/provider.py",
+    "vivarium_workbench/lib/backends/provider.py",
+    "vivarium_workbench/lib/backends/config.py",
+    "vivarium_workbench/lib/backends/features.py",
+    "vivarium_workbench/lib/backends/ids.py",
+    "vivarium_workbench_sms/sms_legacy.py",
+    "vivarium_workbench_sms/sms_landing.py",
+    "vivarium_workbench_sms/analyses.py",
+    "vivarium_workbench_sms/routes.py",
+    "vivarium_workbench_sms/models.py",
+    "vivarium_workbench_sms/remote_pipeline_views.py",
     "vivarium_workbench/lib/auth_views.py",
     "vivarium_workbench/lib/git_commit_views.py",
     "vivarium_workbench/lib/work_mutations.py",
@@ -423,11 +503,15 @@ files = [
     "vivarium_workbench/lib/study_run_post.py",
     "vivarium_workbench/lib/study_runs.py",
     "vivarium_workbench/lib/smoke.py",
-    "vivarium_workbench/lib/comparison_pinning.py",
     "vivarium_workbench/lib/server_capabilities.py",
     "vivarium_workbench/lib/remote_trace.py",
     "vivarium_workbench/lib/perfetto_ui.py",
-    "vivarium_workbench/lib/remote_link.py",
+    "vivarium_workbench_sms/remote_link.py",
+    "vivarium_workbench_sms/cli.py",
+    "vivarium_workbench_sms/deployment_run.py",
+    "vivarium_workbench_sms/cloud_dispatch.py",
+    "vivarium_workbench_sms/sms_trace.py",
+    "vivarium_workbench/lib/remote_run.py",
     "vivarium_workbench/lib/test_run_views.py",
     "vivarium_workbench/lib/comparative_runs.py",
     "vivarium_workbench/lib/run_unblocked_views.py",
@@ -465,7 +549,7 @@ allow-direct-references = true
 # Docker). They stay shipped via `packages`; no force-include needed.
 # Ship the renamed package AND the thin vivarium_dashboard/ back-compat shim
 # (deprecated; removed in Phase 3) so old imports keep resolving in wheels too.
-packages = ["vivarium_workbench", "vivarium_dashboard"]
+packages = ["vivarium_workbench", "vivarium_workbench_sms", "vivarium_dashboard"]
 # vivarium_workbench/loom/_dist (the Vite build output of the vendored
 # bigraph-loom, produced by `scripts/build_loom.sh` / `npm run build`) is
 # gitignored — it's a generated artifact, not source. hatchling's default

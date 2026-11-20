@@ -168,6 +168,66 @@ def test_show_run_detail_regression_metadata_and_buttons_and_close():
 
 
 # ---------------------------------------------------------------------------
+# Provenance: an adopted-remote-run's engine-authored stamp (remote_origin /
+# ran_on / source_ref on the row, from lib/simulations_index._row_to_dict) is
+# surfaced in the panel, each field guarded (rendered only when present —
+# never invented or defaulted).
+# ---------------------------------------------------------------------------
+
+def test_show_run_detail_renders_adopted_remote_run_provenance():
+    body = _func_body("_showRunDetail")
+    # A "Provenance" section, gated on there being any provenance to show.
+    assert "sectionLabel('Provenance')" in body
+    assert "_provRows" in body
+    # Method wording distinguishes a still-remote run from a landed/adopted one.
+    assert "'remote run'" in body
+    assert "'adopted remote run'" in body
+    # Real engine-authored fields off the row — not guessed key names.
+    assert "row.remote_origin" in body
+    assert "_ro.deployment" in body        # origin host
+    assert "row.ran_on" in body            # backend it ran on
+    assert "_ro.simulation_id" in body
+    assert "_ro.experiment_id" in body
+    assert "_ro.s3_uri" in body            # source data artifact
+    assert "row.source_ref" in body
+    assert "_sref.commit_short" in body    # short-hashed source commit
+
+
+def test_show_run_detail_provenance_is_guarded_not_defaulted():
+    body = _func_body("_showRunDetail")
+    # The whole block only renders when _provRows accumulated something.
+    assert "(_provRows" in body
+    # Each field is conditional on its own presence — no `|| \"unknown\"`-style
+    # defaulting of a provenance value.
+    assert "if (_ro && _ro.deployment)" in body
+    assert "if (_ro && _ro.experiment_id)" in body
+
+
+# ---------------------------------------------------------------------------
+# Finding provenance: provenance.model_version is engine-authored
+# (finding_observations._fill_finding) but was never surfaced. Render it in the
+# traceability block, guarded (only-if-present). The phantom evidence keys
+# measured_on / source_sha256 — which NO code writes — are deliberately NOT
+# rendered (rendering fields nothing authors is dead/latent code).
+# ---------------------------------------------------------------------------
+
+_HTML = (_PKG / "templates" / "study-detail.html").read_text(encoding="utf-8")
+
+
+def test_finding_traceability_renders_model_version_guarded():
+    assert "(f.provenance or {}).model_version" in _HTML
+    assert "model <code>{{ _mv }}</code>" in _HTML
+    # Guarded: only shows when a model_version is present.
+    assert "or _mv %}" in _HTML
+
+
+def test_phantom_evidence_fields_are_not_rendered():
+    # These were never authored by any code, so they must not be rendered.
+    assert "measured_on" not in _HTML
+    assert "source_sha256" not in _HTML
+
+
+# ---------------------------------------------------------------------------
 # JS syntax.
 # ---------------------------------------------------------------------------
 

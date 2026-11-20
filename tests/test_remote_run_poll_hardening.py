@@ -7,9 +7,12 @@ Covers the two robustness gaps that matter for external users (Chris et al.):
 """
 import pytest
 
-from vivarium_workbench.lib import remote_run
-from vivarium_workbench.lib.remote_run import _MAX_CONSECUTIVE_POLL_ERRORS, _poll_until_terminal
-from vivarium_workbench.lib.sms_api_client import SmsApiError
+from vivarium_workbench_sms import deployment_run
+from vivarium_workbench_sms.deployment_run import _MAX_CONSECUTIVE_POLL_ERRORS, _poll_until_terminal
+from vivarium_workbench_sms.sms_api_client import SmsApiError
+
+#: The poll loop is the SMS plugin's (``deployment_run``): every test here needs it (step P3, K2b).
+pytestmark = pytest.mark.plugin
 
 
 class _ScriptedClient:
@@ -48,7 +51,7 @@ class _FakeTime:
 @pytest.fixture
 def fake_time(monkeypatch):
     ft = _FakeTime()
-    monkeypatch.setattr(remote_run, "time", ft)  # only remote_run sees the fake clock
+    monkeypatch.setattr(deployment_run, "time", ft)  # only deployment_run sees the fake clock
     return ft
 
 

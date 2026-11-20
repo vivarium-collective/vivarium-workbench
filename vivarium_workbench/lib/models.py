@@ -22,27 +22,36 @@ from pydantic import BaseModel, ConfigDict, Field
 # Which emitter wrote a run's store (derived from its store path).
 EmitterKind = Literal["xarray", "parquet", "sqlite"]
 
-# sms-api job lifecycle (JobStatus enum, mirrored).
-RemoteJobStatus = Literal[
-    "unknown", "waiting", "pending", "queued",
-    "running", "completed", "cancelled", "failed",
-]
-
 
 class RemoteOrigin(BaseModel):
-    """Provenance of a run executed on a remote deployment (sms-api).
+    """Provenance of a run executed on a remote deployment (a remote backend).
 
     Built in ``lib/simulations_index.py`` ``_row_to_dict`` from the run's
     ``params_json`` provenance.
     """
 
     deployment: str            # prov["source"], e.g. "smsvpctest"
-    # sms-api's integer simulation id, or a /viva/v1 run's own id (the backend's string, e.g.
-    # "simulation-E9Ec819") while that run is dispatched and not yet landed.
+    # The run's id on its backend: opaque, whatever its form (an SMS simulation's integer, a /viva/v1 run's
+    # "simulation-E9Ec819"); the run's record, not this form, says which backend ran it.
     simulation_id: Union[int, str]
     experiment_id: Optional[str] = None
     backend: Optional[str] = None       # e.g. "ray"
     s3_uri: Optional[str] = None
+    # The run's own features (step P3 F0): the optional facets of the backend that ran it, among "artifacts" and
+    # "analyses" (``lib/backends/features.run_features``). They only hide optional controls on the row.
+    features: list[str] = []
+
+
+class BackendFeatures(BaseModel):
+    """``GET /api/backend/features`` payload (step P3 F0, ``lib/backends/features.process_features``).
+
+    The features this process's active backends declare, sorted: the optional facets some active backend has
+    (``listing``, ``artifacts``, ``analyses``, ``builds``) and each provider's own UI features. Empty with providers
+    off or the plugin absent. A registry read: no network call. Features only hide optional controls; no dispatch or
+    run-target decision reads them.
+    """
+
+    features: list[str]
 
 
 class StudyRef(BaseModel):
@@ -119,10 +128,10 @@ class SimRow(BaseModel):
 
 
 class RemoteSourceState(BaseModel):
-    """Provenance of the remote (sms-api) runs merged into the Simulations DB.
+    """Provenance of the remote backend's runs merged into the Simulations DB.
 
-    Lets the Runs tab show "GovCloud runs as of HH:MM (refreshing…)" instead of a
-    spinner, and stay honest when the tunnel is down — the fetch is
+    Lets the Runs tab show "remote runs as of HH:MM (refreshing…)" instead of a
+    spinner, and stay honest when the backend is unreachable — the fetch is
     stale-while-revalidate, so the payload never blocks on it.
     """
 
@@ -149,28 +158,6 @@ class SimulationsPayload(BaseModel):
     total: Optional[int] = None
     offset: int = 0
     limit: Optional[int] = None
-
-
-class RemoteRunStep(BaseModel):
-    """One pipeline step of a remote run. ``name`` is one of STEP_NAMES."""
-
-    name: str                  # push | build | run | poll | download | land
-    status: str                # pending | running | ok | error | ...
-    message: str = ""
-
-
-class RemoteRunJob(BaseModel):
-    """A remote-run job (``lib/remote_run_jobs.py`` ``RemoteRunJob.to_dict``)."""
-
-    job_id: str
-    study: str
-    status: RemoteJobStatus
-    steps: list[RemoteRunStep]
-    run_id: Optional[str] = None
-    simulation_id: Optional[int] = None
-    error: Optional[str] = None
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
 
 
 class ChartPayload(BaseModel):
@@ -1325,31 +1312,15 @@ class VisualizationInstances(BaseModel):
 class RemoteHealth(BaseModel):
     """``GET /api/source/remote-health`` payload (lib.workspace_deps_views.remote_health).
 
-    Reachability + config status of the remote sms-api endpoint (``SMS_API_BASE``)
+    Reachability + config status of the configured remote backend
     for the Source panel's health indicator. Always HTTP 200; never raises.
     """
 
     configured: bool
-    base_url: str
+    base_url: str | None  # None: no URL to ask (no backend named, no active provider supplies one)
     reachable: bool
     version: str | None = None
     error: str | None = None
-
-
-class SourceBuilds(BaseModel):
-    """``GET /api/source/builds`` payload (lib.workspace_deps_views.build_source_builds).
-
-    Best-effort remote build list: ``{builds: [...], error: str|null}``.  Always
-    HTTP 200 — ``builds`` is empty and ``error`` carries a reason when the
-    sms-api is unreachable.
-
-    Pure pass-through (``extra="allow"``, no declared fields) so build-entry
-    keys (simulator_id, repo, branch, commit, label, …) survive verbatim.
-
-    Source: ``lib.workspace_deps_views.build_source_builds``.
-    """
-
-    model_config = ConfigDict(extra="allow")
 
 
 class ProvenanceManifest(BaseModel):
@@ -1523,6 +1494,32 @@ class StudyVariantDeleteBody(BaseModel):
     variant: Optional[str] = None
 
 
+class StudyFindingAddBody(BaseModel):
+    """POST /api/study-finding-add
+
+    {study|investigation, statement, status?, kind?, explanation?}
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    statement: Optional[str] = None
+    status: Optional[str] = None
+    kind: Optional[str] = None
+    explanation: Optional[str] = None
+
+
+class StudyFindingDeleteBody(BaseModel):
+    """POST /api/study-finding-delete {study|investigation, id}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    id: Optional[str] = None
+
+
 class StudyVariantSetParamsBody(BaseModel):
     """POST /api/study-variant-set-params {name|study|investigation, variant, parameter_overrides}"""
 
@@ -1537,6 +1534,21 @@ class StudyVariantSetParamsBody(BaseModel):
 
 class StudyBaselineAddBody(BaseModel):
     """POST /api/study-baseline-add {study|investigation, name, composite, params?}"""
+
+    model_config = ConfigDict(extra="allow")
+
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+    name: Optional[str] = None
+    composite: Optional[str] = None
+    params: Optional[dict] = None
+
+
+class StudyBaselineSetBody(BaseModel):
+    """POST /api/study-baseline-set {study|investigation, name, composite?, params?}
+
+    In-place repoint of an existing baseline entry (preserves its name).
+    """
 
     model_config = ConfigDict(extra="allow")
 
@@ -2047,6 +2059,16 @@ class IsetCloneBody(BaseModel):
 
 class InvestigationDeleteBody(BaseModel):
     """POST /api/investigation-delete {name} (also accepts study / investigation aliases)"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    study: Optional[str] = None
+    investigation: Optional[str] = None
+
+
+class StudyDeleteBody(BaseModel):
+    """POST /api/study-delete {name} (also accepts study / investigation aliases)"""
 
     model_config = ConfigDict(extra="allow")
 
@@ -2613,50 +2635,6 @@ class SourceSwitchSource(BaseModel):
 SourceSwitchResponse.model_rebuild()
 
 
-class BuildRemoteRequest(BaseModel):
-    """POST /api/source/build-remote request body — ``{"repo", "branch"}``.
-
-    Registers a repo+branch HEAD as an sms-api build. Empty repo/branch are
-    rejected with HTTP 400 by the route's lib builder.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    repo: str = ""
-    branch: str = ""
-
-
-class BuildRemoteResponse(BaseModel):
-    """200-path payload for ``POST /api/source/build-remote``.
-
-    ``{"ok": True, "simulator_id": <id|null>, "repo", "branch", "commit"}``.
-    The non-200 error paths (``{"error": ...}``, HTTP 400/502) are returned via
-    ``JSONResponse``, not this model.
-
-    Source: ``lib.source_build_views.build_remote``.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    ok: bool = True
-    simulator_id: Optional[int] = None
-    repo: str
-    branch: str
-    commit: str
-
-
-class SwitchBuildRequest(BaseModel):
-    """POST /api/source/switch-build request body — ``{"simulator_id"}``.
-
-    Materializes a build's workspace (cached) + re-points in-process. A missing
-    ``simulator_id`` is rejected with HTTP 400 by the route's lib builder.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    simulator_id: Optional[int] = None
-
-
 class MaterializeRepoRequest(BaseModel):
     """POST /api/source/materialize-repo request body — ``{"repo", "ref"}``.
 
@@ -2668,36 +2646,6 @@ class MaterializeRepoRequest(BaseModel):
 
     repo: Optional[str] = None
     ref: Optional[str] = None
-
-
-class RemoteRunStartRequest(BaseModel):
-    """POST /api/remote-run-start request body.
-
-    ``{"study", "num_generations"?, "num_seeds"?, "run_parca"?}`` — submits a
-    remote sms-api pipeline job for the study.  An empty/missing ``study`` is
-    rejected with HTTP 400 by the route's lib builder.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    study: str = ""
-    num_generations: Optional[int] = None
-    num_seeds: Optional[int] = None
-    run_parca: Optional[bool] = None
-
-
-class RemoteRunStartResponse(BaseModel):
-    """202-path payload for ``POST /api/remote-run-start`` — ``{"job_id": <id>}``.
-
-    The non-202 error paths (``{"error": ...}``, HTTP 401/400/409/404) are
-    returned via ``JSONResponse``, not this model.
-
-    Source: ``lib.remote_run_views.remote_run_start``.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    job_id: str
 
 
 class AuthPayload(BaseModel):

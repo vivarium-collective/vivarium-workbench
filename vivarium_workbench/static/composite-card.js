@@ -972,12 +972,25 @@
   window._openCompositeCode = _openCompositeCode;
 
   // --- Run-target badge -----------------------------------------------------
-  // Show whether a composite ▶ Run will execute Local or on the Cloud (GovCloud)
+  // Show whether a composite ▶ Run will execute Local or on the remote (Cloud)
   // deployment. This is resolve_run_target(workspace) — per WORKSPACE, not per card,
   // and NOT the same as the Local/Cloud *scope* selector (which binds the source).
   // That distinction is exactly what confuses: scope can say "remote" while a Run
   // still executes locally. One preflight fetch per composites render fills every
   // card's badge.
+  //
+  // The backend's own words for a Run against the selected build come from the
+  // preflight's optional `tip` (a template: `{build}` → the build id, `{commit}`
+  // → " (<short sha>)" or ""), so the core names no backend (docs/backend-adapters.md
+  // §2.5, step P3 F4b). No `tip` → the neutral core text.
+  function _selectedBuildTip(pf, b) {
+    var commit = b.commit ? ' (' + String(b.commit).slice(0, 7) + ')' : '';
+    if (pf && typeof pf.tip === 'string' && pf.tip) {
+      return pf.tip.split('{build}').join(String(b.simulator_id)).split('{commit}').join(commit);
+    }
+    return '▶ Run dispatches to the remote backend against build #' + b.simulator_id + commit +
+      '. It runs the build’s committed code — local edits not in that build won’t apply.';
+  }
   function _computeRunTarget(pf) {
     // The Environment scope (dynamic run-target) wins when Cloud is active — a Run
     // then dispatches to the selected build. Otherwise the badge reflects the
@@ -990,10 +1003,7 @@
         // Green/cloud styling separates the ready-to-dispatch state from the
         // amber "no build" blocker and the grey Local state.
         if (b) return { label: '▶ Run → ☁ Cloud · build #' + b.simulator_id, bg: '#e7f6ec', fg: '#1a7f4b',
-          tip: '▶ Run dispatches to the Cloud (GovCloud) against build #' + b.simulator_id +
-               (b.commit ? ' (' + String(b.commit).slice(0, 7) + ')' : '') +
-               '. It runs the build’s committed code — local edits not in that build won’t apply. ' +
-               'The dispatch itself takes ~15-25s (sms-api registers the run over the SSM tunnel); the card tracks it robustly once it lands.' };
+          tip: _selectedBuildTip(pf, b) };
         return { label: '☁ Cloud · no build ⚠', bg: '#fdf0e3', fg: '#a15c12',
           tip: 'Cloud is active but no build is selected — a Run is blocked. Pick or build one, or switch to Local.' };
       }
@@ -1001,8 +1011,20 @@
     var known = !!(pf && pf.target);
     var cloud = known && pf.target === 'deployment';
     if (!known) return { label: 'Runs: —', bg: '#eef1f4', fg: '#8a97a4', tip: 'Could not determine where a Run will execute.' };
-    if (cloud) return { label: 'Runs: Cloud', bg: '#e6f0fb', fg: '#1e5fa4',
-      tip: pf.message || 'This workspace runs on the Cloud (GovCloud) deployment — ▶ Run dispatches remotely.' };
+    // Non-blocking notes (e.g. a viva-core `id:` environment with uncommitted changes:
+    // the run uses its prebuilt image, so local edits won't apply) — an ⓘ on the
+    // label and the note in the tooltip; the badge keeps its ready (blue) styling.
+    var notes = (pf.warnings && pf.warnings.length) ? pf.warnings : null;
+    // Not ready (`ok: false`, e.g. compose-api lists no such environment, or cannot be
+    // asked): the card would refuse a Run with the same reason, so say so up front in the
+    // amber of the "no build" state. The badge itself blocks nothing. A published bundle
+    // has no preflight (`pf` null), so it never reaches here.
+    if (cloud && pf.ok === false) return { label: 'Runs: Cloud · not ready ⚠', bg: '#fdf0e3', fg: '#a15c12',
+      tip: 'A Cloud Run would be refused: ' +
+        String(pf.message || pf.error || pf.reason || 'the deployment is not ready').replace(/\.?$/, '.') };
+    if (cloud) return { label: 'Runs: Cloud' + (notes ? ' ⓘ' : ''), bg: '#e6f0fb', fg: '#1e5fa4',
+      tip: (pf.message || 'This workspace runs on a remote backend — ▶ Run dispatches remotely.') +
+        (notes ? ' Note (does not block a Run): ' + notes.join('; ') + '.' : '') };
     return { label: 'Runs: Local', bg: '#eef1f4', fg: '#667085',
       tip: (pf.message || 'This workspace runs locally.') +
         ' Switch the Environment scope to Cloud (with a build selected) to dispatch a Run remotely instead.' };

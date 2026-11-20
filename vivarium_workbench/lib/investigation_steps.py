@@ -25,7 +25,7 @@ _RUN_ORDER: list | None = None
 def _run_study_hook(workspace: str, study_slug: str) -> dict:
     """Run one study: skeleton-record order, or dispatch to the env worker.
 
-    Honors ``remote_pinned.resolve_run_target`` first (§2A.8 workstream 8 step
+    Honors ``backends.resolve_run_target`` first (§2A.8 workstream 8 step
     2a). ``run_study`` is a **run entrypoint**, and item 18 made that function
     THE authoritative local-vs-deployment answer for every one of them
     "never by which button happened to be clicked". This path was clicking a
@@ -47,9 +47,9 @@ def _run_study_hook(workspace: str, study_slug: str) -> dict:
 
     from pathlib import Path
 
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench.lib import backends
 
-    if remote_pinned.resolve_run_target(Path(workspace)) == "deployment":
+    if backends.resolve_run_target(Path(workspace)) == "deployment":
         raise RuntimeError(
             f"study {study_slug!r} resolves to the 'deployment' run target, so it "
             "must not run in an env worker. Run it through the study-run path "

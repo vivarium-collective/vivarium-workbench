@@ -212,7 +212,7 @@ def git_repo_identity(ws_root) -> dict:
     remote it falls back to the checkout directory name so the column still
     shows *something* identifying for a local-only workspace.
     """
-    out: dict = {"git_sha": None, "repo": None, "remote_url": None}
+    out: dict = {"git_sha": None, "repo": None, "remote_url": None, "dirty": None}
     if ws_root is None:
         return out
     import subprocess
@@ -227,6 +227,18 @@ def git_repo_identity(ws_root) -> dict:
             capture_output=True, text=True, check=True, timeout=5,
         ).stdout.strip()
         out["git_sha"] = sha or None
+    except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
+        pass
+    # Whether the working tree is dirty at launch. `--porcelain` lists both
+    # modified-tracked AND untracked paths, so a study that was never committed
+    # (the exact #1618 bug 10 case) makes this True: the recorded git_sha does
+    # NOT fully capture what ran. None when git is absent / not a repo.
+    try:
+        status = subprocess.run(
+            ["git", "-C", str(ws_root), "status", "--porcelain"],
+            capture_output=True, text=True, check=True, timeout=5,
+        ).stdout
+        out["dirty"] = bool(status.strip())
     except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
         pass
     try:
@@ -345,9 +357,9 @@ def build_run_manifest(*, spec_id, params, n_steps, emitter, emit_paths,
             "role": "declared",
             "repo": declared_environment.get("repo"),
             "ref": declared_environment.get("ref"),
-            # Filled when a W4 dispatch has resolved the declaration
-            # (comparison_pinning.resolve_comparison_pair threads the resolved
-            # commit + simulator_id through the caller's declared_environment);
+            # Filled when a dispatch has resolved the declaration and threaded
+            # the resolved commit + simulator_id through the caller's
+            # declared_environment (no production caller does today);
             # null otherwise — honest that the run declared the env but ran in
             # `primary` unresolved.
             "commit": declared_environment.get("commit"),
@@ -359,7 +371,8 @@ def build_run_manifest(*, spec_id, params, n_steps, emitter, emit_paths,
     return {
         "version": 2,
         "spec_id": spec_id,
-        "params": dict(params or {}),
+        # ``remote`` (where a remote run went, step 1c) is the row's routing record, not a reproduction input
+        "params": {k: v for k, v in (params or {}).items() if k != "remote"},
         "n_steps": int(n_steps) if n_steps is not None else None,
         "emitter": emitter,
         "emit_paths": list(emit_paths or []),
@@ -370,6 +383,10 @@ def build_run_manifest(*, spec_id, params, n_steps, emitter, emit_paths,
         "generation_id": generation_id,
         "code_version": {
             "git_sha": git_sha,
+            # Whether the workspace tree was dirty at launch. True means the
+            # recorded git_sha does NOT fully capture what ran — e.g. the study
+            # was never committed (issue #1618, bug 10). None when not a git repo.
+            "git_dirty": repo.get("dirty"),
             "package": pkg_version,
             # Repo identity of the workspace checkout the run launched from
             # (source-provenance). ``repo`` is a short human name (remote

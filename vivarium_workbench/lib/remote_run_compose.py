@@ -2,18 +2,21 @@
 
 Used only when the operator named a backend (``serve --backend-base-url``) that is compose-api
 (:func:`server_capabilities.compose_dispatch_active`) and neither a session build nor the pinned config chose
-the simulator-keyed path (:func:`remote_pinned.uses_compose_dispatch`). Every function answers the shape the
+the simulator-keyed path (``backends.select(ws) is backends.COMPOSE``). Every function answers the shape the
 legacy ``remote_run_views`` route answers, so the panel and poll code are unchanged.
 
-The workspace's code is not shipped: it runs in an environment compose-api already has, an owner-published
-image registered for the workspace's repository (its ``GET /registry/entries`` entry). The composite is
-exported with ``local:<module>.<Class>`` addresses (the only form compose-api accepts), with one emitter
-recording what a local run of the study records, and checked against that environment's interface manifest
-before anything is sent: for a prebuilt image, compose-api itself does not look classes up.
+The workspace's code is not shipped: it runs in an environment compose-api builds or already has. When the
+workspace's registry entry (``GET /registry/entries``, matched by its repository) has an owner-published prebuilt
+image, the run names that environment and the composite is checked against its interface manifest before anything is
+sent: for a prebuilt image, compose-api itself does not look classes up. When it has none, the run names no
+environment: compose-api infers one that covers the document's classes, or builds one from the registry for a
+signed-in caller, and checks the classes itself. The composite is exported with ``local:<module>.<Class>`` addresses
+(the only form compose-api accepts), with one emitter recording what a local run of the study records. A file inside
+the workspace that the composite names, such as a mesh, is sent with it (:func:`workspace_files`).
 
 Run ids are ``compose-<simulation id>``: compose-api's ids are integers, which the other routes read as legacy
-simulation ids. The Composites-tab remote run (``remote_run.run_remote``) takes the same dispatch through
-:func:`run_composite`.
+simulation ids. The Composites-tab remote run (``remote_run.run_remote`` -> ``ComposeApiRuns.run_composite``) takes the
+same dispatch through :func:`run_composite`.
 """
 
 from __future__ import annotations
@@ -29,7 +32,7 @@ import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from vivarium_workbench.lib import remote_pinned, study_spec
+from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib.investigations import load_spec
 
 if TYPE_CHECKING:
@@ -52,10 +55,29 @@ DISPATCH_TAG_PREFIX = "workbench:dispatch:"
 #: How often, and how far apart in seconds, a submission whose answer was lost is looked up by its dispatch tag.
 LOOKUP_ATTEMPTS = 5
 LOOKUP_INTERVAL = 3.0
+#: What :func:`run_composite` names its results archive after the run (``compose-4706-results.zip``).
+ARCHIVE_SUFFIX = "-results.zip"
+#: A session's timeout in seconds for each request: long enough for an upload or a slow answer from a run.
+SESSION_TIMEOUT = 120.0
+#: The timeout for the environment check the composite card makes before it launches (:func:`check_environment`),
+#: which runs inside the launch request: two small listings (environments, registry entries). The client caps each
+#: read at ``min(timeout, 60)`` and adds a 5 s connect, so the card waits at most about 40 s for a hung compose-api
+#: (two GETs), where the readiness check (:func:`dispatch_preflight`, the session's own timeout) waits up to 60 s per
+#: read. A compose-api slower than 15 s but under 60 s can therefore show a ready badge while the card refuses with
+#: 502 "backend unreachable"; accepted (a launch must not hold the request for a minute).
+CHECK_TIMEOUT = 15.0
 
 _TERMINAL_OK = {"completed"}
 _TERMINAL_BAD = {"failed", "cancelled", "out_of_memory", "timeout"}
 _QUEUED = {"submitting", "waiting", "queued", "pending"}
+
+
+def _deployment_name() -> str:
+    """The configured deployment name (``backends.config.deployment_name``), read at call time. Imported lazily:
+    ``lib.backends`` imports this module (compose-api's adapter)."""
+    from vivarium_workbench.lib.backends import config
+
+    return config.deployment_name()
 
 
 class ComposeDispatchError(Exception):
@@ -70,7 +92,8 @@ class ComposeDispatchError(Exception):
 def is_run_id(value: object) -> bool:
     """A compose-api run id (``compose-4706``)."""
     text = str(value or "").strip()
-    return text.startswith(RUN_ID_PREFIX) and text[len(RUN_ID_PREFIX):].isdigit()
+    n = text[len(RUN_ID_PREFIX):]
+    return text.startswith(RUN_ID_PREFIX) and n.isascii() and n.isdigit()
 
 
 def run_id_of(simulation_id: int) -> str:
@@ -88,29 +111,32 @@ def _text(value: object) -> "str | None":
     return value if isinstance(value, str) else None
 
 
-def _session() -> "ComposeSession":
-    """A session on the named backend, signed in when ``COMPOSE_API_TOKEN`` is set (anonymous otherwise)."""
+def _session(timeout: float = SESSION_TIMEOUT) -> "ComposeSession":
+    """A session on the named backend, signed in when ``COMPOSE_API_TOKEN`` is set (anonymous otherwise), each
+    request bounded by ``timeout`` seconds."""
     from compose_api_client.ext import ComposeSession, EnvironmentToken
 
-    from vivarium_workbench.lib.sms_api_client import explicit_backend_base_url
+    from vivarium_workbench.lib.backend_config import explicit_backend_base_url
 
     base = explicit_backend_base_url()
     if base is None:
         raise ComposeDispatchError({"error": "this is a compose-api run, but no backend was named "
                                              "(serve --backend-base-url) to ask about it", "reason": "no-backend"}, 409)
     tokens = EnvironmentToken() if os.environ.get(TOKEN_ENV_VAR, "").strip() else None
-    return ComposeSession(base, tokens=tokens, timeout=120.0)
+    return ComposeSession(base, tokens=tokens, timeout=timeout)
 
 
 # -- which environment runs the workspace --------------------------------------------------------------------------
 
 
 def _canonical_repo(url: str) -> str:
-    """``github.com/owner/repo`` for any spelling of a git remote (https, ssh, ``.git``, trailing slash)."""
+    """``github.com/owner/repo`` for any spelling of a git remote (https, ssh, ``.git``, trailing slash), or of a registry
+    entry's ``source`` (an entry pinned by commit links ``…/repo/tree/<commit>``)."""
     text = url.strip()
     text = re.sub(r"^git@([^:]+):", r"\1/", text)
     text = re.sub(r"^[a-z+]+://", "", text)
     text = re.sub(r"^[^@/]+@", "", text)  # credentials in an https remote
+    text = re.sub(r"^([^/]+/[^/]+/[^/]+)/tree/.*$", r"\1", text)  # a link to host/owner/repo at a commit or branch
     return text.removesuffix("/").removesuffix(".git").lower()
 
 
@@ -133,11 +159,19 @@ def _head(ws_root: Path) -> str:
 
 
 def resolve_environment(session: "ComposeSession", ws_root: Path) -> dict:
-    """The prebuilt environment that runs this workspace: ``{name, simulator, image, entry}``.
+    """The environment that runs this workspace: ``{name, simulator, image, entry, module_roots, stale}``.
 
-    ``VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT=name:<environment>`` names it outright. Otherwise the workspace's
-    git origin is matched to a registry entry's ``source``, and the entry's prebuilt environment is the one.
-    Raises :class:`ComposeDispatchError` (409) naming what to register when nothing matches.
+    ``VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT=name:<environment>`` names a prebuilt one outright. Otherwise the
+    workspace's git origin is matched to a registry entry's ``source``, and the entry's prebuilt environment is the one.
+    An entry with no prebuilt environment has ``name`` None: the run names none and compose-api chooses one that covers
+    the document's classes, or builds one from the registry for a signed-in caller. ``GET /registry/entries`` does not
+    say whether an entry can be composed, so the service decides, and its refusal is shown as it gives it.
+    A repository no registry entry has, or a workspace with no git origin, is run the same way, with ``entry`` None.
+    compose-api admits a document by its classes, each under a registered entry, not by where it came from, so a
+    workspace that composes other entries' classes needs no entry of its own. compose-api decides each class: it
+    refuses one no entry provides, except when it sends the run to a prebuilt image that covers the document's other
+    classes, whose own classes it does not look up.
+    Raises :class:`ComposeDispatchError` (409) for a named environment compose-api lacks.
     """
     from vivarium_workbench.lib.env_compat import get_env
 
@@ -157,26 +191,13 @@ def resolve_environment(session: "ComposeSession", ws_root: Path) -> dict:
                 "module_roots": _module_roots(entries, name), "stale": bool(env.stale)}
 
     origin = _origin(ws_root)
-    if not origin:
-        raise ComposeDispatchError({
-            "error": "this workspace has no git origin, so compose-api's registry cannot be matched to it; set "
-                     "VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT=name:<environment>",
-            "reason": "no-remote"}, 409)
-    repo = _canonical_repo(origin)
-    entry = next((x for x in entries if x.source and _canonical_repo(x.source) == repo), None)
+    repo = _canonical_repo(origin) if origin else None
+    entry = next((x for x in entries if repo and x.source and _canonical_repo(x.source) == repo), None)
     prebuilt = [environments[b] for b in (entry.bundles or [])
                 if b in environments and environments[b].kind == "prebuilt" and environments[b].simulator] if entry else []
-    if entry is None or not prebuilt:
-        what = (f"its registry entry {entry.id!r} has no prebuilt environment" if entry is not None
-                else f"no registry entry has source {origin}")
-        raise ComposeDispatchError({
-            "error": f"compose-api cannot run this workspace: {what}. This workbench runs a workspace in a prebuilt "
-                     "environment, which takes a manifest.yaml entry for the repository and a declared prebuilt "
-                     "environment (environments.yaml), both by compose-api PR; then an administrator registers the "
-                     "image (POST /registry/environments/{name}/versions) and makes that version the default "
-                     "(PUT /registry/environments/{name}/default). Composed (mash-up) environments are not used yet "
-                     "(docs/backend-compose-api.md, onboarding).",
-            "reason": "not-registered", "origin": origin}, 409)
+    if not prebuilt:
+        return {"name": None, "simulator": None, "image": None, "entry": entry,
+                "module_roots": list(entry.module_roots or []) if entry else [], "stale": False}
     env = prebuilt[0]
     return {"name": env.name, "simulator": env.simulator, "image": env.image, "entry": entry,
             "module_roots": _module_roots(entries, env.name), "stale": bool(env.stale)}
@@ -232,19 +253,22 @@ def _class_path(address: str) -> str:
     return address.removeprefix("local:").removeprefix("!")
 
 
-def manifest_violations(document: dict, components: "list[str]", module_roots: "list[str]") -> list[str]:
+def manifest_violations(document: dict, components: "list[str] | None", module_roots: "list[str]") -> list[str]:
     """Why each address in ``document`` would not run in the environment, if any would not.
 
     A class under one of the environment's module roots must be one its manifest lists (``components``, the
     manifest's addresses); an engine class (``process_bigraph.*``) is resolved by every core; anything else is
-    not in the environment at all.
+    not in the environment at all. With ``components`` None the environment is one compose-api infers and may not have
+    built yet, so there is no manifest to read: only the address form is checked, and the service answers for the classes.
     """
-    listed = {_class_path(c) for c in components}
+    listed = {_class_path(c) for c in components or []}
     problems = []
     for address in sorted({_address_text(a) for a in _addresses(document)}):
         protocol, path = _split_address(address)
         if protocol != "local" or path is None or path.startswith("!"):
             problems.append(f"{address}: compose-api accepts only local:<module>.<Class> addresses")
+            continue
+        if components is None:
             continue
         root = path.split(".", 1)[0]
         if root == ENGINE_MODULE_ROOT:
@@ -314,6 +338,58 @@ def export_document(ws_root: Path, composite_id: str, params: dict, emit_paths: 
     return document
 
 
+#: Names an archive member may not take: compose-api's runner runs the archive's first ``.pbg``, and reads a nested
+#: ``.omex`` as part of a batch.
+_RESERVED_SUFFIXES = (".pbg", ".omex")
+
+
+def workspace_files(document: dict, ws_root: Path) -> "tuple[dict, dict[str, Path]]":
+    """The files inside the workspace that the document names, by the name each travels under, and the document with
+    each such path replaced by that name.
+
+    compose-api's runner unpacks an archive beside its document and makes every bare file name in the document point
+    at the unpacked file (``compose_api/environments/runner.py``, ``load_document``), so a mesh or model file the
+    composite reads from the workspace goes in the upload. A string counts when it names an existing file inside the
+    workspace, relative to it as a local run reads it, or absolute. Any other string, and any path outside the
+    workspace, is left as it is. Raises :class:`ComposeDispatchError` (422) for two different files with one name,
+    which the archive cannot hold side by side, and for a file named like a document or an archive.
+    """
+    root = ws_root.resolve()
+    files: dict[str, Path] = {}
+
+    def named_file(text: str) -> "Path | None":
+        if "/" not in text and not Path(text).suffix:
+            return None
+        candidate = Path(text) if Path(text).is_absolute() else root / text
+        try:
+            path = candidate.resolve()
+        except (OSError, RuntimeError):
+            return None
+        return path if path.is_file() and path.is_relative_to(root) else None
+
+    def visit(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {key: visit(value) for key, value in node.items()}
+        if isinstance(node, list):
+            return [visit(value) for value in node]
+        if not isinstance(node, str) or (path := named_file(node)) is None:
+            return node
+        if path.suffix.lower() in _RESERVED_SUFFIXES:
+            raise ComposeDispatchError({
+                "error": f"the composite names {node!r}, a {path.suffix} file, which compose-api would read as a "
+                         "document or an archive rather than as data; rename it to send it",
+                "reason": "file-name-reserved"}, 422)
+        if files.setdefault(path.name, path) != path:
+            raise ComposeDispatchError({
+                "error": f"the composite names two different files called {path.name!r} "
+                         f"({files[path.name].relative_to(root)} and {path.relative_to(root)}); compose-api receives "
+                         "them side by side under their names, so one must be renamed",
+                "reason": "file-name-collision"}, 422)
+        return path.name
+
+    return visit(document), files
+
+
 # -- the routes ----------------------------------------------------------------------------------------------------
 
 
@@ -331,11 +407,39 @@ def _backend_error(e: Exception) -> tuple[dict, int]:
     if isinstance(e, NetworkError):
         return {"phase": "unreachable", "reachable": False, "reason": "backend unreachable", "error": str(e)}, 502
     if isinstance(e, AuthError):
-        return {"phase": "error", "reachable": True, "reason": "unauthenticated",
-                "error": f"compose-api needs a signed-in caller: set {TOKEN_ENV_VAR} ({e})"}, 401
+        # The client's own advice ("sign in again", auth0 settings) is for its CLI; a token here comes from the environment.
+        why = (f"compose-api rejected the token in {TOKEN_ENV_VAR} ({e})" if os.environ.get(TOKEN_ENV_VAR, "").strip()
+               else f"compose-api needs a signed-in caller: set {TOKEN_ENV_VAR}")
+        return {"phase": "error", "reachable": True, "reason": "unauthenticated", "error": why}, 401
     if isinstance(e, ForbiddenError):
         return {"phase": "error", "reachable": True, "reason": "forbidden", "error": str(e)}, 403
     return {"phase": "backend_error", "reachable": True, "reason": "backend error", "error": str(e)}, 502
+
+
+def _refusal_text(e: Exception) -> str:
+    """compose-api's own words for a refused submission. ``detail`` is a string for a problem with the request, and an
+    object with a ``message`` and a ``violations`` list (each an ``address`` and its ``reason``) for one with the
+    document's contents, which is what a run in an inferred environment is mostly refused with."""
+    detail = getattr(e, "detail", None)
+    if detail is None:
+        return str(e)
+    if not isinstance(detail, dict):
+        return str(detail)
+    violations = detail.get("violations")
+    if not isinstance(violations, list):
+        violations = [] if violations in (None, "") else [violations]
+    lines = [f"{v.get('address')}: {v.get('reason')}" if isinstance(v, dict) else str(v) for v in violations if v]
+    message = str(detail.get("message") or "refused")
+    return f"{message}: " + "; ".join(lines) if lines else message
+
+
+def _is_refusal(e: Exception) -> bool:
+    """compose-api answered by refusing this run: a document it will not take (400, 422) or a conflict (409: a lock pixi
+    could not solve, or an environment for this set of entries that already failed). Its words are on ``detail``; the
+    client's own message names only the operation and the status."""
+    from compose_api_client.ext import ApiError, InvalidRequestError
+
+    return isinstance(e, InvalidRequestError) or (isinstance(e, ApiError) and e.status_code == 409)
 
 
 def checked_steps(value: object) -> float:
@@ -393,24 +497,37 @@ def _dispatch(session: "ComposeSession", ws_root: Path, composite_id: str, param
     except Exception as e:  # noqa: BLE001 - the export's own reason (an unregistered process) IS the answer
         raise ComposeDispatchError({"error": f"could not export composite {composite_id!r} as a document: {e}",
                                     "reason": "export-failed"}, 422) from e
-    try:
-        manifest = session.environment_manifest(env["name"])
-    except NotFoundError as e:
-        raise ComposeDispatchError({
-            "error": f"compose-api has no interface manifest for environment {env['name']!r}, so composite "
-                     f"{composite_id!r} cannot be checked against it ({e})",
-            "reason": "no-manifest", "environment": env["name"]}, 409) from e
-    problems = manifest_violations(document, [c.address for c in manifest.components], env["module_roots"])
+    document, files = workspace_files(document, ws_root)
+    if env["name"] is None:
+        problems = manifest_violations(document, None, [])
+    else:
+        try:
+            manifest = session.environment_manifest(env["name"])
+        except NotFoundError as e:
+            raise ComposeDispatchError({
+                "error": f"compose-api has no interface manifest for environment {env['name']!r}, so composite "
+                         f"{composite_id!r} cannot be checked against it ({e})",
+                "reason": "no-manifest", "environment": env["name"]}, 409) from e
+        problems = manifest_violations(document, [c.address for c in manifest.components], env["module_roots"])
     if problems:
         raise ComposeDispatchError({
-            "error": f"environment {env['name']!r} cannot run composite {composite_id!r}: " + "; ".join(problems),
+            "error": (f"environment {env['name']!r}" if env["name"] else "compose-api")
+                     + f" cannot run composite {composite_id!r}: " + "; ".join(problems),
             "reason": "not-in-environment", "violations": problems, "environment": env["name"]}, 409)
     dispatch_tag = f"{DISPATCH_TAG_PREFIX}{uuid.uuid4().hex}"
     with tempfile.TemporaryDirectory() as td:
-        pbg = Path(td) / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', composite_id)}.pbg"
-        pbg.write_text(json.dumps(document), encoding="utf-8")
+        stem = re.sub(r"[^A-Za-z0-9_.-]", "_", composite_id)
+        if files:  # the document and the workspace files it names, in one archive
+            upload = Path(td) / f"{stem}.omex"
+            with zipfile.ZipFile(upload, "w", zipfile.ZIP_DEFLATED) as omex:
+                omex.writestr(f"{stem}.pbg", json.dumps(document))
+                for name, path in sorted(files.items()):
+                    omex.write(path, name)
+        else:
+            upload = Path(td) / f"{stem}.pbg"
+            upload.write_text(json.dumps(document), encoding="utf-8")
         try:
-            experiment = session.submit(pbg, environment=env["name"], interval=steps,
+            experiment = session.submit(upload, environment=env["name"], interval=steps,
                                         tags=[*tags, dispatch_tag], description=description)
         except UncertainOutcomeError as e:
             # The answer was lost after the request may have arrived: never resubmit, find the run by its tag.
@@ -427,20 +544,45 @@ def _dispatch(session: "ComposeSession", ws_root: Path, composite_id: str, param
     return int(experiment.simulation_database_id), env
 
 
+def check_environment(ws_root: Path, *, timeout: float = SESSION_TIMEOUT) -> dict:
+    """The environment that runs this workspace (:func:`resolve_environment`), asked of compose-api in a session of its
+    own whose requests wait at most ``timeout`` seconds. The readiness check (:func:`dispatch_preflight`) and the
+    composite card's launch (``ComposeApiRuns.dispatch_composite``) both ask it, so they refuse the same workspaces.
+    Raises :class:`ComposeDispatchError` (409: a named environment compose-api lacks, or no backend named) and the
+    client's ``CliError`` for a call that failed (:func:`_backend_error` reads it)."""
+    with _session(timeout=timeout) as session:
+        return resolve_environment(session, Path(ws_root))
+
+
 def dispatch_preflight(ws_root: Path) -> dict:
     """``/api/remote-dispatch-preflight`` on compose-api: ``{target, dispatch, ok, reason, message, environment?}``,
-    ready when an environment runs this workspace (:func:`resolve_environment`); its reason when none does."""
+    ready when a prebuilt environment runs this workspace, or (``reason`` ``inferred``) when compose-api will choose or
+    build one (:func:`resolve_environment`), whether or not a registry entry has the workspace's repository; its
+    reason when a named environment does not exist."""
     from compose_api_client.ext import CliError
 
     out: dict = {"target": "deployment", "dispatch": BACKEND}
     try:
-        with _session() as session:
-            env = resolve_environment(session, Path(ws_root))
+        env = check_environment(Path(ws_root))
     except ComposeDispatchError as e:
         return {**out, **e.body, "ok": False, "message": e.body.get("error")}
     except CliError as e:
         body, _ = _backend_error(e)
         return {**out, **body, "ok": False, "message": body["error"]}
+    if env["name"] is None:
+        entry, signed_in = env["entry"], bool(os.environ.get(TOKEN_ENV_VAR, "").strip())
+        level = getattr(entry.level, "value", entry.level) if entry else None
+        which = (f"compose-api has no prebuilt environment for this workspace (registry entry {entry.id!r}, "
+                 f"level {level})" if entry else
+                 "No registry entry has this workspace's repository, and none is needed when its composite uses "
+                 "registered classes: compose-api admits each class under its own registry entry and runs that "
+                 "entry's pinned code, not this checkout")
+        return {**out, "ok": True, "reason": "inferred", "environment": None,
+                "registry_entry": entry.id if entry else None, "registry_level": level, "signed_in": signed_in,
+                "message": f"{which}. It runs the composite in an environment that covers its classes, or builds "
+                           "one from their registry entries' pinned commits: a build needs a signed-in caller"
+                           + ("" if signed_in else f" (set {TOKEN_ENV_VAR})")
+                           + ", and later runs reuse it. The checkout is not shipped, so nothing needs pushing."}
     return {**out, "ok": True, "reason": "environment", "environment": env["name"],
             "message": f"compose-api runs this workspace in environment {env['name']!r} ({env['image']}): "
                        "its image runs, not this checkout, so nothing needs pushing."}
@@ -448,10 +590,12 @@ def dispatch_preflight(ws_root: Path) -> dict:
 
 def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
     """``POST /simulation/run`` for a study's composite. ``({run_id, phase: "running", backend}, 202)``; 400 for a
-    step count compose-api does not run, 409 when no environment runs the workspace or a class is not in it, 422
-    for a composite that cannot be exported, 502 when compose-api cannot be reached or failed (never retried: a
-    retry could submit twice; a submission whose answer was lost is looked up by its dispatch tag)."""
-    from compose_api_client.ext import CliError, InvalidRequestError
+    step count compose-api does not run, 401 for a first run that needs a signed-in caller, 409 when a named
+    environment does not exist, a class is not in its environment, or compose-api refuses the run (its words are
+    shown), 422 for a composite that cannot be exported, 502 when compose-api cannot be reached or failed (never
+    retried: a retry could submit twice, or start a second environment build; a submission whose answer was lost is
+    looked up by its dispatch tag)."""
+    from compose_api_client.ext import CliError
 
     from vivarium_workbench.lib.study_runs import study_emit_paths
 
@@ -479,29 +623,30 @@ def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
                 description=f"vivarium-workbench: study {study}, {composite_id}")
     except ComposeDispatchError as e:
         return e.body, e.status
-    except InvalidRequestError as e:
-        return {"error": f"compose-api refused the run: {e.detail}", "reason": "refused", "reachable": True}, 409
     except CliError as e:
+        if _is_refusal(e):
+            return {"error": f"compose-api refused the run: {_refusal_text(e)}", "reason": "refused", "reachable": True}, 409
         return _backend_error(e)
     run_id = run_id_of(simulation_id)
-    _record_pending(ws_root, study, composite_id, run_id)
+    _record_pending(ws_root, study, composite_id, run_id, _named_base())
     out = {"run_id": run_id, "phase": "running", "backend": BACKEND, "environment": env["name"]}
     if env["stale"]:
         out["manifest_warning"] = (f"compose-api's interface manifest for {env['name']!r} was read from another image "
                                    "than the one it runs, so the class check may be out of date")
     if head_matches_entry(ws_root, env["entry"]) is False:
+        where = (f"the environment's image ({env['image']})" if env["image"]
+                 else "the environment compose-api has for that commit")
         out["warning"] = (f"this checkout's HEAD is not commit {env['entry'].commit} that compose-api's registry pins "
-                          f"for {env['entry'].id}: the run uses the environment's image ({env['image']}), "
-                          "not this checkout")
+                          f"for {env['entry'].id}: the run uses {where}, not this checkout")
     return out, 202
 
 
 def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: float, overrides: "dict | None",
                   emit_paths: "list[str] | None", poll_interval: float, poll_timeout: float) -> Path:
-    """The Composites-tab remote run on compose-api (``remote_run.run_remote``'s branch): dispatch the composite,
+    """The Composites-tab remote run on compose-api (``ComposeApiRuns.run_composite``): dispatch the composite,
     wait for it, and save its results archive in ``dest``. Raises ``RuntimeError`` naming why a run could not be
     sent or did not complete, and ``TimeoutError`` past ``poll_timeout`` (the run may still be going)."""
-    from compose_api_client.ext import ApiTimeout, CliError, InvalidRequestError
+    from compose_api_client.ext import ApiTimeout, CliError
 
     try:
         steps = checked_steps(n_steps)
@@ -511,7 +656,8 @@ def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: floa
                 tags=["workbench", _tag(f"composite:{composite_id}")],
                 description=f"vivarium-workbench: composite {composite_id}")
             run_id = run_id_of(simulation_id)
-            print(f"Submitted to compose-api ({env['name']}). Run id: {run_id}", flush=True)
+            print(f"Submitted to compose-api ({env['name'] or 'environment chosen by compose-api'}). Run id: {run_id}",
+                  flush=True)
             try:
                 state = session.wait(simulation_id, poll=poll_interval,
                                      timeout=poll_timeout if poll_timeout and poll_timeout > 0 else None,
@@ -524,12 +670,12 @@ def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: floa
                 raise RuntimeError(f"compose-api run {run_id} ended {state.status}"
                                    + (f": {error}" if isinstance(error, str) and error else ""))
             Path(dest).mkdir(parents=True, exist_ok=True)
-            return session.download(simulation_id, Path(dest) / f"{run_id}-results.zip")
+            return session.download(simulation_id, Path(dest) / f"{run_id}{ARCHIVE_SUFFIX}")
     except ComposeDispatchError as e:
         raise RuntimeError(str(e.body.get("error"))) from e
-    except InvalidRequestError as e:
-        raise RuntimeError(f"compose-api refused the run: {e.detail}") from e
     except CliError as e:
+        if _is_refusal(e):
+            raise RuntimeError(f"compose-api refused the run: {_refusal_text(e)}") from e
         raise RuntimeError(str(_backend_error(e)[0]["error"])) from e
 
 
@@ -576,24 +722,17 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
             if not state.ok:
                 return {"error": f"run {run_id!r} is {state.status}; only a completed run has results to land",
                         "phase": _phase(state.status), "run_id": run_id}, 409
-            detail = session.simulation(simulation_id)
-            version = _version_of(detail)
-            image = _image_of(session, version, _text(detail.simulator))
+            provenance, image = _provenance(session, simulation_id, run_id, state)
             with tempfile.TemporaryDirectory() as td:
                 archive = Path(td) / "results.zip"
                 archive.write_bytes(session.results(simulation_id))
                 if not zipfile.is_zipfile(archive):
                     return {"error": f"simulation {simulation_id} served something other than a results archive",
                             "run_id": run_id}, 422
-                deployment = remote_pinned.remote_deployment_name()
-                provenance = {
-                    "source": deployment, "backend": BACKEND,
-                    "compose": {"run_id": run_id, "simulation_id": simulation_id,
-                                "experiment_id": detail.experiment_id, "image": image,
-                                "environment_version": f"{version[0]}@{version[1]}" if version else None,
-                                "slurm_job_id": state.slurm_job},
-                }
+                deployment = _deployment_name()
                 landed = cr.generate_run_id(spec_id, params=provenance)
+                # step 1c: where the run went, kept out of the id's hash (added after it is derived)
+                provenance["remote"] = _remote_record("compose-api", run_id, _named_base())
                 try:
                     n_steps = land_composite_results(archive, db_file, landed, emitter=STUDY_EMITTER)
                 except ValueError as e:
@@ -609,9 +748,7 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
     manifest = cr.build_run_manifest(
         spec_id=spec_id, params=provenance, n_steps=n_steps, emitter="sqlite", emit_paths=[], runtime={},
         origin="remote", study=None, generation_id=None, ws_root=None)
-    # The code that ran is the image's, named by its digest; the checkout is not what ran.
-    manifest["code_version"] = {"git_sha": None, "package": None, "repo": None, "remote_url": None,
-                                "image": image}
+    stamp_manifest(manifest, image)
     conn = cr.connect(db_file)
     try:
         try:
@@ -628,6 +765,52 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
     finally:
         conn.close()
     return {"run_id": landed}, 200
+
+
+def _provenance(session: "ComposeSession", simulation_id: int, run_id: str, state: Any) -> "tuple[dict, str | None]":
+    """compose-api's record of one finished run, ``(provenance, image)``: the simulation, the environment version it
+    ran in, that version's image and the SLURM job, under ``compose`` (the deployment is ``source``)."""
+    detail = session.simulation(simulation_id)
+    version = _version_of(detail)
+    image = _image_of(session, version, _text(detail.simulator))
+    return {
+        "source": _deployment_name(), "backend": BACKEND,
+        "compose": {"run_id": run_id, "simulation_id": simulation_id,
+                    "experiment_id": detail.experiment_id, "image": image,
+                    "environment_version": f"{version[0]}@{version[1]}" if version else None,
+                    "slurm_job_id": state.slurm_job},
+    }, image
+
+
+def stamp_manifest(manifest: dict, image: "str | None") -> None:
+    """The code that ran is the image's, named by its digest; the checkout is not what ran, so ``code_version`` and
+    the primary ``environments`` entry carry none of its identity (``image`` is None until the run is landed). The
+    manifest's ``env`` fingerprint is left as launched: it is the local environment a re-run is compared against
+    (``rerun``'s ``env_id`` drift check), not a claim about what ran."""
+    manifest["code_version"] = {"git_sha": None, "package": None, "repo": None, "remote_url": None, "image": image}
+    manifest["environments"] = [
+        {**e, "repo": None, "commit": None, "remote_url": None, "lockfile_hash": None} if e.get("role") == "primary" else e
+        for e in manifest.get("environments") or []]
+
+
+def record_provenance(conn: Any, run_id: str, archive: Path) -> None:
+    """Complete the manifest of a Composites-tab run with compose-api's record of the run whose results ``archive``
+    is (:func:`run_composite`'s), as :func:`land` does for a study run. A run's params stay the composite's inputs,
+    which a re-run sends back, so the record is ``manifest["compose"]``, not the params. Any other archive: nothing."""
+    name = archive.name.removesuffix(ARCHIVE_SUFFIX)
+    if name == archive.name or not is_run_id(name):
+        return
+    simulation_id = simulation_id_of(name)
+    with _session() as session:
+        provenance, image = _provenance(session, simulation_id, name, session.status(simulation_id))
+    row = conn.execute("SELECT manifest_json FROM runs_meta WHERE run_id = ?", (run_id,)).fetchone()
+    if row is None or not row[0]:
+        return
+    manifest = json.loads(row[0])
+    manifest["compose"] = provenance["compose"]
+    stamp_manifest(manifest, image)
+    conn.execute("UPDATE runs_meta SET manifest_json = ? WHERE run_id = ?", (json.dumps(manifest), run_id))
+    conn.commit()
 
 
 def _version_of(detail: Any) -> "tuple[str, int] | None":
@@ -656,18 +839,32 @@ def _image_of(session: "ComposeSession", version: "tuple[str, int] | None", simu
     return env.image if env is not None else simulator
 
 
-def _record_pending(ws_root: Path, study: str, spec_id: str, run_id: str) -> None:
+def _named_base() -> str:
+    from vivarium_workbench.lib.backend_config import explicit_backend_base_url
+
+    return explicit_backend_base_url() or ""
+
+
+def _remote_record(kind: str, remote_id: Any, base_url: str) -> dict:
+    """``params["remote"]`` for a run of this backend (lazy import: lib.backends imports this module)."""
+    from vivarium_workbench.lib.backends.records import remote_record
+
+    return remote_record(kind, remote_id, base_url)
+
+
+def _record_pending(ws_root: Path, study: str, spec_id: str, run_id: str, base_url: str) -> None:
     """A Runs-tab placeholder from the moment compose-api accepted the run (best-effort: a visibility row must
     never fail an already-dispatched run). Same id scheme as the other routes, so landing can replace it."""
     try:
         from vivarium_workbench.lib import composite_runs as cr
 
-        deployment = remote_pinned.remote_deployment_name()
+        deployment = _deployment_name()
         conn = cr.connect(study_spec.study_dir(ws_root, study) / "runs.db")
         try:
             cr.save_metadata(
                 conn, spec_id=spec_id, run_id=f"remote-pending-{run_id}",
-                params={"source": deployment, "simulation_id": run_id, "backend": BACKEND},
+                params={"source": deployment, "simulation_id": run_id, "backend": BACKEND,
+                        "remote": _remote_record("compose-api", run_id, base_url)},
                 label=f"Remote dispatch ({deployment}) — in progress",
                 started_at=time.time(), n_steps=0, workspace=ws_root,
             )

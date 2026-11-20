@@ -17,13 +17,17 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from vivarium_workbench.lib import sms_api_client as mod
-from vivarium_workbench.lib.sms_api_client import (
+from vivarium_workbench_sms import sms_api_client as mod
+from vivarium_workbench_sms.sms_api_client import (
     CAPABILITY_VIVA_V1_SURFACE,
     CAPABILITY_VIVA_V1_WORKERS,
     SmsApiClient,
     resolve_path,
 )
+
+#: A pure-plugin module (it tests the SMS plugin's own code): the core-only job does not collect it
+#: (docs/backend-adapters.md step P3, K2a).
+pytestmark = pytest.mark.plugin
 
 BOTH = frozenset({CAPABILITY_VIVA_V1_SURFACE, CAPABILITY_VIVA_V1_WORKERS})
 #: Both capability routes: /viva/v1 first, /core/v1 when that 404s (W2).

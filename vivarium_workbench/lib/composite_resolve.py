@@ -12,8 +12,6 @@ from pathlib import Path
 import yaml
 from process_bigraph.composite_spec import CompositeSpec, get as _get_spec  # module-level for monkeypatch
 
-from vivarium_workbench.lib.sms_api_client import SmsApiClient, SmsApiError
-from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
 
 
 from vivarium_workbench.lib.workspace_paths import add_ws_to_sys_path as _ws_add_to_sys_path
@@ -489,22 +487,20 @@ def resolve_composite_for_request(
     ws_root: "Path | str", spec_id: str, overrides: "dict | None" = None
 ) -> "dict | None":
     """Resolve a composite for a UI request, routing by source: a session-bound
-    materialized build (.viv-build.json — real files on disk, same dir the env
+    materialized build (``backends.session_build`` — real files on disk, same dir the env
     worker provisions a venv for, item 63) resolves LOCALLY, through the same
     general resolution any local workspace uses; a bare deployment-wide pin
-    with no materialized clone resolves on the deployment via sms-api; a local
-    workspace resolves locally. Returns the resolve payload dict (or None on
+    with no materialized clone has nothing to resolve against and degrades to
+    ``wiring_status: "unavailable"``; a local workspace resolves locally. Returns the resolve payload dict (or None on
     a local miss)."""
-    from vivarium_workbench.lib.run_core import run_target_for
-    from vivarium_workbench.lib.remote_simulations import _read_build_meta
+    from vivarium_workbench.lib import backends
 
     ws_root = Path(ws_root)
-    if run_target_for(ws_root) == "deployment":
-        meta = _read_build_meta(ws_root) or {}
-        sim_id = meta.get("simulator_id")
-        if sim_id is None:
+    build = backends.session_build(ws_root)
+    if build is not None:
+        if build.id is None:
             return {"error": "remote build has no simulator_id stamp"}
-        # item 63: `.viv-build.json` only ever gets stamped into a materialized
+        # item 63: the session-build stamp only ever gets written into a materialized
         # session clone (source_build_views.switch_build) — its presence means
         # ws_root has real source files on disk. Not special-cased to any one
         # composite kind or workspace: try the SAME general local resolution
@@ -520,28 +516,27 @@ def resolve_composite_for_request(
         #      the same safe, out-of-process env-worker discovery
         #      discover_all_composites already uses elsewhere (and which the
         #      managed materialization path now provisions a real venv for).
-        # Only when NEITHER general path can see it does this fall back to
-        # sms-api — the one case with nothing local to introspect at all is a
-        # bare deployment-wide pin (VIVARIUM_WORKBENCH_REMOTE_PINNED, no
-        # materialized clone), which the same waterfall degrades through
-        # cleanly (both local attempts miss, unconditionally, for any id).
+        # Only when NEITHER general path can see it does this degrade. (A bare
+        # deployment-wide pin -- VIVARIUM_WORKBENCH_REMOTE_PINNED with no
+        # materialized clone -- never gets here: it is no session build, so
+        # it resolves locally.)
         local = resolve_composite(ws_root, spec_id, overrides)
         if local is not None:
             return local
         local = _local_generator_payload(ws_root, spec_id)
         if local is not None:
             return local
-        try:
-            return SmsApiClient(_sms_api_base()).composite_resolve(int(sim_id), spec_id, overrides or {})
-        except SmsApiError as e:
-            # sms-api has no POST /core/v1/simulator/{id}/composite-resolve route —
-            # this client method was added speculatively and the server side was
-            # never built. Composite preview is a non-blocking convenience (actual
-            # dispatch reads the composite ref directly and never calls this), so
-            # degrade to the same honest-unavailable shape every other resolve
-            # failure already uses, instead of a 500.
-            return _degraded_result(
-                spec_id, e,
-                notice="composite preview is not available for remote-pinned deployments yet",
-            )
+        # No remote resolution exists. viva-api has never served a composite-resolve
+        # route (checked 2026-11-18 against code, not docs: the app built from main has
+        # only latest/status/versions/upload under /core/v1/simulator; no version of its
+        # generated OpenAPI spec on any branch has one; no .py on any branch defines it).
+        # The client method was added on the workbench side in 536fa2eb (SP-D1) with the
+        # server endpoint left as a follow-on that was never built. A hosted resolution
+        # would need a live worker, which is viva-core-only (docs/backend-adapters.md §A.3.1). A
+        # preview is a convenience -- dispatch reads the composite ref directly -- so
+        # degrade to the honest-unavailable shape every other resolve failure uses.
+        return _degraded_result(
+            spec_id, LookupError(f"{spec_id!r} has no local definition in this build"),
+            notice="composite preview is not available for remote-pinned deployments yet",
+        )
     return resolve_composite(ws_root, spec_id, overrides)

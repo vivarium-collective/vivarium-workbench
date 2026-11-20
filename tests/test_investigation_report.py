@@ -694,3 +694,18 @@ def test_plotly_figures_render_when_reveal_layout_settles_late(tmp_path):
         assert not errs, errs
     finally:
         browser.close(); p.stop()
+
+
+def test_study_keep_carries_conclusion_verdicts():
+    # architecture-review #6: conclusion_verdicts is authored by the engine and
+    # rendered by the study page + single_study_report; it must not be silently
+    # dropped from the investigation-report study payload (the _STUDY_KEEP filter).
+    from vivarium_workbench.lib.investigation_report import _STUDY_KEEP
+
+    assert "conclusion_verdicts" in _STUDY_KEEP
+    # the payload filter (build_report_data) keeps only fields in _STUDY_KEEP;
+    # prove a study's conclusion_verdicts survives that projection.
+    spec = {"conclusion_verdicts": {"biological_validation": "pass"}, "junk_field": 1}
+    kept = {k: spec.get(k) for k in _STUDY_KEEP if spec.get(k) is not None}
+    assert kept.get("conclusion_verdicts") == {"biological_validation": "pass"}
+    assert "junk_field" not in kept  # whitelist stays bounded

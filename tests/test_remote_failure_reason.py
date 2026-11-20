@@ -9,13 +9,20 @@ def test_reason_timeout_hints_run_may_continue():
     assert "executing on the deployment" in r
 
 
-def test_reason_unreachable_names_the_env_var():
+def test_reason_unreachable_points_at_the_backend_url():
     r = _remote_failure_reason(
         RuntimeError("Remote run 7: sms-api status polling failed 6 times in a row … "
                      "Is the sms-api endpoint (http://x:8080) still reachable?")
     )
-    assert "not reachable" in r
-    assert "SMS_API_BASE" in r
+    # Neutral since step P3 C2 (was "... is the tunnel/endpoint up? (SMS_API_BASE)"): no provider's variable.
+    assert r.endswith("  [remote backend not reachable (check the configured backend URL)]")
+    assert "SMS_API_BASE" not in r
+
+
+def test_reason_core_unreachable_text_is_classified():
+    r = _remote_failure_reason(
+        RuntimeError("GET http://x/version failed (backend unreachable — is the endpoint up?): refused"))
+    assert r.endswith("  [remote backend not reachable (check the configured backend URL)]")
 
 
 def test_reason_unpushed_workspace_tells_user_to_push():

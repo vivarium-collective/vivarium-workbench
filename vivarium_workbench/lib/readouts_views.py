@@ -485,11 +485,13 @@ def build_study_readouts(ws_root: Path, slug: str) -> tuple[dict, int]:
                     "readouts_source": "run-store", "note": note, "degraded": True}, 200
         rows = _merge_readouts(spec, {"leaves": []}, plan_available=False)
         reason = f"composite {ref!r} could not be built: {e}"
-        # On a remote build (a materialized repo@commit, marked by .viv-build.json)
-        # the composite CANNOT build — the workspace has no local ParCa cache, by
-        # design. That's expected, not an error: degrade softly (200) with a clear
-        # note instead of a 422 + a raw filesystem traceback.
-        if (ws_root / ".viv-build.json").is_file():
+        # On a remote build (a materialized repo@commit: a session build,
+        # backends.session_build) the composite CANNOT build — the workspace has
+        # no local ParCa cache, by design. That's expected, not an error: degrade
+        # softly (200) with a clear note instead of a 422 + a raw filesystem traceback.
+        from vivarium_workbench.lib import backends
+
+        if backends.session_build(ws_root) is not None:
             return {"composite": ref, "rows": rows, "excluded": [], "excluded_state": "unavailable",
                     "emitter": emitter_block,
                     "reason": "Emit-plan verification is unavailable on a remote build "

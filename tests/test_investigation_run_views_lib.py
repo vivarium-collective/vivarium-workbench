@@ -244,7 +244,7 @@ def test_deployment_target_refuses_409(tmp_path, monkeypatch, fake_registry):
     """
     ws = _make_ws(tmp_path)
     monkeypatch.setattr(
-        "vivarium_workbench.lib.remote_pinned.resolve_run_target",
+        "vivarium_workbench.lib.backends.resolve_run_target",
         lambda p: "deployment")
 
     def _boom(*a, **k):
@@ -265,7 +265,7 @@ def test_local_target_is_unchanged(tmp_path, monkeypatch, fake_registry):
     route behaves exactly as before the gate."""
     ws = _make_ws(tmp_path)
     monkeypatch.setattr(
-        "vivarium_workbench.lib.remote_pinned.resolve_run_target",
+        "vivarium_workbench.lib.backends.resolve_run_target",
         lambda p: "local")
     monkeypatch.setattr(
         investigations, "run_investigation",
@@ -280,7 +280,7 @@ def test_missing_name_still_400_under_a_deployment_target(tmp_path, monkeypatch)
     rather than being masked by the gate."""
     ws = _make_ws(tmp_path)
     monkeypatch.setattr(
-        "vivarium_workbench.lib.remote_pinned.resolve_run_target",
+        "vivarium_workbench.lib.backends.resolve_run_target",
         lambda p: "deployment")
     body, status = views.investigation_run(ws, {})
     assert status == 400

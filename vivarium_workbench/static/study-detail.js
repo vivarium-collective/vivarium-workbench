@@ -399,6 +399,20 @@
   }
   window._loadAnalyses = _loadAnalyses;
 
+  // Whether to ask for the remote figure gallery (/api/study-remote-figures):
+  // only when the active backends declare `artifacts` (docs/backend-adapters.md
+  // §2.1, step P3 F2). Features only HIDE this optional panel; when they are
+  // unknown (no BackendFeatures, a failed fetch) the page asks as before, and
+  // the read-only snapshot bundle keeps its old behaviour without consulting them.
+  var _GALLERY_NOT_OFFERED = {};
+  function _remoteGalleryOffered() {
+    var bf = window.BackendFeatures;
+    if (_isSnapshot() || !bf || typeof bf.ready !== 'function') return Promise.resolve(true);
+    return bf.ready().then(
+      function (st) { return !st || !st.known || (st.features || []).indexOf('artifacts') !== -1; },
+      function () { return true; });
+  }
+
   // Analyses tab: list the study's completed remote sims' ptools/EcoCyc overlay
   // .tsv files for download, read from their S3 result_uri via the remote
   // setting (complements the local "Analysis result files" above and the
@@ -416,9 +430,15 @@
       panel.id = 'remote-analyses-panel';
       anchor.parentNode.insertBefore(panel, anchor.nextSibling);
     }
-    fetch('/api/study-remote-figures?study=' + encodeURIComponent(slug) + '&limit=8')
-      .then(function (r) { return r.ok ? r.json() : { available: false }; })
+    _remoteGalleryOffered()
+      .then(function (offered) {
+        // Not offered: stay loaded (nothing to retry) and leave the panel empty.
+        if (!offered) return _GALLERY_NOT_OFFERED;
+        return fetch('/api/study-remote-figures?study=' + encodeURIComponent(slug) + '&limit=8')
+          .then(function (r) { return r.ok ? r.json() : { available: false }; });
+      })
       .then(function (d) {
+        if (d === _GALLERY_NOT_OFFERED) return;
         if (!d || !d.available || !(d.sims || []).length) {
           panel.innerHTML = (d && d.reason === 's3-auth-error' && d.total_completed_remote_sims)
             ? '<p class="muted" style="margin:10px 0">' + d.total_completed_remote_sims
@@ -433,7 +453,7 @@
             var links = (a.ptools || []).map(function (pp) {
               var fname = pp.replace(/^ptools\//, '');
               var url = '/api/remote-analysis-figure?simulation_id=' + enc(s.simulation_id)
-                + '&analysis=' + enc(a.name) + '&path=' + enc(pp);
+                + '&analysis=' + enc(a.name) + '&path=' + enc(pp) + '&study=' + enc(slug);
               return '<li><a href="' + url + '" download="' + esc(fname) + '">' + esc(fname) + '</a></li>';
             }).join('');
             var more = a.n_ptools > (a.ptools || []).length
@@ -448,7 +468,7 @@
         }).join('');
         panel.innerHTML =
           '<h4 style="margin-top:18px">Remote ptools / EcoCyc overlays (S3)</h4>'
-          + '<p class="muted">Rendered on GovCloud, read from S3 via the remote setting — showing '
+          + '<p class="muted">Rendered on the remote backend, read from S3 via the remote setting — showing '
           + d.shown_sims + ' of ' + d.total_completed_remote_sims
           + ' completed remote sims. Rendered figures are in the Visualizations tab.</p>'
           + rows;
@@ -871,9 +891,15 @@
       panel.id = 'remote-figures-panel';
       anchor.parentNode.insertBefore(panel, anchor.nextSibling);
     }
-    fetch('/api/study-remote-figures?study=' + encodeURIComponent(slug) + '&limit=8')
-      .then(function (r) { return r.ok ? r.json() : { available: false }; })
+    _remoteGalleryOffered()
+      .then(function (offered) {
+        // Not offered: stay loaded (nothing to retry) and leave the panel empty.
+        if (!offered) return _GALLERY_NOT_OFFERED;
+        return fetch('/api/study-remote-figures?study=' + encodeURIComponent(slug) + '&limit=8')
+          .then(function (r) { return r.ok ? r.json() : { available: false }; });
+      })
       .then(function (d) {
+        if (d === _GALLERY_NOT_OFFERED) return;
         if (!d || !d.available || !(d.sims || []).length) {
           panel.innerHTML = (d && d.reason === 's3-auth-error' && d.total_completed_remote_sims)
             ? '<p class="muted" style="margin:10px 0">' + d.total_completed_remote_sims
@@ -888,7 +914,7 @@
           (s.analyses || []).forEach(function (a) {
             (a.figures || []).forEach(function (fp) {
               var url = '/api/remote-analysis-figure?simulation_id=' + enc(s.simulation_id)
-                + '&analysis=' + enc(a.name) + '&path=' + enc(fp);
+                + '&analysis=' + enc(a.name) + '&path=' + enc(fp) + '&study=' + enc(slug);
               cards.push('<div class="figure-card">'
                 + '<iframe src="' + url + '" loading="lazy" '
                 + 'class="figure-media-frame figure-media-frame--native"></iframe>'
@@ -1588,11 +1614,50 @@
     // .cond-block elements' data-model-composite attributes below, and
     // _loadModelConfig still populates them off-screen (harmless), so nothing
     // downstream breaks. NOTE: the "Set composite" (repoint study.baseline)
-    // authoring action lives only here; it can be re-surfaced behind an explicit
-    // edit affordance if a study needs to change its model from this tab.
+    // authoring action lives only here, so it is re-surfaced behind an explicit
+    // "Change model" toggle below (issue #1618, blocker A) — without it a study
+    // created in the GUI could never be pointed at a model from the GUI.
     var modelSection = document.getElementById('model-section');
     if (modelSection) modelSection.style.display = 'none';
     mount.innerHTML = '';
+    // Issue #1618, blocker A — re-surface the model-set control. The registry-
+    // fed composite <select> + "Set composite" button live inside #model-section
+    // (hidden just above as redundant with the loom cards); a toggle reveals it
+    // so the user can point the study at a real composite from this tab. The
+    // affordance is always offered, since a fresh "+ Study" scaffold starts on
+    // the placeholder composite and MUST be repointed before it can run.
+    if (modelSection) {
+      // A fresh "+ Study" scaffold starts on the placeholder composite; detect
+      // it so the control reads "Choose a model" (and opens on its own) rather
+      // than "Change model" — the "next step" prompt the issue asks for.
+      var _isPlaceholder = order.indexOf('replace_me.composites.placeholder') !== -1;
+      var _editToggle = document.createElement('button');
+      _editToggle.type = 'button';
+      _editToggle.className = 'action-btn';
+      _editToggle.style.cssText = 'font-size:0.82em;margin:0 0 10px' +
+        (_isPlaceholder ? ';font-weight:600' : '');
+      var _editToggleLabel = function (open) {
+        _editToggle.textContent = open
+          ? '✕ Done'
+          : (_isPlaceholder ? '➕ Choose a model' : '✎ Change model');
+      };
+      var _openPicker = function () {
+        modelSection.style.display = '';
+        _editToggleLabel(true);
+        if (typeof _populateBaselineCompositeSelects === 'function') {
+          try { _populateBaselineCompositeSelects(); } catch (e) {}
+        }
+      };
+      _editToggleLabel(false);
+      _editToggle.addEventListener('click', function () {
+        if (modelSection.style.display === 'none') { _openPicker(); }
+        else { modelSection.style.display = 'none'; _editToggleLabel(false); }
+      });
+      mount.appendChild(_editToggle);
+      // Surface the picker immediately when there is no real model yet, so a
+      // newly-created study lands on "Choose a model" without hunting (#1618).
+      if (_isPlaceholder) _openPicker();
+    }
     // The study's ONE canonical config (source of truth) — the vEcoli config both
     // model arms derive from (study.config, else three_arm.native_config, surfaced
     // by the template as data-study-config). Render it ONCE for the whole study so
@@ -1784,22 +1849,21 @@
     if (!editedKeys.length) { status.textContent = 'No changes to save.'; return; }
     var composite = btn.dataset.composite;
     var oldName = btn.dataset.baselineName;
-    var newName = oldName + '-' + Date.now().toString(36);
     btn.disabled = true;
     status.textContent = 'Saving…';
-    api('POST', '/api/study-baseline-add', {study: studyName(), name: newName, composite: composite, params: merged})
-      .then(function (addResult) {
-        if (addResult.status !== 200) throw addResult;
-        return api('POST', '/api/study-baseline-remove', {study: studyName(), name: oldName});
-      })
+    // In-place repoint preserves the baseline entry's name (issue #1618): the
+    // old add(<name>-<suffix>)+remove(<name>) swap renamed the baseline on
+    // every edit. study-baseline-set updates composite/params under the same
+    // name in one call.
+    api('POST', '/api/study-baseline-set', {study: studyName(), name: oldName, composite: composite, params: merged})
       .then(function (r) {
         if (r.status === 200) { location.reload(); return; }
         btn.disabled = false;
         status.textContent = 'Error: ' + (r.body && r.body.error || r.status);
       })
-      .catch(function (addResult) {
+      .catch(function (err) {
         btn.disabled = false;
-        status.textContent = 'Error: ' + (addResult.body && addResult.body.error || addResult.status);
+        status.textContent = 'Error: ' + (err.body && err.body.error || err.status);
       });
   }
 
@@ -1919,6 +1983,34 @@
     var sectionLabel = function (label) {
       return '<div class="muted" style="font-size:0.78em;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">' + e(label) + '</div>';
     };
+    // Provenance of an adopted remote run: these fields are engine-authored onto
+    // the run row (lib/simulations_index._row_to_dict → remote_origin/ran_on/
+    // source_ref) but were never surfaced in this panel. Render each ONLY when it
+    // is actually present on the row — never invent or default a provenance value.
+    var _ro = row.remote_origin || null;
+    var _sref = row.source_ref || null;
+    var _provRows = '';
+    // A run computed on a remote backend. remote_origin present → its data is
+    // still remote (s3); ran_on alone → the results were landed/adopted into
+    // this workspace. The wording reflects what the fields actually say.
+    if (_ro) {
+      _provRows += kv('Method', 'remote run');
+    } else if (row.ran_on) {
+      _provRows += kv('Method', 'adopted remote run');
+    }
+    if (_ro && _ro.deployment) _provRows += kv('Origin host', '<code>' + e(_ro.deployment) + '</code>');
+    var _backend = (_ro && _ro.backend) || row.ran_on;
+    if (_backend) _provRows += kv('Backend', e(_backend));
+    if (_ro && _ro.simulation_id != null) _provRows += kv('Simulation', '<code>' + e(_ro.simulation_id) + '</code>');
+    if (_ro && _ro.experiment_id) _provRows += kv('Experiment', '<code>' + e(_ro.experiment_id) + '</code>');
+    if (_ro && _ro.s3_uri) _provRows += kv('Source artifact', '<code>' + e(_ro.s3_uri) + '</code>');
+    if (_sref && (_sref.commit_short || _sref.commit)) {
+      var _short = _sref.commit_short || String(_sref.commit).slice(0, 10);
+      var _commitHtml = _sref.commit_url
+        ? '<a href="' + e(_sref.commit_url) + '" target="_blank" rel="noopener"><code>' + e(_short) + '</code></a>'
+        : '<code>' + e(_short) + '</code>';
+      _provRows += kv('Source commit', _commitHtml);
+    }
     host.innerHTML =
       '<div class="panel" style="padding:12px 14px">' +
         '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
@@ -1933,6 +2025,11 @@
           kv('Time', e(S.fmtTime(row.completed_at || row.started_at))) +
           (row.n_steps != null ? kv('Steps', e(row.n_steps)) : '') +
         '</div>' +
+        (_provRows
+          ? '<div style="margin-bottom:10px">' + sectionLabel('Provenance') +
+              '<div style="display:grid;gap:4px;font-size:0.88em">' + _provRows + '</div>' +
+            '</div>'
+          : '') +
         '<div style="display:flex;flex-wrap:wrap;gap:8px">' + dl + ' ' + an + ' ' + explore + '</div>' +
         '<div style="margin-top:12px">' + sectionLabel('Figures') +
           '<div id="run-detail-figures">' + figs.html + '</div>' +
@@ -2226,6 +2323,71 @@
 
   function studyName() { return window._studyName; }
 
+  // --- Variants & findings authoring (issue #1618, blocker B) ---
+  // Inline onsubmit handlers resolve against global scope, so these are exposed
+  // on window. Each posts to an existing (variant) or new (finding) endpoint and
+  // reloads so the server-rendered lists/cards refresh.
+  function _submitStudyVariantAdd(form) {
+    var status = form.parentNode.querySelector('.study-variant-add-status');
+    var name = (form.name && form.name.value || '').trim();
+    var base = (form.base_composite && form.base_composite.value || '').trim();
+    var ovrRaw = (form.overrides && form.overrides.value || '').trim();
+    if (!name) { if (status) status.textContent = 'Name required.'; return false; }
+    var overrides = {};
+    if (ovrRaw) {
+      try { overrides = JSON.parse(ovrRaw); }
+      catch (e) { if (status) status.textContent = 'Overrides must be valid JSON (e.g. {"k": 2}).'; return false; }
+      if (typeof overrides !== 'object' || Array.isArray(overrides)) {
+        if (status) status.textContent = 'Overrides must be a JSON object.'; return false;
+      }
+    }
+    if (status) status.textContent = 'Adding…';
+    api('POST', '/api/study-variant-add',
+        {study: studyName(), name: name, base_composite: base, parameter_overrides: overrides})
+      .then(function (r) {
+        if (r.status === 200) { location.reload(); return; }
+        if (status) status.textContent = 'Error: ' + (r.body && r.body.error || r.status);
+      })
+      .catch(function (err) { if (status) status.textContent = 'Error: ' + (err.body && err.body.error || err.status); });
+    return false;
+  }
+  window._submitStudyVariantAdd = _submitStudyVariantAdd;
+
+  function _submitStudyInterventionAdd(form) {
+    var status = form.parentNode.querySelector('.study-intervention-add-status');
+    var name = (form.name && form.name.value || '').trim();
+    var description = (form.description && form.description.value || '').trim();
+    if (!name) { if (status) status.textContent = 'Name required.'; return false; }
+    if (status) status.textContent = 'Adding…';
+    api('POST', '/api/study-intervention-add',
+        {study: studyName(), name: name, description: description})
+      .then(function (r) {
+        if (r.status === 200) { location.reload(); return; }
+        if (status) status.textContent = 'Error: ' + (r.body && r.body.error || r.status);
+      })
+      .catch(function (err) { if (status) status.textContent = 'Error: ' + (err.body && err.body.error || err.status); });
+    return false;
+  }
+  window._submitStudyInterventionAdd = _submitStudyInterventionAdd;
+
+  function _submitStudyFindingAdd(form) {
+    var status = form.parentNode.querySelector('.study-finding-add-status');
+    var statement = (form.statement && form.statement.value || '').trim();
+    var st = (form.status && form.status.value || 'novel').trim();
+    var explanation = (form.explanation && form.explanation.value || '').trim();
+    if (!statement) { if (status) status.textContent = 'Statement required.'; return false; }
+    if (status) status.textContent = 'Adding…';
+    api('POST', '/api/study-finding-add',
+        {study: studyName(), statement: statement, status: st, explanation: explanation})
+      .then(function (r) {
+        if (r.status === 200) { location.reload(); return; }
+        if (status) status.textContent = 'Error: ' + (r.body && r.body.error || r.status);
+      })
+      .catch(function (err) { if (status) status.textContent = 'Error: ' + (err.body && err.body.error || err.status); });
+    return false;
+  }
+  window._submitStudyFindingAdd = _submitStudyFindingAdd;
+
   // --- Analyses (Model tab) ---
   // Reuses /api/study-set-analyses (lib.metadata_mutations.set_investigation_analyses,
   // which despite its name resolves any study by name via study_dir() — flat
@@ -2324,15 +2486,44 @@
   // Mode-aware dispatch: ONE button, the actual target decided by deployment
   // config, never a second button next to it. Items 18/19 exist specifically
   // to eliminate the "which button do I click" choice, not reintroduce it
-  // under a new name. Remote-pinned deployments (VIVARIUM_WORKBENCH_REMOTE_PINNED,
-  // e.g. the live smscdk prod deployment) dispatch to AWS Batch via
-  // remote-run-submit; everything else keeps the existing local-engine path.
+  // under a new name. A backend's launch plugin may take the dispatch (below);
+  // otherwise the study runs on the existing local-engine path.
+  // Backend-specific launch UI: a provider's launch script (window.SmsLaunch),
+  // loaded before this file when present. It gets only the small interface below and returns
+  // {dispatchBaseline, setRemoteConfigured}; absent, the study page is local-only.
   var _CANCELLED = { status: 0, body: { cancelled: true } };
+  var _smsLaunch = null;
+  if (window.SmsLaunch && typeof window.SmsLaunch.mount === 'function') {
+    // A broken plugin must not take the rest of the study page down with it.
+    try {
+      _smsLaunch = window.SmsLaunch.mount({
+        api: api,
+        studyName: studyName,
+        confirmModal: _confirmModal,
+        alertModal: _alertModal,
+        cancelled: _CANCELLED,
+        loadStudySims: _loadStudySims,
+        actionsHost: document.getElementById('sim-run-actions'),
+      }) || null;
+    } catch (err) {
+      // The plugin is present but broken: fail the dispatch visibly. Never fall back to a local run,
+      // which on a pinned deployment would run the study somewhere the operator did not choose.
+      if (window.console) console.error('launch plugin mount failed', err);
+      _smsLaunch = {
+        dispatchBaseline: function () { return Promise.reject(new Error('the launch plugin failed to load: ' + (err && err.message || err))); },
+        setRemoteConfigured: function () {},
+      };
+    }
+  }
 
   function _dispatchCurrentSpecBaseline() {
-    return api('GET', '/api/remote-run-config').then(function(cfgRes) {
-      var cfg = (cfgRes.status === 200 && cfgRes.body) || {};
-      if (cfg.pinned && cfg.simulator_id) return _dispatchRemotePinned(cfg);
+    // The launch plugin answers first (it may dispatch remotely); null means
+    // "not mine" and the study runs on the local engine as before.
+    var remote = _smsLaunch
+      ? Promise.resolve().then(function () { return _smsLaunch.dispatchBaseline(); })
+      : Promise.resolve(null);
+    return remote.then(function(res) {
+      if (res) return res;
       // In-page confirm (not window.confirm): embedded/automated browsers that
       // suppress native dialogs silently cancel the run otherwise.
       return _confirmModal("Run this study's CURRENT baseline spec as a new run?").then(function (ok) {
@@ -2341,271 +2532,17 @@
       });
     });
   }
-
-  // item 20: the resolved target (repo/branch/commit/simulator id) is fetched
-  // fresh via /api/remote-run-config immediately above -- never a stale
-  // client-rendered label -- but nothing surfaced it to a human before this
-  // function fired the actual AWS Batch dispatch. Show it and require an
-  // explicit confirm, so a workspace-identity mismatch is caught here, before
-  // money gets spent, not discovered afterward via aws batch describe-jobs.
-  //
-  // Deliberate addition beyond the || 1 removal below: window._study can be a
-  // STALE in-memory copy fetched before a param edit landed server-side (a
-  // confirmed real failure mode, not theoretical -- a tab left open across a
-  // baseline-param save re-dispatched the OLD 1x1 params from memory even
-  // though study.yaml on disk was already correct). Re-fetching via
-  // window.DataSource.loadStudy immediately before reading params closes that
-  // gap; window._study is refreshed too so the rest of the page stops reading
-  // stale state from this point on as well.
-  function _dispatchRemotePinned(cfg) {
-    var slug = studyName();
-    var refetch = (window.DataSource && window.DataSource.loadStudy)
-      ? window.DataSource.loadStudy(slug).catch(function () { return null; })
-      : Promise.resolve(null);
-    return refetch.then(function (freshStudy) {
-      if (freshStudy) window._study = freshStudy;
-      var baseline = (window._study && window._study.baseline) || [];
-      var params = (baseline[0] && baseline[0].params) || {};
-      var numGenerations = params.n_generations;
-      var numSeeds = params.n_seeds;
-      // n_generations/n_seeds directly size a real AWS Batch job -- unlike
-      // ordinary composite params (already correctly default-backed via
-      // /api/composite-resolve, untouched here), an explicit value the user
-      // set must NEVER be silently replaced by a default. An unset value
-      // blocks the dispatch outright rather than falling back to 1x1.
-      var missing = [];
-      if (!numGenerations) missing.push('n_generations');
-      if (!numSeeds) missing.push('n_seeds');
-      if (missing.length) {
-        // item 81: styled modal, not window.alert() -- see _confirmModal's
-        // own comment above for why (blocks the event loop, including
-        // browser-automation UI verification).
-        return _alertModal(
-          'Cannot dispatch: ' + missing.join(' and ') +
-          (missing.length > 1 ? ' are' : ' is') + ' not set.\n\n' +
-          'Set ' + (missing.length > 1 ? 'both' : 'it') + ' in the Model tab ' +
-          '(Runnable models → edit ' + missing.join(' / ') + ' → Save parameter changes) before running.'
-        ).then(function () { return _CANCELLED; });
-      }
-      var msg = 'Dispatch to AWS Batch:\n\n' +
-        '  repo:    ' + (cfg.repo_url || '(unknown)') + '\n' +
-        '  branch:  ' + (cfg.branch || '(unknown)') + '\n' +
-        '  commit:  ' + ((cfg.commit || '(unknown)').slice(0, 12)) + '\n' +
-        '  simulator id: ' + cfg.simulator_id + '\n' +
-        '  generations:  ' + numGenerations + '\n' +
-        '  seeds:        ' + numSeeds + '\n\n' +
-        'Proceed?';
-      // item 81: styled modal, not window.confirm() -- reuses item 20b's
-      // existing _confirmModal (same file) rather than adding a second
-      // implementation; see its own comment above for the rationale.
-      return _confirmModal(msg).then(function (ok) {
-        if (!ok) return _CANCELLED;
-        return api('POST', '/api/remote-run-submit', {
-          study: slug,
-          simulator_id: cfg.simulator_id,
-          num_generations: numGenerations,
-          num_seeds: numSeeds,
-        });
-      });
-    });
-  }
   window._dispatchCurrentSpecBaseline = _dispatchCurrentSpecBaseline;
 
-  // ─── item 110: dispatch an arbitrary process-bigraph composite_id (e.g.
-  // pbg-native's v2ecoli.composites.lineage_ray_batch, item 101/109) to the
-  // remote compute backend -- independent of this study's own pinned
-  // baseline composite. Mirrors `atlantis composite run`'s already-proven
-  // parameter surface (viva-api PR #382) exactly: named fields for the
-  // common params + a raw-JSON escape hatch for anything else
-  // (injected_processes/variants/config_overrides/emitter_arg/cache_dir/
-  // media/...), rather than inventing a new shape. Fully additive: a new
-  // button, a new panel, a new function -- `_dispatchRemotePinned` and the
-  // default "Run current spec" flow above are untouched.
-  //
-  // Reaches viva-api through the SAME endpoint `_dispatchRemotePinned`
-  // already uses (`POST /api/remote-run-submit`), which already accepts a
-  // top-level `extra_params` field verbatim (`remote_run_views.
-  // remote_run_submit`: `extra_params=body.get("extra_params") or None` ->
-  // `SmsApiClient.run_simulation(extra_params=...)` -> the real
-  // `POST /api/v1/simulations` JSON body's own `extra_params` key) -- the
-  // exact field name/shape every real pbg-native dispatch this session
-  // fired (database_id 253/255/282/283/288) used. No new server-side code
-  // needed; confirmed directly against current source before building this,
-  // not assumed from the earlier gap report alone (which cited a different,
-  // more complex passthrough in study_runs.py that this simpler, more
-  // direct field makes unnecessary for this feature).
-  function _compositePanelEl() {
-    var el = document.getElementById('study-composite-panel');
-    if (el) return el;
-    var btn = document.getElementById('study-run-composite');
-    var host = btn && btn.parentNode;
-    if (!host) return null;
-    el = document.createElement('div');
-    el.id = 'study-composite-panel';
-    el.style.cssText = 'display:none;position:absolute;z-index:20;margin-top:6px;padding:12px;'
-      + 'background:var(--panel-bg,#fff);border:1px solid var(--border,#e2e8f0);border-radius:6px;'
-      + 'box-shadow:0 4px 16px rgba(0,0,0,0.12);font:12px/1.5 system-ui,-apple-system,sans-serif;'
-      + 'width:360px;right:0;top:100%';
-    el.innerHTML =
-      '<div style="font-weight:600;margin-bottom:8px">Dispatch composite (advanced)</div>'
-      + '<label style="display:block;margin-top:6px">mechanism'
-      + '<select id="cp-mechanism" style="width:100%;box-sizing:border-box;margin-top:2px">'
-      + '<option value="multi_node_dispatch">multi_node_dispatch (lineage_ray_batch, etc.)</option>'
-      + '<option value="mbp_dispatch">mbp_dispatch (run_mbp_tracked.py, e.g. reactor_bird_coupled)</option>'
-      + '<option value="nextflow_dispatch">nextflow_dispatch (workflow_nf: Nextflow head, one Batch task per lineage)</option>'
-      + '</select></label>'
-      + '<div id="cp-mnp-fields">'
-      + '<label style="display:block;margin-top:6px">composite_id'
-      + '<input type="text" id="cp-composite-id" placeholder="v2ecoli.composites.lineage_ray_batch.lineage_ray_batch" '
-      + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '<div style="display:flex;gap:8px;margin-top:6px">'
-      + '<label style="flex:1">num_nodes<input type="number" id="cp-num-nodes" min="1" value="2" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '<label style="flex:1">n_seeds<input type="number" id="cp-n-seeds" min="1" value="2" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '<label style="flex:1">n_generations<input type="number" id="cp-n-generations" min="1" value="1" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '</div>'
-      + '</div>'
-      + '<div id="cp-mbp-fields" style="display:none">'
-      + '<label style="display:block;margin-top:6px">variant'
-      + '<input type="text" id="cp-mbp-variant" placeholder="reactor_bird_coupled" '
-      + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '<div style="display:flex;gap:8px;margin-top:6px">'
-      + '<label style="flex:1">max_generations<input type="number" id="cp-mbp-max-generations" min="1" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '<label style="flex:1">seed<input type="number" id="cp-mbp-seed" min="0" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '</div>'
-      + '</div>'
-      // nextflow_dispatch (viva-api's third dispatch path, docs/plan-nextflow-dispatch.md):
-      // the field set mirrors `atlantis composite nextflow` (app/cli.py
-      // _nf_dispatch_payload/_nf_generator_params) -- composite_id/executor/
-      // launch sit flat on nextflow_dispatch; seeds/generations/cache_uri/
-      // include_analysis/independent_founders live under nextflow_dispatch.params
-      // (the workflow_nf generator's own parameters); task_env is the
-      // per-task environment passthrough (viva-api#568). The two tri-state
-      // selects exist because the CLI OMITS an unset option rather than
-      // sending null (a null would override a deployment-derived default), and
-      // a checkbox cannot express "unset".
-      + '<div id="cp-nf-fields" style="display:none">'
-      + '<label style="display:block;margin-top:6px">composite_id'
-      + '<input type="text" id="cp-nf-composite-id" value="v2ecoli.composites.workflow_nf.workflow_nf" '
-      + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '<div style="display:flex;gap:8px;margin-top:6px">'
-      + '<label style="flex:1">n_seeds<input type="number" id="cp-nf-n-seeds" min="1" value="1" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '<label style="flex:1">n_generations<input type="number" id="cp-nf-n-generations" min="1" value="1" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '<label style="flex:1">executor<input type="text" id="cp-nf-executor" value="awsbatch" style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '</div>'
-      + '<label style="display:block;margin-top:6px">cache_uri (optional — an s3:// ParCa cache prefix to fetch instead of running ParCa, '
-      + 'e.g. a staged founder or genotype cache)'
-      + '<input type="text" id="cp-nf-cache-uri" placeholder="s3://<bucket>/ray-parca-cache/<commit>/" '
-      + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '<div style="display:flex;gap:8px;margin-top:6px">'
-      + '<label style="flex:1">include_analysis<select id="cp-nf-include-analysis" style="width:100%;box-sizing:border-box;margin-top:2px">'
-      + '<option value="">(unset)</option><option value="true">true</option><option value="false">false</option></select></label>'
-      + '<label style="flex:1">independent_founders<select id="cp-nf-independent-founders" style="width:100%;box-sizing:border-box;margin-top:2px">'
-      + '<option value="">(unset)</option><option value="true">true</option><option value="false">false</option></select></label>'
-      + '<label style="flex:1;align-self:flex-end"><input type="checkbox" id="cp-nf-launch" checked> launch</label>'
-      + '</div>'
-      + '<label style="display:block;margin-top:6px">task_env (optional — NAME=VALUE, one per line; set in every Batch task, '
-      + 'e.g. V2ECOLI_SKIP_CACHE_VERIFY=1 for a cache built at another commit)'
-      + '<textarea id="cp-nf-task-env" rows="2" placeholder="V2ECOLI_SKIP_CACHE_VERIFY=1" '
-      + 'style="width:100%;box-sizing:border-box;margin-top:2px;font-family:monospace;font-size:11px"></textarea></label>'
-      + '</div>'
-      + '<div id="cp-cache-variant-wrap">'
-      + '<label style="display:block;margin-top:6px">cache_variant (optional — a pre-staged ParCa cache variant; '
-      + 'blank uses the plain per-commit cache)'
-      + '<input type="text" id="cp-cache-variant" placeholder="e.g. cd2-run1-k4-candidate-v1-lambda050" '
-      + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '</div>'
-      // config_filename sits OUTSIDE cp-cache-variant-wrap: it selects the
-      // simulation config for every mechanism, including nextflow_dispatch,
-      // whereas cache_variant is meaningless on the Nextflow path and is
-      // hidden with the wrap (#1044 added this field; the wrap is this PR's).
-      + '<label style="display:block;margin-top:6px">config_filename (optional — a real filename under '
-      + 'vEcoli/configs/ in the pinned repo; sms-api 404s without one on repos with no '
-      + 'api_simulation_default.json — GET /api/v1/simulations/discovery?simulator_id=&lt;id&gt; lists the '
-      + 'pinned commit’s real options)'
-      + '<input type="text" id="cp-config-filename" placeholder="e.g. mecillinam_wellmixed.json" '
-      + 'style="width:100%;box-sizing:border-box;margin-top:2px"></label>'
-      + '<label style="display:block;margin-top:6px"><span id="cp-params-desc">extra params (raw JSON, merged into multi_node_dispatch.params — '
-      + 'e.g. injected_processes/variants/config_overrides/emitter_arg/cache_dir/out_dir/media)</span>'
-      + '<textarea id="cp-params-json" rows="5" placeholder="{}" '
-      + 'style="width:100%;box-sizing:border-box;margin-top:2px;font-family:monospace;font-size:11px"></textarea></label>'
-      + '<div id="cp-error" style="color:var(--err-fg, #dc2626);margin-top:4px;display:none"></div>'
-      + '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">'
-      + '<button type="button" id="cp-cancel" class="btn-mini">Cancel</button>'
-      + '<button type="button" id="cp-dispatch" class="btn-mini">Dispatch</button>'
-      + '</div>';
-    host.style.position = host.style.position || 'relative';
-    host.appendChild(el);
-    el.querySelector('#cp-cancel').addEventListener('click', function () { el.style.display = 'none'; });
-    el.querySelector('#cp-mechanism').addEventListener('change', _updateCompositePanelMechanism);
-    _updateCompositePanelMechanism();
-    // #cp-dispatch's own click is handled by ONE delegated document-level
-    // listener (below, near the other header-button bindings) so the
-    // disable/toast/refresh wrapping lives in exactly one place — binding it
-    // here too would fire _dispatchRemoteComposite twice per click.
-    return el;
-  }
-
-  // Toggles the panel's mechanism-specific field groups and the raw-JSON
-  // description to match -- mbp_dispatch has no nested "params" sub-object
-  // server-side (every field sits flat on mbp_dispatch itself, per
-  // _submit_mbp_tracked_dispatch's real contract), unlike multi_node_dispatch's
-  // params-wrapped shape, so the two raw-JSON boxes genuinely merge into
-  // different places and the label needs to say so, not just the field set.
-  //
-  // nextflow_dispatch is the third shape: composite_id/executor/launch/
-  // resources/work_dir/nextflow_args/task_env sit FLAT on nextflow_dispatch,
-  // while the generator's own knobs (n_seeds/n_generations/cache_uri/
-  // include_analysis/analysis_options/independent_founders/variants/
-  // emit_paths...) live under nextflow_dispatch.params -- so its raw-JSON box
-  // merges flat onto nextflow_dispatch EXCEPT a `params` key, which merges
-  // into nextflow_dispatch.params (see _dispatchRemoteComposite). It has no
-  // cache_variant (the Nextflow path fetches a `cache_uri` instead), so that
-  // shared field is hidden for it rather than silently ignored.
-  function _updateCompositePanelMechanism() {
-    var sel = document.getElementById('cp-mechanism');
-    var mechanism = (sel && sel.value) || 'multi_node_dispatch';
-    var isMnp = mechanism === 'multi_node_dispatch';
-    var isMbp = mechanism === 'mbp_dispatch';
-    var isNf = mechanism === 'nextflow_dispatch';
-    var mnpFields = document.getElementById('cp-mnp-fields');
-    var mbpFields = document.getElementById('cp-mbp-fields');
-    var nfFields = document.getElementById('cp-nf-fields');
-    var cacheVariantWrap = document.getElementById('cp-cache-variant-wrap');
-    var desc = document.getElementById('cp-params-desc');
-    if (mnpFields) mnpFields.style.display = isMnp ? '' : 'none';
-    if (mbpFields) mbpFields.style.display = isMbp ? '' : 'none';
-    if (nfFields) nfFields.style.display = isNf ? '' : 'none';
-    if (cacheVariantWrap) cacheVariantWrap.style.display = isNf ? 'none' : '';
-    if (desc) {
-      desc.textContent = isMnp
-        ? 'extra params (raw JSON, merged into multi_node_dispatch.params — '
-          + 'e.g. injected_processes/variants/config_overrides/emitter_arg/cache_dir/out_dir/media)'
-        : isMbp
-        ? 'extra params (raw JSON, merged directly onto mbp_dispatch — e.g. duration_sec/chunk/'
-          + 'emitter/single_daughters/carbon_exhaustion_arrest/cells_per_agent/initial_glucose_mM/'
-          + 'initial_ammonium_mM/injected_processes/reactor_config/aeration_schedule)'
-        : 'extra params (raw JSON, merged directly onto nextflow_dispatch — e.g. resources/'
-          + 'work_dir/nextflow_args/resume/resume_from; a "params" key merges into '
-          + 'nextflow_dispatch.params — e.g. variants/injected_processes/analysis_options/emit_paths)';
-    }
-  }
-
-  function _cpError(msg) {
-    var e = document.getElementById('cp-error');
-    if (!e) return;
-    if (!msg) { e.style.display = 'none'; e.textContent = ''; return; }
-    e.style.display = ''; e.textContent = msg;
-  }
-
   // item 20b: async, DOM-based replacement for window.confirm() ahead of a
-  // real AWS Batch dispatch. confirm()/alert()/prompt() are the only
+  // real remote dispatch. confirm()/alert()/prompt() are the only
   // web-platform APIs that synchronously freeze the page's JS -- including
   // whatever a browser-automation tool injects to read/screenshot the page --
   // which made the dispatch-confirm dialog impossible to drive through
   // Claude-in-Chrome during the 2026-09-11 CD2 Vignette-1 UI-verification
   // push (three real attempts hung on this exact call). A plain DOM modal
   // keeps item 20a's own safety property (a human must see the resolved
-  // simulator_id/mechanism/params and explicitly click before real spend
+  // target and parameters and explicitly click before real spend
   // happens) without ever blocking the event loop, since it's just elements
   // in the page rather than a browser-chrome dialog.
   function _confirmModal(message) {
@@ -2692,225 +2629,10 @@
     });
   }
 
-  function _dispatchRemoteComposite() {
-    _cpError(null);
-    var mechSel = document.getElementById('cp-mechanism');
-    var mechanism = (mechSel && mechSel.value) || 'multi_node_dispatch';
-    var cacheVariant = (document.getElementById('cp-cache-variant').value || '').trim();
-    var configFilename = (document.getElementById('cp-config-filename').value || '').trim();
-    var rawJson = (document.getElementById('cp-params-json').value || '').trim();
-    var extraParams = {};
-    if (rawJson) {
-      try {
-        extraParams = JSON.parse(rawJson);
-      } catch (e) {
-        _cpError('extra params is not valid JSON: ' + e.message);
-        return;
-      }
-      if (typeof extraParams !== 'object' || extraParams === null || Array.isArray(extraParams)) {
-        _cpError('extra params must be a JSON object, e.g. {"injected_processes": {...}}.');
-        return;
-      }
-    }
-
-    var numGenerations, numSeeds, dispatchExtraParams, confirmLines;
-
-    if (mechanism === 'nextflow_dispatch') {
-      var nfCompositeId = (document.getElementById('cp-nf-composite-id').value || '').trim();
-      if (!nfCompositeId) { _cpError('composite_id is required.'); return; }
-      var nfExecutor = (document.getElementById('cp-nf-executor').value || '').trim() || 'awsbatch';
-      numSeeds = parseInt(document.getElementById('cp-nf-n-seeds').value, 10);
-      numGenerations = parseInt(document.getElementById('cp-nf-n-generations').value, 10);
-      if (!(numSeeds > 0)) { _cpError('n_seeds must be a positive integer.'); return; }
-      if (!(numGenerations > 0)) { _cpError('n_generations must be a positive integer.'); return; }
-      var nfCacheUri = (document.getElementById('cp-nf-cache-uri').value || '').trim();
-      var nfIncludeAnalysis = document.getElementById('cp-nf-include-analysis').value;
-      var nfIndependentFounders = document.getElementById('cp-nf-independent-founders').value;
-      var nfLaunch = !!document.getElementById('cp-nf-launch').checked;
-      // task_env: NAME=VALUE per line, split on the FIRST '=' (a value may
-      // contain one) -- the same rule as the CLI's _parse_task_env. Refused
-      // here rather than after the round trip so the message names the line.
-      var nfTaskEnv = null;
-      var taskEnvRaw = (document.getElementById('cp-nf-task-env').value || '').trim();
-      if (taskEnvRaw) {
-        nfTaskEnv = {};
-        var envLines = taskEnvRaw.split(/\r?\n/);
-        for (var li = 0; li < envLines.length; li++) {
-          var envLine = envLines[li].trim();
-          if (!envLine) continue;
-          var eq = envLine.indexOf('=');
-          if (eq <= 0) { _cpError('task_env line ' + (li + 1) + ' must be NAME=VALUE: ' + envLine); return; }
-          nfTaskEnv[envLine.slice(0, eq)] = envLine.slice(eq + 1);
-        }
-      }
-      // The Nextflow path has no cache_variant: it fetches a cache_uri. A
-      // stray cache_variant in the raw JSON (copy-pasted from an MNP dispatch)
-      // would be ignored server-side and the run would silently build/fetch the
-      // plain per-commit cache, which is the exact silent-fallback class #1041
-      // fixed for MNP -- so refuse it instead of dropping it.
-      if ('cache_variant' in extraParams) {
-        _cpError('nextflow_dispatch has no cache_variant; pass the staged cache as cache_uri instead.');
-        return;
-      }
-      // Raw JSON merges FLAT onto nextflow_dispatch, except its `params` key,
-      // which merges INTO nextflow_dispatch.params (the generator's own
-      // parameters) -- never replacing the object the dedicated fields built.
-      // Dedicated fields win over a duplicate inside raw params, mirroring the
-      // cache_variant rule above.
-      var rawParams = null;
-      if ('params' in extraParams) {
-        rawParams = extraParams.params;
-        if (typeof rawParams !== 'object' || rawParams === null || Array.isArray(rawParams)) {
-          _cpError('extra params "params" must be a JSON object (the workflow_nf generator parameters).');
-          return;
-        }
-        extraParams = Object.assign({}, extraParams);
-        delete extraParams.params;
-      }
-      var nfParams = Object.assign({}, rawParams || {}, { n_seeds: numSeeds, n_generations: numGenerations });
-      if (nfCacheUri) nfParams.cache_uri = nfCacheUri;
-      if (nfIncludeAnalysis !== '') nfParams.include_analysis = (nfIncludeAnalysis === 'true');
-      if (nfIndependentFounders !== '') nfParams.independent_founders = (nfIndependentFounders === 'true');
-      // Absent options are OMITTED, never sent as null: viva-api's
-      // nextflow_dispatch is a passthrough, and a null would override a
-      // deployment-derived default (work_dir, resources) with nothing.
-      var nfDispatch = Object.assign({}, extraParams, {
-        composite_id: nfCompositeId,
-        executor: nfExecutor,
-        launch: nfLaunch,
-        params: nfParams,
-      });
-      if (nfTaskEnv) nfDispatch.task_env = nfTaskEnv;
-      dispatchExtraParams = { nextflow_dispatch: nfDispatch };
-      // num_generations/num_seeds: the workbench route hard-requires both (see
-      // the mbp comment below), and viva-api records them on the simulation
-      // row; the Nextflow path itself sizes the campaign from
-      // nextflow_dispatch.params.n_seeds/n_generations. Same numbers, sent to
-      // both places on purpose -- the row's metadata and the generator agree.
-      confirmLines = '  mechanism:    nextflow_dispatch\n'
-        + '  composite_id: ' + nfCompositeId + '\n'
-        + '  executor:     ' + nfExecutor + (nfLaunch ? '' : '  (launch=false: render only)') + '\n'
-        + '  n_seeds:      ' + numSeeds + '\n'
-        + '  n_generations:' + numGenerations + '\n'
-        + (nfCacheUri ? '  cache_uri:    ' + nfCacheUri + '\n' : '')
-        + (nfIncludeAnalysis !== '' ? '  include_analysis: ' + nfIncludeAnalysis + '\n' : '')
-        + (nfIndependentFounders !== '' ? '  independent_founders: ' + nfIndependentFounders + '\n' : '')
-        + (nfTaskEnv ? '  task_env:     ' + JSON.stringify(nfTaskEnv) + '\n' : '')
-        + (rawJson ? '  extra params: ' + rawJson + '\n' : '');
-    } else if (mechanism === 'mbp_dispatch') {
-      var variant = (document.getElementById('cp-mbp-variant').value || '').trim();
-      if (!variant) { _cpError('variant is required.'); return; }
-      var maxGenerations = parseInt(document.getElementById('cp-mbp-max-generations').value, 10);
-      if (!(maxGenerations > 0)) { _cpError('max_generations must be a positive integer.'); return; }
-      var seedRaw = document.getElementById('cp-mbp-seed').value;
-      var seed = seedRaw === '' ? null : parseInt(seedRaw, 10);
-      // cache_variant pulled out of extraParams (whichever way the caller
-      // supplied it) so a value left over in the raw-JSON box from an older
-      // dispatch can never silently diverge from the dedicated field --
-      // the dedicated field wins when both are set.
-      var extraCacheVariant = extraParams.cache_variant;
-      if ('cache_variant' in extraParams) {
-        extraParams = Object.assign({}, extraParams);
-        delete extraParams.cache_variant;
-      }
-      var effectiveCacheVariant = cacheVariant || extraCacheVariant;
-      // mbp_dispatch is a single-container job -- one dispatch = one lineage,
-      // not a seed sweep, so it has no n_seeds concept of its own. The
-      // workbench's own /api/remote-run-submit route hard-requires
-      // num_generations/num_seeds regardless of mechanism (never silently
-      // defaulted -- see _dispatchRemotePinned's own comment above); neither
-      // is read by _submit_mbp_tracked_dispatch itself, which sizes the run
-      // from mbp_dispatch.max_generations/.seed directly, so
-      // num_generations reuses max_generations (the same concept under a
-      // different name server-side) and num_seeds is a fixed 1.
-      numGenerations = maxGenerations;
-      numSeeds = 1;
-      var mbpDispatch = Object.assign({ variant: variant, max_generations: maxGenerations }, extraParams);
-      if (effectiveCacheVariant) mbpDispatch.cache_variant = effectiveCacheVariant;
-      if (seed !== null && !isNaN(seed)) mbpDispatch.seed = seed;
-      dispatchExtraParams = { mbp_dispatch: mbpDispatch };
-      confirmLines = '  mechanism:    mbp_dispatch\n'
-        + '  variant:      ' + variant + '\n'
-        + '  max_generations: ' + maxGenerations + '\n'
-        + (seed !== null && !isNaN(seed) ? '  seed:         ' + seed + '\n' : '')
-        + (effectiveCacheVariant ? '  cache_variant: ' + effectiveCacheVariant + '\n' : '')
-        + (rawJson ? '  extra params: ' + rawJson + '\n' : '');
-    } else {
-      var compositeId = (document.getElementById('cp-composite-id').value || '').trim();
-      if (!compositeId) { _cpError('composite_id is required.'); return; }
-      var numNodes = parseInt(document.getElementById('cp-num-nodes').value, 10);
-      numSeeds = parseInt(document.getElementById('cp-n-seeds').value, 10);
-      numGenerations = parseInt(document.getElementById('cp-n-generations').value, 10);
-      if (!(numNodes > 0)) { _cpError('num_nodes must be a positive integer.'); return; }
-      if (!(numSeeds > 0)) { _cpError('n_seeds must be a positive integer.'); return; }
-      if (!(numGenerations > 0)) { _cpError('n_generations must be a positive integer.'); return; }
-      // cache_variant AND require_clean_chain must both land as siblings of
-      // `params`, never nested inside it -- viva-api reads both directly off
-      // mnp_dispatch (simulation_service_ray.py:3285/:3289 --
-      // mnp_dispatch.get("cache_variant")/mnp_dispatch.get("require_clean_chain"),
-      // never mnp_dispatch["params"].get(...)). Pulled out of extraParams here
-      // (whichever the caller supplied it through -- the raw-JSON box, old
-      // habit or a copy-pasted dispatch body) BEFORE the params merge below,
-      // exactly the bug this fix addresses; the dedicated cache_variant field
-      // wins if both it and the raw JSON set one.
-      var extraCacheVariant = extraParams.cache_variant;
-      var extraRequireCleanChain = extraParams.require_clean_chain;
-      if ('cache_variant' in extraParams || 'require_clean_chain' in extraParams) {
-        extraParams = Object.assign({}, extraParams);
-        delete extraParams.cache_variant;
-        delete extraParams.require_clean_chain;
-      }
-      var effectiveCacheVariant = cacheVariant || extraCacheVariant;
-      var params = Object.assign({ n_seeds: numSeeds, n_generations: numGenerations }, extraParams);
-      var mnpDispatch = {
-        composite_id: compositeId,
-        num_nodes: numNodes,
-        params: params,
-      };
-      if (effectiveCacheVariant) mnpDispatch.cache_variant = effectiveCacheVariant;
-      if (extraRequireCleanChain !== undefined) mnpDispatch.require_clean_chain = extraRequireCleanChain;
-      dispatchExtraParams = { multi_node_dispatch: mnpDispatch };
-      confirmLines = '  mechanism:    multi_node_dispatch\n'
-        + '  composite_id: ' + compositeId + '\n'
-        + '  num_nodes:    ' + numNodes + '\n'
-        + '  n_seeds:      ' + numSeeds + '\n'
-        + '  n_generations:' + numGenerations + '\n'
-        + (effectiveCacheVariant ? '  cache_variant: ' + effectiveCacheVariant + '\n' : '')
-        + (rawJson ? '  extra params: ' + rawJson + '\n' : '');
-    }
-
-    var slug = studyName();
-    return api('GET', '/api/remote-run-config').then(function (cfgRes) {
-      var cfg = (cfgRes.status === 200 && cfgRes.body) || {};
-      if (!cfg.pinned || !cfg.simulator_id) {
-        _cpError('This deployment is not remote-pinned — composite dispatch needs a pinned simulator_id.');
-        return _CANCELLED;
-      }
-      var msg = 'Dispatch composite to AWS Batch:\n\n'
-        + '  simulator id: ' + cfg.simulator_id + '\n'
-        + confirmLines
-        + (configFilename ? '  config_filename: ' + configFilename + '\n' : '')
-        + '\nProceed?';
-      return _confirmModal(msg).then(function (ok) {
-        if (!ok) return _CANCELLED;
-        var panel = document.getElementById('study-composite-panel');
-        if (panel) panel.style.display = 'none';
-        return api('POST', '/api/remote-run-submit', {
-          study: slug,
-          simulator_id: cfg.simulator_id,
-          num_generations: numGenerations,
-          num_seeds: numSeeds,
-          config_filename: configFilename || undefined,
-          extra_params: dispatchExtraParams,
-        });
-      });
-    });
-  }
-  window._dispatchRemoteComposite = _dispatchRemoteComposite;
 
   // ─── item 6: real dispatch progress, polling not SSE ───────────────────
   // Alex, 2026-08-17: dispatch a sim, get a toast, then total silence -- the
-  // only way to know a campaign is alive was querying AWS Batch directly.
+  // only way to know a campaign is alive was querying the compute backend directly.
   // Polls GET /api/remote-run-chain-progress (viva-api PR #257's real
   // per-seed counts) on a session-status.js-style interval -- SSE was
   // considered and rejected: the Stanford ALB already flakes to
@@ -2934,11 +2656,11 @@
   // fill instead of popping between polls.
   var _chainProgressStart = null;
 
-  // Whether THIS workspace has a remote compute backend (viva-api/sms-api)
+  // Whether THIS workspace has a remote compute backend
   // configured. A local-only workspace (a bench process-bigraph workspace) has
   // none — so the remote-dispatch affordances (⚙ Dispatch composite + the remote
   // chain-progress poller below) must stay hidden and the UI must not even mention
-  // sms-api. Resolved once from /api/source/remote-health by _gateRemoteDispatch();
+  // the remote backend. Resolved once from /api/source/remote-health by _gateRemoteDispatch();
   // default false so a local workspace is never coupled to a remote it lacks.
   var _remoteConfigured = false;
 
@@ -2988,7 +2710,8 @@
     var e = escapeHtmlForTests;
     if (!window.confirm('Stop campaign ' + runId + '? This cancels every seed still in flight.')) return;
     btn.disabled = true; btn.textContent = 'Stopping…';
-    api('POST', '/api/remote-run-cancel', { simulation_id: runId })
+    // study: the server finds the run's own record in this study's runs DB (docs/backend-adapters.md step 1c)
+    api('POST', '/api/remote-run-cancel', { simulation_id: runId, study: studyName() })
       .then(function (res) {
         if (res.status !== 200) {
           btn.disabled = false; btn.textContent = '■ Stop campaign';
@@ -3029,6 +2752,12 @@
       label.textContent = '⚠ progress unavailable (remote backend unreachable)';
       return;
     }
+    if (d.phase === 'other-backend' || d.phase === 'not-offered') {
+      // Refused: the run belongs to another backend than this workbench's (step 1c). Terminal; no Stop button.
+      track.style.display = 'none';
+      label.textContent = '⚠ ' + (d.error || 'this run belongs to another backend');
+      return;
+    }
     var e = escapeHtmlForTests;
     var total = d.seeds_total, done = d.seeds_succeeded, failed = d.seeds_failed,
         inProgress = d.seeds_in_progress;
@@ -3067,13 +2796,14 @@
   function _pollChainProgress(runId) {
     // Local-only workspace: there is no remote backend to report chain progress,
     // so never poll /api/remote-run-chain-progress (it would surface a spurious
-    // "sms-api unreachable"). Local runs track progress via the Runs tab refresh.
+    // "remote backend unreachable"). Local runs track progress via the Runs tab refresh.
     if (!_remoteConfigured) return;
     if (_chainProgressTimer) { clearTimeout(_chainProgressTimer); _chainProgressTimer = null; }
-    // A legacy run is an integer simulation id; a /viva/v1 run (serve --backend-base-url)
-    // carries the backend's opaque string id, asked for as run_id.
-    var idParam = /^\d+$/.test(String(runId)) ? 'simulation_id' : 'run_id';
-    api('GET', '/api/remote-run-chain-progress?' + idParam + '=' + encodeURIComponent(runId))
+    // Opaque run ids: every run is asked for by run_id, whatever its form (an SMS integer, a
+    // /viva/v1 or compose-api string). The server reads run_id and simulation_id alike and the
+    // run's record picks the backend -- the id's form decides nothing here.
+    api('GET', '/api/remote-run-chain-progress?run_id=' + encodeURIComponent(runId) +
+        '&study=' + encodeURIComponent(studyName() || ''))
       .then(function (res) {
         var d = res.body || {};
         _renderChainProgress(d);
@@ -3092,7 +2822,7 @@
         // flight, or vice versa) must never trigger this run's reload.
         if (_gradeAfterRunId != null && String(_gradeAfterRunId) === String(runId)) {
           _gradeAfterRunId = null;
-          if (d.terminal) _reloadStudyAndTests();
+          if (d.terminal && d.phase !== 'other-backend' && d.phase !== 'not-offered') _reloadStudyAndTests();
         }
       })
       .catch(function () {
@@ -3127,73 +2857,21 @@
       });
   });
 
-  // "⚙ Dispatch composite" (item 110) — toggles the advanced panel open/closed;
-  // the actual dispatch is wired to the panel's own #cp-dispatch button
-  // (_compositePanelEl, above). A toast + Runs-tab refresh on success mirrors
-  // the two handlers above; unlike them this button itself never disables —
-  // the panel's own Dispatch button owns that during a real in-flight POST.
-  bindAll('#study-run-composite', function (btn) {
-    var panel = _compositePanelEl();
-    if (!panel) return;
-    panel.style.display = (panel.style.display === 'none') ? '' : 'none';
-  });
-
   // Gate the remote-dispatch affordances on whether this workspace actually has a
-  // remote compute backend configured. ⚙ Dispatch composite targets viva-api/AWS
-  // Batch/Nextflow; a local-only workspace has no such backend, so the button (and
-  // the sms-api progress poller) must not appear — the study view must not even
-  // know about sms-api. Default-hidden; revealed only once /api/source/remote-health
-  // confirms `configured:true`. In a published snapshot the fetch simply fails →
-  // stays hidden, matching the snapshot-mode run-button hide.
+  // remote compute backend configured. A local-only workspace has none, so the
+  // remote progress poller (and any launch UI a plugin adds) must not appear.
+  // Default-off; enabled only once /api/source/remote-health confirms
+  // `configured:true`. In a published snapshot nothing is fetched → stays off,
+  // matching the snapshot-mode run-button hide.
   (function _gateRemoteDispatch() {
-    var dispatchBtn = document.getElementById('study-run-composite');
-    if (dispatchBtn) dispatchBtn.style.display = 'none';
     if (typeof _isSnapshot === 'function' && _isSnapshot()) return;
     api('GET', '/api/source/remote-health')
       .then(function (r) {
         _remoteConfigured = !!(r && r.status === 200 && r.body && r.body.configured);
-        if (_remoteConfigured && dispatchBtn) dispatchBtn.style.display = '';
+        if (_remoteConfigured && _smsLaunch) _smsLaunch.setRemoteConfigured(true);
       })
       .catch(function () { _remoteConfigured = false; });
   })();
-
-  // #cp-dispatch's own click (rendered dynamically inside _compositePanelEl,
-  // so bound here via delegation rather than at panel-creation time) with the
-  // same disabled/toast/refresh convention the other two header buttons use.
-  document.addEventListener('click', function (ev) {
-    if (!ev.target || ev.target.id !== 'cp-dispatch') return;
-    var btn = ev.target;
-    if (btn.disabled) return;
-    var orig = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '… dispatching';
-    var result = _dispatchRemoteComposite();
-    if (!result || typeof result.then !== 'function') {
-      // Validation failed synchronously (_cpError already shown) — nothing to await.
-      btn.disabled = false;
-      btn.textContent = orig;
-      return;
-    }
-    result
-      .then(function (res) {
-        btn.disabled = false;
-        btn.textContent = orig;
-        if (res.body && res.body.cancelled) return;
-        if (res.status === 200 || res.status === 202) {
-          var runId = res.body && (res.body.run_id || res.body.simulation_id);
-          var msg = 'Composite dispatch launched' + (runId ? ' — new run ' + runId : '');
-          if (typeof _showToast === 'function') _showToast(msg); else alert(msg);
-          if (typeof _loadStudySims === 'function') _loadStudySims(true);
-        } else {
-          _cpError('Dispatch failed: ' + ((res.body && res.body.error) || res.status));
-        }
-      })
-      .catch(function (err) {
-        btn.disabled = false;
-        btn.textContent = orig;
-        _cpError('Dispatch failed: network error — ' + err);
-      });
-  }, true);
 
   // "Reproduce" — replay this study's MOST RECENT run's recorded manifest
   // verbatim (POST /api/study-reproduce) rather than re-deriving from the
@@ -3421,28 +3099,27 @@
   })();
 
   // btn-delete has class "btn-delete danger" — selector ".btn-delete" still matches.
-  // Handler _post_investigation_delete uses body key "name".
+  // Deletes THIS study via /api/study-delete. Previously this reused
+  // /api/investigation-delete and relied on that route resolving studies/
+  // first; investigation-delete is now investigations-only (issue #1618,
+  // bug 11), so the study page uses the dedicated study-delete route.
   bindAll('.btn-delete', function(btn) {
     // Guard: only the header delete button has data-study; variant/run deletes
     // use different class names so this handler won't fire for those.
     if (!btn.dataset.study) return;
     if (!confirm('Delete this study and all its runs?')) return;
-    api('POST', '/api/investigation-delete', {name: studyName()})
+    api('POST', '/api/study-delete', {name: studyName()})
       .then(function() { window.location = (window.__BASE_PATH__ || '') + '/studies'; });
   });
 
   // --- Baseline ---
-  // Replace a baseline entry's composite ref: add-then-remove against the
-  // existing (previously orphaned) endpoints, since there's no single
-  // "replace" route. Order matters — study_baseline_remove refuses to leave
-  // baseline[] empty (400), which a single-entry study (e.g. a fresh "+
-  // Study" blank scaffold) always is; adding the replacement under a new
-  // name FIRST means baseline[] never goes empty, then the old entry is
-  // removed. The replacement keeps the original name only when it wasn't
-  // already used (i.e. removal isn't blocked); otherwise it's suffixed to
-  // avoid the add's own "already exists" 409. Params are dropped on
-  // replace — a fresh composite ref starts from its own defaults, matching
-  // what "+ Study" itself does.
+  // Repoint a baseline entry's composite ref IN PLACE, preserving its name
+  // (issue #1618, blocker A). The old flow added a <name>-<timestamp> entry
+  // then removed the original — a dance forced only by the lack of a single
+  // "replace" route, which left every repointed study with a suffixed baseline
+  // name in the UI. study-baseline-set updates the entry under the same name.
+  // Params reset to {} — a fresh composite ref starts from its own defaults,
+  // matching what "+ Study" itself does.
   bindAll('.baseline-composite-set', function(btn) {
     var name = btn.dataset.baselineName;
     var input = document.querySelector('.baseline-composite-input[data-baseline-name="' + name + '"]');
@@ -3450,18 +3127,58 @@
     var composite = input ? input.value.trim() : '';
     if (!composite) { if (status) status.textContent = 'Enter a composite ref first.'; return; }
     if (status) status.textContent = 'Setting…';
-    var newName = name + '-' + Date.now().toString(36);
-    api('POST', '/api/study-baseline-add', {study: studyName(), name: newName, composite: composite, params: {}})
-      .then(function (addResult) {
-        if (addResult.status !== 200) throw addResult;
-        return api('POST', '/api/study-baseline-remove', {study: studyName(), name: name});
-      })
+    api('POST', '/api/study-baseline-set', {study: studyName(), name: name, composite: composite, params: {}})
       .then(function (r) {
         if (r.status === 200) location.reload();
         else if (status) status.textContent = 'Error: ' + (r.body && r.body.error || r.status);
       })
-      .catch(function (addResult) {
-        if (status) status.textContent = 'Error: ' + (addResult.body && addResult.body.error || addResult.status);
+      .catch(function (err) {
+        if (status) status.textContent = 'Error: ' + (err.body && err.body.error || err.status);
+      });
+  });
+
+  // --- Variants & findings (issue #1618, blocker B) ---
+  bindAll('.study-variant-del', function(btn) {
+    var variant = btn.dataset.variant;
+    if (!confirm('Delete variant “' + variant + '”?')) return;
+    api('POST', '/api/study-variant-delete', {study: studyName(), variant: variant})
+      .then(function (r) {
+        if (r.status === 200) location.reload();
+        else alert('Error: ' + (r.body && r.body.error || r.status));
+      });
+  });
+  bindAll('.study-variant-run', function(btn) {
+    var variant = btn.dataset.variant;
+    btn.disabled = true;
+    var prev = btn.textContent;
+    btn.textContent = 'Running…';
+    api('POST', '/api/study-run-variant', {study: studyName(), variant: variant})
+      .then(function (r) {
+        if (r.status === 200) { location.reload(); return; }
+        btn.disabled = false; btn.textContent = prev;
+        alert('Error: ' + (r.body && r.body.error || r.status));
+      })
+      .catch(function (err) {
+        btn.disabled = false; btn.textContent = prev;
+        alert('Error: ' + (err.body && err.body.error || err.status));
+      });
+  });
+  bindAll('.study-finding-del', function(btn) {
+    var id = btn.dataset.id;
+    if (!confirm('Delete this finding?')) return;
+    api('POST', '/api/study-finding-delete', {study: studyName(), id: id})
+      .then(function (r) {
+        if (r.status === 200) location.reload();
+        else alert('Error: ' + (r.body && r.body.error || r.status));
+      });
+  });
+  bindAll('.study-intervention-del', function(btn) {
+    var name = btn.dataset.name;
+    if (!confirm('Delete intervention “' + name + '”?')) return;
+    api('POST', '/api/study-intervention-delete', {study: studyName(), name: name})
+      .then(function (r) {
+        if (r.status === 200) location.reload();
+        else alert('Error: ' + (r.body && r.body.error || r.status));
       });
   });
 
@@ -5254,7 +4971,7 @@
   // reused after a study-grade success AND after a Tests-tab-initiated
   // baseline run completes (see _gradeAfterRunId / _pollChainProgress above).
   // Reuses window.DataSource.loadStudy (the page's existing study-reload
-  // path, also used by _dispatchRemotePinned) rather than a bespoke fetch.
+  // path, also used by the launch plugin) rather than a bespoke fetch.
   function _reloadStudyAndTests() {
     var slug = studyName();
     var reload = (window.DataSource && window.DataSource.loadStudy)

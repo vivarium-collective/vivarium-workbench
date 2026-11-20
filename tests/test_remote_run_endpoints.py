@@ -1,33 +1,39 @@
+import pytest
+
+
+@pytest.mark.plugin
 def test_sms_api_base_default_and_override(monkeypatch):
-    from vivarium_workbench.lib import workspace_deps_views as wdv
+    from vivarium_workbench_sms import sms_api_client  # the workspace_deps_views alias is gone (step P2 Builds B3)
     # "Unconfigured" means BOTH names unset — VIVA_API_BASE is read first, and
     # conftest's _isolate_viva_api_base now sets both for the run, so deleting
     # only the legacy alias would leave the canonical name pointing elsewhere.
     monkeypatch.delenv("VIVA_API_BASE", raising=False)
     monkeypatch.delenv("SMS_API_BASE", raising=False)
-    assert wdv._sms_api_base() == "http://localhost:8080"
+    assert sms_api_client.sms_api_base() == "http://localhost:8080"
     monkeypatch.setenv("SMS_API_BASE", "http://localhost:9000")
-    assert wdv._sms_api_base() == "http://localhost:9000"
+    assert sms_api_client.sms_api_base() == "http://localhost:9000"
 
 
 def test_normalize_repo_url_strips_git_suffix():
-    from vivarium_workbench.lib import source_build_views as sbv
+    from vivarium_workbench.lib.git_status import normalize_repo_url
     # sms-api simulator/upload 500s on a .git-suffixed URL
-    assert sbv._normalize_repo_url("https://github.com/x/v2ecoli.git") == "https://github.com/x/v2ecoli"
-    assert sbv._normalize_repo_url("  https://github.com/x/v2ecoli  ") == "https://github.com/x/v2ecoli"
-    assert sbv._normalize_repo_url("https://github.com/x/v2ecoli") == "https://github.com/x/v2ecoli"
+    assert normalize_repo_url("https://github.com/x/v2ecoli.git") == "https://github.com/x/v2ecoli"
+    assert normalize_repo_url("  https://github.com/x/v2ecoli  ") == "https://github.com/x/v2ecoli"
+    assert normalize_repo_url("https://github.com/x/v2ecoli") == "https://github.com/x/v2ecoli"
 
 
+@pytest.mark.plugin
 def test_remote_run_start_requires_login(monkeypatch, tmp_path):
-    from vivarium_workbench.lib import remote_run_views
     from vivarium_workbench.lib import github_auth
+    from vivarium_workbench_sms import remote_pipeline_views
 
     monkeypatch.setattr(github_auth, "current_session", lambda: None)
 
-    body, code = remote_run_views.remote_run_start(tmp_path, {"study": "s"})
+    body, code = remote_pipeline_views.remote_run_start(tmp_path, {"study": "s"})
     assert code == 401
 
 
+@pytest.mark.plugin  # since C1 the SMS_API_BASE / VIVA_API_BASE isolation only takes effect through the plugin
 def test_test_suite_cannot_reach_a_live_deployment(
     inproc_client, tmp_path, _isolate_viva_api_base
 ):

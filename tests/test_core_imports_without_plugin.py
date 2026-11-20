@@ -1,0 +1,495 @@
+"""The core imports without the SMS plugin (docs/backend-adapters.md §2.5, step P2).
+
+The hosted env-worker pod ships the core (``vivarium_workbench``: ``env_worker.py``, ``lib/``) WITHOUT
+``vivarium_workbench_sms``, so every core module the worker can reach must import without the plugin. Step P1b moved
+whole SMS modules into the plugin, and a core module that still imports one at module level fails there with
+``ModuleNotFoundError`` (``lib.study_runs`` did, and the worker's study-run methods import it).
+
+``STILL_NEED_PLUGIN`` was a ratchet through step P2 (the core modules that could not yet be imported without the
+plugin); P2 emptied it, and at its end (Routes Rt3) it became a permanent guard: **any entry is a regression**. Make
+the offending import lazy, or move the code into the plugin behind a backend facet. ``MUST_IMPORT`` names the modules
+whose import is checked on its own (not only through the package walk): the env worker, what its study-run methods
+import, and the app (``api.app``: ``create_app()`` with the plugin absent includes no provider routes).
+
+Importing is not running. A study run IN the worker resolves its target at call time (``study_runs.run_study_*`` ->
+``backends.resolve_run_target`` -> ``backends.named`` -> ``server_capabilities``); since step P2's Client area that path
+no longer imports the plugin either, and ``test_run_target_answers_without_the_plugin`` keeps it that way.
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import textwrap
+
+
+#: Permanent guard (end of step P2): any entry is a regression.
+STILL_NEED_PLUGIN: frozenset[str] = frozenset()
+
+# Modules allowed to fail for a reason other than the plugin: optional extras that may be absent (the ``chat`` extra).
+# Anything else failing to import would hide a plugin import behind it.
+OPTIONAL_EXTRA_MODULES = frozenset({
+    "vivarium_workbench.lib.ai_chat",
+    "vivarium_workbench.lib.ai_claude_code",
+    "vivarium_workbench.lib.ai_tools",
+})
+
+# Must import without the plugin: the env worker itself, what its study-run methods import, and the app.
+MUST_IMPORT = ("vivarium_workbench.env_worker", "vivarium_workbench.lib.study_runs", "vivarium_workbench.api.app")
+
+_PROBE = textwrap.dedent('''
+    import importlib, json, pkgutil, sys
+
+    class _NoPlugin:
+        """Every vivarium_workbench_sms import fails, as in the hosted env-worker pod."""
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    for name in [n for n in sys.modules if n == "vivarium_workbench_sms" or n.startswith("vivarium_workbench_sms.")]:
+        del sys.modules[name]
+
+    must = {}
+    for name in MUST_IMPORT:
+        try:
+            importlib.import_module(name)
+            must[name] = None
+        except BaseException as e:  # noqa: BLE001 -- report, never crash the probe
+            must[name] = f"{type(e).__name__}: {e}"
+
+    import vivarium_workbench
+    need = set()
+    other = {}
+
+    def _onerror(name):
+        pass
+
+    for info in pkgutil.walk_packages(vivarium_workbench.__path__, "vivarium_workbench.", onerror=_onerror):
+        name = info.name
+        parts = name.split(".")
+        if "loom" in parts or parts[-1] == "__main__":
+            continue
+        try:
+            importlib.import_module(name)
+        except ModuleNotFoundError as e:
+            if (e.name or "").startswith("vivarium_workbench_sms"):
+                need.add(name)
+            else:
+                other[name] = f"ModuleNotFoundError: {e}"
+        except BaseException as e:  # noqa: BLE001
+            other[name] = f"{type(e).__name__}: {e}"
+    print("@@RESULT@@" + json.dumps({"must": must, "need": sorted(need), "other": other}))
+''')
+
+
+def _probe() -> dict:
+    code = f"MUST_IMPORT = {MUST_IMPORT!r}\n" + _PROBE
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600)
+    marker = [ln for ln in proc.stdout.splitlines() if ln.startswith("@@RESULT@@")]
+    assert marker, f"probe crashed (exit {proc.returncode}):\n{proc.stdout[-3000:]}\n{proc.stderr[-3000:]}"
+    return json.loads(marker[-1][len("@@RESULT@@"):])
+
+
+def test_core_modules_import_without_the_plugin():
+    result = _probe()
+    assert result["must"] == {name: None for name in MUST_IMPORT}, result["must"]
+    assert not STILL_NEED_PLUGIN, f"STILL_NEED_PLUGIN is a permanent guard; any entry is a regression: {STILL_NEED_PLUGIN}"
+    need = sorted(frozenset(result["need"]) - STILL_NEED_PLUGIN)
+    assert not need, f"core modules that need the SMS plugin to import (make the import lazy): {need}"
+    unexpected = sorted(set(result["other"]) - OPTIONAL_EXTRA_MODULES)
+    assert not unexpected, f"core modules failing to import for another reason: {result['other']}"
+
+
+_CALL_PROBE = textwrap.dedent('''
+    import sys, tempfile
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import backends
+    print("@@RESULT@@" + backends.resolve_run_target(tempfile.mkdtemp()))
+''')
+
+
+def test_run_target_answers_without_the_plugin(monkeypatch):
+    from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
+
+    for var in BACKEND_BASE_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+        monkeypatch.delenv(var.replace("VIVARIUM_WORKBENCH_", "VIVARIUM_DASHBOARD_"), raising=False)
+    proc = subprocess.run([sys.executable, "-c", _CALL_PROBE], capture_output=True, text=True, timeout=300)
+    assert "@@RESULT@@local" in proc.stdout, proc.stderr[-2000:]
+
+
+_LANDING_PROBE = textwrap.dedent('''
+    import json, sys, tempfile
+    from pathlib import Path
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import remote_run_landing
+
+    root = Path(tempfile.mkdtemp())
+    tree, ws = root / "x", root / "ws"
+    a = tree / "analyses" / "a"
+    (a / "ptools").mkdir(parents=True)
+    (a / "ptools" / "ptools_rna__all.tsv").write_text("id t0")
+    (a / "analysis.json").write_text(json.dumps({"summary": {"m": {"ptools_rna": "ok"}}}))
+    remote_run_landing.fold_analyses(tree, ws, "r1")
+    n = remote_run_landing.land_ptools_tsvs(tree, ws, "r1", study_dest=root / "study" / "e")
+    ok = ((ws / ".pbg" / "runs" / "r1" / "analyses.json").is_file()
+          and (root / "study" / "e" / "ptools" / "ptools_rna__all.tsv").is_file())
+    plugin = [m for m in sys.modules if m.startswith("vivarium_workbench_sms")]
+    print("@@RESULT@@" + json.dumps({"n": n, "ok": ok, "plugin": plugin}))
+''')
+
+
+def test_the_archive_landing_runs_without_the_plugin():
+    """Step P2 Runs c1: the archive landing the core keeps (``fold_analyses``, ``land_ptools_tsvs``: the PTools
+    writer) runs with the plugin absent and never reaches for it."""
+    proc = subprocess.run([sys.executable, "-c", _LANDING_PROBE], capture_output=True, text=True, timeout=300)
+    marker = [ln for ln in proc.stdout.splitlines() if ln.startswith("@@RESULT@@")]
+    assert marker, proc.stderr[-2000:]
+    assert json.loads(marker[-1][len("@@RESULT@@"):]) == {"n": 1, "ok": True, "plugin": []}
+
+
+_CLI_PROBE = textwrap.dedent('''
+    import argparse, sys
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    import vivarium_workbench.lib.server_capabilities, vivarium_workbench.lib.startup
+    from vivarium_workbench import cli
+
+    action = next(a for a in cli._build_parser()._actions if isinstance(a, argparse._SubParsersAction))
+    assert "run-remote" not in action.choices, sorted(action.choices)
+    try:
+        cli.main(["gen-readme", "--help"])
+    except SystemExit as e:
+        print("@@RESULT@@" + str(e.code))
+''')
+
+
+def test_the_cli_and_startup_work_without_the_plugin():
+    """Step P2 CLI: ``cli``, ``startup`` and ``server_capabilities`` import with the plugin absent; the CLI parses and
+    simply has no ``run-remote``."""
+    proc = subprocess.run([sys.executable, "-c", _CLI_PROBE], capture_output=True, text=True, timeout=300)
+    assert "@@RESULT@@0" in proc.stdout, proc.stderr[-2000:]
+    assert "warning" not in proc.stderr  # an absent plugin is not a broken one
+
+
+_REFRESH_PROBE = textwrap.dedent('''
+    import sys
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import remote_run_compose, run_jobs
+
+    remote_run_compose.status = lambda run_id: ({"phase": "done", "raw_status": "completed", "error": None}, 200)
+    job = run_jobs.RunJob("inv", [{"status": "submitted", "simulation_id": 4},
+                                  {"status": "submitted", "simulation_id": "compose-1"}])
+    run_jobs.refresh_submitted(job)
+    loaded = any(n == "vivarium_workbench_sms" or n.startswith("vivarium_workbench_sms.") for n in sys.modules)
+    print("@@RESULT@@" + ",".join(it["status"] for it in job.to_dict()["items"]) + f";plugin={loaded}")
+''')
+
+
+def test_refresh_submitted_answers_without_the_plugin():
+    """Step P2 Runs c2: with the plugin absent, an integer (SMS) item is owned by no backend and stays ``submitted``
+    without SMS being asked; a compose-api item still settles."""
+    proc = subprocess.run([sys.executable, "-c", _REFRESH_PROBE], capture_output=True, text=True, timeout=300)
+    assert "@@RESULT@@submitted,done;plugin=False" in proc.stdout, proc.stdout[-2000:] + proc.stderr[-2000:]
+
+
+_RUN_PROBE = textwrap.dedent('''
+    import sys, tempfile
+    from pathlib import Path
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import remote_run, remote_run_compose
+    from vivarium_workbench.lib import server_capabilities as sc
+
+    ws = tempfile.mkdtemp()
+    sc.explicit_backend_profile = lambda: None          # nothing named
+    try:
+        remote_run.run_remote(ws, "c")
+        print("@@NONE@@returned")
+    except BaseException as e:  # noqa: BLE001
+        print("@@NONE@@" + type(e).__name__ + ": " + str(e))
+
+    sc.explicit_backend_profile = lambda: {"dispatch": sc.DISPATCH_COMPOSE}   # compose-api named
+    remote_run_compose.run_composite = lambda *a, **k: Path(k["dest"]) / "results.zip"
+    print("@@COMPOSE@@" + remote_run.run_remote(ws, "c").name)
+''')
+
+
+def test_a_deployment_run_works_or_refuses_cleanly_without_the_plugin(monkeypatch):
+    """Step P2 Runs b: the runner's dispatcher no longer imports the plugin before choosing a backend. With nothing
+    named it is a ``RuntimeError`` naming no backend (never ``ModuleNotFoundError``); a named compose-api runs."""
+    from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
+
+    for var in BACKEND_BASE_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+        monkeypatch.delenv(var.replace("VIVARIUM_WORKBENCH_", "VIVARIUM_DASHBOARD_"), raising=False)
+    proc = subprocess.run([sys.executable, "-c", _RUN_PROBE], capture_output=True, text=True, timeout=300)
+    assert "@@NONE@@RuntimeError: this run targets a deployment, but no remote backend is named" in proc.stdout, (
+        proc.stdout[-2000:], proc.stderr[-2000:])
+    assert "@@COMPOSE@@results.zip" in proc.stdout, (proc.stdout[-2000:], proc.stderr[-2000:])
+
+
+_SESSION_BUILD_PROBE = textwrap.dedent('''
+    import pathlib, sys, tempfile
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import backends, run_core
+
+    ws = pathlib.Path(tempfile.mkdtemp())
+    (ws / ".viv-build.json").write_text('{"simulator_id": 42, "commit": "abc"}')
+    print("@@RESULT@@" + repr((backends.session_build(ws), run_core.run_target_for(ws))))
+''')
+
+
+def test_the_session_build_answers_without_the_plugin():
+    """Step P2 Builds B1: with the plugin absent a stamped workspace is no session build and runs locally (before B1,
+    ``composite_resolve``'s preview raised ``ModuleNotFoundError`` on any workspace)."""
+    proc = subprocess.run([sys.executable, "-c", _SESSION_BUILD_PROBE], capture_output=True, text=True, timeout=300)
+    assert "@@RESULT@@(None, 'local')" in proc.stdout, proc.stderr[-2000:]
+
+
+_CARD_PROBE = textwrap.dedent('''
+    import json, sys, tempfile
+    from pathlib import Path
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import composite_test_run_views as ctr, run_registry
+    from vivarium_workbench.lib import server_capabilities as sc
+
+    ws = Path(tempfile.mkdtemp())
+    (ws / ".pbg").mkdir()
+    (ws / "workspace.yaml").write_text("name: ws\\n", encoding="utf-8")
+    (ws / ".viv-build.json").write_text('{"simulator_id": 124, "repo_url": "r", "commit": "c"}')
+    sc.explicit_backend_profile = lambda: None          # nothing named
+    run_registry.count_running = lambda db_file: 0
+    run_registry.spawn_detached = lambda *a, **k: 1
+    body = {"id": "pkg.composites.x", "run_target": "deployment", "build": {"simulator_id": 211, "repo_url": "r"}}
+    try:
+        print("@@CLOUD@@" + json.dumps(ctr.composite_test_run(ws, body)))
+    except BaseException as e:  # noqa: BLE001
+        print("@@CLOUD@@" + type(e).__name__ + ": " + str(e))
+    resp, status = ctr.composite_test_run(ws, {"id": "pkg.composites.x"})
+    req = json.loads((ws / ".pbg" / "runs" / resp["run_id"] / "request.json").read_text())
+    print(f"@@STAMPED@@{status}:{req['target']}")
+''')
+
+
+def test_a_card_run_answers_without_the_plugin(monkeypatch):
+    """Step P2 Builds B2: with the plugin absent, the Environment picker's explicit cloud run is refused (409
+    ``no-backend``), never ``ModuleNotFoundError`` (before B2 the card imported ``remote_pinned`` on that path); a
+    stamped workspace is a plain local one (nothing claims it)."""
+    from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
+
+    for var in BACKEND_BASE_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+        monkeypatch.delenv(var.replace("VIVARIUM_WORKBENCH_", "VIVARIUM_DASHBOARD_"), raising=False)
+    proc = subprocess.run([sys.executable, "-c", _CARD_PROBE], capture_output=True, text=True, timeout=300)
+    expected = json.dumps([{"error": "no remote backend was named (serve --backend-base-url)", "reason": "no-backend",
+                            "run_target": "deployment"}, 409])
+    assert "@@CLOUD@@" + expected in proc.stdout, (proc.stdout[-2000:], proc.stderr[-2000:])
+    assert "@@STAMPED@@202:local" in proc.stdout, (proc.stdout[-2000:], proc.stderr[-2000:])
+
+
+_TRACE_PROBE = textwrap.dedent('''
+    import json, sys, tempfile
+    from pathlib import Path
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import remote_trace
+
+    ws = Path(tempfile.mkdtemp())
+    (ws / "workspace.yaml").write_text("name: ws\\n", encoding="utf-8")
+    support, status = remote_trace.trace_support()
+    one = remote_trace.fetch_trace(ws_root=ws, simulation_id="44")
+    none = remote_trace.fetch_trace(ws_root=ws)
+    plugin = [m for m in sys.modules if m.startswith("vivarium_workbench_sms")]
+    print("@@RESULT@@" + json.dumps({"support": [support["supported"], support["reason"], "viewer" in support, status],
+                                     "one": [one[1], one[0].get("reason")], "none": [none[1], none[0]["error"]],
+                                     "plugin": plugin}))
+''')
+
+
+def test_the_trace_answers_without_the_plugin(monkeypatch):
+    """Step P2 Runs b2: with the plugin absent the trace's core answers (before, the routes' lazy import of the SMS
+    client was a 500): support says ``no-backend`` with the viewer, a lone id is a terminal 409
+    ``backend-not-installed``, no id is the old 400."""
+    from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
+
+    for var in BACKEND_BASE_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+        monkeypatch.delenv(var.replace("VIVARIUM_WORKBENCH_", "VIVARIUM_DASHBOARD_"), raising=False)
+    proc = subprocess.run([sys.executable, "-c", _TRACE_PROBE], capture_output=True, text=True, timeout=300)
+    marker = [ln for ln in proc.stdout.splitlines() if ln.startswith("@@RESULT@@")]
+    assert marker, proc.stderr[-2000:]
+    assert json.loads(marker[-1][len("@@RESULT@@"):]) == {
+        "support": [False, "no-backend", True, 200],
+        "one": [409, "backend-not-installed"],
+        "none": [400, "give exactly one of simulation_id, composite_run_id, compose_id"],
+        "plugin": [],
+    }
+
+
+_LISTING_PROBE = textwrap.dedent('''
+    import json, sys, tempfile
+    from pathlib import Path
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import backends, investigations_index, simulations_index
+
+    ws = Path(tempfile.mkdtemp())
+    (ws / "workspace.yaml").write_text("name: ws\\nremote_run_study_map:\\n  - {pattern: x, study: s}\\n")
+    data = simulations_index.build_simulations_data(ws)
+    simulations_index.forget_remote_listings()
+    print("@@RESULT@@" + json.dumps({
+        "has_remote": "remote" in data,
+        "offering": [b.name for b in backends.offering("listing")],
+        "stats": investigations_index._remote_study_run_stats(ws),
+        "plugin": sorted(m for m in sys.modules if m.startswith("vivarium_workbench_sms")),
+    }, sort_keys=True))
+''')
+
+
+def test_the_remote_listing_answers_without_the_plugin():
+    """Step P2 Remote tab R1: with the plugin absent (the env-worker pod) no backend offers ``listing``, so the
+    Simulations index is local-only with no ``remote`` state, the refresh flush is a no-op, the study cards count no
+    remote runs even with a ``remote_run_study_map``, and no plugin module is imported."""
+    proc = subprocess.run([sys.executable, "-c", _LISTING_PROBE], capture_output=True, text=True, timeout=300)
+    expected = json.dumps({"has_remote": False, "offering": [], "plugin": [], "stats": {}}, sort_keys=True)
+    assert "@@RESULT@@" + expected in proc.stdout, (proc.stdout[-2000:], proc.stderr[-2000:])
+
+
+_STORE_PROBE = textwrap.dedent('''
+    import json, sys, tempfile
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import simulations_index
+
+    row = {"run_id": "r", "db_path": None, "store_path": "s3://bucket/r", "study_slug": None,
+           "remote_origin": {"simulation_id": 113, "deployment": "smsvpctest"}}
+    got = simulations_index.resolve_or_fetch_store(tempfile.mkdtemp(), row)
+    plugin = [m for m in sys.modules if m.startswith("vivarium_workbench_sms")]
+    print("@@RESULT@@" + json.dumps({"got": list(got), "plugin": plugin}))
+''')
+
+
+def test_the_store_fetch_answers_without_the_plugin():
+    """Step P2 Remote tab R2: with the plugin absent (the env-worker pod) an SMS simulation's s3-only row has no
+    backend offering ``artifacts``, so its store is ``(None, None)`` and the plugin is never reached for."""
+    proc = subprocess.run([sys.executable, "-c", _STORE_PROBE], capture_output=True, text=True, timeout=300)
+    marker = [ln for ln in proc.stdout.splitlines() if ln.startswith("@@RESULT@@")]
+    assert marker, proc.stderr[-2000:]
+    assert json.loads(marker[-1][len("@@RESULT@@"):]) == {"got": [None, None], "plugin": []}
+
+
+_COMPOSITE_RUN_PROBE = textwrap.dedent('''
+    import json, sys, tempfile
+    from pathlib import Path
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from starlette.testclient import TestClient
+    from vivarium_workbench.api.app import create_app
+    from vivarium_workbench.lib import composite_run_views, composite_stop_views
+
+    ws = Path(tempfile.mkdtemp())
+    (ws / "workspace.yaml").write_text("name: ws\\n", encoding="utf-8")
+    status = composite_run_views.build_composite_run_status(ws, "remote-sim-12")
+    stop = composite_stop_views.stop_composite_run(ws, "remote-sim-12")
+    support = TestClient(create_app()).get("/api/remote-run-trace-support")
+    plugin = [m for m in sys.modules if m.startswith("vivarium_workbench_sms")]
+    print("@@RESULT@@" + json.dumps({"status": [status[1], status[0].get("reason")],
+                                     "stop": [stop[1], stop[0]["outcome"]],
+                                     "support": [support.status_code, support.json()["supported"],
+                                                 support.json()["reason"]],
+                                     "plugin": plugin}))
+''')
+
+
+def test_the_composite_run_routes_and_the_app_answer_without_the_plugin(monkeypatch):
+    """End of step P2 (Routes Rt3): with the plugin absent, a cloud composite run's status is a terminal 409
+    ``backend-not-installed`` (routed by record; nothing owns it), Stop still detaches (``remote-uncancellable``: no
+    SMS call), and ``create_app()`` builds and serves the trace-support route (``no-backend``)."""
+    from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
+
+    for var in BACKEND_BASE_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+        monkeypatch.delenv(var.replace("VIVARIUM_WORKBENCH_", "VIVARIUM_DASHBOARD_"), raising=False)
+    proc = subprocess.run([sys.executable, "-c", _COMPOSITE_RUN_PROBE], capture_output=True, text=True, timeout=300)
+    marker = [ln for ln in proc.stdout.splitlines() if ln.startswith("@@RESULT@@")]
+    assert marker, proc.stderr[-2000:]
+    assert json.loads(marker[-1][len("@@RESULT@@"):]) == {
+        "status": [409, "backend-not-installed"],
+        "stop": [200, "remote-uncancellable"],
+        "support": [200, False, "no-backend"],
+        "plugin": [],
+    }

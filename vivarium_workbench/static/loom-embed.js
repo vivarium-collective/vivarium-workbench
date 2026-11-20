@@ -18,10 +18,10 @@
 
   // ── Cloud-run tracking (parent-owned) ─────────────────────────────────────
   // A composite-card Cloud Run dispatches the selected build's PRE-BUILT image
-  // via sms-api run_simulation (plan B). That dispatch POST is inherently slow
-  // (~15-25s while sms-api registers the whole-cell run over the SSM tunnel) and
-  // the loom's own run bar times out during it, mislabelling a run that actually
-  // landed on GovCloud. So the loom hands the PARENT the sms-api simulation id
+  // to the remote backend (plan B). That dispatch POST can be slow (~15-25s
+  // while the backend registers the run) and the loom's own run bar times out
+  // during it, mislabelling a run that actually landed on the remote backend.
+  // So the loom hands the PARENT the backend's simulation id
   // (postMessage explore:remote-dispatched) and the parent owns the tracking:
   // a patient chip driven by the SAME robust sim-status endpoint the Runs tab
   // uses (/api/composite-run/remote-sim-<id>/status), with backoff, terminating
@@ -66,9 +66,11 @@
     var chip = '<span class="pcard-cloud-chip" style="display:inline-flex;align-items:center;gap:6px;' +
       'background:' + pal[0] + ';color:' + pal[1] + ';padding:2px 9px;border-radius:10px;' +
       'font-size:12px;font-weight:600">' + label + '</span>';
+    // Opaque run ids: the id goes into the handler as a string literal (JSON-quoted, then
+    // attribute-escaped), never Number()-coerced -- a non-integer run id would become NaN.
     var link = (simId != null && phase !== 'dispatching' && phase !== 'dispatch-failed')
       ? ' <a href="#simulations" class="pcard-cloud-link" onclick="return _viewCloudRunInRuns(' +
-          Number(simId) + ')" style="font-size:12px;margin-left:8px">View in Runs DB →</a>'
+          _esc(JSON.stringify(String(simId))) + ')" style="font-size:12px;margin-left:8px">View in Runs DB →</a>'
       : '';
     var err = (phase === 'dispatch-failed' && state.error)
       ? '<div class="muted" style="font-size:11px;margin-top:3px">' + _esc(state.error) + '</div>' : '';
@@ -133,7 +135,11 @@
   function _focusRemoteRow(simId) {
     var tries = 0;
     (function look() {
-      var row = document.querySelector('tr[data-remote-sim-id="' + simId + '"]');
+      // Match by attribute value, not by a selector built from the id (an opaque id may hold quotes).
+      var row = null, rows = document.querySelectorAll('tr[data-remote-sim-id]');
+      for (var k = 0; k < rows.length; k++) {
+        if (rows[k].getAttribute('data-remote-sim-id') === String(simId)) { row = rows[k]; break; }
+      }
       if (row) {
         try { row.scrollIntoView({ block: 'center' }); } catch (e) { /* ignore */ }
         var prev = row.style.boxShadow;
@@ -142,7 +148,7 @@
         return;
       }
       // A just-dispatched cloud run only lands in the Runs list after the slow
-      // remote (GovCloud) merge — up to ~2 min on a cold fetch — so keep looking
+      // remote-backend merge — up to ~2 min on a cold fetch — so keep looking
       // well past the local-first paint instead of giving up at 10s and leaving
       // the user staring at a list that "doesn't have" their run yet.
       if (tries++ < 300) setTimeout(look, 500);
@@ -304,11 +310,11 @@
         if (bar && typeof window._toggleLoomCard === 'function') window._toggleLoomCard(bar);
       } else if (d.type === 'explore:remote-dispatching') {
         // The ~20s Cloud dispatch POST is in flight — show a patient chip so the
-        // card never mislabels a run that is still being registered on GovCloud.
+        // card never mislabels a run the remote backend is still registering.
         var cd = _cardFromMsg(ev);
         if (cd) _renderCloudChip(cd, { phase: 'dispatching', buildSim: d.build_sim });
       } else if (d.type === 'explore:remote-dispatched') {
-        // 202 carrying the sms-api simulation id — the SAME id the Runs tab
+        // 202 carrying the backend's simulation id — the SAME id the Runs tab
         // tracks. Own the chip + robust poll here, in the parent (vanilla JS),
         // independent of the loom bar's own per-run polling.
         var cx = _cardFromMsg(ev);

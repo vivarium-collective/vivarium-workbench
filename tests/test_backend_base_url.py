@@ -2,6 +2,8 @@
 
 Precedence (highest first): the flag / ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL``, then
 the pre-existing ``VIVA_API_BASE``, then its alias ``SMS_API_BASE``, then localhost.
+One exception, tested in test_backend_interop.py: a named URL that has answered as compose-api is skipped when an
+alias is set (compose-api has none of the SMS routes).
 The last case boots a REAL detached server (the flag must survive the re-exec that
 ``--detach`` does) and asks it, over HTTP, which backend it resolved.
 """
@@ -14,9 +16,9 @@ from pathlib import Path
 import pytest
 
 from vivarium_workbench import cli
-from vivarium_workbench.lib import sms_api_client as sac
-
-BACKEND_BASE_ENV_VARS = sac.BACKEND_BASE_ENV_VARS
+from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
+from vivarium_workbench.lib.backends import config as backend_cfg
+from vivarium_workbench.lib import backend_config as bc
 
 
 @pytest.fixture
@@ -26,23 +28,47 @@ def clean_env(monkeypatch):
     return monkeypatch
 
 
+@pytest.mark.plugin
 def test_default_is_localhost(clean_env):
+    from vivarium_workbench_sms import sms_api_client as sac
+
     assert sac.sms_api_base() == "http://localhost:8080"
-    assert sac.backend_configured() is False
+    assert backend_cfg.backend_configured() is False
 
 
+@pytest.mark.plugin
 def test_aliases_still_resolve_in_their_old_order(clean_env):
+    from vivarium_workbench_sms import sms_api_client as sac
+
     clean_env.setenv("SMS_API_BASE", "http://alias")
     assert sac.sms_api_base() == "http://alias"
     clean_env.setenv("VIVA_API_BASE", "http://viva")
     assert sac.sms_api_base() == "http://viva"
-    assert sac.backend_configured() is True
+    assert backend_cfg.backend_configured() is True
 
 
+@pytest.mark.plugin
 def test_new_env_beats_aliases(clean_env):
+    from vivarium_workbench_sms import sms_api_client as sac
+
     clean_env.setenv("VIVA_API_BASE", "http://viva")
     clean_env.setenv("SMS_API_BASE", "http://alias")
     clean_env.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "http://new")
+    assert sac.sms_api_base() == "http://new"
+
+
+@pytest.mark.plugin
+def test_resolving_the_base_url_never_touches_the_network(clean_env):
+    """sms_api_base() is read from some forty places (health polls, every SMS call, the circuit breaker's own key):
+    with a named backend AND an alias set it answers from the environment alone, and cannot fail."""
+    from vivarium_workbench_sms import sms_api_client as sac
+
+    def boom(*a, **k):
+        raise AssertionError("sms_api_base() made a network call")
+
+    clean_env.setattr(sac, "urlopen", boom)
+    clean_env.setenv("VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "http://new")
+    clean_env.setenv("SMS_API_BASE", "http://alias")
     assert sac.sms_api_base() == "http://new"
 
 
@@ -52,7 +78,7 @@ def test_new_env_beats_aliases(clean_env):
     ("http://localhost:8080/prefix/", "http://localhost:8080/prefix"),
 ])
 def test_normalize_accepts(url, ok):
-    assert sac.normalize_backend_base_url(url) == ok
+    assert bc.normalize_backend_base_url(url) == ok
 
 
 @pytest.mark.parametrize("url", [
@@ -61,7 +87,7 @@ def test_normalize_accepts(url, ok):
 ])
 def test_normalize_rejects(url):
     with pytest.raises(ValueError):
-        sac.normalize_backend_base_url(url)
+        bc.normalize_backend_base_url(url)
 
 
 def _ns(**kw):
@@ -90,9 +116,12 @@ def _fixture_ws() -> Path:
 
 
 def test_the_backend_flag_is_honoured_by_a_real_detached_server(tmp_path, monkeypatch):
-    """Flag > the env aliases (conftest points VIVA_API_BASE at a closed port), and
-    it survives ``--detach``'s re-exec: the child reports the flag's URL."""
+    """The flag survives ``--detach``'s re-exec: the child reports the flag's URL. (conftest points both aliases at
+    a closed port; a named backend beside a different alias is refused at startup since step 1c, so this test clears
+    them -- "flag beats aliases" stays pinned as a pure ``sms_api_base()`` test above.)"""
     pytest.importorskip("process_bigraph.artifacts")
+    monkeypatch.delenv("VIVA_API_BASE", raising=False)
+    monkeypatch.delenv("SMS_API_BASE", raising=False)
     ws = tmp_path / "ws_copy"
     shutil.copytree(_fixture_ws(), ws)
     cli._clear_server_state(ws)

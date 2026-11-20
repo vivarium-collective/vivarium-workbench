@@ -8,7 +8,6 @@ sync` and (b) rebuilt remotely by build-via-sms-api. Pure / ws_root-parameterize
 from __future__ import annotations
 
 import hashlib
-import json
 
 from vivarium_workbench.lib.git_io import git_text
 from pathlib import Path
@@ -56,25 +55,23 @@ def _result_pointers(ws_root: Path) -> dict:
 
 
 def build_manifest(ws_root: Path) -> dict:
-    ws_root = Path(ws_root)
-    build_meta = None
-    vb = ws_root / ".viv-build.json"
-    if vb.is_file():
-        try:
-            build_meta = json.loads(vb.read_text())
-        except Exception:
-            build_meta = None
+    from vivarium_workbench.lib import backends
 
-    if isinstance(build_meta, dict):
+    ws_root = Path(ws_root)
+    build = backends.session_build(ws_root)
+    if build is not None and not build.readable:
+        build = None
+
+    if build is not None:
         # Build workspace: repo/commit/branch come from the recorded build metadata.
         # NOTE: `lockfile` below is always taken from the on-disk uv.lock (see
         # lockfile_hash call), not from the lockfile at repo@commit.  For a
         # freshly materialized build these are identical.  If the on-disk lock
         # is later re-synced (e.g. `uv lock --upgrade`) it can diverge and
         # cause a false 409 on a subsequent `vivarium-dashboard sync`.
-        repo = build_meta.get("repo_url") or build_meta.get("repo") or ""
-        commit = build_meta.get("commit") or ""
-        branch = build_meta.get("branch") or ""
+        repo = build.repo_url or ""
+        commit = build.commit or ""
+        branch = build.branch or ""
     else:
         repo = git_origin_url(ws_root)
         commit = git_full_commit(ws_root)
@@ -93,5 +90,5 @@ def build_manifest(ws_root: Path) -> dict:
         "workspace": name,
         "lockfile": lockfile_hash(ws_root),
         "results": _result_pointers(ws_root),
-        "simulator_id": build_meta.get("simulator_id") if isinstance(build_meta, dict) else None,
+        "simulator_id": build.id if build is not None else None,
     }

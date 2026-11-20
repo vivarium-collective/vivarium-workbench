@@ -34,12 +34,29 @@ import yaml
 
 from vivarium_workbench.lib import composite_subprocess
 from vivarium_workbench.lib import lifecycle_mutations
-from vivarium_workbench.lib import remote_pinned
 from vivarium_workbench.lib import run_core
 from vivarium_workbench.lib import study_run_post
 from vivarium_workbench.lib import study_run_state
 from vivarium_workbench.lib import study_spec
+from vivarium_workbench.lib.errors import APIError
 from vivarium_workbench.lib.study_crud_mutations import _study_name_from_body
+
+
+def _named_backend_runs_documents(ws_root) -> bool:
+    """A study run goes to the selected backend as a document (step 1b: ``backends.select``): compose-api or
+    viva-core today.
+
+    Step P2 Routes Rt3: decided by facet, never by which backend it is. A backend that runs the workspace as its own
+    build (``builds``: sms-legacy) is asked first and is not a document run (the baseline reaches it through
+    ``builds.run_study`` in :func:`run_study_baseline`); any other selected backend runs documents; nothing selected
+    is a local run. The coupling with ``run_study_baseline``'s ``chosen.builds is not None`` branch is deliberate:
+    exactly one of the two applies to a selected backend."""
+    from vivarium_workbench.lib import backends
+
+    chosen = backends.select(ws_root)
+    if chosen is None or chosen.builds is not None:
+        return False
+    return True
 
 
 def _study_runtime_emitter(runtime_cfg):
@@ -128,17 +145,13 @@ def _composite_declared_emit_paths(study_dir, spec) -> list:
 def _resolve_study_dir(ws_root, name):
     """Resolve a study's directory honoring the workspace ``layout:`` map.
 
-    Uses :class:`WorkspacePaths` (nested investigations/<inv>/studies/<s> and
-    relocated layouts), falling back to the classic flat ``studies/<name>`` /
-    ``investigations/<name>`` paths for legacy studies whose dir lacks a
-    ``study.yaml`` (so WorkspacePaths' study.yaml gate skips them).
+    Delegates to :func:`study_spec.study_dir` — :class:`WorkspacePaths` (nested
+    investigations/<inv>/studies/<s> and relocated layouts), falling back to the
+    layout-mapped ``studies`` / ``investigations`` roots for legacy studies whose
+    dir lacks a ``study.yaml`` (so WorkspacePaths' study.yaml gate skips them),
+    e.g. the ``spec.yaml`` study ``POST /api/study-create-from-composite`` writes.
     """
-    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
-    try:
-        return WorkspacePaths.load(ws_root).study_dir(name, must_exist=True)
-    except FileNotFoundError:
-        flat = ws_root / "studies" / name
-        return flat if flat.is_dir() else ws_root / "investigations" / name
+    return study_spec.study_dir(ws_root, name)
 
 
 def _materialize_federated_study(ws_root, name):
@@ -568,15 +581,24 @@ def launch_into_study(ws_root, study, spec_id, params, n_steps, *, seed=None,
     label = label or "baseline"
     effective_seed = seed if seed is not None else full_params.get("seed")
 
+    from vivarium_workbench.lib import backends
+
+    try:
+        target = backends.resolve_run_target(ws_root)
+    except APIError:
+        # The backend named for this workbench cannot be reached. A dry run starts nothing (a preview "stays
+        # local-only", see run_study_baseline), so it still answers; any other run is refused.
+        if not dry_run:
+            raise
+        target = "local"
     try:
         plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=full_params,
                                    db_path=db_file, label=label, n_steps=n_steps,
-                                   seed=effective_seed,
-                                   target=remote_pinned.resolve_run_target(ws_root))
+                                   seed=effective_seed, target=target)
     except run_core.RunTargetUnavailable as e:
         return {"error": str(e)}, 409
     # Remote-build guard (item 18: unified with composite_test_run's target
-    # resolution via remote_pinned.resolve_run_target — a materialized session
+    # resolution via backends.resolve_run_target — a materialized session
     # build (.viv-build.json) OR a deployment-wide pin (VIVARIUM_WORKBENCH_
     # REMOTE_PINNED) now BOTH resolve to "deployment" here, matching the
     # Composites tab; previously only the .viv-build.json case was caught, so
@@ -754,57 +776,28 @@ def run_study_baseline(ws_root, body):
     # A backend the operator NAMED (serve --backend-base-url) that runs documents (POST
     # /viva/v1/composites, or compose-api's POST /simulation/run): ANY baseline composite runs there, keyed by the workspace's
     # composite (no simulator id exists to pin, and none is needed).
-    if not dry_run and remote_pinned.uses_named_backend_dispatch(ws_root):
+    if not dry_run and _named_backend_runs_documents(ws_root):
         from vivarium_workbench.lib.remote_run_views import remote_run_submit
         return remote_run_submit(ws_root, {
             "study": name, "composite": spec_id,
             "params": generator_overrides, "n_steps": params_n_steps,
         })
 
-    # item 83: on a deployment target, delegate to the ONE proven, real
-    # remote-dispatch mechanism (remote_run_submit -> real POST
-    # /api/v1/simulations, the same path "Run current spec" already uses when
-    # a session is pinned) instead of the unconditional 409 launch_into_study
-    # raises below. Scoped narrowly to the case that mechanism actually
-    # supports: the study's DEFAULT baseline entry (entry is baseline[0], no
-    # explicit ?composite= override) and a real (non-dry-run) dispatch.
-    # remote_run_submit has no way to select a specific composite -- it
-    # dispatches whatever the pinned simulator's own build contains -- so a
-    # non-default `requested` composite still falls through to
-    # launch_into_study's existing, accurate 409 rather than risk silently
-    # running the wrong composite. dry_run also falls through unchanged
-    # (preview stays local-only; no real dispatch to preview against).
+    # item 83: on a backend that runs this workspace as one of its own builds (a session build or the deployment's
+    # pin), delegate to that backend's study run (``builds.run_study``: SMS's real POST /api/v1/simulations, the same
+    # path "Run current spec" already uses when a session is pinned) instead of the unconditional 409
+    # launch_into_study raises below. Scoped narrowly to the case that mechanism actually supports: the study's
+    # DEFAULT baseline entry (entry is baseline[0], no explicit ?composite= override) and a real (non-dry-run)
+    # dispatch. A build has no way to select a specific composite -- it runs whatever the build contains -- so a
+    # non-default `requested` composite still falls through to launch_into_study's existing, accurate 409 rather
+    # than risk silently running the wrong composite. dry_run also falls through unchanged (preview stays
+    # local-only; no real dispatch to preview against).
     if not dry_run and entry is baseline[0] and not requested:
-        target = remote_pinned.resolve_run_target(ws_root)
-        if target == "deployment":
-            num_generations = generator_overrides.get("n_generations")
-            num_seeds = generator_overrides.get("n_seeds")
-            # Backlog items 86/88: any composite-declared param beyond the two run-size
-            # knobs above (e.g. a fork/injection spec, or a multi-node dispatch request)
-            # rides through to viva-api as a generic passthrough dict — never silently
-            # dropped the way it previously was. Composite-agnostic: no key here is
-            # inspected or special-cased by name.
-            extra_params = {
-                k: v for k, v in generator_overrides.items()
-                if k not in ("n_generations", "n_seeds")
-            }
-            from vivarium_workbench.lib.sms_api_client import SmsApiClient
-            from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
-            simulator_id = remote_pinned.resolve_pinned_simulator_id(
-                SmsApiClient(_sms_api_base()), ws_root)
-            if simulator_id is None:
-                return {"error": "no remote build resolved for this deployment/"
-                                 "session — switch to a built workspace or "
-                                 "configure a pinned repo@branch"}, 409
-            from vivarium_workbench.lib.remote_run_views import remote_run_submit
-            return remote_run_submit(ws_root, {
-                "study": name,
-                "simulator_id": simulator_id,
-                "num_generations": num_generations,
-                "num_seeds": num_seeds,
-                "run_parca": bool(body.get("run_parca", True)),
-                "extra_params": extra_params or None,
-            })
+        from vivarium_workbench.lib import backends
+
+        chosen = backends.active(ws_root)
+        if chosen is not None and chosen.builds is not None:
+            return chosen.builds.run_study(ws_root, study=name, params=generator_overrides, request=body)
 
     return launch_into_study(
         ws_root, name, spec_id, generator_overrides, params_n_steps,
@@ -958,11 +951,13 @@ def run_study_variant(ws_root, body):
         full_params = dict(generator_overrides)
         if params_n_steps is not None:
             full_params["n_steps"] = params_n_steps
+        from vivarium_workbench.lib import backends
+
         try:
             plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=full_params,
                                        db_path=study_dir / "runs.db", label=variant_name,
                                        n_steps=params_n_steps,
-                                       target=remote_pinned.resolve_run_target(ws_root))
+                                       target=backends.resolve_run_target(ws_root))
         except run_core.RunTargetUnavailable as e:
             return {"error": str(e)}, 409
         # Remote-build guard — same as the baseline path above (SP-D2/G1, item
@@ -1032,15 +1027,17 @@ def run_study_variant(ws_root, body):
             full_params["n_steps"] = params_n_steps
 
         db_file = str(study_dir / "runs.db")
+        from vivarium_workbench.lib import backends
+
         try:
             plan = run_core.invoke_run(ws_root, spec_id=spec_id, config=full_params,
                                        db_path=db_file, label=variant_name, n_steps=params_n_steps,
-                                       target=remote_pinned.resolve_run_target(ws_root))
+                                       target=backends.resolve_run_target(ws_root))
         except run_core.RunTargetUnavailable as e:
             return {"error": str(e)}, 409
         # Remote-build guard — same as the baseline path above (SP-D2/G1, item 18).
         if plan.target == "deployment":
-            if remote_pinned.uses_named_backend_dispatch(ws_root):
+            if _named_backend_runs_documents(ws_root):
                 from vivarium_workbench.lib.remote_run_views import remote_run_submit
                 return remote_run_submit(ws_root, {
                     "study": name, "composite": spec_id,

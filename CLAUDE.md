@@ -84,9 +84,9 @@ vivarium-workbench compose-entry --workspace /path/to/ws [--registry URL|FILE] [
 
 There is no separate build step (pure Python + static assets). Linting/typing is
 enforced in CI (`.github/workflows/types.yml`): `ruff check vivarium_workbench
-vivarium_dashboard`, `mypy` on the typed modules, and `lint-imports` (import-linter)
+vivarium_workbench_sms vivarium_dashboard`, `mypy` on the typed modules, and `lint-imports` (import-linter)
 for the package-boundary allowlist — run them the same way locally, e.g.
-`uv run ruff check vivarium_workbench vivarium_dashboard` and `uv run mypy`.
+`uv run ruff check vivarium_workbench vivarium_workbench_sms vivarium_dashboard` and `uv run mypy`.
 Dependencies are managed with `uv` (`uv.lock`); install editable with
 `pip install -e .` (or `uv pip install -e .`) into the venv that will run it. Note `bigraph-loom`, `viva-superpowers` (formerly pbg-superpowers) and
 `discovery-engine` are direct git/path deps.
@@ -100,7 +100,10 @@ serve` → `cli.py` → `lib/startup.serve_fastapi` → `uvicorn.run(app, ...)`.
 defined in `api/app.py` via `@app.get`/`@app.post` decorators; each backs onto a
 `lib/` function. Non-GET routes are guarded by the CSRF/origin middleware (see
 below). When adding an endpoint: add the route in `api/app.py`, put the real logic
-in a `lib/` module, and return a pydantic model where possible.
+in a `lib/` module, and return a pydantic model where possible. The route
+dependencies (`get_workspace`, `get_workspace_context`, `session_key_of`) live in
+`api/deps.py` (re-exported by `api/app.py` as the same objects), so a separate
+router module can declare routes without importing `api/app.py`.
 
 The old stdlib `BaseHTTPRequestHandler` (`server.py`, ~9.6k lines) has been
 **deleted**. All of its real logic was relocated to `lib/`, and the dashboard's
@@ -116,15 +119,15 @@ test fixture now spawns the live FastAPI app. Do **not** add new dependencies on
 **Plugin split.** `discovery_engine` (the `discovery-engine` package) holds the investigation/study
 framework and the discovery cycle: study audit/evaluation/verdict/status, rigor,
 the report linter, the argument/knowledge/narrative projections, post-sim steps,
-and `viz_freshness`. `viva_superpowers` is the skills-first facade plus the helpers
-that stayed behind (`catalog`, `feedback_import`, `feedback_tracking`,
-`chart_store`, `run_params`, `loop_state`, `test_audit`); for every moved module it
-keeps only a **back-compat shim** that re-exports the engine
-(`sys.modules[__name__] = discovery_engine.<m>`), so `viva_superpowers.<m>` *is* the
-same module object as `discovery_engine.<m>` — a permanent facade with **no forks and
-no divergence** (viva-superpowers' own `test_discovery_engine_facade.py` asserts that
-object identity across the whole set). **New workbench code imports moved modules from
-`discovery_engine.*` directly** (never through the shim); `tests/test_plugin_import_allowlist.py`
+and `viz_freshness`. `viva_superpowers` is the skills-first agent plugin plus the
+non-engine helpers that stayed behind (`catalog`, `feedback_import`,
+`feedback_tracking`, `chart_store`, `run_params`, `loop_state`, `test_audit`, plus the
+benchmarking / model-build-loop / publishing / packaging helpers). **The facade is
+gone — import moved modules from `discovery_engine.<m>` directly.** The back-compat
+shims that used to re-export the engine under the `viva_superpowers.<m>` name have
+been **deleted** (clean split; there is no longer a `test_discovery_engine_facade.py`
+object-identity assertion). So `from discovery_engine.card_grade import ...` — never
+`viva_superpowers.<engine-module>`. `tests/test_plugin_import_allowlist.py`
 (the allowlist) plus the import-linter config govern which modules the workbench may
 import from each package.
 

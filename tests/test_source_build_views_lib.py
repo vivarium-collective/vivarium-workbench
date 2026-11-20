@@ -12,10 +12,12 @@ import json
 import pytest
 
 from vivarium_workbench.lib import _root
-from vivarium_workbench.lib.sms_api_client import register_branch_head_legacy
+from vivarium_workbench_sms.sms_api_client import register_branch_head_legacy
 from vivarium_workbench.lib import active_workspace
-from vivarium_workbench.lib import source_build_views
-from vivarium_workbench.lib.sms_api_client import SmsApiError
+from vivarium_workbench_sms import source_build_views
+from vivarium_workbench_sms.sms_api_client import SmsApiError
+
+pytestmark = pytest.mark.plugin  # every test drives the SMS plugin's source-build views
 
 
 @pytest.fixture(autouse=True)
@@ -98,7 +100,7 @@ def test_build_remote_happy_normalizes_repo(monkeypatch):
     assert body == {
         "ok": True,
         "simulator_id": 77,
-        "repo": "https://github.com/x/y",  # _normalize_repo_url stripped .git + whitespace
+        "repo": "https://github.com/x/y",  # normalize_repo_url stripped .git + whitespace
         "branch": "main",
         "commit": "abcdef123",
     }

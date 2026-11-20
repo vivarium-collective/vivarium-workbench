@@ -190,11 +190,12 @@ def test_happy_path_202(tmp_path, monkeypatch, fixed_run_id):
     assert row == ("demo.spec", "running", 9, 4242)
 
 
+@pytest.mark.plugin
 def test_pinned_mode_routes_to_deployment_target(tmp_path, monkeypatch, fixed_run_id):
     """B (demo blocker): with remote-pinned mode ON, the Composites-tab Run stamps
     ``target='deployment'`` so the detached runner dispatches to sms-api compose
     instead of spawning the full model locally — even without a ``.viv-build.json``."""
-    from vivarium_workbench.lib import remote_pinned
+    from vivarium_workbench_sms import remote_pinned
     ws = _make_ws(tmp_path)  # NOTE: no .viv-build.json stamped
     monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: True)
     # Pinned mode with no resolvable image → the opt-in compose path (c1).
@@ -218,10 +219,17 @@ def test_pinned_mode_routes_to_deployment_target(tmp_path, monkeypatch, fixed_ru
 
 
 def test_pinned_mode_off_stays_local(tmp_path, monkeypatch, fixed_run_id):
-    """Local dev (pinned mode OFF, no .viv-build.json) still resolves to 'local'."""
-    from vivarium_workbench.lib import remote_pinned
+    """Local dev (pinned mode OFF, no .viv-build.json) still resolves to 'local'. Pinned mode is the SMS plugin's;
+    with the plugin absent there is none to turn off (docs/backend-adapters.md step P3, K2a)."""
+    import importlib
+
     ws = _make_ws(tmp_path)
-    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: False)
+    try:
+        remote_pinned = importlib.import_module("vivarium_workbench_sms.remote_pinned")
+    except ImportError:
+        pass
+    else:
+        monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: False)
     monkeypatch.setattr(run_registry, "count_running", lambda db_file: 0)
     monkeypatch.setattr(run_registry, "spawn_detached",
                         lambda request_path, *, workspace, log_path: 4242)

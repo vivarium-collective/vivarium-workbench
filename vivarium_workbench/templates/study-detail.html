@@ -738,11 +738,15 @@
               {% if f.evidence.smoking_gun %}<details style="display:inline-block;margin-left:4px"><summary>smoking gun</summary><pre style="white-space:pre-wrap;margin:4px 0 0 0;padding:6px 8px;background:#fff;border-radius:3px;font-size:0.85em;font-family:inherit">{{ f.evidence.smoking_gun }}</pre></details>{% endif %}
             </div>
             {% set _runids = (f.provenance or {}).run_ids %}
-            {% if f.evidence.divergence_factor is defined or _runids %}
+            {# provenance.model_version is engine-authored (finding_observations._fill_finding)
+               but was never surfaced; render it only when present (never defaulted). #}
+            {% set _mv = (f.provenance or {}).model_version %}
+            {% if f.evidence.divergence_factor is defined or _runids or _mv %}
             <div class="finding-traceability" style="font-size:0.84em;color:#475569;padding:4px 10px;margin:4px 0">
               {% if f.evidence.divergence_factor is defined %}<span class="finding-divergence" style="font-weight:600">×{{ f.evidence.divergence_factor }} vs expected</span>{% endif %}
               {% if f.evidence.divergence_factor is defined and _runids %} · {% endif %}
               {% if _runids %}runs: {% for rid in _runids %}<a href="#run-{{ rid }}"><code>{{ rid }}</code></a>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+              {% if _mv %}{% if f.evidence.divergence_factor is defined or _runids %} · {% endif %}model <code>{{ _mv }}</code>{% endif %}
             </div>
             {% endif %}
             {% set _citedtest = (study.behavior_tests or study.expected_behavior or [])|selectattr('name','equalto', _ftok)|first %}
@@ -1270,6 +1274,91 @@
   <p class="empty-message">Nothing to compose yet.</p>
   {% endif %}
 
+  {# Variants authoring (issue #1618, blocker B). A study created in the GUI
+     carries a top-level `variants[]` list (what study-variant-add writes);
+     nothing rendered it before, and there was no form to add one. This lists
+     those variants with Run/Delete and offers an add form. The v4
+     conditions.variants table above is a separate, derived surface. #}
+  <div class="overview-section" id="study-variants-section">
+    <h3>Variants <span class="muted" style="font-size:0.85em;font-weight:normal">— perturbations of the baseline to compare</span></h3>
+    {% if study.variants %}
+    <table class="cond-table" style="margin-bottom:10px">
+      <thead><tr><th>Variant</th><th>Base</th><th>Parameter overrides</th><th></th></tr></thead>
+      <tbody>
+        {% for v in study.variants %}
+        <tr>
+          <td><code>{{ v.name or '?' }}</code></td>
+          <td>{% if v.base_composite %}<code>{{ v.base_composite }}</code>{% else %}<em class="muted">(inherits baseline)</em>{% endif %}</td>
+          <td>
+            {% set _ovr = v.parameter_overrides or v.params or {} %}
+            {% if _ovr %}{% for k, val in _ovr.items() %}<div><span class="cond-pill-k">{{ k }}</span>=<code>{{ val }}</code></div>{% endfor %}{% else %}<em class="muted">(none)</em>{% endif %}
+          </td>
+          <td style="white-space:nowrap">
+            <button type="button" class="action-btn study-variant-run" data-variant="{{ v.name }}" style="font-size:0.78em" title="Run this variant">▶ Run</button>
+            <button type="button" class="action-btn study-variant-del" data-variant="{{ v.name }}" style="font-size:0.78em" title="Delete variant">✕</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted" style="font-size:0.88em;margin:0 0 10px">No variants yet — add one to perturb the baseline and compare against it.</p>
+    {% endif %}
+    {% if study.baseline %}
+    <form class="study-variant-add-form" onsubmit="return _submitStudyVariantAdd(this)" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+      <label style="font-size:0.78em;color:#475569">Name<br>
+        <input name="name" required pattern="[a-zA-Z0-9_-]+" placeholder="hi-dnaa"
+               style="font-family:monospace;font-size:0.82em;padding:3px 6px;min-width:130px"></label>
+      <label style="font-size:0.78em;color:#475569">Base<br>
+        <select name="base_composite" style="font-size:0.82em;padding:3px 6px">
+          {% for b in study.baseline %}<option value="{{ b.name }}">{{ b.name }}</option>{% endfor %}
+        </select></label>
+      <label style="font-size:0.78em;color:#475569">Parameter overrides (JSON)<br>
+        <input name="overrides" placeholder='{"k_synth": 2.0}'
+               style="font-family:monospace;font-size:0.82em;padding:3px 6px;min-width:180px"></label>
+      <button type="submit" class="action-btn" style="font-size:0.82em">+ Add variant</button>
+    </form>
+    <div class="study-variant-add-status muted" style="font-size:0.8em;margin-top:4px"></div>
+    {% else %}
+    <p class="muted" style="font-size:0.84em">Choose a model (baseline) first — a variant perturbs a baseline entry.</p>
+    {% endif %}
+  </div>
+
+  {# Interventions authoring (issue #1618, blocker B). Interventions are named,
+     described perturbations the study applies; the endpoints existed with no UI
+     and nothing rendered the list. Mirrors the Variants section above. #}
+  <div class="overview-section" id="study-interventions-section">
+    <h3>Interventions <span class="muted" style="font-size:0.85em;font-weight:normal">— named perturbations applied in this study</span></h3>
+    {% if study.interventions %}
+    <table class="cond-table" style="margin-bottom:10px">
+      <thead><tr><th>Intervention</th><th>Description</th><th></th></tr></thead>
+      <tbody>
+        {% for iv in study.interventions %}
+        <tr>
+          <td><code>{{ iv.name or '?' }}</code></td>
+          <td>{{ iv.description or '' }}</td>
+          <td style="white-space:nowrap">
+            <button type="button" class="action-btn study-intervention-del" data-name="{{ iv.name }}" style="font-size:0.78em" title="Delete intervention">✕</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted" style="font-size:0.88em;margin:0 0 10px">No interventions yet.</p>
+    {% endif %}
+    <form class="study-intervention-add-form" onsubmit="return _submitStudyInterventionAdd(this)" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+      <label style="font-size:0.78em;color:#475569">Name<br>
+        <input name="name" required pattern="[a-zA-Z0-9_-]+" placeholder="knockout-dnaA"
+               style="font-family:monospace;font-size:0.82em;padding:3px 6px;min-width:140px"></label>
+      <label style="font-size:0.78em;color:#475569;flex:1;min-width:200px">Description<br>
+        <input name="description" placeholder="what the intervention does"
+               style="width:100%;font-size:0.82em;padding:3px 6px"></label>
+      <button type="submit" class="action-btn" style="font-size:0.82em">+ Add intervention</button>
+    </form>
+    <div class="study-intervention-add-status muted" style="font-size:0.8em;margin-top:4px"></div>
+  </div>
+
 
 
   {# Readouts (Phase 1): the emit CONTRACT, re-homed from its own tab into
@@ -1330,11 +1419,9 @@
 <div id="sim-run-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 16px 0">
   <button type="button" id="study-run-current-spec" class="action-btn" title="Run this study's CURRENT baseline spec (POST /api/study-run-baseline) as a brand-new run">▶ Run current spec</button>
   <button type="button" id="study-reproduce" class="btn-mini" title="Replay this study's most recent run's RECORDED manifest verbatim (POST /api/study-reproduce) — ignores any study.yaml edits made since">↻ Reproduce</button>
-  {# item 110: dispatch ANY registered process-bigraph composite_id (e.g. pbg-native's
-     v2ecoli.composites.lineage_ray_batch, item 101/109) to the remote compute backend --
-     independent of this study's own pinned baseline composite. Remote-pinned only, same
-     gate as "Run current spec" (see _dispatchRemoteComposite in study-detail.js). #}
-  <button type="button" id="study-run-composite" class="btn-mini" title="Dispatch a specific process-bigraph composite_id to the remote compute backend (pbg-native multi_node/mbp, or the Nextflow campaign path) — advanced, independent of this study's own pinned baseline">⚙ Dispatch composite</button>
+  {# A backend's launch plugin may add its own buttons here (the launch script
+     loaded below appends the remote "Dispatch composite" button, hidden until a
+     remote backend is configured). #}
 </div>
 
 <div class="overview-section" id="simulations-section">
@@ -2032,6 +2119,41 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 
   </div>
 
+  {# Findings authoring (issue #1618, blocker B) — the Decide tab told users to
+     "edit findings" with no way to do so. Record a finding here and it writes
+     study.yaml findings[], rendering in the Findings cards (Overview) + the
+     report. Writes via /api/study-finding-add. #}
+  <div class="overview-section" id="study-findings-authoring">
+    <h2 class="overview-label">Record a finding</h2>
+    {% if study.findings %}
+    <ul class="synthesis-list" style="margin:0 0 12px">
+      {% for f in study.findings %}{% if (f.statement or f.summary) %}
+      <li style="display:flex;align-items:flex-start;gap:8px">
+        {% if f.id %}<button type="button" class="action-btn study-finding-del" data-id="{{ f.id }}" title="Delete finding" style="font-size:0.72em;line-height:1;padding:2px 6px">✕</button>{% endif %}
+        <span>{{ f.statement or f.summary }} <span class="muted small">({{ f.status or 'novel' }})</span></span>
+      </li>
+      {% endif %}{% endfor %}
+    </ul>
+    {% endif %}
+    <form class="study-finding-add-form" onsubmit="return _submitStudyFindingAdd(this)" style="display:flex;flex-direction:column;gap:8px;max-width:680px">
+      <textarea name="statement" required rows="2" placeholder="What did this study show? (one sentence)"
+                style="font-size:0.9em;padding:6px 8px;resize:vertical"></textarea>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <label style="font-size:0.78em;color:#475569">Status<br>
+          <select name="status" style="font-size:0.82em;padding:3px 6px">
+            <option value="novel">novel</option>
+            <option value="confirms">confirms literature</option>
+            <option value="partial">partial</option>
+            <option value="contradicts">contradicts</option>
+          </select></label>
+        <label style="font-size:0.78em;color:#475569;flex:1;min-width:200px">Why / mechanism (optional)<br>
+          <input name="explanation" style="width:100%;font-size:0.82em;padding:3px 6px"></label>
+        <button type="submit" class="action-btn" style="font-size:0.82em">+ Add finding</button>
+      </div>
+    </form>
+    <div class="study-finding-add-status muted" style="font-size:0.8em;margin-top:4px"></div>
+  </div>
+
   {# ── Group 3: Follow-ups & decisions ──────────────────────────────────────── #}
   <div class="overview-section"><h2 class="overview-label">Follow-ups &amp; decisions</h2>
 
@@ -2289,6 +2411,7 @@ cites:   {{ b.cites|tojson }}{% endif %}</pre>
 </main>
 <script>window.__DASH_CONFIG__ = { mode: "local-server" };</script>
 <script src="/data-source.js"></script>
+<script src="/backend-features.js"></script>
 <script src="/toast.js"></script>
 <script>
 window._studyName = "{{ name }}";
@@ -2420,6 +2543,11 @@ window._seedFollowupProposal = _seedFollowupProposal;
 <script src="/checklist-select.js"></script>
 <script src="/progress-track.js"></script>
 <script src="/comparison-view.js"></script>
+<!-- The backend launch plugin's script (remote-pinned dispatch + the
+     "Dispatch composite" panel), quarantined out of study-detail.js. Loaded
+     BEFORE it: study-detail.js calls window.SmsLaunch.mount() while it loads,
+     and runs local-only when the file is absent. -->
+<script src="/sms-launch.js"></script>
 <script src="/study-detail.js"></script>
 <script src="/study-feedback.js"></script>
 <script src="/inline-edit.js"></script>
@@ -2432,7 +2560,7 @@ window._seedFollowupProposal = _seedFollowupProposal;
 </script>
 <script>
 (function () {
-  // Task 8: the Configure & Run mount and the remote-run (smsvpctest) panel
+  // Task 8: the Configure & Run mount and the remote-run panel
   // were both removed from the Simulate tab — launching now lives entirely
   // in the header buttons (Reproduce / Run current spec). This block used
   // to also mount ConfigureRun into the (now-deleted) mount div and, in an

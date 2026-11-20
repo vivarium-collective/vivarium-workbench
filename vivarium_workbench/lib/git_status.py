@@ -99,16 +99,30 @@ def diagnose_push_error(err: str) -> dict | None:
     return None
 
 
+def normalize_repo_url(url: str) -> str:
+    """Normalize a git remote URL: strip surrounding whitespace and a trailing ``.git``.
+
+    sms-api's ``/core/v1/simulator/upload`` 500s on a ``.git``-suffixed URL
+    (it builds an image tag / repo path from the URL), which is why the SMS
+    plugin's source-build routes use this too.
+
+    Not to be confused with ``cli._normalize_repo_url``, which expands an
+    ``org/repo`` shorthand into a cloneable URL and keeps a ``.git`` suffix.
+    """
+    url = url.strip()
+    if url.endswith(".git"):
+        url = url[: -len(".git")]
+    return url
+
+
 def remote_repo_url(ws_root: Path) -> str | None:
     """Return origin's normalized remote URL, or ``None`` when unresolved.
 
     Mirrors ``server._remote_repo_url`` parameterised on ``ws_root``: runs
     ``git remote get-url origin`` in ``cwd=ws_root``, returns ``None`` on a
     non-zero exit or empty URL, else the URL normalized via
-    :func:`lib.source_build_views._normalize_repo_url` (reused, not re-copied).
+    :func:`normalize_repo_url`.
     """
-    from vivarium_workbench.lib.source_build_views import _normalize_repo_url
-
     r = subprocess.run(
         ["git", "remote", "get-url", "origin"], cwd=ws_root,
         capture_output=True, text=True, timeout=5,
@@ -116,7 +130,7 @@ def remote_repo_url(ws_root: Path) -> str | None:
     if r.returncode != 0:
         return None
     raw = r.stdout.strip()
-    return _normalize_repo_url(raw) if raw else None
+    return normalize_repo_url(raw) if raw else None
 
 
 def remote_push_and_sha(ws_root: Path) -> str:
@@ -365,44 +379,49 @@ def build_git_status(ws_root: Path) -> dict:
     if r.returncode != 0:
         return result
     result["branch"] = (r.stdout or "").strip()
-    # upstream repo (from origin remote)
+    # upstream repo (from origin remote). A local-only workspace that has not
+    # been pushed yet has no ``origin``; previously this returned HERE, before
+    # ``dirty_count`` was ever computed, so the "Commit all" panel never
+    # appeared for an un-pushed workspace — ``/api/git-status`` reported
+    # ``dirty_count: 0`` even with uncommitted files (issue #1618, bug 6).
+    # Instead, skip only the origin-dependent fields and fall through to the
+    # dirty-count / PR / workstream blocks below.
     r = subprocess.run(
         ["git", "remote", "get-url", "origin"],
         cwd=ws_root, capture_output=True, text=True,
     )
-    if r.returncode != 0:
-        return result
-    origin_url = (r.stdout or "").strip()
-    m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?$", origin_url)
-    if m:
-        result["upstream_repo"] = m.group(1)
-        result["repo_url"] = f"https://github.com/{m.group(1)}"
-        result["branch_url"] = (
-            f"https://github.com/{m.group(1)}/tree/{result['branch']}"
+    origin_url = (r.stdout or "").strip() if r.returncode == 0 else ""
+    if origin_url:
+        m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?$", origin_url)
+        if m:
+            result["upstream_repo"] = m.group(1)
+            result["repo_url"] = f"https://github.com/{m.group(1)}"
+            result["branch_url"] = (
+                f"https://github.com/{m.group(1)}/tree/{result['branch']}"
+            )
+        # ahead/behind vs origin/<branch>
+        ref = f"origin/{result['branch']}"
+        r = subprocess.run(
+            ["git", "rev-list", "--left-right", "--count", f"{ref}...HEAD"],
+            cwd=ws_root, capture_output=True, text=True,
         )
-    # ahead/behind vs origin/<branch>
-    ref = f"origin/{result['branch']}"
-    r = subprocess.run(
-        ["git", "rev-list", "--left-right", "--count", f"{ref}...HEAD"],
-        cwd=ws_root, capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        result["push_state"] = "no_origin"
-    else:
-        parts = (r.stdout or "").strip().split()
-        if len(parts) == 2:
-            behind = int(parts[0])
-            ahead = int(parts[1])
-            result["ahead"] = ahead
-            result["behind"] = behind
-            if ahead == 0 and behind == 0:
-                result["push_state"] = "pushed"
-            elif ahead > 0 and behind == 0:
-                result["push_state"] = "ahead"
-            elif ahead == 0 and behind > 0:
-                result["push_state"] = "behind"
-            else:
-                result["push_state"] = "diverged"
+        if r.returncode != 0:
+            result["push_state"] = "no_origin"
+        else:
+            parts = (r.stdout or "").strip().split()
+            if len(parts) == 2:
+                behind = int(parts[0])
+                ahead = int(parts[1])
+                result["ahead"] = ahead
+                result["behind"] = behind
+                if ahead == 0 and behind == 0:
+                    result["push_state"] = "pushed"
+                elif ahead > 0 and behind == 0:
+                    result["push_state"] = "ahead"
+                elif ahead == 0 and behind > 0:
+                    result["push_state"] = "behind"
+                else:
+                    result["push_state"] = "diverged"
     # PR info + base — read from .pbg/state.json (cheaper than gh API)
     try:
         state = _load_work_state(ws_root)

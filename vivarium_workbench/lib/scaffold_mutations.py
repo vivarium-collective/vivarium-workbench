@@ -182,11 +182,17 @@ def iset_clone(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
 
 
 def delete_investigation(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
-    """POST /api/investigation-delete — remove an investigation directory (pure rmtree).
+    """POST /api/investigation-delete — remove an investigation directory.
 
-    Extracted from the ``action`` closure in ``server._post_investigation_delete``.
-    Returns (response_dict, status_code).  Performs validation + file deletion;
-    NO git — the git commit is not yet wired under the FastAPI route.
+    Resolves the target under ``investigations/<name>/`` ONLY. Previously it
+    used ``study_spec.study_dir`` (which prefers ``studies/`` and only falls
+    back to ``investigations/``), so "delete investigation foo" would delete a
+    *study* named ``foo`` when one existed — a silent data-loss bug (issue
+    #1618, bug 11). Studies are deleted through :func:`delete_study` instead.
+
+    Returns (response_dict, status_code). Performs validation + file deletion;
+    NO git — the git commit is not yet wired under the FastAPI route (same as
+    the sibling create/clone routes).
 
     Body:
         name / study / investigation: the investigation slug (any alias accepted).
@@ -198,15 +204,65 @@ def delete_investigation(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, in
     """
     import shutil
 
+    from vivarium_workbench.lib.path_safety import plain_name
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+
     name = _extract_name(body)
     if not name:
         return {"error": "name is required"}, 400
+    name = plain_name(name, "investigation name")
 
-    from vivarium_workbench.lib import study_spec as _study_spec
-
-    inv_dir = _study_spec.study_dir(ws_root, name)
+    # Resolve under investigations/ ONLY — never studies/, so a same-named study
+    # can never be the target.
+    inv_dir = WorkspacePaths.load(ws_root).investigations / name
     if not inv_dir.is_dir():
         return {"error": f"investigation '{name}' not found"}, 404
 
     shutil.rmtree(inv_dir)
+    return {"ok": True, "name": name}, 200
+
+
+def delete_study(ws_root: Path, body: dict[str, Any]) -> "tuple[dict, int]":
+    """POST /api/study-delete — remove a study directory.
+
+    Resolves the target as a STUDY (``study_spec.study_dir``: studies/ first,
+    nested ``investigations/<inv>/studies/<slug>/`` aware) and refuses a dir
+    that is actually an investigation (carries ``investigation.yaml``) — that is
+    :func:`delete_investigation`'s job. Split out from the old overloaded
+    ``investigation-delete`` so the study page's Delete button no longer relies
+    on the studies-first resolution of an investigation route (issue #1618,
+    bug 11).
+
+    Body:
+        name / study / investigation: the study slug (any alias accepted).
+
+    Status codes:
+        400 — name missing.
+        404 — study directory not found.
+        409 — resolved target is an investigation (use investigation-delete).
+        200 — deletion succeeded.
+    """
+    import shutil
+
+    from vivarium_workbench.lib import study_spec as _study_spec
+
+    name = _extract_name(body)
+    if not name:
+        return {"error": "name is required"}, 400
+
+    # study_dir applies plain_name internally and prefers studies/ over
+    # investigations/, so a name that is both a study and an investigation
+    # resolves to the study — exactly what a study-delete should target.
+    sdir = _study_spec.study_dir(ws_root, name)
+    if not sdir.is_dir():
+        return {"error": f"study '{name}' not found"}, 404
+    if (sdir / "investigation.yaml").is_file():
+        # study_dir fell back to an investigations/<name>/ dir — it's an
+        # investigation, not a study. Refuse rather than delete the wrong thing.
+        return {
+            "error": f"'{name}' is an investigation, not a study — "
+                     "use investigation-delete",
+        }, 409
+
+    shutil.rmtree(sdir)
     return {"ok": True, "name": name}, 200

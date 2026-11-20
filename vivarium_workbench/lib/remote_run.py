@@ -1,34 +1,25 @@
-"""Remote-run orchestration for the vivarium-dashboard CLI.
+"""Workspace git helpers for a remote run, plus the deployment-run dispatcher.
 
 Provides:
 - ``git_pip_url(ws_root)`` — validates the git working tree is clean + pushed
   and returns a ``git+<origin>@<sha>`` pip-installable URL.
-- ``run_remote(ws_root, composite_id, ...)`` — export the composite to a .pbg,
-  submit to sms-api, poll until completion, and land results.zip.
-
-The dashboard CLI's ``run-remote`` subcommand calls ``run_remote``.
+- ``remote_dispatch_preflight(ws_root)`` — the same guards, as a structured, non-raising answer.
+- ``workspace_pinned_deps(ws_root)`` — the workspace's framework pins, as pip specs.
+- ``run_remote(ws_root, composite_id, ...)`` — the detached runner's deployment run: the backend
+  ``backends.select`` picks (else the ``unrouted`` one) runs the composite and returns its results
+  archive (``RunFacet.run_composite``, step P2 Runs b; the SMS run itself is the plugin's
+  ``deployment_run``).
 """
 from __future__ import annotations
 
-import json
 import subprocess
-import tempfile
-import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
-
-from vivarium_workbench.lib.pbg_export import export_composite_pbg  # noqa: E402 (module-level for patch)
-
-if TYPE_CHECKING:
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient
 
 # Default poll interval in seconds
 _DEFAULT_POLL_INTERVAL = 10.0
 # Hardening (external users): bound the status-poll loop so a stuck remote run can't
-# hang the poller forever, and tolerate a few *consecutive* transient errors so a
-# single network blip doesn't fail a multi-hour run. Env-tunable for slow links.
+# hang the poller forever. Env-tunable for slow links.
 _DEFAULT_POLL_TIMEOUT = 7200.0  # 2 h wall-clock ceiling; <= 0 disables the deadline
-_MAX_CONSECUTIVE_POLL_ERRORS = 5
 
 
 # Paths the workbench itself (re)writes whenever it serves a workspace or runs something in it — the `.viv-build.json`
@@ -126,75 +117,6 @@ def git_pip_url(ws_root: "Path | str") -> str:
     return f"git+{origin_url}@{sha}"
 
 
-#: The site-named environment ``POST /viva/v1/composites`` accepts for a document run (viva-core
-#: ``NAMED_ENVIRONMENTS``): one container on the core runtime image. ``deployment-default`` is only
-#: the label a legacy submission is *recorded* under, not a name the route accepts.
-DEFAULT_BACKEND_ENVIRONMENT = "runtime"
-
-
-def backend_environment() -> dict:
-    """``environment`` for a /viva/v1 document run: ``VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT``
-    is a site-named environment (``runtime``) or ``id:<environment id>``; default ``runtime``."""
-    from vivarium_workbench.lib.env_compat import get_env
-
-    raw = (get_env("BACKEND_ENVIRONMENT", DEFAULT_BACKEND_ENVIRONMENT) or DEFAULT_BACKEND_ENVIRONMENT).strip()
-    return {"id": raw[3:]} if raw.startswith("id:") else {"name": raw}
-
-
-def viva_v1_document_options(
-    environment: dict, steps: int, extra_pip_deps: "list[str] | None", analysis_options: "dict | None",
-) -> dict:
-    """``execution.options`` for a document run. A named environment is one container: the
-    workspace code arrives as ``extra_pip_deps`` and ``analysis_options`` is refused by the
-    backend; an environment id is a simulator image that already holds the code."""
-    options: dict = {"interval_time": float(steps)}
-    if "name" in environment:
-        if extra_pip_deps:
-            options["extra_pip_deps"] = list(extra_pip_deps)
-    elif analysis_options:
-        options["analysis_options"] = analysis_options
-    return options
-
-
-# One batch-status read asks for this many simulation ids; a little past the run's row covers a simulation
-# created ahead of its row.
-_SIMULATION_LOOKUP_BATCH = 200
-_SIMULATION_LOOKUP_SLACK = 20
-
-
-def compose_simulation_id(client: "SmsApiClient", run: dict) -> int:
-    """The compose simulation a /viva/v1 document run became.
-
-    The run's ``job_id`` is ``compose:<n>``, but ``n`` is the ``compose_hpcrun`` row the run's job took, not the
-    simulation id the results route is keyed by: container builds take rows too, so the two drift apart (a run
-    whose job was ``compose:46`` was simulation 43) and the gap only grows. The backend has no route from one to
-    the other, so the simulation is found where its records are: the batch status read lists, for each
-    simulation id asked, its ``correlation_id`` (the run's own id) and ``database_id`` (that row). A simulation
-    is created with its row, so it is at or below ``n``: the read walks down from just above ``n`` in batches
-    until it finds it. A row is accepted only when BOTH agree with the run -- another run's results must never be
-    landed as this one's -- and nothing agreeing is an error, never a guess.
-    """
-    run_id = run.get("id")
-    job_id = str(run.get("job_id") or "")
-    kind, _, n = job_id.partition(":")
-    if not run_id or kind != "compose" or not n.isdigit():
-        raise RuntimeError(
-            f"run {run_id!r} has job_id {job_id!r}, not compose:<n>; its output has no "
-            "/viva/v1 download route the workbench knows (docs/backend-viva-v1.md)")
-    row_id = int(n)
-    top = row_id + _SIMULATION_LOOKUP_SLACK
-    while top >= 1:
-        ids = list(range(max(1, top - _SIMULATION_LOOKUP_BATCH + 1), top + 1))
-        for row in client.compose_status_batch(ids):
-            if row.get("correlation_id") == run_id and row.get("database_id") == row_id \
-                    and row.get("sim_id") is not None:
-                return int(row["sim_id"])
-        top = ids[0] - 1
-    raise RuntimeError(
-        f"the backend lists no compose simulation for run {run_id!r} (job {job_id}); its results cannot be "
-        "fetched without guessing which run is its own")
-
-
 def remote_dispatch_preflight(ws_root: "Path | str") -> dict:
     """Non-raising, structured counterpart to :func:`git_pip_url`'s guards.
 
@@ -254,201 +176,40 @@ def remote_dispatch_preflight(ws_root: "Path | str") -> dict:
 def run_remote(
     ws_root: "Path | str",
     composite_id: str,
-    client: "SmsApiClient | None" = None,
+    *,
     poll_interval: float = _DEFAULT_POLL_INTERVAL,
     dest: "Path | None" = None,
-    n_steps: int = 1,
+    n_steps: float = 1,
     overrides: "dict | None" = None,
     poll_timeout: float = _DEFAULT_POLL_TIMEOUT,
-    skip_preflight: bool = False,
-    expected_variant_count: "int | None" = None,
     analysis_options: "dict | None" = None,
     build_ref: "dict | None" = None,
     emit_paths: "list[str] | None" = None,
 ) -> Path:
-    """Export a composite, submit to sms-api, poll, and land results.tar.gz.
+    """Run a workspace composite on the deployment and return its results archive in *dest* (default
+    ``<ws_root>/.pbg/remote-results/``): a ``.zip`` of emitter history, or a ``.tar.gz`` the runner folds.
 
-    An operator who named compose-api (``serve --backend-base-url``) gets
-    :func:`remote_run_compose.run_composite` instead: the composite runs in the
-    environment compose-api's registry lists for the workspace, recording
-    ``emit_paths`` (when given) under its own emitter, and its results zip lands
-    in *dest*.
-
-    Parameters
-    ----------
-    ws_root:
-        Workspace root directory.
-    composite_id:
-        Composite spec id (e.g. ``"pbg_my_ws.composites.my_composite"``).
-    client:
-        ``SmsApiClient`` pointed at the sms-api tunnel.  If *None*, a default
-        client is constructed (``http://localhost:8080``).
-    poll_interval:
-        Seconds between status polls.
-    dest:
-        Directory for the landed ``results.tar.gz``.  Defaults to
-        ``<ws_root>/.pbg/remote-results/``.
-    analysis_options:
-        v2ecoli-shaped ``{scale: {name: params}}`` analyses to run server-side
-        (composite-auto-results Task 8 — mirrors the study path's
-        ``remote_run_views.remote_run_submit`` injection). Forwarded to
-        ``client.compose_submit``'s own ``analysis_options`` param.  Default
-        ``None`` keeps every pre-Task-8 caller unchanged.
-    poll_timeout:
-        Wall-clock ceiling (seconds) for the whole poll loop; raises
-        :exc:`TimeoutError` if the run hasn't reached a terminal state by then.
-        Pass ``<= 0`` to disable (wait indefinitely).  Defaults to 2 h.
-    skip_preflight:
-        Bypass the pre-spend preflight (:func:`preflight.preflight_composite_run`)
-        that validates the composite-id + overrides request LOCALLY before
-        dispatch. A preflight failure otherwise raises :exc:`PreflightError` and
-        aborts *before* any GovCloud spend. Only skip when the request has
-        already been validated.
-    expected_variant_count:
-        Forwarded to the preflight so a ``variants`` grid must expand to exactly
-        this many branches (e.g. 84 for Run-4 pathway-expression).
-
-    Returns
-    -------
-    Path
-        Path to the downloaded ``results.tar.gz``.
-    """
-    from vivarium_workbench.lib.sms_api_client import SmsApiClient as _SmsApiClient
-    from vivarium_workbench.lib.workspace_deps_views import _sms_api_base
+    The backend is the one :func:`backends.select` picks for ``ws_root`` (a provider's claim -- the session's own
+    build or the deployment's pin -- else the named backend); a deployment run that none claims (the opt-in compose
+    path) goes to the backend that answers unrouted requests (:func:`backends.unrouted`). With neither, a
+    ``RuntimeError``. ``analysis_options`` and ``build_ref`` are carried to the backend unread
+    (``RunFacet.run_composite``)."""
+    from vivarium_workbench.lib import backends
 
     ws_root = Path(ws_root).resolve()
-
-    # Only an operator who NAMED a backend (``serve --backend-base-url``) that runs
-    # documents via /viva/v1/composites takes that route; a caller-supplied client
-    # (CLI ``run-remote``, tests) and every other deployment keep /compose/v1.
-    from vivarium_workbench.lib.remote_pinned import uses_compose_dispatch, uses_viva_v1_dispatch
-
     if dest is None:
         dest = ws_root / ".pbg" / "remote-results"
-    if client is None and uses_compose_dispatch(ws_root):
-        from vivarium_workbench.lib import remote_run_compose
-
-        if analysis_options:
-            # compose-api runs the document only; there is no server-side analysis step to hand these to.
-            print(f"note: compose-api does not run declared analyses; not run: {', '.join(sorted(analysis_options))}",
-                  flush=True)
-        return remote_run_compose.run_composite(
-            ws_root, composite_id, dest=Path(dest), n_steps=n_steps, overrides=overrides, emit_paths=emit_paths,
-            poll_interval=poll_interval, poll_timeout=poll_timeout)
-    via_viva_v1 = client is None and uses_viva_v1_dispatch(ws_root)
-    if client is None:
-        client = _SmsApiClient(_sms_api_base())
-
-    dest = Path(dest)
-    dest.mkdir(parents=True, exist_ok=True)
-
-    # Resolve the pip URL for the workspace code, plus any workspace-pinned framework
-    # versions (§3.12) so the shared runner image doesn't float to latest PyPI.
-    #
-    # N3 / option C: on a pinned deployment (VIVARIUM_WORKBENCH_REMOTE_PINNED) the prod
-    # pod's /workspace is dirty-by-design — the workbench re-renders reports/ and touches
-    # workspace.yaml at runtime — so git_pip_url's clean-tree check can never hold there.
-    # Instead derive the commit from sms-api's already-resolved *built* simulator (the same
-    # resolver the pinned "Run on remote" study card uses) and ship git+<repo>@<commit>: no
-    # local git, pinned by construction to the commit sms-api built + keyed its ParCa cache
-    # by. Local dev (unpinned) keeps the clean+pushed git_pip_url path.
-    from vivarium_workbench.lib import remote_pinned
-    cfg = remote_pinned.pinned_config()
-    if build_ref and build_ref.get("commit") and build_ref.get("repo_url"):
-        # Explicit build target: a Cloud Run against a SELECTED registered build
-        # (the Environment picker's chosen build). Run against THAT build's
-        # already-pushed commit — NOT the local working tree — so no clean/pushed
-        # check on ws_root (git_pip_url is skipped entirely). This is what lets a
-        # Cloud run fire without first pushing session-latest: build N's code is
-        # already on GitHub at build_ref['commit'] and already built by sms-api.
-        repo = str(build_ref["repo_url"]).strip().rstrip("/")
-        if repo.endswith(".git"):
-            repo = repo[: -len(".git")]
-        pip_url = f"git+{repo}.git@{build_ref['commit']}"
-    elif cfg is not None:
-        resolved = remote_pinned.resolve_pinned_build(client, cfg.repo_url, cfg.branch)
-        repo = cfg.repo_url.strip().rstrip("/")
-        if repo.endswith(".git"):
-            repo = repo[: -len(".git")]
-        pip_url = f"git+{repo}.git@{resolved['commit']}"
-    else:
-        pip_url = git_pip_url(ws_root)
-    extra_pip_deps = [pip_url, *workspace_pinned_deps(ws_root)]
-
-    # Pre-spend preflight: validate the composite-id + overrides request LOCALLY
-    # before committing any GovCloud spend. Turns ~15 silent wrong-but-successful
-    # failure modes (a dropped process swap, a typo'd emit path, an empty variant
-    # grid, an incoherent step count) into a loud, aggregated local error. A
-    # failure raises PreflightError and aborts here — the dispatch never happens.
-    if not skip_preflight:
-        from vivarium_workbench.lib.preflight import preflight_composite_run
-
-        report = preflight_composite_run(
-            ws_root, composite_id, overrides,
-            n_steps=n_steps,
-            expected_variant_count=expected_variant_count,
-        )
-        print(report.summary())
-
-    # Export composite to a temporary .pbg file
-    with tempfile.NamedTemporaryFile(suffix=".pbg", delete=False) as tmp:
-        pbg_path = Path(tmp.name)
-
-    try:
-        export_composite_pbg(ws_root, composite_id, pbg_path, overrides=overrides)
-        pbg_bytes = pbg_path.read_bytes()
-    finally:
-        try:
-            pbg_path.unlink()
-        except OSError:
-            pass
-
-    # Submit. sms-api's `interval_time` query param IS the step count — it sets
-    # `end_time_point`, which the runner passes as `run_pbg.py -n <steps>` (§3.5).
-    # sms-api hard-rejects `interval_time` outside 0..1000 with a 400
-    # (compose.py:121-122), so clamp here at the boundary that owns the contract
-    # rather than trusting every caller. Local runs never reach this path, so
-    # their step counts stay unbounded.
-    steps = max(0, min(int(n_steps), 1000))
-    print(f"Submitting composite '{composite_id}' to sms-api ({steps} steps)…")
-    # analysis_options is added to the call only when present, so a client test
-    # double built against the pre-Task-8 compose_submit(pbg_bytes,
-    # extra_pip_deps=, interval_time=) signature (no **kwargs catch-all) keeps
-    # working unchanged when there's nothing to inject.
-    if via_viva_v1:
-        run = client.create_composite_run(
-            environment=backend_environment(),
-            document=json.loads(pbg_bytes),
-            execution={"options": viva_v1_document_options(
-                backend_environment(), steps, extra_pip_deps, analysis_options)},
-            label=f"workbench: {composite_id}",
-        )
-        sim_id = run["id"]
-        print(f"Submitted to /viva/v1/composites. Run id: {sim_id}")
-        status_of = client.composite_run_status
-    else:
-        compose_kwargs: dict = dict(extra_pip_deps=extra_pip_deps, interval_time=float(steps))
-        if analysis_options:
-            compose_kwargs["analysis_options"] = analysis_options
-        sim_id = client.compose_submit(pbg_bytes, **compose_kwargs)
-        print(f"Submitted. Simulation id: {sim_id}")
-        status_of = None
-
-    # Poll until terminal state — bounded by a wall-clock deadline and tolerant of a
-    # few consecutive transient errors (see _poll_until_terminal).
-    status, status_data = _poll_until_terminal(
-        client, sim_id, poll_interval, poll_timeout, **({"status_of": status_of} if status_of else {}))
-
-    if status != "completed":
-        raise RuntimeError(
-            f"Remote run {sim_id} ended with status '{status}': {status_data}"
-        )
-
-    # Download results (results.tar.gz — T5b). A /viva/v1 run's output is the compose
-    # simulation it became (``job_id`` = ``compose:<n>``).
-    results_path = client.download_compose_results(compose_simulation_id(client, run) if via_viva_v1 else sim_id, dest)
-    print(f"Results landed at: {results_path}")
-    return results_path
+    chosen = backends.select(ws_root)
+    facet: "backends.RunFacet | backends.UnroutedFacet | None" = chosen.runs if chosen is not None else None
+    if facet is None:
+        ub = backends.unrouted()  # a deployment run no backend claimed (step P2, Runs a1's facet)
+        facet = ub.unrouted if ub is not None else None
+    if facet is None:
+        raise RuntimeError("this run targets a deployment, but no remote backend is named (serve --backend-base-url) "
+                           "or provided by an installed backend plugin")
+    return facet.run_composite(ws_root, composite_id, dest=Path(dest), n_steps=n_steps, overrides=overrides,
+                               emit_paths=emit_paths, analysis_options=analysis_options, build_ref=build_ref,
+                               poll_interval=poll_interval, poll_timeout=poll_timeout)
 
 
 # The process-bigraph framework packages a workspace pins in its own uv.lock. We
@@ -492,68 +253,6 @@ def workspace_pinned_deps(ws_root: "Path | str") -> list[str]:
         elif pkg.get("version"):
             deps.append(f"{name}=={pkg['version']}")
     return deps
-
-
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
-
-# Terminal compose statuses that end the poll loop.
-_TERMINAL_STATUSES = ("completed", "failed", "error", "cancelled")
-
-
-def _poll_until_terminal(
-    client: "SmsApiClient",
-    sim_id: "int | str",
-    poll_interval: float,
-    poll_timeout: float,
-    status_of: "Callable[[int | str], dict] | None" = None,
-) -> "tuple[str, dict]":
-    """Poll ``client.compose_status(sim_id)`` until a terminal status.
-
-    Hardened for external users: bounded by ``poll_timeout`` (wall-clock ceiling;
-    ``<= 0`` disables) and tolerant of up to ``_MAX_CONSECUTIVE_POLL_ERRORS``
-    *consecutive* transient :class:`SmsApiError`s, so one network blip doesn't fail
-    an otherwise-healthy multi-hour run and a stuck run can't hang the poller forever.
-
-    Returns ``(status, status_data)`` for a terminal status. Raises
-    :exc:`TimeoutError` on deadline and :exc:`RuntimeError` on persistent polling
-    failure.
-    """
-    from vivarium_workbench.lib.sms_api_client import SmsApiError
-
-    deadline = time.monotonic() + poll_timeout if poll_timeout and poll_timeout > 0 else None
-    consecutive_errors = 0
-    while True:
-        try:
-            status_data = (status_of or client.compose_status)(sim_id)
-            consecutive_errors = 0
-        except SmsApiError as exc:
-            consecutive_errors += 1
-            if consecutive_errors > _MAX_CONSECUTIVE_POLL_ERRORS:
-                raise RuntimeError(
-                    f"Remote run {sim_id}: sms-api status polling failed "
-                    f"{consecutive_errors} times in a row (last error: {exc}). "
-                    f"Is the sms-api endpoint ({client.base_url}) still reachable?"
-                ) from exc
-            print(
-                f"  status: (transient poll error "
-                f"{consecutive_errors}/{_MAX_CONSECUTIVE_POLL_ERRORS}: {exc}; retrying)"
-            )
-            time.sleep(poll_interval)
-            continue
-
-        status = status_data.get("status", "unknown")
-        print(f"  status: {status}")
-        if status in _TERMINAL_STATUSES:
-            return status, status_data
-        if deadline is not None and time.monotonic() >= deadline:
-            raise TimeoutError(
-                f"Remote run {sim_id} did not reach a terminal state within "
-                f"{poll_timeout:.0f}s (last status: '{status}'). The run may still be "
-                f"executing on the deployment — check sms-api directly before retrying."
-            )
-        time.sleep(poll_interval)
 
 
 def _git(cwd: Path, *args: str) -> str:

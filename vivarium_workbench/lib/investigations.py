@@ -1111,6 +1111,8 @@ def gather_results(spec: dict, db_path: Path) -> dict:
         for row in meta_rows:
             try:
                 params = json.loads(row["params_json"] or "{}")
+                if isinstance(params, dict):
+                    params.pop("remote", None)  # where a remote run went: internal, not a result input
             except json.JSONDecodeError:
                 params = {}
             run_meta[row["run_id"]] = {
@@ -1268,6 +1270,8 @@ def gather_emitter_outputs(db_path: Path, *, run_id: str | None = None,
         for r in meta_rows:
             try:
                 params = json.loads(r["params_json"] or "{}")
+                if isinstance(params, dict):
+                    params.pop("remote", None)  # where a remote run went: internal, not a result input
             except json.JSONDecodeError:
                 params = {}
             run_meta[r["run_id"]] = {
@@ -2219,6 +2223,49 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
                 pass
         paths.append(target)
     return paths
+
+
+def render_local_viz_html(study_dir, viz_spec: dict, *,
+                          core_registry: "dict | None" = None,
+                          inputs_by_class: "dict | None" = None,
+                          build_and_run=None) -> "str | None":
+    """Render ONE class-dispatch (``local:``) visualization to an HTML string
+    IN MEMORY — nothing is written to disk.
+
+    Mirrors the class branch of :func:`render_visualizations` (build the viz
+    composite, run it once via the env-worker ``build_and_run`` hook) but RETURNS
+    the HTML instead of committing it to ``viz/<name>.html`` and stamping meta.
+    This is the self-contained report's on-demand path: a declared ``local:`` viz
+    that was never materialized on disk (no committed ``viz/*.html``) and has no
+    run ``viz.json`` is still rendered into the report, so a declared
+    visualization is never silently dropped.
+
+    ``gathered`` is read from ``<study_dir>/runs.db`` when present (empty when the
+    study has no runs — self-loading viz, e.g. ones that read a committed
+    ``results/*.json``, render fine with no runs). Returns the HTML on success, or
+    ``None`` when the viz is a static image (handled by the report's image-embed
+    path instead), cannot be dispatched / is not registered, the render raises, or
+    the render produces empty or error-stub output. Fully guarded — never raises.
+    """
+    if build_and_run is None or _is_static_image_viz(viz_spec):
+        return None
+    try:
+        gathered = gather_emitter_outputs(Path(study_dir) / "runs.db")
+    except Exception:  # noqa: BLE001 — no/unreadable runs.db → render with no runs
+        gathered = {"by_sim": {}}
+    try:
+        doc = build_viz_composite(viz_spec, gathered, core_registry or {},
+                                  inputs_by_class=inputs_by_class)
+        html = build_and_run(doc, core_registry)
+    except Exception:  # noqa: BLE001 — a render failure is "not rendered", not a crash
+        return None
+    html = (html or "").strip()
+    if not html:
+        return None
+    # An error stub (``<p ...>Failed to render ...``) is not a real figure.
+    if html[:400].lstrip().startswith("<p") and "Failed to render" in html[:400]:
+        return None
+    return html
 
 
 def _viz_error_stub(name, e) -> str:

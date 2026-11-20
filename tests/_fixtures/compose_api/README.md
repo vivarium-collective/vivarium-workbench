@@ -10,6 +10,7 @@ workbench against what compose-api and its runners actually produce.
 | `results_4706_no_emitter.zip` | the `.pber` of production simulation 4706, a pilot run whose document had no emitter: `{}` | its one `.pber` member copied byte for byte from `GET /results/simulation/results/file?simulation_id=4706` |
 | `viva-pde-particle.manifest.json` | the environment's interface manifest | `GET https://compose.cam.uchc.edu/registry/environments/viva-pde-particle/manifest` (0.7.33) |
 | `environments.json`, `entries.json` | the registry's environments and entries | `GET /registry/environments`, `GET /registry/entries` on the same deployment |
+| `environments_0.7.76.json`, `entries_0.7.76.json` | the same two lists as production served them on 2026-10-30 (0.7.76): 62 entries, 4 environments (two of them mash-ups), and `viva-basic-processes`, an entry at level `tested`, pinned by commit (its `source` links `…/tree/<commit>`), that no environment bundles | `GET https://compose.cam.uchc.edu/registry/environments`, `GET https://compose.cam.uchc.edu/registry/entries`, saved byte for byte. The inferred-environment tests read these; the older pair is kept for the tests written against it |
 
 `../../_contracts/compose_api_openapi_0.7.72.json` is the `openapi.json` shipped in the locked `compose-api-client`
 (PyPI `compose-api-client` 0.7.72; production's 0.7.76 serves the same spec apart from `info.version` and compose-api's

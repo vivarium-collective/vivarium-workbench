@@ -27,6 +27,7 @@ from vivarium_workbench.lib.investigation_members import (
     investigation_member_slugs,
     member_slug,
 )
+from vivarium_workbench.lib.cycle_cache import cached_run_cycle
 from vivarium_workbench.lib.single_study_report import _load_study_spec
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
@@ -49,6 +50,11 @@ _STUDY_KEEP = (
     # state transfer (handoff.emits/receives), and the planned-scaffold analogs
     # (honest_caveat / proposed_controls) used where a realized study has none.
     "primary_limitation", "handoff", "honest_caveat", "proposed_controls",
+    # the two-axis conclusion verdicts (biological_validation / explanatory_gain)
+    # the study page + single_study_report render from the spec directly; carried
+    # here too so the investigation synthesis/template layer can read them instead
+    # of silently dropping an engine-authored field (architecture-review #6).
+    "conclusion_verdicts",
 )
 
 # 5-state study verdict (mirrors viva_superpowers roll-up): each maps to a glyph
@@ -405,6 +411,103 @@ def _embed_native_gallery_panels(ws_root, slug: str, budget: list, skip_names: s
         if interactive:
             rec["interactive"] = True
         out.append(rec)
+    return out
+
+
+def _placard_unaccounted_viz(viz_list, figs: list) -> list:
+    """Completeness backstop: return a VISIBLE ``skipped`` placard for every
+    declared visualization that is not already accounted for in ``figs`` — either
+    embedded (an ``image:`` data-URI, a committed ``viz/*.html``, a run-gallery
+    panel, or an on-demand ``local:`` render) or already placarded.
+
+    A declared viz represented by nothing — e.g. a ``command``/recipe viz whose
+    chart was never committed, or an ``image:`` viz whose file is missing — would
+    otherwise be silently dropped from the report. This closes that last gap so a
+    declared figure is NEVER silently dropped, whatever its address scheme. Matched
+    on the normalized display name (the HTML / gallery embedders humanize stems).
+    """
+    out: list = []
+    accounted = {_norm_fig_name(f.get("name")) for f in figs
+                 if isinstance(f, dict) and f.get("name")}
+    for v in (viz_list or []):
+        if not isinstance(v, dict):
+            continue
+        vname = v.get("name")
+        if not vname or _norm_fig_name(vname) in accounted:
+            continue
+        out.append({"name": vname, "skipped": True,
+                    "reason": "declared visualization is not present in the report "
+                              "(no committed figure, no run output, no live render)"})
+        accounted.add(_norm_fig_name(vname))
+    return out
+
+
+def _embed_local_viz_ondemand(study_dir: Path, viz_list, budget: list,
+                              skip_names: set, hooks) -> list:
+    """Render any declared ``local:`` (class-dispatch) visualization that was NOT
+    already materialized — neither a committed ``viz/*.html`` (``_embed_html_figures``)
+    nor a run ``viz.json`` gallery panel (``_embed_native_gallery_panels``) — by
+    dispatching its viz class IN MEMORY, so a declared visualization is ALWAYS in
+    the self-contained report instead of being silently dropped.
+
+    This closes the gap where a study declares a ``local:`` viz but never committed
+    its rendered HTML and has no run: such a figure used to vanish from the report
+    with no trace. ``hooks`` is ``(inputs_by_class, build_and_run)`` from
+    :func:`vivarium_workbench.lib.viz_render.viz_render_hooks`; when the env worker
+    is unavailable it is ``(None, None)`` and this is a no-op. ``skip_names`` holds
+    the display names already embedded through another path (matched on the
+    normalized name, since the other embedders humanize stems). Respects the shared
+    inline-size budget. A declared viz that still cannot be rendered is recorded as
+    a VISIBLE ``skipped`` placard (fail-loud) — never a silent drop. Fully guarded.
+    """
+    out: list = []
+    if not viz_list:
+        return out
+    inputs_by_class, build_and_run = hooks
+    if build_and_run is None:
+        return out
+    try:
+        from vivarium_workbench.lib.investigations import render_local_viz_html
+    except Exception:  # noqa: BLE001
+        return out
+    norm_skip = {_norm_fig_name(n) for n in skip_names}
+    for v in (viz_list or []):
+        if not isinstance(v, dict):
+            continue
+        addr = str(v.get("address") or "")
+        name = v.get("name") or ""
+        if not addr.startswith("local:"):
+            continue  # static image: / command viz handled by the other embedders
+        if _norm_fig_name(name) in norm_skip:
+            continue  # already embedded via committed HTML or a run gallery
+        try:
+            html = render_local_viz_html(
+                study_dir, v, inputs_by_class=inputs_by_class, build_and_run=build_and_run)
+        except Exception:  # noqa: BLE001 — never let one viz break the report
+            html = None
+        if not html:
+            out.append({"name": name, "skipped": True,
+                        "reason": "declared local: visualization could not be rendered "
+                                  "(no committed viz/*.html, no run, and live render "
+                                  "produced nothing)"})
+            continue
+        frag, interactive = html, False
+        try:
+            prepared = _prepare_interactive_figure(html)
+            if prepared is not None:
+                frag, interactive = prepared, True
+        except Exception:  # noqa: BLE001
+            frag, interactive = html, False
+        fsize = len(frag.encode("utf-8"))
+        if fsize > _HTML_PER_FILE_MAX or budget[0] + fsize > _IMG_TOTAL_MAX:
+            out.append({"name": name, "skipped": True, "reason": "too large to inline"})
+            continue
+        budget[0] += fsize
+        rec = {"name": name, "html": frag}
+        if interactive:
+            rec["interactive"] = True
+        out.append(rec)
+        norm_skip.add(_norm_fig_name(name))
     return out
 
 
@@ -987,7 +1090,7 @@ def _build_discovery(ws_root, inv_slug: str) -> "dict | None":
         from discovery_engine import discover
         from discovery_engine.projection import engine as de
         _, inv_spec, studies = discover.load_cycle_inputs(ws_root, inv_slug)
-        cyc = discover.run_cycle(inv_spec, studies)
+        cyc = cached_run_cycle(discover, inv_spec, studies)
         clo = de.closure(cyc, inv_spec)
         na = de.next_action(cyc, inv_spec)
         opps = de.opportunities(cyc, inv_spec)
@@ -1055,7 +1158,7 @@ def build_generation_requests(ws_root, inv_slug: str) -> "dict | None":
         return None
     try:
         _, inv_spec, studies = discover.load_cycle_inputs(ws_root, inv_slug)
-        cyc = discover.run_cycle(inv_spec, studies)
+        cyc = cached_run_cycle(discover, inv_spec, studies)
         opps = de.opportunities(cyc, inv_spec)
         gates = (inv_spec.get("discovery") or {}).get("gates") if isinstance(inv_spec, dict) else None
         gc = (GateConfig(default=gates.get("default"), by_kind=gates.get("by_kind") or {})
@@ -1148,6 +1251,14 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
 
     studies = []
     img_budget = [0]
+    # Env-worker hooks for rendering a declared ``local:`` viz on demand (see
+    # `_embed_local_viz_ondemand`), resolved ONCE for the whole investigation.
+    # `(None, None)` when the worker is unavailable → the on-demand pass no-ops.
+    try:
+        from vivarium_workbench.lib.viz_render import viz_render_hooks
+        _viz_hooks = viz_render_hooks(ws_root)
+    except Exception:  # noqa: BLE001
+        _viz_hooks = (None, None)
     # Read the member list via the shared helper so BOTH the pre-migration
     # `studies:` key and the post-migration `members:` key render — otherwise a
     # members-only investigation reports zero studies (the generated report's
@@ -1226,6 +1337,17 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         # embedded above (by display name).
         embedded_names = {f.get("name") for f in figs if isinstance(f, dict)}
         figs.extend(_embed_native_gallery_panels(ws_root, real_slug, img_budget, embedded_names))
+        # On-demand render of any declared `local:` viz still unmaterialized (no
+        # committed viz/*.html above, no run viz.json gallery) — rendered in memory
+        # via the viz class so a declared visualization is ALWAYS in the report
+        # rather than silently dropped. Dedup on names already embedded (success
+        # only, so a prior SKIP placard can still be replaced by a real render).
+        rendered_names = {f.get("name") for f in figs
+                          if isinstance(f, dict) and not f.get("skipped")}
+        figs.extend(_embed_local_viz_ondemand(
+            study_dir, spec.get("visualizations"), img_budget, rendered_names, _viz_hooks))
+        # Completeness backstop: every DECLARED visualization must be ACCOUNTED FOR.
+        figs.extend(_placard_unaccounted_viz(spec.get("visualizations"), figs))
         # Carry the declared `display:` intent (primary / mechanism) from
         # `visualizations[]` onto each embedded figure, so the report's figure-first
         # card can show the decisive figure (+ mechanism) and collapse the rest into

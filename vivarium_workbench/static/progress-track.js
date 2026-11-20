@@ -33,7 +33,7 @@
 //
 //    Poll on an interval and re-call render() each tick; the signature diff keeps
 //    it cheap. Not wired this iteration — documented so the next adopter is a
-//    drop-in. (Finer remote substages need sms-api to forward the Batch substate;
+//    drop-in. (Finer remote substages need the backend to forward the Batch substate;
 //    see plan 7 WS-3c.)
 (function (global) {
   'use strict';

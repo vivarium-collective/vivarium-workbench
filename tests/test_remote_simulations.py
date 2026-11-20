@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import pytest
 
-import vivarium_workbench.lib.remote_simulations as rs
+import vivarium_workbench_sms.remote_simulations as rs
+
+#: Every test here exercises the SMS plugin (step P3, K2c): the core-only run ignores this module.
+pytestmark = pytest.mark.plugin
 
 
 # ---- fake sms-api ---------------------------------------------------------
@@ -47,7 +50,7 @@ class _FakeClient:
 
 @pytest.fixture
 def _stub(monkeypatch):
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.SmsApiClient", _FakeClient)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.SmsApiClient", _FakeClient)
     monkeypatch.setattr("vivarium_workbench.lib.git_status.remote_repo_url",
                         lambda ws: "https://github.com/CovertLabEcoli/sms-ecoli")
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT", "govcloud-test")
@@ -68,7 +71,7 @@ def test_local_workspace_lists_repo_scoped_remote_runs(_stub, tmp_path):
 
 
 def test_no_repo_resolvable_returns_empty(monkeypatch, tmp_path):
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.SmsApiClient", _FakeClient)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.SmsApiClient", _FakeClient)
     monkeypatch.setattr("vivarium_workbench.lib.git_status.remote_repo_url", lambda ws: None)
     assert rs.list_remote_simulations(tmp_path) == []
 
@@ -77,7 +80,7 @@ def test_unreachable_sms_api_returns_empty(monkeypatch, tmp_path):
     class _Boom:
         def __init__(self, *a, **k): pass
         def list_simulators(self): raise RuntimeError("tunnel down")
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.SmsApiClient", _Boom)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.SmsApiClient", _Boom)
     monkeypatch.setattr("vivarium_workbench.lib.git_status.remote_repo_url",
                         lambda ws: "https://github.com/CovertLabEcoli/sms-ecoli")
     assert rs.list_remote_simulations(tmp_path) == []

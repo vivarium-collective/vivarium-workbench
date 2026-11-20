@@ -1,0 +1,158 @@
+{
+ "openapi_schemas": {
+  "BuildRemoteRequest": {
+   "additionalProperties": true,
+   "description": "POST /api/source/build-remote request body — ``{\"repo\", \"branch\"}``.\n\nRegisters a repo+branch HEAD as an sms-api build. Empty repo/branch are\nrejected with HTTP 400 by the route's lib builder.",
+   "properties": {
+    "branch": {
+     "default": "",
+     "title": "Branch",
+     "type": "string"
+    },
+    "repo": {
+     "default": "",
+     "title": "Repo",
+     "type": "string"
+    }
+   },
+   "title": "BuildRemoteRequest",
+   "type": "object"
+  },
+  "BuildRemoteResponse": {
+   "additionalProperties": true,
+   "description": "200-path payload for ``POST /api/source/build-remote``.\n\n``{\"ok\": True, \"simulator_id\": <id|null>, \"repo\", \"branch\", \"commit\"}``.\nThe non-200 error paths (``{\"error\": ...}``, HTTP 400/502) are returned via\n``JSONResponse``, not this model.\n\nSource: ``vivarium_workbench_sms.source_build_views.build_remote``.",
+   "properties": {
+    "branch": {
+     "title": "Branch",
+     "type": "string"
+    },
+    "commit": {
+     "title": "Commit",
+     "type": "string"
+    },
+    "ok": {
+     "default": true,
+     "title": "Ok",
+     "type": "boolean"
+    },
+    "repo": {
+     "title": "Repo",
+     "type": "string"
+    },
+    "simulator_id": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "title": "Simulator Id"
+    }
+   },
+   "required": [
+    "repo",
+    "branch",
+    "commit"
+   ],
+   "title": "BuildRemoteResponse",
+   "type": "object"
+  },
+  "RemoteRunStartRequest": {
+   "additionalProperties": true,
+   "description": "POST /api/remote-run-start request body.\n\n``{\"study\", \"num_generations\"?, \"num_seeds\"?, \"run_parca\"?}`` — submits a\nremote sms-api pipeline job for the study.  An empty/missing ``study`` is\nrejected with HTTP 400 by the route's lib builder.",
+   "properties": {
+    "num_generations": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "title": "Num Generations"
+    },
+    "num_seeds": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "title": "Num Seeds"
+    },
+    "run_parca": {
+     "anyOf": [
+      {
+       "type": "boolean"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "title": "Run Parca"
+    },
+    "study": {
+     "default": "",
+     "title": "Study",
+     "type": "string"
+    }
+   },
+   "title": "RemoteRunStartRequest",
+   "type": "object"
+  },
+  "RemoteRunStartResponse": {
+   "additionalProperties": true,
+   "description": "202-path payload for ``POST /api/remote-run-start`` — ``{\"job_id\": <id>}``.\n\nThe non-202 error paths (``{\"error\": ...}``, HTTP 401/400/409/404) are\nreturned via ``JSONResponse``, not this model.\n\nSource: ``vivarium_workbench_sms.remote_pipeline_views.remote_run_start``.",
+   "properties": {
+    "job_id": {
+     "title": "Job Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "job_id"
+   ],
+   "title": "RemoteRunStartResponse",
+   "type": "object"
+  },
+  "SourceBuilds": {
+   "additionalProperties": true,
+   "description": "``GET /api/source/builds`` payload (vivarium_workbench_sms.source_build_views.build_source_builds).\n\nBest-effort remote build list: ``{builds: [...], error: str|null}``.  Always\nHTTP 200 — ``builds`` is empty and ``error`` carries a reason when the\nsms-api is unreachable.\n\nPure pass-through (``extra=\"allow\"``, no declared fields) so build-entry\nkeys (simulator_id, repo, branch, commit, label, …) survive verbatim.\n\nSource: ``vivarium_workbench_sms.source_build_views.build_source_builds`` (the SMS provider's route).",
+   "properties": {},
+   "title": "SourceBuilds",
+   "type": "object"
+  },
+  "SwitchBuildRequest": {
+   "additionalProperties": true,
+   "description": "POST /api/source/switch-build request body — ``{\"simulator_id\"}``.\n\nMaterializes a build's workspace (cached) + re-points in-process. A missing\n``simulator_id`` is rejected with HTTP 400 by the route's lib builder.",
+   "properties": {
+    "simulator_id": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "title": "Simulator Id"
+    }
+   },
+   "title": "SwitchBuildRequest",
+   "type": "object"
+  }
+ },
+ "ts_blocks": [
+  "export interface BuildRemoteResponse {\n  ok: boolean;\n  simulator_id: number | null;\n  repo: string;\n  branch: string;\n  commit: string;\n}",
+  "export interface RemoteRunJob {\n  job_id: string;\n  study: string;\n  status: RemoteJobStatus;\n  steps: RemoteRunStep[];\n  run_id: string | null;\n  simulation_id: number | null;\n  error: string | null;\n  started_at: string | null;\n  completed_at: string | null;\n}",
+  "export interface RemoteRunStartResponse {\n  job_id: string;\n}",
+  "export interface RemoteRunStep {\n  name: string;\n  status: string;\n  message: string;\n}",
+  "export interface SourceBuilds {\n}",
+  "export type RemoteJobStatus = 'unknown' | 'waiting' | 'pending' | 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';"
+ ]
+}

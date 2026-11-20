@@ -189,7 +189,7 @@ def test_readonly_mode_drops_mutating_operations(tmp_path, monkeypatch):
     app = appmod.create_app()
     index = ai_tools.build_index(app)
     assert "/api/study-create" not in {e["path"] for e in index.values()}
-    allowed = appmod._READONLY_ALLOWED_MUTATIONS
+    allowed = app.state.readonly_allowed_mutations  # the core's + the providers' (step P2 Runs a2)
     assert all(e["path"] in allowed for e in index.values() if e["mutating"])
 
 

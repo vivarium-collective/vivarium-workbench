@@ -17,9 +17,12 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-import vivarium_workbench.lib.remote_simulations as rs
+import vivarium_workbench_sms.remote_simulations as rs
 from vivarium_workbench.api.app import create_app, get_workspace
 from vivarium_workbench.lib import simulations_index as si
+
+#: Every test here drives the SMS plugin's listing (step P3, K2c): the core-only run ignores this module.
+pytestmark = pytest.mark.plugin
 
 
 @pytest.fixture(autouse=True)
@@ -88,7 +91,7 @@ class _DownClient:
 def test_swr_never_blocks_on_a_slow_fetch(monkeypatch, tmp_path):
     _SlowClient.calls = 0
     _SlowClient.release.clear()
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.SmsApiClient", _SlowClient)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.SmsApiClient", _SlowClient)
 
     t0 = time.time()
     rows = rs.list_remote_simulations_swr(tmp_path)
@@ -109,7 +112,7 @@ def test_swr_never_blocks_on_a_slow_fetch(monkeypatch, tmp_path):
 
 def test_fresh_path_reports_unavailable_on_a_down_tunnel(monkeypatch, tmp_path):
     _DownClient.calls = 0
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.SmsApiClient", _DownClient)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.SmsApiClient", _DownClient)
 
     rows = rs.list_remote_simulations(tmp_path, use_cache=False)
     assert rows == []
@@ -121,7 +124,7 @@ def test_fresh_path_reports_unavailable_on_a_down_tunnel(monkeypatch, tmp_path):
 
 def test_negative_cache_prevents_repeated_probes(monkeypatch, tmp_path):
     _DownClient.calls = 0
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.SmsApiClient", _DownClient)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.SmsApiClient", _DownClient)
 
     # One failing fetch negative-caches the outcome…
     rs.list_remote_simulations(tmp_path, use_cache=False)
@@ -143,7 +146,7 @@ def test_successful_fetch_is_fresh_with_as_of(monkeypatch, tmp_path):
         def list_simulators(self):
             return {"versions": []}
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.SmsApiClient", _Ok)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.SmsApiClient", _Ok)
     monkeypatch.setattr("vivarium_workbench.lib.git_status.remote_repo_url",
                         lambda ws: None)  # local checkout, no matching builds
 
@@ -166,7 +169,7 @@ def test_bounded_fresh_client_uses_short_timeout_and_one_retry(monkeypatch, tmp_
         def list_simulators(self):
             return {"versions": []}
 
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.SmsApiClient", _Recorder)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.SmsApiClient", _Recorder)
     # The fresh path (?refresh=true) must bound the client so it can't hang.
     si._append_remote_simulations([], tmp_path, fresh=True)
     assert captured["timeout"] == rs._FRESH_TIMEOUT
@@ -185,7 +188,7 @@ def client(tmp_path):
 def test_api_simulations_returns_promptly_when_remote_is_slow(client, monkeypatch, tmp_path):
     _SlowClient.calls = 0
     _SlowClient.release.clear()
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.SmsApiClient", _SlowClient)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.SmsApiClient", _SlowClient)
 
     t0 = time.time()
     r = client.get("/api/simulations")
@@ -206,7 +209,7 @@ def test_api_simulations_returns_promptly_when_remote_is_slow(client, monkeypatc
 
 def test_api_simulations_refresh_forces_bounded_fresh_path(client, monkeypatch, tmp_path):
     _DownClient.calls = 0
-    monkeypatch.setattr("vivarium_workbench.lib.sms_api_client.SmsApiClient", _DownClient)
+    monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.SmsApiClient", _DownClient)
 
     r = client.get("/api/simulations?refresh=true")
     assert r.status_code == 200

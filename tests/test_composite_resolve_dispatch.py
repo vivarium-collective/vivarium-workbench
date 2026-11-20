@@ -1,5 +1,14 @@
-"""Tests for resolve_composite_for_request — local vs deployment dispatch."""
+"""Tests for resolve_composite_for_request — local vs deployment dispatch.
+
+Two session-build tests are marked ``plugin``: a ``.viv-build.json`` stamp is the SMS provider's record of a session
+build (``backends.session_build`` asks the providers). With the plugin absent or providers off the stamp is inert and
+the workspace resolves as a plain local one, which a static spec does too (so that test stays core), while a generator
+only the session's environment can import is a local miss (docs/backend-adapters.md step P3, K2a).
+"""
 from pathlib import Path
+
+import pytest
+
 from vivarium_workbench.lib import composite_resolve as cr
 
 
@@ -10,20 +19,7 @@ def test_dispatch_local_when_no_viv_build(tmp_path, monkeypatch):
     assert out == {"name": "local"} and called["local"] == ("pkg.x", {"k": 1})
 
 
-def test_dispatch_deployment_when_viv_build(tmp_path, monkeypatch):
-    (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
-    captured = {}
-    class _FakeClient:
-        def __init__(self, base=None): pass
-        def composite_resolve(self, sid, ref, ov=None):
-            captured.update(sid=sid, ref=ref, ov=ov); return {"name": "remote"}
-    monkeypatch.setattr(cr, "SmsApiClient", _FakeClient)
-    monkeypatch.setattr(cr, "_sms_api_base", lambda: "http://sms")
-    out = cr.resolve_composite_for_request(tmp_path, "pkg.x", {"k": 2})
-    assert out == {"name": "remote"}
-    assert captured == {"sid": 66, "ref": "pkg.x", "ov": {"k": 2}}
-
-
+@pytest.mark.plugin
 def test_dispatch_deployment_prefers_local_when_generator_found(tmp_path, monkeypatch):
     """item 63: a session-bound materialized build (.viv-build.json present)
     has real files on disk — resolve via the same safe env-worker discovery
@@ -32,10 +28,6 @@ def test_dispatch_deployment_prefers_local_when_generator_found(tmp_path, monkey
     must never even be constructed when local discovery finds the id."""
     (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
 
-    def _boom_client(*a, **k):
-        raise AssertionError("remote SmsApiClient must not be called when local resolution hits")
-
-    monkeypatch.setattr(cr, "SmsApiClient", _boom_client)
     monkeypatch.setattr(
         cr, "_local_generator_payload",
         lambda ws, sid: {"id": sid, "kind": "generator",
@@ -63,35 +55,14 @@ def test_dispatch_deployment_resolves_static_spec_locally_no_generator_helper_ne
         "name: c\nschema:\n  v: float\nstate:\n  v: 1\n", encoding="utf-8")
 
     def _boom(*a, **k):
-        raise AssertionError("neither the generator helper nor sms-api should be reached")
+        raise AssertionError("the generator helper should not be reached")
 
     monkeypatch.setattr(cr, "_local_generator_payload", _boom)
-    monkeypatch.setattr(cr, "SmsApiClient", _boom)
     monkeypatch.setattr(cr, "_prime_registry", lambda: None)
     out = cr.resolve_composite_for_request(tmp_path, "pbg_demo.composites.c", {})
     assert out is not None and out["id"] == "pbg_demo.composites.c"
     assert out["wiring_status"] == "ready" and out["state"] == {"v": 1}
     assert out["kind"] == "spec"
-
-
-def test_dispatch_deployment_falls_back_to_remote_when_local_misses(tmp_path, monkeypatch):
-    """The bare deployment-wide-pin case (or any id local discovery genuinely
-    doesn't know) must still reach the existing remote sms-api attempt —
-    the local-first check is additive, not a replacement."""
-    (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
-    captured = {}
-
-    class _FakeClient:
-        def __init__(self, base=None): pass
-        def composite_resolve(self, sid, ref, ov=None):
-            captured.update(sid=sid, ref=ref, ov=ov); return {"name": "remote"}
-
-    monkeypatch.setattr(cr, "SmsApiClient", _FakeClient)
-    monkeypatch.setattr(cr, "_sms_api_base", lambda: "http://sms")
-    monkeypatch.setattr(cr, "_local_generator_payload", lambda ws, sid: None)
-    out = cr.resolve_composite_for_request(tmp_path, "pkg.x", {"k": 2})
-    assert out == {"name": "remote"}
-    assert captured == {"sid": 66, "ref": "pkg.x", "ov": {"k": 2}}
 
 
 def test_local_generator_payload_returns_none_for_non_generator(tmp_path, monkeypatch):
@@ -135,28 +106,23 @@ def test_local_generator_payload_returns_real_parameters(tmp_path, monkeypatch):
     assert "not available" in out["notice"] and "parameters" in out["notice"].lower()
 
 
-def test_dispatch_deployment_degrades_when_sms_api_route_missing(tmp_path, monkeypatch):
-    """sms-api has no POST /core/v1/simulator/{id}/composite-resolve route --
-    SmsApiClient.composite_resolve was added speculatively and the server side
-    was never built, so every call 404s. This is a non-blocking preview
-    convenience (dispatch itself never calls it), so a missing/unreachable
-    remote route must degrade to the same honest-unavailable 200 shape every
-    other resolve failure already uses, not propagate as a 500."""
+@pytest.mark.plugin
+def test_dispatch_deployment_degrades_when_local_misses(tmp_path, monkeypatch):
+    """A deployment build that neither local path can see degrades to the
+    honest-unavailable 200 shape and asks no remote. viva-api has never served a
+    composite-resolve route (verified against its route table and its OpenAPI
+    history, 2026-11-18), so the SmsApiClient fallback, which could only ever 404,
+    was removed (docs/backend-adapters.md, step 0)."""
     (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
+    monkeypatch.setattr(cr, "resolve_composite", lambda ws, sid, ov=None: None)
+    monkeypatch.setattr(cr, "_local_generator_payload", lambda ws, sid: None)
 
-    class _FailingClient:
-        def __init__(self, base=None): pass
-        def composite_resolve(self, sid, ref, ov=None):
-            raise cr.SmsApiError("POST http://sms/core/v1/simulator/66/composite-resolve -> 404")
-
-    monkeypatch.setattr(cr, "SmsApiClient", _FailingClient)
-    monkeypatch.setattr(cr, "_sms_api_base", lambda: "http://sms")
-
-    out = cr.resolve_composite_for_request(tmp_path, "pkg.x")
+    out = cr.resolve_composite_for_request(tmp_path, "pkg.x", {"k": 2})
 
     assert out["id"] == "pkg.x"
     assert out["wiring_status"] == "unavailable"
     assert "not available" in out["notice"]
+    assert not hasattr(cr, "SmsApiClient")
 
 
 def test_resolve_generator_without_artifact_degrades(tmp_path, monkeypatch):
