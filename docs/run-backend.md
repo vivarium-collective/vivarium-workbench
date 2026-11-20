@@ -32,7 +32,7 @@ remote impls" liability:
    and runs **v2ecoli analyses in the HTTP process** (`render_study_visualizations`,
    `run_study_analyses`).
 3. **Remote (viva-api) — in-process threaded polling (the fragile model).**
-   `remote_run.run_remote` exports a `.pbg`, `SmsApiClient.compose_submit`s it,
+   `remote_run.run_remote` (SMS: the plugin's `deployment_run.run`) exports a `.pbg`, `SmsApiClient.compose_submit`s it,
    and **polls in a daemon `threading.Thread`** (`remote_run_jobs` /
    `run_jobs`, an in-memory `_jobs` dict). The poll loop and its state are **lost
    on restart**.
