@@ -26,7 +26,6 @@ BASELINE: dict[str, dict[str, int]] = {
     "static/loom-embed.js": {"sms-api": 4, "GovCloud": 3},
     "static/progress-track.js": {"sms-api": 1},
     "static/session.js": {"sms-api": 1},
-    "static/sim-table.js": {"sms-api": 2, "GovCloud": 4},
     "static/sms-launch.js": {"sms-api": 1},
     "static/walkthrough.js": {"sms-api": 2, "GovCloud": 8, "sms-launch": 1},
     "static/workspace-picker.js": {"sms-api": 4},
