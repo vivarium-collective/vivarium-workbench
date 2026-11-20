@@ -41,17 +41,34 @@ class RunFacet(Protocol):
     def trace(self, run_id: str) -> "tuple[Union[bytes, dict], int, str]": ...
 
 
+class UnroutedFacet(Protocol):
+    """What a backend answers for a run-lifecycle request the core cannot route by a run's record: one that names no
+    run, or (status) carries a build or analysis id beside it (step P2, Runs a1). The views' ``(body, status)``
+    shapes; the backend's own checks run first, so its "not authenticated" still comes before any "id required".
+    The methods are the SMS tails' own signatures. Once Builds and Analyses take the build and analysis ids, it
+    answers only requests that name no id at all. At most one active backend declares it."""
+
+    def submit(self, ws_root: Path, body: dict) -> tuple[dict, int]: ...
+    def land(self, ws_root: Path, body: dict) -> tuple[dict, int]: ...
+    def status(self, params: dict) -> tuple[dict, int]: ...
+    def progress(self, params: dict) -> tuple[dict, int]: ...
+    def cancel(self, params: dict) -> tuple[dict, int]: ...
+
+
 @dataclass(frozen=True)
 class Backend:
     """One backend. Only the run facet exists so far (§2.1's other facets come with later steps).
 
     ``identity`` maps a base URL to the identity that server reports (``None`` when the backend reports none);
     run records store it as ``server_id`` (§2.3). Backends that share one function are one server and share its
-    cached identity (viva-core and sms-legacy); each other function is its own family (compose-api)."""
+    cached identity (viva-core and sms-legacy); each other function is its own family (compose-api).
+
+    ``unrouted`` (optional) answers the lifecycle requests no run record routes (:class:`UnroutedFacet`)."""
 
     name: str
     runs: RunFacet
     identity: Optional[Callable[[str], Optional[str]]] = None
+    unrouted: Optional[UnroutedFacet] = None
 
 
 COMPOSE = Backend("compose-api", ComposeApiRuns(), identity=compose_health_identity)
@@ -102,8 +119,17 @@ def _registry() -> "dict[str, Backend]":
             for p in _provider.providers():
                 for backend in p.backends():
                     found.setdefault(backend.name, backend)
+            declaring = sorted(b.name for b in found.values() if b.unrouted is not None)
+            if len(declaring) > 1:
+                raise RuntimeError(f"more than one backend declares the unrouted facet: {declaring}")
             _BY_KIND = found
         return _BY_KIND
+
+
+def unrouted() -> "Backend | None":
+    """The active backend with an ``unrouted`` facet (at most one; the registry refuses two), or ``None`` (providers
+    off). Read from the registry at every call, so :func:`reset_registry` covers it."""
+    return next((b for b in _registry().values() if b.unrouted is not None), None)
 
 
 def __getattr__(name: str) -> object:

@@ -300,7 +300,6 @@ ignore_imports = [
     "vivarium_workbench.lib.remote_run_landing -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.remote_run_views -> vivarium_workbench_sms.remote_pinned",
     "vivarium_workbench.lib.remote_run_views -> vivarium_workbench_sms.remote_run_jobs",
-    "vivarium_workbench.lib.remote_run_views -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.remote_run_views -> vivarium_workbench_sms.sms_legacy",
     "vivarium_workbench.lib.remote_trace -> vivarium_workbench_sms.sms_api_client",
     "vivarium_workbench.lib.run_jobs -> vivarium_workbench_sms.sms_api_client",
@@ -311,6 +310,16 @@ ignore_imports = [
     "vivarium_workbench.lib.workspace_deps_views -> vivarium_workbench_sms.remote_build_source",
     "vivarium_workbench.lib.workspace_deps_views -> vivarium_workbench_sms.sms_api_client",
 ]
+
+[[tool.importlinter.contracts]]
+# docs/backend-adapters.md §2.4, step P2 (Runs a1): the SMS plugin no longer reads its seams back through
+# lib.remote_run_views (the reverse seam); remote_run_views reads them through sms_legacy instead. Indirect chains
+# through other core modules are fine; the direct read-back is what this forbids.
+name = "the SMS plugin does not import lib.remote_run_views"
+type = "forbidden"
+source_modules = ["vivarium_workbench_sms"]
+forbidden_modules = ["vivarium_workbench.lib.remote_run_views"]
+allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 # api/deps.py holds the route dependencies (get_workspace, ...) so a router module -- e.g. a backend plugin's

@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from vivarium_workbench.lib import remote_run_views as rrv
+from vivarium_workbench_sms import sms_legacy
 
 
 # ---------------------------------------------------------------------------
@@ -54,14 +55,14 @@ def _wire_happy(monkeypatch, tmp_path: Path, spec: dict):
     spec_file.write_text("baseline: []\n")  # presence only — load_spec is stubbed
     monkeypatch.setattr(rrv.study_spec, "study_spec_path", lambda ws, name: spec_file)
     monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
-    monkeypatch.setattr(rrv, "load_spec", lambda p: spec)
+    monkeypatch.setattr(sms_legacy, "load_spec", lambda p: spec)
 
     monkeypatch.setattr(
         rrv.subprocess, "run",
         lambda *a, **k: subprocess.CompletedProcess(args=[], returncode=0, stdout="feature/x\n"),
     )
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeClient)
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeClient)
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
 
     def _fake_submit(study, worker_fn):
         captured["submit"] = (study, worker_fn)
@@ -247,21 +248,21 @@ def _wire_thin(monkeypatch, tmp_path, *, authed=True, study_exists=True):
                         lambda ws, name: (spec_file if study_exists else None))
     monkeypatch.setattr(rrv.study_spec, "study_dir", lambda ws, name: tmp_path)
     monkeypatch.setattr(rrv.study_spec, "collect_study_observables", lambda spec: ["cell_mass"])
-    monkeypatch.setattr(rrv, "load_spec", lambda p: {"baseline": [{"composite": "my-comp"}]})
+    monkeypatch.setattr(sms_legacy, "load_spec", lambda p: {"baseline": [{"composite": "my-comp"}]})
     monkeypatch.setattr(
         rrv.subprocess, "run",
         lambda *a, **k: subprocess.CompletedProcess(args=[], returncode=0, stdout="feature/x\n"),
     )
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
     captured = {"land": None}
-    monkeypatch.setattr(rrv, "land_remote_run",
+    monkeypatch.setattr(sms_legacy, "land_remote_run",
                         lambda study_dir, **kw: captured.__setitem__("land", (study_dir, kw)) or "run-xyz")
     return captured
 
 
 def test_build_start_returns_simulator_id_and_building_phase(monkeypatch, tmp_path):
     _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     body, status = rrv.remote_run_build_start(tmp_path, {"study": "s"})
     assert status == 202
     assert body["simulator_id"] == 66
@@ -271,19 +272,19 @@ def test_build_start_returns_simulator_id_and_building_phase(monkeypatch, tmp_pa
 
 def test_build_start_unauthenticated_401(monkeypatch, tmp_path):
     _wire_thin(monkeypatch, tmp_path, authed=False)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     assert rrv.remote_run_build_start(tmp_path, {"study": "s"})[1] == 401
 
 
 def test_build_start_missing_study_400(monkeypatch, tmp_path):
     _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     assert rrv.remote_run_build_start(tmp_path, {})[1] == 400
 
 
 def test_submit_issues_run_and_returns_simulation_id(monkeypatch, tmp_path):
     _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     body, status = rrv.remote_run_submit(
         tmp_path, {"simulator_id": 66, "study": "s", "num_generations": 1, "num_seeds": 1})
     assert status == 202
@@ -302,7 +303,7 @@ def test_submit_writes_a_pending_runs_meta_row(monkeypatch, tmp_path):
     from vivarium_workbench.lib import composite_runs as cr
 
     _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     # step P1a (patch target moved): the deployment name is backend_config's; remote_pinned's wrapper and the run
     # record both read it at call time.
     from vivarium_workbench.lib import backend_config
@@ -337,7 +338,7 @@ def test_submit_still_succeeds_when_pending_row_write_fails(monkeypatch, tmp_pat
     already-dispatched, real-money AWS Batch campaign must never be reported
     as failed just because this bookkeeping side effect couldn't happen."""
     _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
 
     def _boom(ws, name):
         raise OSError("workspace paths unavailable")
@@ -351,7 +352,7 @@ def test_submit_still_succeeds_when_pending_row_write_fails(monkeypatch, tmp_pat
 
 def test_submit_missing_simulator_id_400(monkeypatch, tmp_path):
     _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     assert rrv.remote_run_submit(tmp_path, {"study": "s"})[1] == 400
 
 
@@ -363,7 +364,7 @@ def test_submit_missing_simulator_id_400(monkeypatch, tmp_path):
 
 def test_submit_missing_num_generations_400(monkeypatch, tmp_path):
     _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     body, status = rrv.remote_run_submit(
         tmp_path, {"simulator_id": 66, "study": "s", "num_seeds": 3})
     assert status == 400
@@ -372,7 +373,7 @@ def test_submit_missing_num_generations_400(monkeypatch, tmp_path):
 
 def test_submit_missing_num_seeds_400(monkeypatch, tmp_path):
     _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     body, status = rrv.remote_run_submit(
         tmp_path, {"simulator_id": 66, "study": "s", "num_generations": 5})
     assert status == 400
@@ -384,7 +385,7 @@ def test_submit_zero_num_generations_treated_as_unset_400(monkeypatch, tmp_path)
     a real dispatch can never run zero generations, and `not x` is the same
     truthiness check already used for simulator_id/study in this ladder."""
     _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     body, status = rrv.remote_run_submit(
         tmp_path, {"simulator_id": 66, "study": "s", "num_generations": 0, "num_seeds": 3})
     assert status == 400
@@ -397,7 +398,7 @@ def test_submit_forwards_explicit_num_generations_and_num_seeds(monkeypatch, tmp
     SmsApiClient.run_simulation()."""
     _wire_thin(monkeypatch, tmp_path)
     client = _FakeThinClient()
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: client)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: client)
     body, status = rrv.remote_run_submit(
         tmp_path, {"simulator_id": 66, "study": "s", "num_generations": 7, "num_seeds": 3})
     assert status == 202
@@ -410,9 +411,9 @@ def test_submit_threads_analysis_options_from_spec(monkeypatch, tmp_path):
     this was silently dropped for every remote dispatch (the "Analyses 404"
     root cause: sms-api never received a real analysis config to run)."""
     _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     monkeypatch.setattr(
-        rrv, "load_spec",
+        sms_legacy, "load_spec",
         lambda p: {"baseline": [{"composite": "my-comp"}],
                    "analyses": [{"name": "ecocyc_table", "params": {}}]},
     )
@@ -421,7 +422,7 @@ def test_submit_threads_analysis_options_from_spec(monkeypatch, tmp_path):
         lambda entries, ws_root: ({"multiseed": {"ecocyc_table": {}}}, []),
     )
     client = _FakeThinClient()
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: client)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: client)
     body, status = rrv.remote_run_submit(
         tmp_path, {"simulator_id": 66, "study": "s", "num_generations": 1, "num_seeds": 1})
     assert status == 202
@@ -433,7 +434,7 @@ def test_submit_analysis_options_none_when_spec_has_no_analyses(monkeypatch, tmp
     — matching run_simulation()'s default and sms-api's contract."""
     _wire_thin(monkeypatch, tmp_path)
     client = _FakeThinClient()
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: client)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: client)
     body, status = rrv.remote_run_submit(
         tmp_path, {"simulator_id": 66, "study": "s", "num_generations": 1, "num_seeds": 1})
     assert status == 202
@@ -447,7 +448,7 @@ def test_submit_surfaces_analysis_errors_in_response(monkeypatch, tmp_path):
     analysis_options with no trace anywhere (backlog item 39 continued)."""
     _wire_thin(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        rrv, "load_spec",
+        sms_legacy, "load_spec",
         lambda p: {"baseline": [{"composite": "my-comp"}],
                    "analyses": [{"name": "ecocyc_table"}, {"name": "totally_unknown"}]},
     )
@@ -459,7 +460,7 @@ def test_submit_surfaces_analysis_errors_in_response(monkeypatch, tmp_path):
         ),
     )
     client = _FakeThinClient()
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: client)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: client)
     body, status = rrv.remote_run_submit(
         tmp_path, {"simulator_id": 66, "study": "s", "num_generations": 1, "num_seeds": 1})
     assert status == 202
@@ -479,7 +480,7 @@ def test_submit_omits_analysis_errors_key_when_none(monkeypatch, tmp_path):
         lambda entries, ws_root: ({}, []),
     )
     client = _FakeThinClient()
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: client)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: client)
     body, status = rrv.remote_run_submit(
         tmp_path, {"simulator_id": 66, "study": "s", "num_generations": 1, "num_seeds": 1})
     assert status == 202
@@ -488,7 +489,7 @@ def test_submit_omits_analysis_errors_key_when_none(monkeypatch, tmp_path):
 
 def test_land_downloads_and_lands(monkeypatch, tmp_path):
     captured = _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     body, status = rrv.remote_run_land(tmp_path, {"study": "s", "simulation_id": 199})
     assert status == 200
     assert body["run_id"] == "run-xyz"
@@ -505,7 +506,7 @@ def test_land_sources_commit_image_and_config_hash_from_sms_api(monkeypatch, tmp
     not leave land_remote_run to fall back to whatever body.get("commit")
     happened to be (which no real caller has ever actually populated)."""
     captured = _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     body, status = rrv.remote_run_land(tmp_path, {"study": "s", "simulation_id": 199})
     assert status == 200
     _study_dir, kw = captured["land"]
@@ -522,7 +523,7 @@ def test_land_explicit_body_commit_wins_over_sms_api_lookup(monkeypatch, tmp_pat
     sms-api lookup is a fallback for when nothing better is known, not an
     override of an already-known-good value."""
     captured = _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     rrv.remote_run_land(tmp_path, {"study": "s", "simulation_id": 199, "commit": "explicit-commit"})
     _study_dir, kw = captured["land"]
     assert kw["commit"] == "explicit-commit"
@@ -536,7 +537,7 @@ def test_land_triggers_analysis_and_polls_real_status_when_spec_has_analyses(mon
     the subsequent download picks up."""
     _wire_thin(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        rrv, "load_spec",
+        sms_legacy, "load_spec",
         lambda p: {"baseline": [{"composite": "my-comp"}],
                    "analyses": [{"name": "doubling_time_distribution", "params": {}}]},
     )
@@ -545,7 +546,7 @@ def test_land_triggers_analysis_and_polls_real_status_when_spec_has_analyses(mon
         lambda entries, ws_root: ({"multiseed": {"doubling_time_distribution": {}}}, []),
     )
     client = _FakeThinClient()
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: client)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: client)
     slept = []
     monkeypatch.setattr(rrv.time, "sleep", slept.append)
 
@@ -568,7 +569,7 @@ def test_land_polls_until_terminal_then_stops(monkeypatch, tmp_path):
     forever, not give up after one check."""
     _wire_thin(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        rrv, "load_spec",
+        sms_legacy, "load_spec",
         lambda p: {"baseline": [{"composite": "my-comp"}],
                    "analyses": [{"name": "doubling_time_distribution", "params": {}}]},
     )
@@ -587,7 +588,7 @@ def test_land_polls_until_terminal_then_stops(monkeypatch, tmp_path):
             return {"id": analysis_id, "status": "running" if self._polls < 3 else "completed"}
 
     client = _SlowAnalysisClient()
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: client)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: client)
     slept = []
     monkeypatch.setattr(rrv.time, "sleep", slept.append)
 
@@ -595,7 +596,7 @@ def test_land_polls_until_terminal_then_stops(monkeypatch, tmp_path):
 
     assert status == 200
     assert client._polls == 3
-    assert slept == [rrv._ANALYSIS_POLL_INTERVAL_SECONDS] * 2
+    assert slept == [sms_legacy._ANALYSIS_POLL_INTERVAL_SECONDS] * 2
 
 
 def test_land_gives_up_after_poll_ceiling(monkeypatch, tmp_path):
@@ -603,7 +604,7 @@ def test_land_gives_up_after_poll_ceiling(monkeypatch, tmp_path):
     landing proceeds anyway after the ceiling, per the best-effort contract."""
     _wire_thin(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        rrv, "load_spec",
+        sms_legacy, "load_spec",
         lambda p: {"baseline": [{"composite": "my-comp"}],
                    "analyses": [{"name": "doubling_time_distribution", "params": {}}]},
     )
@@ -618,19 +619,19 @@ def test_land_gives_up_after_poll_ceiling(monkeypatch, tmp_path):
             return {"id": analysis_id, "status": "running"}
 
     client = _StuckAnalysisClient()
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: client)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: client)
     monkeypatch.setattr(rrv.time, "sleep", lambda s: None)
 
     body, status = rrv.remote_run_land(tmp_path, {"study": "s", "simulation_id": 199})
 
     assert status == 200
-    assert client.status_polls == rrv._ANALYSIS_POLL_MAX_ATTEMPTS
+    assert client.status_polls == sms_legacy._ANALYSIS_POLL_MAX_ATTEMPTS
 
 
 def test_land_skips_analysis_trigger_when_spec_has_no_analyses(monkeypatch, tmp_path):
     _wire_thin(monkeypatch, tmp_path)
     client = _FakeThinClient()
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: client)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: client)
     slept = []
     monkeypatch.setattr(rrv.time, "sleep", slept.append)
 
@@ -646,7 +647,7 @@ def test_land_analysis_trigger_failure_does_not_block_landing(monkeypatch, tmp_p
     landing the simulation output itself must still succeed."""
     _wire_thin(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        rrv, "load_spec",
+        sms_legacy, "load_spec",
         lambda p: {"baseline": [{"composite": "my-comp"}],
                    "analyses": [{"name": "doubling_time_distribution", "params": {}}]},
     )
@@ -657,10 +658,10 @@ def test_land_analysis_trigger_failure_does_not_block_landing(monkeypatch, tmp_p
 
     class _FailingAnalysisClient(_FakeThinClient):
         def run_analysis(self, simulation_id, modules):
-            raise rrv.SmsApiError("sms-api unreachable")
+            raise sms_legacy.SmsApiError("sms-api unreachable")
 
     client = _FailingAnalysisClient()
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: client)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: client)
     slept = []
     monkeypatch.setattr(rrv.time, "sleep", slept.append)
 
@@ -679,7 +680,7 @@ def test_land_surfaces_analysis_errors_in_response(monkeypatch, tmp_path):
     remote_run_submit's own analysis_errors field)."""
     _wire_thin(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        rrv, "load_spec",
+        sms_legacy, "load_spec",
         lambda p: {"baseline": [{"composite": "my-comp"}],
                    "analyses": [{"name": "doubling_time_distribution"}, {"name": "totally_unknown"}]},
     )
@@ -691,7 +692,7 @@ def test_land_surfaces_analysis_errors_in_response(monkeypatch, tmp_path):
         ),
     )
     client = _FakeThinClient()
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: client)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: client)
 
     body, status = rrv.remote_run_land(tmp_path, {"study": "s", "simulation_id": 199})
 
@@ -711,7 +712,7 @@ def test_land_omits_analysis_errors_key_when_none(monkeypatch, tmp_path):
     matching remote_run_submit's own convention."""
     _wire_thin(monkeypatch, tmp_path)
     client = _FakeThinClient()
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: client)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: client)
 
     body, status = rrv.remote_run_land(tmp_path, {"study": "s", "simulation_id": 199})
 
@@ -721,7 +722,7 @@ def test_land_omits_analysis_errors_key_when_none(monkeypatch, tmp_path):
 
 def test_land_missing_simulation_id_400(monkeypatch, tmp_path):
     _wire_thin(monkeypatch, tmp_path)
-    monkeypatch.setattr(rrv, "SmsApiClient", _FakeThinClient)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", _FakeThinClient)
     assert rrv.remote_run_land(tmp_path, {"study": "s"})[1] == 400
 
 
@@ -738,9 +739,9 @@ def test_land_missing_simulation_id_400(monkeypatch, tmp_path):
 
 def _bind_analysis_client(monkeypatch, tmp_path, *, client=None, authed=True):
     monkeypatch.setattr(rrv.github_auth, "current_session", lambda: (object() if authed else None))
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
     c = client or _FakeThinClient()
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: c)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: c)
     return c
 
 
@@ -770,7 +771,7 @@ def test_run_analysis_uses_the_studys_own_analyses_when_given_one(monkeypatch, t
     _wire_thin(monkeypatch, tmp_path)
     client = _bind_analysis_client(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        rrv, "load_spec",
+        sms_legacy, "load_spec",
         lambda p: {"analyses": [{"name": "cd1_fluxomics", "params": {}}]},
     )
     monkeypatch.setattr(
@@ -821,7 +822,7 @@ def test_run_analysis_surfaces_a_backend_failure(monkeypatch, tmp_path):
 
     class _Boom(_FakeThinClient):
         def run_analysis(self, simulation_id, modules):
-            raise rrv.SmsApiError("tunnel down")
+            raise sms_legacy.SmsApiError("tunnel down")
 
     _bind_analysis_client(monkeypatch, tmp_path, client=_Boom())
     body, status = rrv.remote_run_analysis(tmp_path, {"simulation_id": 199})
@@ -838,7 +839,7 @@ def test_run_analysis_surfaces_analysis_errors_in_response(monkeypatch, tmp_path
     _wire_thin(monkeypatch, tmp_path)
     client = _bind_analysis_client(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        rrv, "load_spec",
+        sms_legacy, "load_spec",
         lambda p: {"analyses": [{"name": "cd1_fluxomics"}, {"name": "totally_unknown"}]},
     )
     monkeypatch.setattr(
@@ -878,9 +879,9 @@ class _AnalysisStatusClient:
 def test_status_accepts_an_analysis_id(monkeypatch):
     """One poll endpoint for all three phases — the JS panel already polls
     remote-run-poll; the analysis phase must not need a second one."""
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
     monkeypatch.setattr(
-        rrv, "SmsApiClient",
+        sms_legacy, "SmsApiClient",
         lambda base=None: _AnalysisStatusClient(base, status={"status": "completed"}),
     )
     body, status = rrv.remote_run_status({"analysis_id": 7}, ws_root=_WS)
@@ -889,9 +890,9 @@ def test_status_accepts_an_analysis_id(monkeypatch):
 
 
 def test_status_analysis_failed_maps_to_failed(monkeypatch):
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
     monkeypatch.setattr(
-        rrv, "SmsApiClient",
+        sms_legacy, "SmsApiClient",
         lambda base=None: _AnalysisStatusClient(base, status={"status": "failed", "error_log": "boom"}),
     )
     body, _status = rrv.remote_run_status({"analysis_id": 7}, ws_root=_WS)
@@ -917,8 +918,8 @@ class _StatusClient:
 
 
 def _bind_status_client(monkeypatch, **kw):
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: _StatusClient(base, **kw))
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: _StatusClient(base, **kw))
 
 
 def test_status_run_completed_maps_to_done(monkeypatch):
@@ -948,8 +949,8 @@ def test_the_terminal_sets_match_sms_apis_real_status_vocabulary():
     """
     # "ready" is an environment's terminal-OK status (/viva/v1/environments,
     # W2, vivarium-workbench#1150); an environment's "failed" is already here.
-    assert rrv._TERMINAL_OK == {"completed", "done", "succeeded", "ready"}
-    assert rrv._TERMINAL_BAD == {"failed", "cancelled", "error"}
+    assert sms_legacy._TERMINAL_OK == {"completed", "done", "succeeded", "ready"}
+    assert sms_legacy._TERMINAL_BAD == {"failed", "cancelled", "error"}
 
 
 def test_status_build_ready_environment_maps_to_built(monkeypatch):
@@ -975,7 +976,7 @@ def test_status_requires_an_id(monkeypatch):
 
 
 def test_status_sms_api_unreachable_is_502_not_crash(monkeypatch):
-    _bind_status_client(monkeypatch, raise_err=rrv.SmsApiError("tunnel down"))
+    _bind_status_client(monkeypatch, raise_err=sms_legacy.SmsApiError("tunnel down"))
     body, status = rrv.remote_run_status({"simulation_id": 199}, ws_root=_WS)
     assert status == 502 and body["reachable"] is False and "unreachable" in body["reason"]
 
@@ -998,8 +999,8 @@ class _ChainProgressClient:
 
 
 def _bind_chain_progress_client(monkeypatch, **kw):
-    monkeypatch.setattr(rrv, "_sms_api_base", lambda: "http://sms.local")
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda base=None: _ChainProgressClient(base, **kw))
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://sms.local")
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base=None: _ChainProgressClient(base, **kw))
 
 
 def test_chain_progress_in_progress_split(monkeypatch):
@@ -1030,7 +1031,7 @@ def test_chain_progress_requires_simulation_id(monkeypatch):
 
 
 def test_chain_progress_unknown_simulation_is_404(monkeypatch):
-    _bind_chain_progress_client(monkeypatch, raise_err=rrv.SmsApiError("GET http://x -> 404"))
+    _bind_chain_progress_client(monkeypatch, raise_err=sms_legacy.SmsApiError("GET http://x -> 404"))
     body, status = rrv.remote_run_chain_progress({"simulation_id": 9999}, ws_root=_WS)
     assert status == 404 and body["phase"] == "not_found"
 
@@ -1038,12 +1039,12 @@ def test_chain_progress_unknown_simulation_is_404(monkeypatch):
 def test_chain_progress_non_chain_run_is_200_not_a_campaign(monkeypatch):
     """A plain (non-chain-dispatch) run has nothing to aggregate -- this is a
     real, expected case, not an error the panel should alarm on."""
-    _bind_chain_progress_client(monkeypatch, raise_err=rrv.SmsApiError("GET http://x -> 409"))
+    _bind_chain_progress_client(monkeypatch, raise_err=sms_legacy.SmsApiError("GET http://x -> 409"))
     body, status = rrv.remote_run_chain_progress({"simulation_id": 42}, ws_root=_WS)
     assert status == 200 and body["phase"] == "not_a_campaign"
 
 
 def test_chain_progress_sms_api_unreachable_is_502_not_crash(monkeypatch):
-    _bind_chain_progress_client(monkeypatch, raise_err=rrv.SmsApiError("tunnel down"))
+    _bind_chain_progress_client(monkeypatch, raise_err=sms_legacy.SmsApiError("tunnel down"))
     body, status = rrv.remote_run_chain_progress({"simulation_id": 163}, ws_root=_WS)
     assert status == 502 and body["reachable"] is False

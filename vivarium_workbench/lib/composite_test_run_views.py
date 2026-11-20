@@ -99,11 +99,11 @@ def _dispatch_build_image_run(simulator_id, overrides, emit_paths, config_filena
     Async — returns a synthetic ``remote-sim-<id>`` run_id the loom polls; the run
     surfaces in the Simulations/Runs tab via remote_simulations.
     """
-    from vivarium_workbench.lib import remote_run_views as _rrv
+    from vivarium_workbench.lib import workspace_deps_views as _wdv
     from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
 
     overrides = overrides or {}
-    client = SmsApiClient(_rrv._sms_api_base())
+    client = SmsApiClient(_wdv._sms_api_base())
     # Resolve a real config for this build. sms-api defaults to
     # 'api_simulation_default.json', which only exists in the vEcoli-lineage
     # repos (e.g. v2ecoli) — a build whose repo lacks it (e.g. the sms-ecoli fork,
@@ -291,10 +291,10 @@ def resolve_cloud_target(
                            str(session_build.get("repo_url") or ""),
                            str(session_build.get("commit") or ""), "session-build")
 
-    from vivarium_workbench.lib import remote_run_views as _rrv
+    from vivarium_workbench.lib import workspace_deps_views as _wdv
     from vivarium_workbench_sms.sms_api_client import SmsApiClient
 
-    client = SmsApiClient(_rrv._sms_api_base())
+    client = SmsApiClient(_wdv._sms_api_base())
     # resolve_pinned_simulator_id handles the frozen PinnedConfig + unreachable
     # sms-api correctly (returns None), so no `.get("simulator_id")` on a dataclass.
     sid = remote_pinned.resolve_pinned_simulator_id(client, ws_root)

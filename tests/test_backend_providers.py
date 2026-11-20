@@ -8,6 +8,7 @@ core's behaviour with providers OFF (``VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none
 from __future__ import annotations
 
 import threading
+from urllib.parse import urlencode
 
 import pytest
 
@@ -304,3 +305,138 @@ def test_with_providers_off_the_run_target_ignores_sms(providers_off, tmp_path, 
             assert body["ok"] is True
         else:
             assert body["dispatch"] == "compose"
+
+
+# --- the unrouted facet and the reverse seam (step P2, Runs a1) ------------------------------------------------------
+
+#: The names that moved from lib.remote_run_views to the plugin's sms_legacy. remote_run_views must bind none of them:
+#: a stale ``monkeypatch.setattr(rrv, name, ...)`` then raises instead of silently patching a dead copy.
+_MOVED_TO_SMS_LEGACY = (
+    "SmsApiClient", "SmsApiError", "_sms_api_base", "load_spec", "_run_auth_ok", "land_remote_run",
+    "_TERMINAL_OK", "_TERMINAL_BAD", "_ANALYSIS_POLL_INTERVAL_SECONDS", "_ANALYSIS_POLL_MAX_ATTEMPTS",
+    "_ANALYSIS_LAND_WAIT_SECONDS", "_ANALYSIS_TERMINAL_STATUSES",
+)
+
+
+def test_remote_run_views_binds_no_sms_seam():
+    from vivarium_workbench.lib import remote_run_views as rrv
+    from vivarium_workbench_sms import sms_legacy
+
+    assert [n for n in _MOVED_TO_SMS_LEGACY if hasattr(rrv, n)] == []
+    assert [n for n in _MOVED_TO_SMS_LEGACY if not hasattr(sms_legacy, n)] == []
+
+
+def test_with_providers_on_sms_legacy_is_the_unrouted_backend():
+    assert backends.unrouted() is backends.SMS_LEGACY
+    assert backends.VIVA_CORE.unrouted is None and backends.COMPOSE.unrouted is None
+
+
+def test_two_backends_declaring_the_unrouted_facet_are_refused(monkeypatch):
+    from vivarium_workbench_sms.sms_legacy import SmsLegacyRuns, SmsLegacyUnrouted
+
+    class Two:
+        name = "two"
+
+        def backends(self):
+            return (backends.Backend("a", SmsLegacyRuns(), unrouted=SmsLegacyUnrouted()),
+                    backends.Backend("b", SmsLegacyRuns(), unrouted=SmsLegacyUnrouted()))
+
+    monkeypatch.setattr(provider_mod, "providers", lambda: (Two(),))
+    backends.reset_registry()
+    with pytest.raises(RuntimeError, match="unrouted"):
+        backends.unrouted()
+
+
+def _sms_record_ws(tmp_path, monkeypatch, sim_id="12"):
+    """A workspace whose study ``s`` holds an sms-legacy record for ``sim_id`` on the configured SMS host."""
+    from vivarium_workbench.lib import composite_runs as cr
+    from vivarium_workbench.lib.backends import records
+    from vivarium_workbench_sms.sms_api_client import BACKEND_BASE_ENV_VARS
+
+    for v in BACKEND_BASE_ENV_VARS + ("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT",):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("SMS_API_BASE", "http://api:8000")
+    monkeypatch.setattr(records, "fetch_server_id", lambda url, **_: None)
+    monkeypatch.setattr(records, "refresh_server_id", lambda url, **_: None)
+    ws = tmp_path / "ws"
+    (ws / "studies" / "s").mkdir(parents=True)
+    (ws / "workspace.yaml").write_text("name: ws\n")
+    conn = cr.connect(ws / "studies" / "s" / "runs.db")
+    try:
+        cr.save_metadata(conn, spec_id="c", run_id=f"remote-pending-{sim_id}", label=None, started_at=0.0, n_steps=0,
+                         params={"source": "smsvpctest", "simulation_id": sim_id, "backend": "ray",
+                                 "remote": {"kind": "sms-legacy", "id": sim_id, "base_url": "http://api:8000",
+                                            "deployment": "smsvpctest", "server_id": None}})
+    finally:
+        conn.close()
+    return ws
+
+
+def test_with_providers_on_an_sms_runs_status_keeps_its_analysis_id(tmp_path, monkeypatch, inproc_client):
+    """The status rule ``chosen is not None and chosen.unrouted is None``: an SMS run's poll goes to the unrouted
+    facet with every id it carries (analysis beats simulation), never to ``runs.status(rid)``, which would drop it."""
+    from vivarium_workbench_sms import sms_legacy
+
+    ws = _sms_record_ws(tmp_path, monkeypatch)
+    assert backends.for_existing(ws, "12") is backends.SMS_LEGACY  # the record routes it to SMS
+
+    class Client:
+        def __init__(self, base=None):
+            pass
+
+        def analysis_status(self, aid):
+            return {"status": "completed"}
+
+        def simulation_status(self, sid):
+            raise AssertionError("the analysis id must win")
+
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", Client)
+    r = inproc_client(ws).get("/api/remote-run-poll?simulation_id=12&analysis_id=5")
+    assert r.status_code == 200
+    assert (r.json()["kind"], r.json()["analysis_id"]) == ("analysis", 5)
+
+
+def test_with_providers_off_there_is_no_unrouted_backend(providers_off):
+    assert backends.unrouted() is None
+    assert backends.SMS_LEGACY.unrouted is None  # the inert sentinel
+
+
+_REFUSED = (409, "backend-not-installed", "backend-not-installed", True)
+
+
+@pytest.mark.parametrize("method, path, payload, expected", [
+    # no id: the old 400 texts, without the SMS login check before them
+    ("post", "/api/remote-run-land", {"study": "s"}, (400, "study and simulation_id are required")),
+    ("get", "/api/remote-run-poll", {}, (400, "simulator_id, simulation_id or analysis_id required")),
+    ("get", "/api/remote-run-chain-progress", {"run_id": "0"}, (400, "simulation_id required")),
+    ("post", "/api/remote-run-cancel", {}, (400, "simulation_id required")),
+    # an id no active backend owns, or a build / analysis id: refused, terminal
+    ("post", "/api/remote-run-land", {"study": "s", "simulation_id": 12}, _REFUSED),
+    ("get", "/api/remote-run-poll", {"simulation_id": 12}, _REFUSED),
+    ("get", "/api/remote-run-poll", {"simulator_id": 3}, _REFUSED),
+    ("get", "/api/remote-run-poll", {"analysis_id": 5}, _REFUSED),
+    ("get", "/api/remote-run-chain-progress", {"simulation_id": 12}, _REFUSED),
+    ("post", "/api/remote-run-cancel", {"simulation_id": 12}, _REFUSED),
+    ("post", "/api/remote-run-submit", {"study": "s", "simulator_id": 3}, _REFUSED),
+    # nothing named at all
+    ("post", "/api/remote-run-submit", {"study": "s"}, (409, "no-backend")),
+])
+def test_with_providers_off_the_core_answers_unrouted_requests(providers_off, tmp_path, monkeypatch, inproc_client,
+                                                               method, path, payload, expected):
+    from vivarium_workbench.lib import server_capabilities as sc
+    from vivarium_workbench_sms import sms_legacy
+
+    monkeypatch.setattr(sc, "explicit_backend_profile", lambda: None)
+    # Nothing may reach SMS: its login check would answer 401 first, and its client would be asked.
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: pytest.fail("the SMS login check was consulted"))
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda *a, **k: pytest.fail("SMS was asked"))
+    (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
+    client = inproc_client(tmp_path)
+    r = client.get(f"{path}?{urlencode(payload)}") if method == "get" else client.post(path, json=payload)
+    body = r.json()
+    if expected == _REFUSED:
+        assert (r.status_code, body.get("reason"), body.get("phase"), body.get("terminal")) == _REFUSED, body
+    elif expected[0] == 409:
+        assert (r.status_code, body["reason"]) == expected, body
+    else:
+        assert (r.status_code, body["error"]) == expected, body

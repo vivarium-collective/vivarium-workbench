@@ -14,6 +14,7 @@ import pytest
 
 from vivarium_workbench.lib import remote_run_landing as rrl
 from vivarium_workbench.lib import remote_run_views as rrv
+from vivarium_workbench_sms import sms_legacy
 
 
 def _make_results_tar(dst: Path) -> Path:
@@ -79,7 +80,7 @@ def test_no_ptools_in_tar_lands_zero(_ws, tmp_path):
 # ---- the HTTP-shaped view ------------------------------------------------
 
 def test_view_requires_simulation_id_and_run_id(_ws, monkeypatch):
-    monkeypatch.setattr(rrv, "_run_auth_ok", lambda: True)
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
     body, status = rrv.remote_run_land_artifacts(_ws, {"run_id": "exp-a"})
     assert status == 400
     body, status = rrv.remote_run_land_artifacts(_ws, {"simulation_id": 501})
@@ -87,8 +88,8 @@ def test_view_requires_simulation_id_and_run_id(_ws, monkeypatch):
 
 
 def test_view_returns_landing_result(_ws, tmp_path, monkeypatch):
-    monkeypatch.setattr(rrv, "_run_auth_ok", lambda: True)
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda *a, **k: object())
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda *a, **k: object())
     monkeypatch.setattr(
         "vivarium_workbench.lib.remote_run_landing.land_remote_simulation_artifacts",
         lambda ws, sid, rid, client: {"run_id": rid, "ptools": 3, "analyses": True},
@@ -100,8 +101,8 @@ def test_view_returns_landing_result(_ws, tmp_path, monkeypatch):
 
 def test_view_shapes_sms_api_error(_ws, monkeypatch):
     from vivarium_workbench_sms.sms_api_client import SmsApiError
-    monkeypatch.setattr(rrv, "_run_auth_ok", lambda: True)
-    monkeypatch.setattr(rrv, "SmsApiClient", lambda *a, **k: object())
+    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: True)
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda *a, **k: object())
 
     def _boom(ws, sid, rid, client):
         raise SmsApiError("GET /data -> 502: 502 Bad Gateway", status=502)
