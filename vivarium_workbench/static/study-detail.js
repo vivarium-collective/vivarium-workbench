@@ -706,15 +706,15 @@
   function _hideStudyExportMenu(){ var m = document.getElementById('study-export-menu'); if (m) m.style.display = 'none'; }
   window._vivStudyReportOpen = function (ev, slug) {
     if (ev && ev.stopPropagation) ev.stopPropagation(); _hideStudyExportMenu();
-    window.open('/api/study-report/' + encodeURIComponent(slug), '_blank', 'noopener');
+    window.open((window.__BASE_PATH__ || "") + '/api/study-report/' + encodeURIComponent(slug), '_blank', 'noopener');
   };
   window._vivStudyReportDownload = function (ev, slug) {
     if (ev && ev.stopPropagation) ev.stopPropagation(); _hideStudyExportMenu();
-    window.open('/api/study-report/' + encodeURIComponent(slug) + '?download=1', '_blank', 'noopener');
+    window.open((window.__BASE_PATH__ || "") + '/api/study-report/' + encodeURIComponent(slug) + '?download=1', '_blank', 'noopener');
   };
   window._vivStudyNotebookOpen = function (ev, slug) {
     if (ev && ev.stopPropagation) ev.stopPropagation(); _hideStudyExportMenu();
-    window.open('/api/study/' + encodeURIComponent(slug) + '/notebook?download=0', '_blank', 'noopener');
+    window.open((window.__BASE_PATH__ || "") + '/api/study/' + encodeURIComponent(slug) + '/notebook?download=0', '_blank', 'noopener');
   };
   window._vivStudyFiguresOpen = function (ev, slug) {
     if (ev && ev.stopPropagation) ev.stopPropagation(); _hideStudyExportMenu();
