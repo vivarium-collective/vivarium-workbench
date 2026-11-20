@@ -698,6 +698,29 @@
   // absent file 404s; a bare <a download> to a 404 reads as a broken button.
   // (The "↓ Figures" jump button + _vivStudyJumpToFigures were removed — the
   // figures now live in their own Visualizations tab, opened via _setStudyTab.)
+
+  // Study Export "open in browser" variants — mirror the investigation Export:
+  // open the study's self-contained report / runnable notebook inline in a new
+  // tab, and "open figures" switches to the study's Visualizations tab (its
+  // in-page figure view). The download counterparts stay _vivStudy*FromCard.
+  function _hideStudyExportMenu(){ var m = document.getElementById('study-export-menu'); if (m) m.style.display = 'none'; }
+  window._vivStudyReportOpen = function (ev, slug) {
+    if (ev && ev.stopPropagation) ev.stopPropagation(); _hideStudyExportMenu();
+    window.open('/api/study-report/' + encodeURIComponent(slug), '_blank', 'noopener');
+  };
+  window._vivStudyReportDownload = function (ev, slug) {
+    if (ev && ev.stopPropagation) ev.stopPropagation(); _hideStudyExportMenu();
+    window.open('/api/study-report/' + encodeURIComponent(slug) + '?download=1', '_blank', 'noopener');
+  };
+  window._vivStudyNotebookOpen = function (ev, slug) {
+    if (ev && ev.stopPropagation) ev.stopPropagation(); _hideStudyExportMenu();
+    window.open('/api/study/' + encodeURIComponent(slug) + '/notebook?download=0', '_blank', 'noopener');
+  };
+  window._vivStudyFiguresOpen = function (ev, slug) {
+    if (ev && ev.stopPropagation) ev.stopPropagation(); _hideStudyExportMenu();
+    if (typeof window._setStudyTab === 'function') window._setStudyTab('visualize');
+  };
+
   window._vivStudyFiguresFromCard = function (ev, slug) {
     if (ev && ev.stopPropagation) ev.stopPropagation();
     var c = window.__DASH_CONFIG__ || {};

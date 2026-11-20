@@ -2752,9 +2752,10 @@ body.pcard-splitting iframe{ pointer-events:none; }
 .study-tab-panel { display: none; padding: 8px 0; }
 .study-tab-panel.active { display: block; }
 
-/* Study header — name + status pill */
-.study-header { margin: 0 0 8px; }
-.study-title { display: flex; align-items: center; gap: 12px; margin: 0; font-size: 1.6em; }
+/* Study header — name + status pill (compact: smaller title, tighter spacing,
+   so the tab content below gets the emphasis) */
+.study-header { margin: 0 0 5px; }
+.study-title { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 1.22em; }
 .study-title .study-name { font-weight: 600; }
 
 /* Overview tab — full-width, streamlined layout */
