@@ -2012,3 +2012,71 @@ def test_compose_panel_variant_rows_carry_model_composite_attrs(tmp_path):
     # The "inherits" variant declares no composite of its own -> an empty
     # attribute the JS skips (never a stray undefined-id fetch).
     assert 'data-model-composite=""' in compose
+
+
+def test_study_header_is_compact():
+    """The study title is shrunk and the question line condensed (more room for
+    the tab content)."""
+    from pathlib import Path as _P
+    root = _P(__file__).resolve().parents[1]
+    css = (root / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
+    assert "font-size: 1.22em;" in css          # study title shrunk from 1.6em
+    tpl = (root / "vivarium_workbench/templates/study-detail.html").read_text(encoding="utf-8")
+    assert "font-size:0.92em" in tpl            # question line condensed
+
+
+def test_question_headline_hidden_when_it_duplicates_the_title(tmp_path, inproc_client):
+    """An auto-titled study (title == question) hides the Q line (pure repetition);
+    a study whose question differs keeps it."""
+    import yaml as _y
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    (ws / "workspace.yaml").write_text("name: ws\n")
+    q = "Do the same conditions permit enclosure?"
+    base = {"schema_version": 3, "baseline": [{"name": "core", "composite": "pkg.composites.core"}],
+            "variants": [], "status": "in_progress"}
+    dup = ws / "studies" / "dup-study"; dup.mkdir(parents=True)
+    (dup / "study.yaml").write_text(_y.safe_dump({**base, "name": "dup-study", "title": q, "question": q}))
+    diff = ws / "studies" / "diff-study"; diff.mkdir(parents=True)
+    (diff / "study.yaml").write_text(_y.safe_dump({**base, "name": "diff-study", "title": "A short title", "question": q}))
+    c = inproc_client(ws)
+    assert 'id="study-question-headline"' not in c.get("/studies/dup-study").text
+    assert 'id="study-question-headline"' in c.get("/studies/diff-study").text
+
+
+def test_study_export_menu_open_and_download_per_artifact(tmp_path, inproc_client):
+    """The study Export menu mirrors the investigation one: report / notebook /
+    figures each offer open-in-browser AND download."""
+    import yaml as _y
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    (ws / "workspace.yaml").write_text("name: ws\n")
+    sd = ws / "studies" / "exp-study"; sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(_y.safe_dump({
+        "schema_version": 3, "name": "exp-study", "title": "T",
+        "baseline": [{"name": "core", "composite": "pkg.composites.core"}],
+        "variants": [], "question": "Does it?", "status": "in_progress"}))
+    html = inproc_client(ws).get("/studies/exp-study").text
+    for h in ("_vivStudyReportOpen", "_vivStudyReportDownload", "_vivStudyNotebookOpen", "_vivStudyFiguresOpen"):
+        assert h in html, f"missing study export handler {h}"
+    assert html.count("Open in browser") >= 3
+    assert "Download HTML" in html and "Download .ipynb" in html and "Download (zip)" in html
+
+
+def test_study_report_and_notebook_inline_routes(tmp_path, inproc_client):
+    """GET /api/study-report/<slug> serves inline (open) and attaches with
+    ?download=1; the study notebook honors ?download=0 for inline open."""
+    import yaml as _y
+    ws = tmp_path
+    (ws / "workspace.yaml").write_text("name: t\n")
+    sd = ws / "studies" / "rep-study"; sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(_y.safe_dump({"name": "rep-study", "title": "Rep", "purpose": {"question": "Q?"}}))
+    c = inproc_client(workspace=ws)
+    r = c.get("/api/study-report/rep-study")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
+    assert "attachment" not in r.headers.get("content-disposition", "")      # inline = open
+    r2 = c.get("/api/study-report/rep-study?download=1")
+    assert "attachment" in r2.headers.get("content-disposition", "")
+    assert c.get("/api/study-report/does-not-exist").status_code == 404
+    rn = c.get("/api/study/rep-study/notebook?download=0")
+    assert rn.status_code == 200 and "attachment" not in rn.headers.get("content-disposition", "")

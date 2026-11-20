@@ -4519,6 +4519,7 @@ def create_app() -> FastAPI:
     def study_notebook_route(
         slug: str,
         format: str = "ipynb",
+        download: int = 1,
         ws: Path = Depends(get_workspace),
     ) -> Response:
         """Generate + download ONE study's notebook/script.
@@ -4527,7 +4528,8 @@ def create_app() -> FastAPI:
         that study's setup / parameters / composite / visualization cells (no
         sibling studies). Deterministic export (no AI). ``?format=py`` →
         ``text/x-python``; otherwise → ``application/x-ipynb+json``. Served as an
-        attachment with ``Cache-Control: no-store``.
+        attachment with ``Cache-Control: no-store`` by default; ``?download=0``
+        serves it inline so the browser can open it in a new tab.
 
         HTTP 400 when ``slug`` is empty; HTTP 404 ``{"error": "no study
         '<slug>'"}`` when absent; HTTP 500 on export failure.
@@ -4540,14 +4542,43 @@ def create_app() -> FastAPI:
             )
         except _download_views.DownloadError as exc:
             return JSONResponse(status_code=exc.status, content=exc.body)
-        return Response(
-            content=data,
-            headers={
-                "Content-Type": mime,
-                "Cache-Control": "no-store",
-                "Content-Disposition": f'attachment; filename="{filename}"',
-            },
-        )
+        headers = {"Content-Type": mime, "Cache-Control": "no-store"}
+        if download:
+            headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return Response(content=data, headers=headers)
+
+    @app.get(
+        "/api/study-report/{slug}",
+        tags=["Downloads"],
+        summary="Self-contained single-study HTML report (inline, or ?download=1)",
+        response_class=Response,
+    )
+    def study_report_route(
+        slug: str,
+        download: int = 0,
+        ws: Path = Depends(get_workspace),
+    ) -> Response:
+        """Render ONE study to a self-contained HTML report and serve it **inline**
+        (so it opens in the browser), or as an attachment with ``?download=1`` —
+        the study-level counterpart to ``/api/investigation-report/{slug}``.
+
+        Deterministic/data-only (reads ``study.yaml`` + the study's ``viz/*.html``).
+        404 when the study spec doesn't exist. Library-backed via
+        ``lib.single_study_report.render_single_study_report`` (rendered to a temp
+        dir and streamed, so nothing is written into the workspace)."""
+        import tempfile
+        from vivarium_workbench.lib import single_study_report as _ssr
+        name = _path_safety.plain_name(slug, "study")
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                out = _ssr.render_single_study_report(ws, name, out_dir=Path(td))
+                html = out.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return JSONResponse(status_code=404, content={"error": f"no study {name!r}"})
+        headers = None
+        if download:
+            headers = {"Content-Disposition": f'attachment; filename="study-{name}.html"'}
+        return Response(content=html, media_type="text/html", headers=headers)
 
     # -----------------------------------------------------------------------
     # Events (Phase C, Batch 15): SSE workspace-state stream
