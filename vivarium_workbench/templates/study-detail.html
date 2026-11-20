@@ -35,14 +35,14 @@
        any consumer; the lifecycle stage is now shown — and highlighted "you are
        here" — inside the six-gate status row below (gate-current). #}
   </h1>
-    {# Two-axis study markers — Progress (● Completed) × Verdict (◆ Supported) —
-       lined up inline with the title (filled by _renderStudyAxisMarkers in
-       study-detail.js) so they don't take a separate row above the content. #}
-    <span id="study-axis-markers" data-slug="{{ name }}" style="display:inline-flex; gap:8px; align-items:center; flex-wrap:wrap"></span>
   </div>
   {% if _q and (_q | trim) != (display_name | trim) %}<p id="study-question-headline" class="study-question-headline" title="{{ _q }}"><span class="q-glyph">Q</span> <span class="study-question-headline-text" data-edit-kind="study" data-edit-field="question" data-edit-value="{{ study.question }}" data-edit-multiline data-edit-label="Question">{{ _q }}</span></p>{% endif %}
   </div>
-  <span class="study-header-actions" style="display:inline-flex; gap:6px; flex-shrink:0; align-items:center;">
+  <span class="study-header-actions" style="display:inline-flex; gap:10px; flex-shrink:0; align-items:center;">
+    {# Two-axis study markers — Progress (● Completed) × Verdict (◆ Supported) —
+       sit top-right with the nav (filled by _renderStudyAxisMarkers in
+       study-detail.js) so the title + question take the full left width. #}
+    <span id="study-axis-markers" data-slug="{{ name }}" style="display:inline-flex; gap:8px; align-items:center; flex-wrap:wrap"></span>
     {# Export (figures / notebook) moved OUT of the header into the Overview
        panel's section toolbar (Phase 4 refinement). The launch actions
        (↻ Reproduce / ▶ Run current spec / ⚙ Dispatch composite) were moved OUT
@@ -165,7 +165,7 @@
 .study-kind-tag.study-kind-biological{background:#ecfdf5;color:#065f46}
 .study-kind-tag.study-kind-computational{background:#eff6ff;color:#1e40af}
 .study-kind-tag.study-kind-theoretical{background:#faf5ff;color:#6b21a8}
-.study-question-headline{margin:2px 0 0 0;font-size:0.85em;line-height:1.35;color:#475569;font-family:Georgia,"Times New Roman",serif;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.study-question-headline{margin:2px 0 0 0;font-size:0.85em;line-height:1.35;color:#475569;font-family:Georgia,"Times New Roman",serif}
 .study-question-headline .q-glyph{display:inline-block;font-size:0.78em;font-weight:700;font-family:ui-monospace,monospace;color:#64748b;background:#f1f5f9;padding:1px 7px;border-radius:4px;margin-right:6px;vertical-align:middle}
 /* Study Export menu — styled to match the investigation-level ↓ Export menu
    exactly: grey uppercase section labels + full-width, left-aligned, stacked
