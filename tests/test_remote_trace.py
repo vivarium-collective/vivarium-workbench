@@ -16,7 +16,11 @@ import json
 import pytest
 
 from vivarium_workbench.lib import remote_trace
+from vivarium_workbench_sms import sms_trace
 from vivarium_workbench_sms.sms_api_client import CAPABILITY_VIVA_V1_TRACE, SmsApiError
+
+#: The real builder, before the autouse ``use`` fixture replaces it.
+_REAL_MAKE_CLIENT = sms_trace.make_client
 
 TRACE = json.dumps({"traceEvents": [
     {"name": "run", "ph": "X", "ts": 0, "dur": 1000, "pid": 1, "tid": 1},
@@ -30,7 +34,7 @@ import tempfile as _tempfile  # noqa: E402
 _WS = Path(_tempfile.mkdtemp(prefix="no-records-ws-"))
 
 class FakeClient:
-    """Just the surface ``remote_trace`` touches."""
+    """Just the surface ``sms_trace`` touches."""
 
     def __init__(self, caps=(CAPABILITY_VIVA_V1_TRACE,), *, caps_error=None,
                  trace_error=None, correlation_id="compose-sim-abc"):
@@ -62,31 +66,50 @@ class FakeClient:
         return {"status": "completed", "correlation_id": self.correlation_id}
 
 
+@pytest.fixture(autouse=True)
+def use(monkeypatch):
+    """The client viva-api's half gets (step P2, Runs b2: ``sms_trace.make_client``, the plugin's builder). The lib
+    tests call the CORE functions, so each assertion covers the whole chain: core routing, the SMS unrouted facet,
+    ``sms_trace``."""
+    slot = {"client": FakeClient()}
+    monkeypatch.setattr(sms_trace, "make_client", lambda: slot["client"])
+
+    def _use(client):
+        slot["client"] = client
+        return client
+
+    return _use
+
+
 # ---------------------------------------------------------------- lib: support
 
 
-def test_support_true_when_capability_advertised(monkeypatch):
+def test_support_true_when_capability_advertised(monkeypatch, use):
     monkeypatch.setenv("VIVARIUM_WORKBENCH_PERFETTO_UI", "https://ui.perfetto.dev")
-    body, status = remote_trace.trace_support(FakeClient())
+    use(FakeClient())
+    body, status = remote_trace.trace_support()
     assert status == 200
     assert body["supported"] is True and body["reason"] is None
     assert body["capability"] == "viva-v1-trace"
     assert body["viewer"] == {"mode": "external", "url": "https://ui.perfetto.dev/", "version": None}
 
 
-def test_support_false_when_capability_absent():
-    body, _ = remote_trace.trace_support(FakeClient(caps=("chain-progress",)))
+def test_support_false_when_capability_absent(use):
+    use(FakeClient(caps=("chain-progress",)))
+    body, _ = remote_trace.trace_support()
     assert body["supported"] is False and body["reason"] == "capability-absent"
 
 
-def test_support_false_on_pre_capabilities_server():
+def test_support_false_on_pre_capabilities_server(use):
     """A deployment predating the capabilities endpoint (404) advertises nothing."""
-    body, _ = remote_trace.trace_support(FakeClient(caps_error=SmsApiError("nope", status=404)))
+    use(FakeClient(caps_error=SmsApiError("nope", status=404)))
+    body, _ = remote_trace.trace_support()
     assert body["supported"] is False and body["reason"] == "capability-absent"
 
 
-def test_support_unreachable_is_not_reported_as_unsupported():
-    body, status = remote_trace.trace_support(FakeClient(caps_error=SmsApiError("tunnel down")))
+def test_support_unreachable_is_not_reported_as_unsupported(use):
+    use(FakeClient(caps_error=SmsApiError("tunnel down")))
+    body, status = remote_trace.trace_support()
     assert status == 200
     assert body["supported"] is False and body["reason"] == "unreachable"
 
@@ -94,31 +117,32 @@ def test_support_unreachable_is_not_reported_as_unsupported():
 # ---------------------------------------------------------------- lib: fetch
 
 
-def test_fetch_simulation_trace_passes_bytes_through():
-    client = FakeClient()
-    body, status, filename = remote_trace.fetch_trace(client, simulation_id="42", ws_root=_WS)
+def test_fetch_simulation_trace_passes_bytes_through(use):
+    client = use(FakeClient())
+    body, status, filename = remote_trace.fetch_trace(simulation_id="42", ws_root=_WS)
     assert status == 200 and body == TRACE
     assert filename == "simulation-42-trace.json"
     assert client.calls == [("simulation_trace", 42)]
 
 
-def test_fetch_composite_run_trace():
-    client = FakeClient()
-    body, status, filename = remote_trace.fetch_trace(client, composite_run_id="run/../x y", ws_root=_WS)
+def test_fetch_composite_run_trace(use):
+    client = use(FakeClient())
+    body, status, filename = remote_trace.fetch_trace(composite_run_id="run/../x y", ws_root=_WS)
     assert status == 200 and body == TRACE
     assert client.calls == [("composite_run_trace", "run/../x y")]
     assert "/" not in filename and " " not in filename
 
 
-def test_fetch_compose_id_resolves_correlation_id():
-    client = FakeClient(correlation_id="compose-sim-xyz")
-    body, status, _ = remote_trace.fetch_trace(client, compose_id=7, ws_root=_WS)
+def test_fetch_compose_id_resolves_correlation_id(use):
+    client = use(FakeClient(correlation_id="compose-sim-xyz"))
+    body, status, _ = remote_trace.fetch_trace(compose_id=7, ws_root=_WS)
     assert status == 200
     assert client.calls == [("compose_status", 7), ("composite_run_trace", "compose-sim-xyz")]
 
 
-def test_fetch_compose_id_without_correlation_is_404():
-    body, status, _ = remote_trace.fetch_trace(FakeClient(correlation_id=None), compose_id=7, ws_root=_WS)
+def test_fetch_compose_id_without_correlation_is_404(use):
+    use(FakeClient(correlation_id=None))
+    body, status, _ = remote_trace.fetch_trace(compose_id=7, ws_root=_WS)
     assert status == 404 and "correlation_id" in body["error"]
 
 
@@ -129,30 +153,31 @@ def test_fetch_compose_id_without_correlation_is_404():
     {"simulation_id": 0},
     {"compose_id": -3},
 ])
-def test_fetch_rejects_bad_or_ambiguous_ids(kwargs):
-    client = FakeClient()
-    body, status, _ = remote_trace.fetch_trace(client, **kwargs, ws_root=_WS)
+def test_fetch_rejects_bad_or_ambiguous_ids(kwargs, use):
+    client = use(FakeClient())
+    body, status, _ = remote_trace.fetch_trace(**kwargs, ws_root=_WS)
     assert status == 400 and "error" in body
     assert client.calls == []
 
 
-def test_fetch_capability_absent_is_409_and_never_calls_trace():
-    client = FakeClient(caps=())
-    body, status, _ = remote_trace.fetch_trace(client, simulation_id=1, ws_root=_WS)
+def test_fetch_capability_absent_is_409_and_never_calls_trace(use):
+    client = use(FakeClient(caps=()))
+    body, status, _ = remote_trace.fetch_trace(simulation_id=1, ws_root=_WS)
     assert status == 409
     assert body["missing"] == ["viva-v1-trace"]
     assert client.calls == []
 
 
-def test_fetch_unreachable_is_502():
-    body, status, _ = remote_trace.fetch_trace(FakeClient(caps_error=SmsApiError("down")), simulation_id=1, ws_root=_WS)
+def test_fetch_unreachable_is_502(use):
+    use(FakeClient(caps_error=SmsApiError("down")))
+    body, status, _ = remote_trace.fetch_trace(simulation_id=1, ws_root=_WS)
     assert status == 502
 
 
 @pytest.mark.parametrize("upstream,expected", [(404, 404), (409, 409), (500, 502), (None, 502)])
-def test_fetch_upstream_errors(upstream, expected):
-    client = FakeClient(trace_error=SmsApiError("x", status=upstream))
-    body, status, _ = remote_trace.fetch_trace(client, simulation_id=3, ws_root=_WS)
+def test_fetch_upstream_errors(upstream, expected, use):
+    use(FakeClient(trace_error=SmsApiError("x", status=upstream)))
+    body, status, _ = remote_trace.fetch_trace(simulation_id=3, ws_root=_WS)
     assert status == expected and "error" in body
 
 
@@ -166,7 +191,7 @@ def rc(monkeypatch, tmp_path):
     from vivarium_workbench.api.app import create_app, get_workspace
 
     state = {"client": FakeClient()}
-    monkeypatch.setattr(remote_trace, "make_client", lambda: state["client"])
+    monkeypatch.setattr(sms_trace, "make_client", lambda: state["client"])
     monkeypatch.setenv("VIVARIUM_WORKBENCH_PERFETTO_UI", "off")
     app = create_app()
     app.dependency_overrides[get_workspace] = lambda: tmp_path
@@ -208,7 +233,7 @@ def test_trace_routes_survive_readonly(monkeypatch, tmp_path):
     from vivarium_workbench.api import app as _app_mod
     from vivarium_workbench.api.app import create_app, get_workspace
 
-    monkeypatch.setattr(remote_trace, "make_client", lambda: FakeClient())
+    monkeypatch.setattr(sms_trace, "make_client", lambda: FakeClient())
     app = create_app()
     _app_mod._apply_readonly_filter(app)
     app.dependency_overrides[get_workspace] = lambda: tmp_path
@@ -261,3 +286,62 @@ def test_route_trace_omits_the_count_when_unknown(rc, monkeypatch):
     monkeypatch.setattr(remote_trace, "COUNT_EVENTS_MAX_BYTES", 10)
     r = rc.get("/api/remote-run-trace", params={"simulation_id": 42})
     assert r.status_code == 200 and "x-trace-events" not in r.headers
+
+
+# ---------------------------------------------------------------- the seam (step P2, Runs b2)
+
+#: What moved from lib.remote_trace to the plugin's sms_trace. The core binds none of them: a stale
+#: ``monkeypatch.setattr(remote_trace, name, ...)`` raises instead of silently patching a dead copy.
+_MOVED_TO_SMS_TRACE = ("make_client", "SmsApiClient", "SmsApiError", "require_capabilities", "fetch_capabilities",
+                       "CapabilityUnsupportedError", "CAPABILITY_VIVA_V1_TRACE", "sms_api_base", "_positive_int",
+                       "_safe")
+
+
+def test_the_core_binds_no_viva_api_seam():
+    assert [n for n in _MOVED_TO_SMS_TRACE if hasattr(remote_trace, n)] == []
+    assert [n for n in ("_positive_int", "_safe") if not hasattr(sms_trace, n)] == []
+    assert _REAL_MAKE_CLIENT.__module__ == sms_trace.__name__
+
+
+def test_the_core_names_no_provider_backend():
+    """The core routes by the record's kind through ``backends.by_kind``; it never spells a provider's kind."""
+    import ast
+
+    tree = ast.parse(Path(remote_trace.__file__).read_text(encoding="utf-8"))
+    kinds = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value in ("viva-core", "sms-legacy")]
+    names = [n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and n.attr in ("VIVA_CORE", "SMS_LEGACY")]
+    assert (kinds, names) == ([], [])
+
+
+def test_the_core_functions_take_no_client_and_only_keywords():
+    import inspect
+
+    assert list(inspect.signature(remote_trace.trace_support).parameters) == []
+    params = inspect.signature(remote_trace.fetch_trace).parameters
+    assert "client" not in params
+    assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in params.values())
+    with pytest.raises(TypeError):
+        remote_trace.fetch_trace(FakeClient(), simulation_id=1, ws_root=_WS)  # type: ignore[misc]
+
+
+def test_sms_trace_reads_its_seams_through_their_modules():
+    """``sms_trace`` builds its client from ``sms_legacy``'s seams and reads the capability helpers from
+    ``sms_api_client`` at call time, never from-imports them: tests patch them on those modules."""
+    import ast
+
+    watched = {"vivarium_workbench_sms.sms_api_client", "vivarium_workbench_sms.sms_legacy"}
+    tree = ast.parse(Path(sms_trace.__file__).read_text(encoding="utf-8"))
+    offenders = [f"{n.module}:{n.lineno}" for n in ast.walk(tree)
+                 if isinstance(n, ast.ImportFrom) and n.module in watched]
+    assert offenders == []
+
+
+def test_the_client_is_built_from_sms_legacys_seams(monkeypatch):
+    """One patch point with the rest of the plugin: ``sms_legacy.SmsApiClient`` / ``sms_legacy._sms_api_base``
+    (review fix 4), so a test patching those reaches the trace too."""
+    from vivarium_workbench_sms import sms_legacy
+
+    built = []
+    monkeypatch.setattr(sms_legacy, "_sms_api_base", lambda: "http://seam:1")
+    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda base: built.append(base) or "client")
+    assert _REAL_MAKE_CLIENT() == "client" and built == ["http://seam:1"]

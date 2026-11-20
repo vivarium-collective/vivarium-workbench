@@ -21,9 +21,7 @@ import sys
 import textwrap
 
 
-STILL_NEED_PLUGIN = frozenset({
-    "vivarium_workbench.lib.remote_trace",
-})
+STILL_NEED_PLUGIN: frozenset[str] = frozenset()
 
 # Modules allowed to fail for a reason other than the plugin: optional extras that may be absent (the ``chat`` extra).
 # Anything else failing to import would hide a plugin import behind it.
@@ -336,3 +334,48 @@ def test_a_card_run_answers_without_the_plugin(monkeypatch):
                             "run_target": "deployment"}, 409])
     assert "@@CLOUD@@" + expected in proc.stdout, (proc.stdout[-2000:], proc.stderr[-2000:])
     assert "@@STAMPED@@202:local" in proc.stdout, (proc.stdout[-2000:], proc.stderr[-2000:])
+
+
+_TRACE_PROBE = textwrap.dedent('''
+    import json, sys, tempfile
+    from pathlib import Path
+
+    class _NoPlugin:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
+
+    sys.meta_path.insert(0, _NoPlugin())
+    from vivarium_workbench.lib import remote_trace
+
+    ws = Path(tempfile.mkdtemp())
+    (ws / "workspace.yaml").write_text("name: ws\\n", encoding="utf-8")
+    support, status = remote_trace.trace_support()
+    one = remote_trace.fetch_trace(ws_root=ws, simulation_id="44")
+    none = remote_trace.fetch_trace(ws_root=ws)
+    plugin = [m for m in sys.modules if m.startswith("vivarium_workbench_sms")]
+    print("@@RESULT@@" + json.dumps({"support": [support["supported"], support["reason"], "viewer" in support, status],
+                                     "one": [one[1], one[0].get("reason")], "none": [none[1], none[0]["error"]],
+                                     "plugin": plugin}))
+''')
+
+
+def test_the_trace_answers_without_the_plugin(monkeypatch):
+    """Step P2 Runs b2: with the plugin absent the trace's core answers (before, the routes' lazy import of the SMS
+    client was a 500): support says ``no-backend`` with the viewer, a lone id is a terminal 409
+    ``backend-not-installed``, no id is the old 400."""
+    from vivarium_workbench.lib.backend_config import BACKEND_BASE_ENV_VARS
+
+    for var in BACKEND_BASE_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+        monkeypatch.delenv(var.replace("VIVARIUM_WORKBENCH_", "VIVARIUM_DASHBOARD_"), raising=False)
+    proc = subprocess.run([sys.executable, "-c", _TRACE_PROBE], capture_output=True, text=True, timeout=300)
+    marker = [ln for ln in proc.stdout.splitlines() if ln.startswith("@@RESULT@@")]
+    assert marker, proc.stderr[-2000:]
+    assert json.loads(marker[-1][len("@@RESULT@@"):]) == {
+        "support": [False, "no-backend", True, 200],
+        "one": [409, "backend-not-installed"],
+        "none": [400, "give exactly one of simulation_id, composite_run_id, compose_id"],
+        "plugin": [],
+    }
