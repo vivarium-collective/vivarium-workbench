@@ -3,10 +3,16 @@
 With providers ON (the default, and the only configuration in use) everything is as before step P1c -- the existing
 routing, select, capability and interop tests prove that unchanged. These tests pin the registry itself and the
 core's behaviour with providers OFF (``VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none``, step P3's core-only CI job).
+
+Step P3 K2a: the providers-on tests are marked ``plugin``. The providers-off tests also run with the plugin absent (the
+core-only job); their "SMS is never asked" guards patch the plugin only where it is installed (:func:`_forbid`) --
+absent, it cannot be asked. An anti-seam test that also checked the plugin's side is split in two: the core's half and
+the plugin's (marked).
 """
 
 from __future__ import annotations
 
+import importlib
 import threading
 from urllib.parse import urlencode
 
@@ -14,6 +20,26 @@ import pytest
 
 from vivarium_workbench.lib import backends
 from vivarium_workbench.lib.backends import provider as provider_mod
+
+
+def _installed(module: str):
+    """The plugin's ``module`` when the plugin is installed, else None (the core-only job)."""
+    try:
+        return importlib.import_module(f"vivarium_workbench_sms.{module}")
+    except ImportError:
+        return None
+
+
+def _forbid(monkeypatch, module: str, attr: str, value) -> None:
+    """Patch the plugin's ``module.attr`` (a dotted ``attr`` reaches into a class) when the plugin is installed: a
+    providers-off guard that SMS is never asked. With the plugin absent there is nothing to ask."""
+    target = _installed(module)
+    if target is None:
+        return
+    *owner, name = attr.split(".")
+    for part in owner:
+        target = getattr(target, part)
+    monkeypatch.setattr(target, name, value)
 
 
 @pytest.fixture
@@ -34,6 +60,7 @@ def _fresh_registry():
 
 # --- providers on ---------------------------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_the_sms_provider_is_found_and_brings_viva_core_and_sms_legacy():
     (sms,) = provider_mod.providers()
     assert sms.name == "sms"
@@ -43,6 +70,7 @@ def test_the_sms_provider_is_found_and_brings_viva_core_and_sms_legacy():
     assert backends.VIVA_CORE.identity is backends.SMS_LEGACY.identity  # one viva-api server
 
 
+@pytest.mark.plugin
 def test_the_registry_hands_out_the_same_objects_even_under_concurrent_first_use():
     seen = []
     barrier = threading.Barrier(8)
@@ -61,8 +89,11 @@ def test_the_registry_hands_out_the_same_objects_even_under_concurrent_first_use
 
 
 def test_a_missing_dependency_inside_the_plugin_is_not_mistaken_for_no_plugin(monkeypatch):
+    """Core: the loader tells a broken plugin from an absent one (runs core-only too: the stub raises before any real
+    plugin import). Providers must be on for the loader to try (``PROVIDERS=none`` is the local "off" mode)."""
     import builtins
 
+    monkeypatch.delenv(provider_mod.PROVIDERS_ENV, raising=False)
     real_import = builtins.__import__
 
     def boom(name, *a, **k):
@@ -76,6 +107,7 @@ def test_a_missing_dependency_inside_the_plugin_is_not_mistaken_for_no_plugin(mo
         provider_mod.providers()
 
 
+@pytest.mark.plugin
 def test_recognise_never_raises_and_stops_when_the_backend_cannot_be_asked():
     from vivarium_workbench_sms.sms_api_client import SmsApiError
 
@@ -114,15 +146,14 @@ def test_with_providers_off_the_sms_attributes_are_inert_sentinels(providers_off
 @pytest.mark.parametrize("session_build, pinned", [(True, False), (False, True)])
 def test_with_providers_off_a_session_build_or_pin_does_not_pick_sms(providers_off, tmp_path, monkeypatch,
                                                                      session_build, pinned):
-    from vivarium_workbench_sms import remote_pinned
-
     if session_build:
         (tmp_path / ".viv-build.json").write_text("{}")  # any stamp: SmsProvider.session_build claims it
-    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: pinned)
+    _forbid(monkeypatch, "remote_pinned", "is_pinned_enabled", lambda: pinned)
     monkeypatch.setattr(backends, "named", lambda: None)
     assert backends.select(tmp_path) is None
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("session_build, pinned", [(True, False), (False, True)])
 def test_with_providers_on_a_session_build_or_pin_picks_sms_legacy(tmp_path, monkeypatch, session_build, pinned):
     from vivarium_workbench_sms import remote_pinned
@@ -133,6 +164,7 @@ def test_with_providers_on_a_session_build_or_pin_picks_sms_legacy(tmp_path, mon
     assert backends.select(tmp_path) is backends.SMS_LEGACY
 
 
+@pytest.mark.plugin
 def test_the_same_backends_come_back_across_a_providers_toggle(monkeypatch):
     """A provider keeps the backends it built, so ``is`` comparisons stay valid after reset_registry()."""
     before = (backends.VIVA_CORE, backends.SMS_LEGACY)
@@ -169,12 +201,11 @@ def test_with_providers_off_a_named_compose_api_is_probed_by_the_core_client(pro
     SMS client."""
     from vivarium_workbench.lib import backend_config as bc
     from vivarium_workbench.lib import server_capabilities as sc
-    from vivarium_workbench_sms import sms_api_client as sac
 
     def no_sms_client(self, *a, **k):
         raise AssertionError("built the SMS client with providers off")
 
-    monkeypatch.setattr(sac.SmsApiClient, "__init__", no_sms_client)
+    _forbid(monkeypatch, "sms_api_client", "SmsApiClient.__init__", no_sms_client)
     asked = []
 
     def ops(self):
@@ -192,6 +223,7 @@ def test_with_providers_off_a_named_compose_api_is_probed_by_the_core_client(pro
     assert profile is not None and profile["dispatch"] == sc.DISPATCH_COMPOSE
 
 
+@pytest.mark.plugin
 def test_with_providers_on_the_named_backend_is_probed_by_the_sms_probe_client(monkeypatch):
     """The golden for the pre-P2 ``SmsApiClient.for_("probe", base)``: the provider's ``probe_client`` builds it."""
     from vivarium_workbench.lib import server_capabilities as sc
@@ -270,13 +302,12 @@ def test_with_providers_off_the_run_target_ignores_sms(providers_off, tmp_path, 
     from vivarium_workbench.lib import remote_run_compose as _rc
     from vivarium_workbench.lib import server_capabilities as sc
     from vivarium_workbench.lib.errors import APIError
-    from vivarium_workbench_sms import remote_pinned
 
     ws = tmp_path
     (ws / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
     if case == "session-build":
         (ws / ".viv-build.json").write_text('{"simulator_id": 66}')
-    monkeypatch.setattr(remote_pinned, "is_pinned_enabled", lambda: case == "pin")
+    _forbid(monkeypatch, "remote_pinned", "is_pinned_enabled", lambda: case == "pin")
     profile = {
         "named-compose": {"reachable": True, "dispatch": sc.DISPATCH_COMPOSE, "error": None},
         "named-document": {"reachable": True, "dispatch": sc.DISPATCH_DOCUMENT, "error": None},
@@ -320,17 +351,24 @@ _MOVED_TO_SMS_LEGACY = (
 
 def test_remote_run_views_binds_no_sms_seam():
     from vivarium_workbench.lib import remote_run_views as rrv
-    from vivarium_workbench_sms import sms_legacy
 
     assert [n for n in _MOVED_TO_SMS_LEGACY if hasattr(rrv, n)] == []
+
+
+@pytest.mark.plugin
+def test_the_names_remote_run_views_dropped_are_the_plugins():
+    from vivarium_workbench_sms import sms_legacy
+
     assert [n for n in _MOVED_TO_SMS_LEGACY if not hasattr(sms_legacy, n)] == []
 
 
+@pytest.mark.plugin
 def test_with_providers_on_sms_legacy_is_the_unrouted_backend():
     assert backends.unrouted() is backends.SMS_LEGACY
     assert backends.VIVA_CORE.unrouted is None and backends.COMPOSE.unrouted is None
 
 
+@pytest.mark.plugin
 def test_two_backends_declaring_the_unrouted_facet_are_refused(monkeypatch):
     from vivarium_workbench_sms.sms_legacy import SmsLegacyRuns, SmsLegacyUnrouted
 
@@ -372,6 +410,7 @@ def _sms_record_ws(tmp_path, monkeypatch, sim_id="12"):
     return ws
 
 
+@pytest.mark.plugin
 def test_with_providers_on_an_sms_runs_status_keeps_its_analysis_id(tmp_path, monkeypatch, inproc_client):
     """The status rule ``chosen is not None and chosen.unrouted is None``: an SMS run's poll goes to the unrouted
     facet with every id it carries (analysis beats simulation), never to ``runs.status(rid)``, which would drop it."""
@@ -431,12 +470,11 @@ _REFUSED = (409, "backend-not-installed", "backend-not-installed", True)
 def test_with_providers_off_the_core_answers_unrouted_requests(providers_off, tmp_path, monkeypatch, inproc_client,
                                                                method, path, payload, expected):
     from vivarium_workbench.lib import server_capabilities as sc
-    from vivarium_workbench_sms import sms_legacy
 
     monkeypatch.setattr(sc, "explicit_backend_profile", lambda: None)
     # Nothing may reach SMS: its login check would answer 401 first, and its client would be asked.
-    monkeypatch.setattr(sms_legacy, "_run_auth_ok", lambda: pytest.fail("the SMS login check was consulted"))
-    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda *a, **k: pytest.fail("SMS was asked"))
+    _forbid(monkeypatch, "sms_legacy", "_run_auth_ok", lambda: pytest.fail("the SMS login check was consulted"))
+    _forbid(monkeypatch, "sms_legacy", "SmsApiClient", lambda *a, **k: pytest.fail("SMS was asked"))
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
     client = inproc_client(tmp_path)
     r = client.get(f"{path}?{urlencode(payload)}") if method == "get" else client.post(path, json=payload)
@@ -450,9 +488,7 @@ def test_with_providers_off_the_core_answers_unrouted_requests(providers_off, tm
 
 
 def test_with_providers_off_the_study_gallery_is_empty(providers_off, tmp_path, monkeypatch, inproc_client):
-    from vivarium_workbench_sms import sms_legacy
-
-    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda *a, **k: pytest.fail("SMS was asked"))
+    _forbid(monkeypatch, "sms_legacy", "SmsApiClient", lambda *a, **k: pytest.fail("SMS was asked"))
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
     r = inproc_client(tmp_path).get("/api/study-remote-figures?study=s")
     assert (r.status_code, r.json()) == (200, {"available": False, "reason": "no-backend", "study": "s", "sims": []})
@@ -460,6 +496,7 @@ def test_with_providers_off_the_study_gallery_is_empty(providers_off, tmp_path, 
 
 # --- the optional artifacts / analyses facets (step P2, Analyses and figures) ---------------------------------------
 
+@pytest.mark.plugin
 def test_only_sms_legacy_offers_the_artifacts_and_analyses_facets():
     from vivarium_workbench_sms.analyses import SmsAnalyses, SmsArtifacts
 
@@ -480,6 +517,7 @@ def test_with_providers_off_no_backend_offers_artifacts_or_analyses(providers_of
 
 # --- the optional listing facet (step P2, Remote tab R1) -------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_only_sms_legacy_offers_the_listing_facet():
     from vivarium_workbench_sms.remote_simulations import SmsListing
 
@@ -500,10 +538,9 @@ def test_with_providers_off_a_runs_store_is_never_fetched(providers_off, tmp_pat
     """Step P2 Remote tab R2: an s3-only row of an SMS simulation (no record: routed by its id's form) has no backend
     offering ``artifacts`` with providers off, so the Results zip is a 404 and SMS is never asked."""
     from vivarium_workbench.lib import simulations_index as si
-    from vivarium_workbench_sms import sms_api_client, sms_legacy
 
-    monkeypatch.setattr(sms_api_client.SmsApiClient, "__init__", lambda *a, **k: pytest.fail("SMS was asked"))
-    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda *a, **k: pytest.fail("SMS was asked"))
+    _forbid(monkeypatch, "sms_api_client", "SmsApiClient.__init__", lambda *a, **k: pytest.fail("SMS was asked"))
+    _forbid(monkeypatch, "sms_legacy", "SmsApiClient", lambda *a, **k: pytest.fail("SMS was asked"))
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
     row = {"run_id": "r", "db_path": None, "store_path": "s3://bucket/r", "study_slug": None,
            "remote_origin": {"simulation_id": 113, "deployment": "smsvpctest"}}
@@ -515,6 +552,7 @@ def test_with_providers_off_a_runs_store_is_never_fetched(providers_off, tmp_pat
 
 # --- the optional batch status (step P2, Runs c2) ---------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_only_sms_legacy_declares_the_optional_batch_status():
     """``runs.status_many`` (:class:`backends.BatchStatus`) is optional and found by ``getattr``: SMS declares it (its
     one ``compose_status_batch`` call), compose-api and viva-core do not, and neither does any inert sentinel nor the
@@ -569,21 +607,29 @@ def _app_routes(app):
     return {(r.path, m.lower()): r for r in app.router.routes if getattr(r, "methods", None) for m in r.methods}
 
 
-def test_the_sms_only_views_moved_to_the_plugin_and_bind_no_pipeline_seam():
+def test_the_sms_only_views_left_the_core():
     from vivarium_workbench.lib import remote_run_views as rrv
-    from vivarium_workbench_sms import remote_pipeline_views as pv
 
     assert [n for n in _MOVED_TO_PIPELINE_VIEWS + _DROPPED_FROM_RRV if hasattr(rrv, n)] == []
+
+
+@pytest.mark.plugin
+def test_the_sms_only_views_moved_to_the_plugin_and_bind_no_pipeline_seam():
+    from vivarium_workbench_sms import remote_pipeline_views as pv
+
     assert [n for n in _MOVED_TO_PIPELINE_VIEWS if not hasattr(pv, n)] == []
     # The pipeline seams are read through remote_run_jobs and the SMS ones through sms_legacy: one patch target each.
     assert [n for n in ("PipelineCtx", "manager", "run_remote_pipeline") + _MOVED_TO_SMS_LEGACY if hasattr(pv, n)] == []
 
 
+@pytest.mark.plugin
 def test_the_registry_does_not_load_the_routes_or_the_pipeline():
     """An env worker loads the provider for the registry (``backends.active`` -> ``_registry``); that must not pull in
     the plugin's routes, its views or the in-process pipeline (``remote_run_jobs``), which only ``create_app`` needs."""
     import subprocess
     import sys
+
+    import vivarium_workbench_sms  # noqa: F401 -- the child loads the provider; it must be installed here too
 
     code = ("import sys\n"
             "from vivarium_workbench.lib import backends\n"
@@ -597,6 +643,7 @@ def test_the_registry_does_not_load_the_routes_or_the_pipeline():
     assert out.stdout.strip().splitlines()[-1] == "[]"
 
 
+@pytest.mark.plugin
 def test_with_providers_on_the_sms_only_routes_are_served_under_the_app_wide_guards():
     from vivarium_workbench.api import app as appmod
 
@@ -614,6 +661,7 @@ def test_with_providers_on_the_sms_only_routes_are_served_under_the_app_wide_gua
     assert "/api/remote-run-pinned-build" not in app.state.readonly_allowed_mutations
 
 
+@pytest.mark.plugin
 def test_read_only_keeps_start_build_and_status_and_drops_pinned_build(tmp_path, monkeypatch, inproc_client):
     from vivarium_workbench.lib import github_auth
 
@@ -748,11 +796,10 @@ def test_with_providers_off_an_explicit_cloud_run_is_refused_no_backend(provider
     to the unrouted facet; with providers off there is none, so it is refused (409 ``no-backend``) and nothing is
     sent or spawned. Before B2 it reached the SMS dispatch (a ``run_simulation`` call, or SMS's no-build 409)."""
     from vivarium_workbench.lib import composite_test_run_views as ctr
-    from vivarium_workbench_sms import sms_api_client as sac
 
     spawned = _card_ws(tmp_path, monkeypatch)
-    monkeypatch.setattr(sac.SmsApiClient, "run_simulation",
-                        lambda self, **kw: (_ for _ in ()).throw(AssertionError("SMS was asked")))
+    _forbid(monkeypatch, "sms_api_client", "SmsApiClient.run_simulation",
+            lambda self, **kw: (_ for _ in ()).throw(AssertionError("SMS was asked")))
     for body in ({"run_target": "deployment", "build": {"simulator_id": 211, "repo_url": "r", "commit": "c"}},
                  {"run_target": "deployment"}):
         assert ctr.composite_test_run(tmp_path, {"id": "pkg.composites.x", **body}) == (
@@ -788,9 +835,14 @@ _MOVED_TO_CLOUD_DISPATCH = (
 
 def test_the_card_binds_no_sms_seam():
     from vivarium_workbench.lib import composite_test_run_views as ctr
-    from vivarium_workbench_sms import cloud_dispatch
 
     assert [n for n in _MOVED_TO_CLOUD_DISPATCH if hasattr(ctr, n)] == []
+
+
+@pytest.mark.plugin
+def test_the_names_the_card_dropped_are_the_plugins():
+    from vivarium_workbench_sms import cloud_dispatch
+
     assert [n for n in _MOVED_TO_CLOUD_DISPATCH if not hasattr(cloud_dispatch, n)] == []
 
 
@@ -798,13 +850,20 @@ def test_viva_cores_environment_grammar_left_the_core():
     """``backend_environment`` / ``DEFAULT_BACKEND_ENVIRONMENT`` (viva-core's reading of the shared
     ``VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT``) live in the plugin since step P2 Builds B2, with no core alias."""
     from vivarium_workbench.lib import remote_run
-    from vivarium_workbench_sms import remote_run_viva_v1
 
     for name in ("backend_environment", "DEFAULT_BACKEND_ENVIRONMENT"):
         assert not hasattr(remote_run, name), name
+
+
+@pytest.mark.plugin
+def test_viva_cores_environment_grammar_is_the_plugins():
+    from vivarium_workbench_sms import remote_run_viva_v1
+
+    for name in ("backend_environment", "DEFAULT_BACKEND_ENVIRONMENT"):
         assert hasattr(remote_run_viva_v1, name), name
 
 
+@pytest.mark.plugin
 def test_cloud_dispatch_reads_every_seam_through_its_module():
     """The moved card code reads core names (``remote_run``, ``backends``) and the plugin's own (``remote_pinned``,
     ``sms_api_client``) as ``<module>.<name>`` at call time, never from-imports them: tests patch them on those
@@ -826,6 +885,7 @@ def test_cloud_dispatch_reads_every_seam_through_its_module():
 _BUILD_POSTS = frozenset({"/api/source/build-remote", "/api/source/switch-build"})
 
 
+@pytest.mark.plugin
 def test_only_sms_legacy_declares_builds_and_the_sentinels_do_not():
     from vivarium_workbench_sms.sms_legacy import SmsLegacyBuilds
 
@@ -844,12 +904,10 @@ def test_the_pin_the_study_dispatch_and_the_build_routes_left_the_core():
     from vivarium_workbench.lib import remote_run_views as rrv
     from vivarium_workbench.lib import study_runs
     from vivarium_workbench.lib import workspace_deps_views as wdv
-    from vivarium_workbench_sms import source_build_views as sbv
 
     assert [n for n in ("_sms_api_base", "build_source_builds") if hasattr(wdv, n)] == []
     assert [n for n in ("_remote_run_config", "remote_pinned") if hasattr(rrv, n)] == []
     assert not hasattr(appmod, "_source_build_views")
-    assert hasattr(sbv, "build_source_builds")
     # study_runs names no plugin module at all (its dispatch is ``builds.run_study``).
     tree = ast.parse(inspect.getsource(study_runs))
     plugin = [n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
@@ -857,6 +915,14 @@ def test_the_pin_the_study_dispatch_and_the_build_routes_left_the_core():
     assert plugin == []
 
 
+@pytest.mark.plugin
+def test_the_source_build_list_is_the_plugins():
+    from vivarium_workbench_sms import source_build_views as sbv
+
+    assert hasattr(sbv, "build_source_builds")
+
+
+@pytest.mark.plugin
 def test_the_build_routes_are_the_plugins_and_read_only_keeps_the_two_posts():
     from vivarium_workbench.api import app as appmod
 
@@ -877,14 +943,12 @@ def test_with_providers_off_the_pin_is_not_reported_and_sms_is_not_asked(provide
     """Declared change (Builds B3), providers off only: a pin env var used to reach SMS's pin; now no backend with
     builds is selected, so the card reads ``pinned: false`` with the configured deployment name, and nothing is
     sent."""
-    from vivarium_workbench_sms import remote_pinned
-    from vivarium_workbench_sms import sms_api_client as sac
-
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_REPO_URL", "https://github.com/o/r")
     monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT", "smscdk")
-    monkeypatch.setattr(sac.SmsApiClient, "list_branch_builds", lambda *a, **k: pytest.fail("SMS was asked"))
-    monkeypatch.setattr(remote_pinned, "resolved_from_session_build", lambda *a: pytest.fail("SMS's pin was read"))
+    _forbid(monkeypatch, "sms_api_client", "SmsApiClient.list_branch_builds",
+            lambda *a, **k: pytest.fail("SMS was asked"))
+    _forbid(monkeypatch, "remote_pinned", "resolved_from_session_build", lambda *a: pytest.fail("SMS's pin was read"))
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
     r = inproc_client(tmp_path).get("/api/remote-run-config")
     assert (r.status_code, r.json()) == (200, {"pinned": False, "deployment": "smscdk"})
@@ -908,6 +972,7 @@ def test_bind_session_does_nothing_without_a_key_or_a_path(monkeypatch):
 
 # --- step P2 Runs b2: the trace -------------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_every_backend_traces_and_the_unrouted_facet_traces_and_answers_support(tmp_path, monkeypatch):
     """``RunFacet.trace`` on every active backend -- real for viva-core and sms-legacy since Runs b2, no longer
     ``NotImplementedError`` -- and ``UnroutedFacet.trace`` / ``trace_support`` on the unrouted backend; an inert
@@ -966,11 +1031,10 @@ _TRACE_ONE_ID = "give exactly one of simulation_id, composite_run_id, compose_id
 def test_with_providers_off_the_trace_never_reaches_sms(providers_off, tmp_path, monkeypatch, inproc_client,
                                                         query, expected):
     from vivarium_workbench.lib import server_capabilities as sc
-    from vivarium_workbench_sms import sms_api_client, sms_legacy
 
     monkeypatch.setattr(sc, "explicit_backend_profile", lambda: None)
-    monkeypatch.setattr(sms_api_client.SmsApiClient, "__init__", lambda *a, **k: pytest.fail("SMS was asked"))
-    monkeypatch.setattr(sms_legacy, "SmsApiClient", lambda *a, **k: pytest.fail("SMS was asked"))
+    _forbid(monkeypatch, "sms_api_client", "SmsApiClient.__init__", lambda *a, **k: pytest.fail("SMS was asked"))
+    _forbid(monkeypatch, "sms_legacy", "SmsApiClient", lambda *a, **k: pytest.fail("SMS was asked"))
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
     r = inproc_client(tmp_path).get(f"/api/remote-run-trace?{urlencode(query)}")
     body = r.json()
@@ -986,10 +1050,9 @@ def test_with_providers_off_trace_support_says_no_backend(providers_off, tmp_pat
     request and the viewer as always (``perfetto-open.js`` keeps the action hidden); before, the SMS client was asked
     at the configured or default URL."""
     from vivarium_workbench.lib import server_capabilities as sc
-    from vivarium_workbench_sms import sms_api_client
 
     monkeypatch.setattr(sc, "explicit_backend_profile", lambda: None)
-    monkeypatch.setattr(sms_api_client.SmsApiClient, "__init__", lambda *a, **k: pytest.fail("SMS was asked"))
+    _forbid(monkeypatch, "sms_api_client", "SmsApiClient.__init__", lambda *a, **k: pytest.fail("SMS was asked"))
     monkeypatch.setenv("VIVARIUM_WORKBENCH_PERFETTO_UI", "off")
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")
     r = inproc_client(tmp_path).get("/api/remote-run-trace-support")
@@ -1005,11 +1068,10 @@ def test_with_providers_off_a_compose_run_is_still_traced_by_compose_api(provide
     still says it serves traces."""
     from vivarium_workbench.lib import remote_run_compose, remote_trace
     from vivarium_workbench.lib import server_capabilities as sc
-    from vivarium_workbench_sms import sms_api_client
 
     monkeypatch.setattr(sc, "explicit_backend_profile",
                         lambda: {"reachable": True, "dispatch": sc.DISPATCH_COMPOSE, "error": None})
-    monkeypatch.setattr(sms_api_client.SmsApiClient, "__init__", lambda *a, **k: pytest.fail("SMS was asked"))
+    _forbid(monkeypatch, "sms_api_client", "SmsApiClient.__init__", lambda *a, **k: pytest.fail("SMS was asked"))
     monkeypatch.setattr(remote_run_compose, "trace", lambda rid: (b"{}", 200, f"{rid}.json"))
     for key in ("simulation_id", "composite_run_id"):
         assert remote_trace.fetch_trace(ws_root=tmp_path, **{key: "compose-6"}) == (b"{}", 200, "compose-6.json")

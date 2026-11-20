@@ -4,13 +4,15 @@ Each green here proves: the client's paths, methods, query names and request bod
 accepted by the published contract (the stub 422s an undeclared field/param/shape).
 It does NOT prove a live deployment's behaviour (auth, environment readiness, that a
 composite id exists there) -- that needs a real run, which is the owner's call.
+
+The client is the SMS plugin's, so its tests are marked ``plugin``; the stub's own checks against the spec are core
+(docs/backend-adapters.md step P3, K2a).
 """
 import jsonschema
 import pytest
 
 from _viva_v1_stub import VivaV1Stub, example, load_spec
 from vivarium_workbench.lib import server_capabilities as sc
-from vivarium_workbench_sms.sms_api_client import SmsApiClient, SmsApiError
 
 CAPS = "/viva/v1/capabilities"
 HEALTH = "/viva/v1/health"
@@ -26,6 +28,8 @@ def stub():
 
 @pytest.fixture
 def client(stub):
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient
+
     return SmsApiClient(stub.url, timeout=5, max_retries=1)
 
 
@@ -50,14 +54,20 @@ def test_every_default_response_satisfies_its_schema():
     assert n > 40
 
 
+@pytest.mark.plugin
 def test_stub_refuses_a_field_the_schema_does_not_declare(stub, client):
+    from vivarium_workbench_sms.sms_api_client import SmsApiError
+
     with pytest.raises(SmsApiError) as e:
         client._post("/viva/v1/composites", json_body={
             "environment": {"name": "e"}, "composite": {"id": "c"}, "simulator_id": 3})
     assert e.value.status == 422
 
 
+@pytest.mark.plugin
 def test_stub_refuses_an_undeclared_query_param(stub, client):
+    from vivarium_workbench_sms.sms_api_client import SmsApiError
+
     with pytest.raises(SmsApiError) as e:
         client._get("/viva/v1/composites", {"experiment_id": "x"})
     assert e.value.status == 422
@@ -70,6 +80,7 @@ def test_stub_will_not_lie_about_the_contract(stub):
 
 # -- the client, against the contract --------------------------------------
 
+@pytest.mark.plugin
 def test_create_composite_run_by_id_sends_the_documented_body(stub, client):
     run = client.create_composite_run(
         environment={"id": "env-1"},
@@ -81,6 +92,7 @@ def test_create_composite_run_by_id_sends_the_documented_body(stub, client):
     assert call.status == 202 and "id" in run
 
 
+@pytest.mark.plugin
 def test_create_composite_run_by_document(stub, client):
     client.create_composite_run(environment={"name": "deployment-default"},
                                 document={"state": {}}, execution={"options": {"interval_time": 5.0}})
@@ -89,6 +101,7 @@ def test_create_composite_run_by_document(stub, client):
     assert call.status == 202
 
 
+@pytest.mark.plugin
 def test_create_needs_exactly_one_of_composite_or_document(client):
     with pytest.raises(ValueError):
         client.create_composite_run(environment={"id": "e"})
@@ -96,6 +109,7 @@ def test_create_needs_exactly_one_of_composite_or_document(client):
         client.create_composite_run(environment={"id": "e"}, composite={"id": "c"}, document={})
 
 
+@pytest.mark.plugin
 def test_reads_hit_the_documented_routes(stub, client):
     rid = "simulation-D55FF7B"
     client.composite_run(rid)
@@ -110,6 +124,7 @@ def test_reads_hit_the_documented_routes(stub, client):
     assert None not in {c.operation_id for c in stub.calls}
 
 
+@pytest.mark.plugin
 def test_cancel_uses_delete_and_returns_the_kept_run(stub, client):
     out = client.cancel_composite_run("simulation-D55FF7B")
     assert "run" in out
@@ -117,6 +132,7 @@ def test_cancel_uses_delete_and_returns_the_kept_run(stub, client):
     assert call.path == "/viva/v1/composites/simulation-D55FF7B" and call.status == 200
 
 
+@pytest.mark.plugin
 def test_opaque_run_id_is_quoted_not_parsed(stub, client):
     client.composite_run("a/b c")
     # the whole id is ONE path segment: it reached the get-run route, not a sub-route
@@ -125,6 +141,7 @@ def test_opaque_run_id_is_quoted_not_parsed(stub, client):
 
 # -- capability negotiation ------------------------------------------------
 
+@pytest.mark.plugin
 def test_profile_document_when_composites_and_documents_advertised(stub, client):
     _advertise(stub, ["viva-v1-composites", "viva-v1-composites-documents", "viva-v1-environments"],
                {"composites": True})
@@ -132,12 +149,14 @@ def test_profile_document_when_composites_and_documents_advertised(stub, client)
     assert p["dispatch"] == sc.DISPATCH_DOCUMENT and p["services"] == {"composites": True}
 
 
+@pytest.mark.plugin
 def test_profile_legacy_when_composites_are_served_by_id_only(stub, client):
     """A run surface without documents cannot run an arbitrary workspace composite."""
     _advertise(stub, ["viva-v1-composites", "viva-v1-environments"])
     assert sc.backend_profile(client)["dispatch"] == sc.DISPATCH_LEGACY
 
 
+@pytest.mark.plugin
 def test_profile_document_on_a_standalone_core(stub, client):
     """What sms.cam.uchc.edu advertises (viva-core 0.1.9, read live on 2026-09-30)."""
     _advertise(stub, ["viva-v1-composites", "viva-v1-composites-documents", "viva-v1-jobs",
@@ -145,12 +164,16 @@ def test_profile_document_on_a_standalone_core(stub, client):
     assert sc.backend_profile(client)["dispatch"] == sc.DISPATCH_DOCUMENT
 
 
+@pytest.mark.plugin
 def test_profile_legacy_without_the_run_surface(stub, client):
     _advertise(stub, ["viva-v1-surface"])
     assert sc.backend_profile(client)["dispatch"] == sc.DISPATCH_LEGACY
 
 
+@pytest.mark.plugin
 def test_profile_legacy_when_the_backend_predates_capabilities():
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient
+
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     import threading
 
@@ -169,7 +192,10 @@ def test_profile_legacy_when_the_backend_predates_capabilities():
         srv.shutdown(); srv.server_close()
 
 
+@pytest.mark.plugin
 def test_profile_reports_unreachable_without_raising():
+    from vivarium_workbench_sms.sms_api_client import SmsApiClient
+
     c = SmsApiClient("http://127.0.0.1:1", timeout=1, max_retries=1)
     p = sc.backend_profile(c)
     assert p["reachable"] is False and p["dispatch"] == sc.DISPATCH_LEGACY and p["error"]

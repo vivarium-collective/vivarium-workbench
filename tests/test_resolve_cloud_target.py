@@ -15,6 +15,10 @@ from vivarium_workbench.lib import backends
 from vivarium_workbench_sms import cloud_dispatch as v
 from vivarium_workbench_sms import remote_pinned
 
+#: A pure-plugin module (it tests the SMS plugin's own code): the core-only job does not collect it
+#: (docs/backend-adapters.md step P3, K2a).
+pytestmark = pytest.mark.plugin
+
 
 def test_explicit_build_with_simulator_id_returns_cloud_target(tmp_path):
     body = {"run_target": "deployment",

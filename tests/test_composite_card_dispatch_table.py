@@ -8,9 +8,14 @@ Only seams that exist on both sides are patched (the SMS client's class attribut
 ``remote_pinned``'s network hop, the capability profile, ``run_registry``), never a name of the card module, so
 the table runs unchanged on the base and on B2. The network is a tripwire: ``sms_api_client.urlopen`` and
 ``backend_config``'s ``urlopen`` (``ping`` and the probe client) raise.
+
+Step P3 K2a: the rows that need the SMS plugin (a stamp, a pin, an explicit build, viva-core's environments, the
+image dispatch) are marked ``plugin``; the local and compose-api rows run core-only too, where the fixture stubs only
+what the core has.
 """
 from __future__ import annotations
 
+import importlib
 import json
 
 import pytest
@@ -19,8 +24,6 @@ from vivarium_workbench.lib import backend_config
 from vivarium_workbench.lib import remote_run
 from vivarium_workbench.lib import run_registry
 from vivarium_workbench.lib import server_capabilities as sc
-from vivarium_workbench_sms import remote_pinned
-from vivarium_workbench_sms import sms_api_client as sac
 
 PROFILES = {
     "compose": {"reachable": True, "dispatch": sc.DISPATCH_COMPOSE, "error": None},
@@ -49,6 +52,11 @@ class _Net(Exception):
 def card(tmp_path, monkeypatch):
     """A workspace, no backend named, no pin, no stamp, compose not opted in; the SMS client and the git preflight
     are recorded stubs and the network raises."""
+    try:
+        sac = importlib.import_module("vivarium_workbench_sms.sms_api_client")
+    except ImportError:   # the core-only job: no SMS client to stub
+        sac = None
+
     for v in (*backend_config.BACKEND_BASE_ENV_VARS, "VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT",
               "VIVARIUM_WORKBENCH_REMOTE_PINNED", "VIVARIUM_WORKBENCH_REMOTE_REPO_URL",
               "VIVARIUM_WORKBENCH_REMOTE_BRANCH", "VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH",
@@ -59,7 +67,8 @@ def card(tmp_path, monkeypatch):
     def net(*a, **k):
         raise _Net("network call in the dispatch table")
 
-    monkeypatch.setattr(sac, "urlopen", net)
+    if sac is not None:
+        monkeypatch.setattr(sac, "urlopen", net)
     monkeypatch.setattr(backend_config, "urlopen", net)
 
     (tmp_path / ".pbg").mkdir()
@@ -87,8 +96,9 @@ def card(tmp_path, monkeypatch):
             raise out
         return out
 
-    monkeypatch.setattr(sac.SmsApiClient, "_get", _get)
-    monkeypatch.setattr(sac.SmsApiClient, "run_simulation", run_simulation)
+    if sac is not None:
+        monkeypatch.setattr(sac.SmsApiClient, "_get", _get)
+        monkeypatch.setattr(sac.SmsApiClient, "run_simulation", run_simulation)
 
     class World:
         ws = tmp_path
@@ -103,6 +113,8 @@ def card(tmp_path, monkeypatch):
 
         @staticmethod
         def pin(simulator_id):
+            from vivarium_workbench_sms import remote_pinned   # the pin is the plugin's
+
             monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_PINNED", "1")
             monkeypatch.setenv("VIVARIUM_WORKBENCH_REMOTE_REPO_URL", "https://github.com/x/sms-ecoli.git")
 
@@ -177,6 +189,7 @@ IMAGE_909 = {"run_id": "remote-sim-909", "status": "running", "remote": True, "s
 
 # --- the image dispatch (202) ------------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_explicit_build_dispatches_its_image(card):
     assert card.run({"run_target": "deployment", "build": BUILD}) == (IMAGE_909, 202)
     assert card.seen["run_simulation"] == [DEFAULT_SIM_CALL]
@@ -184,6 +197,7 @@ def test_explicit_build_dispatches_its_image(card):
     assert card.seen["preflight"] == 0 and card.seen["spawned"] == []
 
 
+@pytest.mark.plugin
 def test_explicit_build_with_overrides_paths_and_a_config_skips_discovery(card):
     body = {"run_target": "deployment", "build": BUILD, "config_filename": " mine.json ",
             "overrides": {"n_generations": 3, "n_seeds": 2}, "emit_paths": ["a", "b"]}
@@ -193,6 +207,7 @@ def test_explicit_build_with_overrides_paths_and_a_config_skips_discovery(card):
     assert card.seen["get"] == []
 
 
+@pytest.mark.plugin
 def test_a_session_build_dispatches_its_image(card):
     card.stamp({"simulator_id": 124, "repo_url": "r", "commit": "c", "branch": "b"})
     card.state["run_simulation"] = {"simulation_id": 777}
@@ -202,12 +217,14 @@ def test_a_session_build_dispatches_its_image(card):
     assert card.seen["preflight"] == 0
 
 
+@pytest.mark.plugin
 def test_a_pinned_build_dispatches_its_image(card):
     card.pin(333)
     assert card.run({}) == (IMAGE_909, 202)
     assert card.seen["run_simulation"][0]["simulator_id"] == 333
 
 
+@pytest.mark.plugin
 def test_the_session_build_wins_over_a_named_backend(card):
     card.name("compose")
     card.stamp({"simulator_id": 124, "repo_url": "r", "commit": "c"})
@@ -217,12 +234,14 @@ def test_the_session_build_wins_over_a_named_backend(card):
 
 # --- the SMS dead ends --------------------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_explicit_cloud_with_no_build_is_409_with_actions(card):
     assert card.run({"run_target": "deployment"}) == (
         {"error": NO_IMAGE_ERROR, "reason": "no-build", "run_target": "deployment", "actions": ACTIONS_NONE}, 409)
     assert card.seen["spawned"] == [] and card.seen["run_simulation"] == []
 
 
+@pytest.mark.plugin
 def test_explicit_cloud_with_a_build_but_no_simulator_carries_its_commit(card):
     body, status = card.run({"run_target": "deployment", "build": {"commit": "abc1234def", "repo_url": "u"}})
     assert status == 409
@@ -234,12 +253,14 @@ def test_explicit_cloud_with_a_build_but_no_simulator_carries_its_commit(card):
                     {"label": "Switch Environment to Local", "panel": "environment"}]}
 
 
+@pytest.mark.plugin
 def test_a_pin_with_no_build_is_409_with_actions(card):
     card.pin(None)
     assert card.run({}) == (
         {"error": NO_IMAGE_ERROR, "reason": "no-build", "run_target": "deployment", "actions": ACTIONS_NONE}, 409)
 
 
+@pytest.mark.plugin
 def test_a_stamp_with_no_repo_is_409_without_the_opt_in(card):
     card.stamp({"simulator_id": 66})
     assert card.run({}) == (
@@ -247,6 +268,7 @@ def test_a_stamp_with_no_repo_is_409_without_the_opt_in(card):
     assert card.seen["preflight"] == 0
 
 
+@pytest.mark.plugin
 def test_no_config_for_the_composite_is_409(card):
     card.state["configs"] = ["fss.json", "other.json"]
     assert card.run({"run_target": "deployment", "build": BUILD}) == ({
@@ -257,7 +279,10 @@ def test_no_config_for_the_composite_is_409(card):
     assert card.seen["run_simulation"] == []
 
 
+@pytest.mark.plugin
 def test_a_failed_dispatch_is_502(card):
+    from vivarium_workbench_sms import sms_api_client as sac
+
     card.state["run_simulation"] = sac.SmsApiError("boom")
     assert card.run({"run_target": "deployment", "build": BUILD}) == (
         {"error": "cloud dispatch failed: boom", "reason": "dispatch-failed", "run_target": "deployment"}, 502)
@@ -265,6 +290,7 @@ def test_a_failed_dispatch_is_502(card):
 
 # --- the opt-in compose path (VIVARIUM_WORKBENCH_ALLOW_COMPOSE_DISPATCH) --------------------------------------------
 
+@pytest.mark.plugin
 def test_opt_in_with_an_unpushed_tree_is_409_with_actions(card):
     card.opt_in()
     card.state["preflight"] = NOT_PUSHED
@@ -275,6 +301,7 @@ def test_opt_in_with_an_unpushed_tree_is_409_with_actions(card):
     assert card.seen["spawned"] == []
 
 
+@pytest.mark.plugin
 def test_opt_in_writes_the_selected_build_into_the_run_request(card):
     card.opt_in()
     resp, status = card.run({"run_target": "deployment", "build": {"commit": "abc1234def", "repo_url": "u"}})
@@ -285,6 +312,7 @@ def test_opt_in_writes_the_selected_build_into_the_run_request(card):
     assert card.seen["preflight"] == 1 and len(card.seen["spawned"]) == 1
 
 
+@pytest.mark.plugin
 def test_opt_in_on_a_stamp_with_no_repo_runs_detached_with_no_build_ref(card):
     card.opt_in()
     card.stamp({"simulator_id": 66})
@@ -329,6 +357,7 @@ def test_compose_refuses_an_unknown_environment_with_no_run(card):
     assert not (card.ws / ".pbg" / "runs").exists() or not any((card.ws / ".pbg" / "runs").iterdir())
 
 
+@pytest.mark.plugin
 def test_viva_named_environment_with_a_dirty_tree_is_409(card):
     card.name("viva")
     card.state["preflight"] = NOT_PUSHED
@@ -336,6 +365,7 @@ def test_viva_named_environment_with_a_dirty_tree_is_409(card):
                              "run_target": "deployment"}, 409)
 
 
+@pytest.mark.plugin
 def test_viva_named_environment_with_a_clean_tree_runs_detached(card):
     card.name("viva")
     card.env("runtime")
@@ -345,6 +375,7 @@ def test_viva_named_environment_with_a_clean_tree_runs_detached(card):
     assert card.seen["preflight"] == 1
 
 
+@pytest.mark.plugin
 def test_viva_environment_id_skips_the_git_preflight(card):
     card.name("viva")
     card.env("id:env-1")
@@ -375,6 +406,7 @@ def test_preflight_local(card, inproc_client):
                                                "message": "This workspace runs locally — no push needed."}
 
 
+@pytest.mark.plugin
 def test_preflight_session_build_image(card, inproc_client):
     card.stamp({"simulator_id": 124, "repo_url": "r", "commit": "c"})
     assert _preflight(card, inproc_client) == {
@@ -383,6 +415,7 @@ def test_preflight_session_build_image(card, inproc_client):
         "tip": SMS_TIP}
 
 
+@pytest.mark.plugin
 def test_preflight_pin_with_no_build(card, inproc_client):
     card.pin(None)
     assert _preflight(card, inproc_client) == {"error": NO_IMAGE_ERROR, "reason": "no-build",
@@ -390,6 +423,7 @@ def test_preflight_pin_with_no_build(card, inproc_client):
                                                "target": "deployment", "ok": False, "tip": SMS_TIP}
 
 
+@pytest.mark.plugin
 def test_preflight_opt_in(card, inproc_client):
     card.opt_in()
     card.stamp({"simulator_id": 66})
@@ -403,6 +437,7 @@ def test_preflight_opt_in(card, inproc_client):
         "tip": SMS_TIP}
 
 
+@pytest.mark.plugin
 def test_preflight_viva_named_environment_runs_the_git_check(card, inproc_client):
     """A named environment ships the workspace from git: the git preflight decides (unchanged by B2b)."""
     card.name("viva")
@@ -411,6 +446,7 @@ def test_preflight_viva_named_environment_runs_the_git_check(card, inproc_client
     assert _preflight(card, inproc_client) == {**NOT_PUSHED, "target": "deployment", "dispatch": "viva-v1-document"}
 
 
+@pytest.mark.plugin
 def test_preflight_viva_environment_id_is_ready_with_a_warning(card, inproc_client):
     """An environment id runs its prebuilt image (Builds B2b, Finding F): ready like the card, and an unpushed tree
     is only a non-blocking warning. (Before B2b this row answered the git preflight's refusal.)"""

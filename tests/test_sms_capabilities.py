@@ -14,6 +14,10 @@ import pytest
 from vivarium_workbench_sms import sms_api_client as sac
 from vivarium_workbench_sms.sms_api_client import SmsApiError
 
+#: A pure-plugin module (it tests the SMS plugin's own code): the core-only job does not collect it
+#: (docs/backend-adapters.md step P3, K2a).
+pytestmark = pytest.mark.plugin
+
 
 class FakeClient:
     def __init__(self, reply=None, error=None):
