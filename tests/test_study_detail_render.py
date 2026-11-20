@@ -1972,13 +1972,14 @@ def test_compose_panel_keeps_notebook_and_explore_actions(tmp_path):
     assert 'id="model-composite-cards"' in compose
     assert 'data-study="model-cards-study"' in compose
 
-    # Existing actions are UNCHANGED (Task 6 keeps them, doesn't fork them):
-    # the notebook download button and, per baseline entry, the "explore &
-    # run" loom action.
-    assert '_vivStudyNotebookFromCard' in compose
-    assert '↓ notebook' in compose
+    # The per-baseline "explore & run" loom action is still present.
     assert "_openCompositeLoom('pkg.composites.core')" in compose
     assert '🧬 explore &amp; run ↗' in compose
+    # The notebook download moved OUT of the Model panel into the study header's
+    # Shortcuts menu (it was redundant here), so it is no longer in the compose
+    # panel.
+    assert '_vivStudyNotebookFromCard' not in compose
+    assert '↓ notebook' not in compose
 
     # The per-entry block still carries the same data-model-composite /
     # data-model-overrides attributes _loadModelConfig already used —
