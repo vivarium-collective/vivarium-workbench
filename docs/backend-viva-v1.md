@@ -85,6 +85,11 @@ So an arbitrary workspace composite cannot be dispatched by id. The general rout
   * `environment`: `{"name": "runtime"}` (default; the **only** name `NAMED_ENVIRONMENTS` accepts in
     viva-core — `deployment-default` is merely the label a legacy compose submission is *recorded*
     under), or `{"id": "<env id>"}` via `VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT=id:<env id>`.
+    This reading of the variable is the SMS plugin's (`vivarium_workbench_sms/remote_run_viva_v1.backend_environment`,
+    moved out of the core's `remote_run` in step P2 Builds B2); its readers are the study page's submit, the
+    composite card's `VivaCoreRuns.dispatch_composite` (the git preflight runs only for a named environment) and the
+    detached run (`deployment_run`). compose-api reads the same variable in its own `name:` form
+    (docs/backend-compose-api.md).
   * `execution.options` (closed set, `extra=forbid`): `interval_time` (= steps, 0..100000);
     for a named environment `extra_pip_deps` = `git+<origin>.git@<HEAD>` (+ the workspace's pinned
     framework versions) so the workspace code is installed in the container — the same contract as
