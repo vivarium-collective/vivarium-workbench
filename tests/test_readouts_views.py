@@ -1,3 +1,5 @@
+import pytest
+
 from vivarium_workbench.lib.readouts_views import _merge_readouts, _observable_leaves
 
 
@@ -176,6 +178,7 @@ def test_build_study_readouts_extracts_v4_conditions_baseline(tmp_path):
     assert body.get("composite") == "some.composite.ref", body
 
 
+@pytest.mark.plugin
 def test_readouts_remote_build_degrades_softly(tmp_path, monkeypatch):
     """On a remote build (.viv-build.json present), a composite-build failure is
     EXPECTED (no local ParCa cache) → soft 200 degrade with authored rows tagged
@@ -287,6 +290,7 @@ def test_build_study_readouts_emitter_honors_runtime_default_emitter(tmp_path):
     assert em["output_kind"] == "sqlite"
 
 
+@pytest.mark.plugin
 def test_build_study_readouts_emitter_present_on_remote_degrade(tmp_path, monkeypatch):
     """The remote-build soft-degrade (200, .viv-build.json present) still
     carries the emitter block — spec §3.1 says ALWAYS render it."""

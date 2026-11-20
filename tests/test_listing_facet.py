@@ -14,13 +14,18 @@ from pathlib import Path
 
 import pytest
 
-import vivarium_workbench_sms.remote_simulations as rs
 from vivarium_workbench.lib import backends
 from vivarium_workbench.lib import investigations_index as ii
 from vivarium_workbench.lib import simulations_index as si
 from vivarium_workbench.lib.backends import provider as provider_mod
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _rs():
+    """The plugin's listing module (``vivarium_workbench_sms.remote_simulations``); only ``plugin`` tests use it."""
+    import vivarium_workbench_sms.remote_simulations as rs
+    return rs
 
 
 @pytest.fixture
@@ -43,11 +48,11 @@ def _isolated_caches():
 def sms_calls(monkeypatch):
     """The three plugin functions SmsListing calls, replaced by recorders on the module (where it reads them)."""
     calls: list = []
-    monkeypatch.setattr(rs, "list_remote_simulations_swr",
+    monkeypatch.setattr(_rs(), "list_remote_simulations_swr",
                         lambda ws, *a, **k: calls.append(("swr", ws, a, k)) or [dict(SWR_ROW)])
-    monkeypatch.setattr(rs, "list_remote_simulations",
+    monkeypatch.setattr(_rs(), "list_remote_simulations",
                         lambda ws, *a, **k: calls.append(("list", ws, a, k)) or [dict(FRESH_ROW)])
-    monkeypatch.setattr(rs, "remote_state", lambda ws, *a, **k: calls.append(("state", ws, a, k)) or {"state": "x"})
+    monkeypatch.setattr(_rs(), "remote_state", lambda ws, *a, **k: calls.append(("state", ws, a, k)) or {"state": "x"})
     return calls
 
 
@@ -57,6 +62,7 @@ FRESH_ROW = {"run_id": "fresh-row", "status": "completed"}
 
 # --- dispatch, providers on ------------------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_sms_listing_calls_the_plugin_functions_at_call_time(sms_calls, tmp_path):
     listing = backends.SMS_LEGACY.listing
     assert listing.list_runs(tmp_path) == [SWR_ROW]
@@ -64,20 +70,22 @@ def test_sms_listing_calls_the_plugin_functions_at_call_time(sms_calls, tmp_path
     assert listing.state(tmp_path) == {"state": "x"}
     assert sms_calls == [
         ("swr", tmp_path, (), {}),
-        ("list", tmp_path, (), {"use_cache": False, "timeout": rs._FRESH_TIMEOUT,
-                                "max_retries": rs._FRESH_MAX_RETRIES}),
+        ("list", tmp_path, (), {"use_cache": False, "timeout": _rs()._FRESH_TIMEOUT,
+                                "max_retries": _rs()._FRESH_MAX_RETRIES}),
         ("state", tmp_path, (), {}),
     ]
 
 
+@pytest.mark.plugin
 def test_sms_listing_invalidate_clears_the_module_caches(monkeypatch):
     cache, meta = {("k",): (0, [])}, {("k",): {"as_of": 1}}
-    monkeypatch.setattr(rs, "_REMOTE_CACHE", cache)
-    monkeypatch.setattr(rs, "_REMOTE_META", meta)
+    monkeypatch.setattr(_rs(), "_REMOTE_CACHE", cache)
+    monkeypatch.setattr(_rs(), "_REMOTE_META", meta)
     backends.SMS_LEGACY.listing.invalidate()
     assert cache == {} and meta == {}
 
 
+@pytest.mark.plugin
 def test_the_core_merge_goes_through_sms_listing(sms_calls, tmp_path):
     local = [{"run_id": "swr-row", "local": True}, {"run_id": "other"}]
     assert si._append_remote_simulations(local, tmp_path) == local  # the one remote row is a landed local run
@@ -87,17 +95,19 @@ def test_the_core_merge_goes_through_sms_listing(sms_calls, tmp_path):
     assert [c[0] for c in sms_calls] == ["swr", "list", "state"]
 
 
+@pytest.mark.plugin
 def test_one_backends_own_duplicate_rows_are_kept(monkeypatch, tmp_path):
     """Identical to the base: the dedup is against local rows (and, new, earlier backends), never within one
     backend's answer (two SMS simulations may share an experiment id)."""
-    monkeypatch.setattr(rs, "list_remote_simulations_swr", lambda ws: [{"run_id": "a", "n": 1}, {"run_id": "a", "n": 2}])
+    monkeypatch.setattr(_rs(), "list_remote_simulations_swr", lambda ws: [{"run_id": "a", "n": 1}, {"run_id": "a", "n": 2}])
     assert si._append_remote_simulations([], tmp_path) == [{"run_id": "a", "n": 1}, {"run_id": "a", "n": 2}]
 
 
+@pytest.mark.plugin
 def test_the_refresh_flush_reaches_the_plugin_caches(monkeypatch):
     cache, meta = {("k",): (0, [])}, {("k",): {}}
-    monkeypatch.setattr(rs, "_REMOTE_CACHE", cache)
-    monkeypatch.setattr(rs, "_REMOTE_META", meta)
+    monkeypatch.setattr(_rs(), "_REMOTE_CACHE", cache)
+    monkeypatch.setattr(_rs(), "_REMOTE_META", meta)
     si.forget_remote_listings()
     assert cache == {} and meta == {}
 
@@ -196,6 +206,7 @@ def blocking_calls(monkeypatch):
     return seen
 
 
+@pytest.mark.plugin
 def test_the_listing_path_makes_no_blocking_call(blocking_calls, sms_calls, tmp_path):
     (tmp_path / "workspace.yaml").write_text("remote_run_study_map:\n  - {pattern: x, study: s}\n", encoding="utf-8")
     si._append_remote_simulations([], tmp_path)
@@ -207,6 +218,7 @@ def test_the_listing_path_makes_no_blocking_call(blocking_calls, sms_calls, tmp_
     assert [c[0] for c in sms_calls] == ["swr", "list", "state", "swr"]
 
 
+@pytest.mark.plugin
 def test_api_simulations_answers_without_a_blocking_call(blocking_calls, sms_calls, tmp_path, inproc_client):
     client = inproc_client(tmp_path)
     for path in ("/api/simulations", "/api/simulations?refresh=true"):
@@ -218,6 +230,7 @@ def test_api_simulations_answers_without_a_blocking_call(blocking_calls, sms_cal
 
 # --- the study-map gate ---------------------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_the_study_counts_ask_the_listing_only_with_a_study_map(monkeypatch, tmp_path):
     asked: list = []
     monkeypatch.setattr(backends.SMS_LEGACY.listing, "list_runs",
@@ -241,8 +254,7 @@ def sms_tripwire(monkeypatch):
     monkeypatch.setattr("vivarium_workbench_sms.sms_api_client.SmsApiClient.__init__", _boom)
 
 
-def test_with_providers_off_the_listing_is_local_and_sms_is_never_asked(providers_off, sms_tripwire, tmp_path,
-                                                                        inproc_client):
+def _assert_the_listing_is_local(tmp_path, inproc_client):
     client = inproc_client(tmp_path)
     for path in ("/api/simulations", "/api/simulations?refresh=true"):
         r = client.get(path)
@@ -252,12 +264,23 @@ def test_with_providers_off_the_listing_is_local_and_sms_is_never_asked(provider
     assert ii._remote_study_run_stats(tmp_path) == {}
 
 
+def test_with_providers_off_the_listing_is_local(providers_off, tmp_path, inproc_client):
+    _assert_the_listing_is_local(tmp_path, inproc_client)
+
+
+@pytest.mark.plugin
+def test_with_providers_off_the_listing_is_local_and_sms_is_never_asked(providers_off, sms_tripwire, tmp_path,
+                                                                        inproc_client):
+    _assert_the_listing_is_local(tmp_path, inproc_client)
+
+
+@pytest.mark.plugin
 def test_the_analysis_tool_run_picker_follows_the_listing(monkeypatch, tmp_path):
     """``analysis_tools._run_candidates`` builds the index WITH remote rows: providers on it offers SMS's runs;
     providers off it does not (declared, with the listing)."""
     from vivarium_workbench.lib import analysis_tools
 
-    monkeypatch.setattr(rs, "list_remote_simulations_swr", lambda ws: [{"run_id": "sms-run", "status": "completed"}])
+    monkeypatch.setattr(_rs(), "list_remote_simulations_swr", lambda ws: [{"run_id": "sms-run", "status": "completed"}])
     assert "sms-run" in [c["ref"] for c in analysis_tools._run_candidates(tmp_path)]
     monkeypatch.setenv(provider_mod.PROVIDERS_ENV, "none")
     backends.reset_registry()
@@ -271,18 +294,24 @@ def test_the_analysis_tool_run_picker_follows_the_listing(monkeypatch, tmp_path)
 
 # --- seams that must not come back ----------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_the_moved_study_map_names_are_gone_from_the_plugin():
+    rs = _rs()
     for name in ("_load_remote_study_map", "_infer_study_slug"):
         assert not hasattr(rs, name), name
     # The investigation lookup stays plugin-private (it globs study.yaml files itself).
     assert callable(rs._study_investigation_map)
 
 
+@pytest.mark.plugin
 def test_the_plugin_reads_the_study_map_through_its_module():
     """No ``from vivarium_workbench.lib.remote_study_map import ...`` in the plugin: a patch on the core module stays
-    live."""
+    live. (The plugin's sources are found through its import, so without the plugin this fails instead of passing over
+    no files.)"""
+    import vivarium_workbench_sms
+
     offenders = []
-    for path in sorted((ROOT / "vivarium_workbench_sms").rglob("*.py")):
+    for path in sorted(Path(vivarium_workbench_sms.__file__).parent.rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.ImportFrom) and node.module == "vivarium_workbench.lib.remote_study_map":
                 offenders.append(f"{path.name}:{node.lineno}")
@@ -307,4 +336,9 @@ def test_backend_caches_names_the_listing_caches():
 
     for attr in ("_REMOTE_CACHE", "_REMOTE_META"):
         assert ("vivarium_workbench_sms.remote_simulations", attr) in BACKEND_CACHES
-        assert isinstance(getattr(rs, attr), dict)
+
+
+@pytest.mark.plugin
+def test_the_listing_caches_backend_caches_names_exist():
+    for attr in ("_REMOTE_CACHE", "_REMOTE_META"):
+        assert isinstance(getattr(_rs(), attr), dict)

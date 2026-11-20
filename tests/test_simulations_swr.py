@@ -21,6 +21,9 @@ import vivarium_workbench_sms.remote_simulations as rs
 from vivarium_workbench.api.app import create_app, get_workspace
 from vivarium_workbench.lib import simulations_index as si
 
+#: Every test here drives the SMS plugin's listing (step P3, K2c): the core-only run ignores this module.
+pytestmark = pytest.mark.plugin
+
 
 @pytest.fixture(autouse=True)
 def _clear_caches():

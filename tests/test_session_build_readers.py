@@ -35,6 +35,13 @@ STAMPS: "dict[str, object]" = {
 }
 
 
+def _cases(*same_without_the_plugin: str) -> list:
+    """``STAMPS``'s cases for a parametrize: those whose answer the stamp changes are read through the SMS provider's
+    ``session_build`` (the registry), so they are marked ``plugin``; the named ones answer the same with no provider
+    (no stamp, or one the reader falls back past), so they stay core (step P3, K2c)."""
+    return [c if c in same_without_the_plugin else pytest.param(c, marks=pytest.mark.plugin) for c in STAMPS]
+
+
 @pytest.fixture(autouse=True)
 def _providers_on(monkeypatch):
     """These goldens are the providers-on behaviour, whatever the environment says."""
@@ -60,7 +67,7 @@ def _ws(tmp_path: Path, case: str) -> Path:
 
 # --- run_core.run_target_for -----------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("case", list(STAMPS))
+@pytest.mark.parametrize("case", _cases("absent"))
 def test_run_target_for(tmp_path, case):
     from vivarium_workbench.lib import run_core
 
@@ -81,7 +88,7 @@ CHIP = {
 }
 
 
-@pytest.mark.parametrize("case", list(STAMPS))
+@pytest.mark.parametrize("case", _cases("absent"))
 def test_rail_chip(tmp_path, monkeypatch, case):
     import jinja2
 
@@ -113,7 +120,7 @@ MANIFEST = {
 }
 
 
-@pytest.mark.parametrize("case", list(STAMPS))
+@pytest.mark.parametrize("case", _cases("absent", "unreadable", "non_dict", "empty"))
 def test_manifest(tmp_path, case):
     from vivarium_workbench.lib import provenance_manifest as pm
 
@@ -144,7 +151,7 @@ PARCA = {
 }
 
 
-@pytest.mark.parametrize("case", list(STAMPS))
+@pytest.mark.parametrize("case", _cases("absent", "unreadable", "non_dict"))
 def test_parca_notice(tmp_path, monkeypatch, case):
     from vivarium_workbench.lib import composite_state_views as csv
 
@@ -162,7 +169,7 @@ def test_parca_notice(tmp_path, monkeypatch, case):
 
 # --- the readouts soft-degrade -----------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("case", list(STAMPS))
+@pytest.mark.parametrize("case", _cases("absent"))
 def test_readouts_soft_degrade(tmp_path, monkeypatch, case):
     import yaml
 
@@ -198,7 +205,7 @@ RESOLVE = {
 }
 
 
-@pytest.mark.parametrize("case", list(STAMPS))
+@pytest.mark.parametrize("case", _cases("absent", "full"))
 def test_composite_preview(tmp_path, monkeypatch, case):
     from vivarium_workbench.lib import composite_resolve as cr
 
@@ -224,6 +231,7 @@ MAPPING = {
 }
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("case", list(STAMPS))
 def test_the_sms_provider_maps_the_stamp(tmp_path, case):
     from vivarium_workbench_sms.provider import PROVIDER
@@ -235,6 +243,7 @@ def test_the_sms_provider_maps_the_stamp(tmp_path, case):
     assert backends.session_build(ws) == got  # the core asks the provider and passes its answer on unchanged
 
 
+@pytest.mark.plugin
 def test_the_sms_provider_claims_a_session_build_through_session_build(tmp_path, monkeypatch):
     """``SmsProvider.select`` asks ``remote_pinned.session_build`` (through the module, so this patch is live), not
     ``run_core.run_target_for`` (which would loop core -> provider -> core)."""
@@ -252,6 +261,21 @@ def test_the_sms_provider_claims_a_session_build_through_session_build(tmp_path,
 # --- providers off: a stamped workspace reads as a plain local one (declared) ------------------------------------------
 
 def test_with_providers_off_a_stamped_workspace_reads_as_local(tmp_path, monkeypatch):
+    _assert_a_stamped_workspace_reads_as_local(tmp_path, monkeypatch)
+
+
+@pytest.mark.plugin
+def test_with_providers_off_the_plugin_is_never_asked_about_the_session_build(tmp_path, monkeypatch):
+    from vivarium_workbench_sms import remote_pinned
+
+    def never(ws):
+        raise AssertionError("the plugin was asked about the session build with providers off")
+
+    monkeypatch.setattr(remote_pinned, "session_build", never)
+    _assert_a_stamped_workspace_reads_as_local(tmp_path, monkeypatch)
+
+
+def _assert_a_stamped_workspace_reads_as_local(tmp_path, monkeypatch):
     import jinja2
 
     from vivarium_workbench.lib import composite_resolve as cr
@@ -259,12 +283,7 @@ def test_with_providers_off_a_stamped_workspace_reads_as_local(tmp_path, monkeyp
     from vivarium_workbench.lib import provenance_manifest as pm
     from vivarium_workbench.lib import report, run_core
     from vivarium_workbench.lib.backends import provider as _provider
-    from vivarium_workbench_sms import remote_pinned
 
-    def never(ws):
-        raise AssertionError("the plugin was asked about the session build with providers off")
-
-    monkeypatch.setattr(remote_pinned, "session_build", never)
     monkeypatch.setenv(_provider.PROVIDERS_ENV, "none")
     backends.reset_registry()
 
@@ -335,6 +354,7 @@ def test_no_core_string_literal_names_the_session_build_stamp():
     assert ".viv-build.json" in (root / "lib" / "remote_run.py").read_text(encoding="utf-8")
 
 
+@pytest.mark.plugin
 def test_a_deeply_nested_stamp_is_unreadable_not_an_error(tmp_path):
     """``Provider.session_build`` never raises: a stamp nested past the parser's recursion limit is ``readable=False``
     (review of wb#1680; the base's readers caught it with ``except Exception``)."""

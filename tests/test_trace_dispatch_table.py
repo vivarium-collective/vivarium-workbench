@@ -27,7 +27,6 @@ from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib import remote_run_compose
 from vivarium_workbench.lib import server_capabilities as sc
 from vivarium_workbench.lib.backends import records
-from vivarium_workbench_sms import sms_api_client as sac
 
 HERE = "http://api:8000"
 ELSEWHERE = "http://other:8000"
@@ -76,9 +75,16 @@ def app():
 
 @pytest.fixture
 def world(ws, app, monkeypatch):
+    """The table's world: providers on, the SMS client's class patched where the plugin is installed. Without it
+    (the core-only job) there is no SMS client to patch or to call, and the cases the core answers alone -- the
+    unmarked rows -- still match the golden; the rest are marked ``plugin``."""
     from fastapi.testclient import TestClient
 
     from vivarium_workbench.api.app import get_workspace
+    try:
+        from vivarium_workbench_sms import sms_api_client as sac
+    except ImportError:   # the core-only job
+        sac = None
 
     for v in (*backend_config.BACKEND_BASE_ENV_VARS, "VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT",
               "VIVARIUM_WORKBENCH_BACKEND_PROVIDERS"):
@@ -93,7 +99,8 @@ def world(ws, app, monkeypatch):
     def net(*a, **k):
         raise _Net("network call in the trace table")
 
-    monkeypatch.setattr(sac, "urlopen", net)
+    if sac is not None:
+        monkeypatch.setattr(sac, "urlopen", net)
     monkeypatch.setattr(backend_config, "urlopen", net)
 
     state: dict = {"mode": "ok", "calls": []}
@@ -127,9 +134,10 @@ def world(ws, app, monkeypatch):
         calls.append(("compose_status", self.base_url, compose_id))
         return {"status": "completed", "correlation_id": None if state["mode"] == "no-correlation" else "corr-1"}
 
-    for name, fn in (("capabilities", capabilities), ("simulation_trace", simulation_trace),
-                     ("composite_run_trace", composite_run_trace), ("compose_status", compose_status)):
-        monkeypatch.setattr(sac.SmsApiClient, name, fn)
+    if sac is not None:
+        for name, fn in (("capabilities", capabilities), ("simulation_trace", simulation_trace),
+                         ("composite_run_trace", composite_run_trace), ("compose_status", compose_status)):
+            monkeypatch.setattr(sac.SmsApiClient, name, fn)
 
     def compose_trace(run_id):
         calls.append(("compose.trace", run_id))
@@ -223,19 +231,47 @@ SUPPORT_CASES = [
     ("support pre-capabilities", None, "pre-capabilities"),
 ]
 
+#: The rows the core answers alone, the same with the plugin absent (step P3, K2c): compose-api ids, the ambiguous
+#: pairs refused before any backend is asked, a deployment that is not this workbench's, and the compose-api half of
+#: the support route. Every other row needs the SMS plugin and is marked ``plugin``.
+CORE_CASES = frozenset({
+    "simulation_id='compose-7'",
+    "simulation_id='compose-6'",
+    "composite_run_id='compose-7'",
+    "composite_run_id='compose-6'",
+    "pair simulation_id='compose-6'&compose_id='5'",
+    "pair simulation_id='12'&composite_run_id='r'",
+    "pair simulation_id='12'&compose_id='7'",
+    "pair composite_run_id=' compose-6 '",
+    "pair ",
+    "where simulation_id='44'&deployment='prod-elsewhere'",
+    "where simulation_id='44'&deployment='nowhere'",
+    "named compose simulation_id='compose-7'",
+    "named viva simulation_id='compose-7'",
+    "named legacy simulation_id='compose-7'",
+    "support compose named",
+    "support compose named, viva-api unreachable",
+})
 
-@pytest.mark.parametrize("case,query,named,mode", FETCH_CASES, ids=[c[0] for c in FETCH_CASES])
+
+def _params(cases):
+    """Each case as a param with its id, marked ``plugin`` unless the core answers it alone."""
+    return [pytest.param(*c, id=c[0], marks=() if c[0] in CORE_CASES else pytest.mark.plugin) for c in cases]
+
+
+@pytest.mark.parametrize("case,query,named,mode", _params(FETCH_CASES))
 def test_the_trace_route_answers_as_on_the_base(world, case, query, named, mode):
     assert world("/api/remote-run-trace", query, named=named, mode=mode) == GOLDEN[case]
 
 
-@pytest.mark.parametrize("case,named,mode", SUPPORT_CASES, ids=[c[0] for c in SUPPORT_CASES])
+@pytest.mark.parametrize("case,named,mode", _params(SUPPORT_CASES))
 def test_the_trace_support_route_answers_as_on_the_base(world, case, named, mode):
     assert world("/api/remote-run-trace-support", {}, named=named, mode=mode) == GOLDEN[case]
 
 
 def test_the_table_covers_every_case():
     assert set(GOLDEN) == {c[0] for c in FETCH_CASES} | {c[0] for c in SUPPORT_CASES}
+    assert CORE_CASES <= set(GOLDEN)
 
 
 GOLDEN: dict = {"simulation_id='12'": {'status': 200,

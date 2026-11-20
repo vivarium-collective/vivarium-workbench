@@ -11,6 +11,9 @@ import pytest
 
 from vivarium_workbench_sms import remote_analysis_figures as raf
 
+#: Every test here exercises the SMS plugin (step P3, K2c): the core-only run ignores this module.
+pytestmark = pytest.mark.plugin
+
 ADIR = "analysis-sim248-sim248-api_si-d7639e"
 PREFIX = f"s3://bucket/vecoli-output/sim248-sim248-api_simulation_default-15f2/analyses/{ADIR}"
 

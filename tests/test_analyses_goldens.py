@@ -15,6 +15,9 @@ from vivarium_workbench_sms import remote_analysis_figures as raf
 from vivarium_workbench_sms import sms_landing, sms_legacy
 from vivarium_workbench_sms.sms_api_client import SmsApiError
 
+#: Goldens recorded with providers on, through the SMS plugin (step P3, K2c): the core-only run ignores this module.
+pytestmark = pytest.mark.plugin
+
 LAND = "/api/remote-run-land-artifacts"
 RERUN = "/api/remote-run-analysis"
 

@@ -2,6 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from vivarium_workbench.api.app import create_app, get_workspace
@@ -38,6 +39,7 @@ def test_build_manifest_reads_git_and_lockfile(tmp_path):
     assert m["simulator_id"] is None
 
 
+@pytest.mark.plugin
 def test_build_manifest_prefers_viv_build_json(tmp_path):
     ws = tmp_path / "ws"
     _init_git_repo(ws, "https://github.com/x/local.git")

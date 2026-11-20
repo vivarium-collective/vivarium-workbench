@@ -11,11 +11,11 @@ from vivarium_workbench.lib.models import (
     SimulationsPayload,
     StudyChartsPayload,
 )
-from vivarium_workbench_sms.models import RemoteRunJob as RemoteRunJobModel
-from vivarium_workbench_sms.remote_run_jobs import RemoteRunJob
 from vivarium_workbench.lib.simulations_index import _row_to_dict
 
 import json
+
+import pytest
 
 
 def _row(**overrides):
@@ -122,8 +122,12 @@ def test_simulations_payload_shape():
     assert model.simulations[0].run_id == "r1"
 
 
+@pytest.mark.plugin
 def test_remote_run_job_to_dict_validates():
     """RemoteRunJob.to_dict() is model-backed and validates against the model."""
+    from vivarium_workbench_sms.models import RemoteRunJob as RemoteRunJobModel
+    from vivarium_workbench_sms.remote_run_jobs import RemoteRunJob
+
     job = RemoteRunJob("study-a")
     job.set_step("push", "ok", "pushed abc123")
     job.simulation_id = 105
@@ -138,9 +142,12 @@ def test_remote_run_job_to_dict_validates():
     assert model.simulation_id == 105
 
 
+@pytest.mark.plugin
 def test_remote_run_job_falls_back_on_bad_status(recwarn):
     """An unexpected status (outside the RemoteJobStatus literal) warns and
     returns the legacy dict rather than breaking the status endpoint."""
+    from vivarium_workbench_sms.remote_run_jobs import RemoteRunJob
+
     job = RemoteRunJob("study-a")
     job.status = "bogus-status"
     out = job.to_dict()

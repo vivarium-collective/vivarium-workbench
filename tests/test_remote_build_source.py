@@ -11,6 +11,9 @@ import pytest
 from vivarium_workbench_sms import sms_api_client as sac
 from vivarium_workbench_sms import remote_build_source as rbs
 
+#: Every test here exercises the SMS plugin (step P3, K2c): the core-only run ignores this module.
+pytestmark = pytest.mark.plugin
+
 
 class _Resp:
     """Minimal urlopen() context-manager response."""

@@ -28,6 +28,9 @@ import yaml
 class TestBuildSourceBuilds:
     """source_build_views.build_source_builds() (moved from workspace_deps_views, step P2 Builds B3) — env-based."""
 
+    #: The SMS plugin's view (step P3, K2c).
+    pytestmark = pytest.mark.plugin
+
     def test_happy_path(self, monkeypatch):
         """When sms-api returns simulators, builds list is populated."""
         from vivarium_workbench_sms import source_build_views as sbv
