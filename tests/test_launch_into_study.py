@@ -6,6 +6,8 @@ study's own runs.db, forwards the explicit spec_id/params/n_steps to
 invoke_run, and builds + forwards a manifest carrying emitter/emit_paths/
 runtime through to the (stubbed) launch+flush helper.
 """
+import pytest
+
 from vivarium_workbench.lib import study_runs
 
 
@@ -114,6 +116,7 @@ def test_launch_into_study_threads_reran_from(tmp_path, monkeypatch):
     assert flush_kwargs[-1]["reran_from"] == "orig-run-1"
 
 
+@pytest.mark.plugin
 def test_launch_into_study_remote_build_guard_409(tmp_path, monkeypatch):
     """A remote-build workspace (.viv-build.json) rejects before any flush —
     mirrors run_study_baseline's existing 409 guard."""
@@ -133,6 +136,7 @@ def test_launch_into_study_remote_build_guard_409(tmp_path, monkeypatch):
     assert not called
 
 
+@pytest.mark.plugin
 def test_launch_into_study_pinned_deployment_guard_409(tmp_path, monkeypatch):
     """Item 18: a deployment-wide pin (VIVARIUM_WORKBENCH_REMOTE_PINNED), with
     NO .viv-build.json in this workspace, must ALSO reject before any flush —

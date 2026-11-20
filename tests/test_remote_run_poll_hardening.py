@@ -11,6 +11,9 @@ from vivarium_workbench_sms import deployment_run
 from vivarium_workbench_sms.deployment_run import _MAX_CONSECUTIVE_POLL_ERRORS, _poll_until_terminal
 from vivarium_workbench_sms.sms_api_client import SmsApiError
 
+#: The poll loop is the SMS plugin's (``deployment_run``): every test here needs it (step P3, K2b).
+pytestmark = pytest.mark.plugin
+
 
 class _ScriptedClient:
     """A fake SmsApiClient whose ``compose_status`` replays a scripted sequence.

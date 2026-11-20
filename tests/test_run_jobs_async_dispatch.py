@@ -57,6 +57,7 @@ class _Client:
         return self.rows
 
 
+@pytest.mark.plugin
 def test_refresh_resolves_completed_and_failed_in_one_call(sms_client):
     job = _job(
         {"status": "submitted", "simulation_id": 1},
@@ -80,6 +81,7 @@ def test_refresh_resolves_completed_and_failed_in_one_call(sms_client):
     assert client.calls == [[1, 2, 3]]
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("upstream", ["waiting", "queued", "running", "pending",
                                       "suspended", "unknown", ""])
 def test_non_terminal_upstream_states_stay_submitted(upstream, sms_client):
@@ -90,6 +92,7 @@ def test_non_terminal_upstream_states_stay_submitted(upstream, sms_client):
     assert job.to_dict()["items"][0]["status"] == "submitted"
 
 
+@pytest.mark.plugin
 def test_unreachable_upstream_leaves_items_submitted(sms_client):
     """Losing the poll must not turn a running campaign into a failed one."""
     class _Down:
@@ -102,6 +105,7 @@ def test_unreachable_upstream_leaves_items_submitted(sms_client):
     assert job.to_dict()["items"][0]["status"] == "submitted"
 
 
+@pytest.mark.plugin
 def test_job_completes_once_every_item_resolves(sms_client):
     job = _job({"status": "submitted", "simulation_id": 1},
                {"status": "submitted", "simulation_id": 2})
@@ -115,6 +119,7 @@ def test_job_completes_once_every_item_resolves(sms_client):
     assert d["completed_at"] is not None
 
 
+@pytest.mark.plugin
 def test_refresh_is_a_noop_without_submitted_items(sms_client):
     """No network call when there is nothing in flight."""
     client = _Client([])
@@ -256,6 +261,7 @@ def _patch_status(monkeypatch, module, answers):
     return asked
 
 
+@pytest.mark.plugin
 def test_viva_core_and_compose_items_settle_against_their_own_backend(monkeypatch, sms_client):
     from vivarium_workbench.lib import remote_run_compose
     from vivarium_workbench_sms import remote_run_viva_v1
@@ -279,6 +285,7 @@ def test_viva_core_and_compose_items_settle_against_their_own_backend(monkeypatc
     assert (viva, comp, sms.calls) == (["simulation-cDA421C"], ["compose-4706"], [])
 
 
+@pytest.mark.plugin
 def test_a_failed_document_run_without_a_message_names_its_upstream_state(monkeypatch, sms_client):
     from vivarium_workbench_sms import remote_run_viva_v1
 
@@ -292,6 +299,7 @@ def test_a_failed_document_run_without_a_message_names_its_upstream_state(monkey
     assert (item["status"], item["error"]) == ("failed", "upstream: cancelled")
 
 
+@pytest.mark.plugin
 def test_a_running_document_run_stays_submitted_with_its_phase(monkeypatch, sms_client):
     from vivarium_workbench.lib import remote_run_compose
 
@@ -306,6 +314,7 @@ def test_a_running_document_run_stays_submitted_with_its_phase(monkeypatch, sms_
     assert job.to_dict()["status"] != "done"
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("answer", [
     ({"error": "unreachable", "reachable": False, "run_id": "simulation-Y"}, 502),
     ({"phase": "not_found", "error": "no such run", "run_id": "simulation-Y"}, 404),
@@ -321,6 +330,7 @@ def test_a_document_backend_that_does_not_answer_leaves_the_item_submitted(monke
     assert job.to_dict()["items"][0]["status"] == "submitted"
 
 
+@pytest.mark.plugin
 def test_a_raising_backend_does_not_stop_the_others(monkeypatch, sms_client):
     from vivarium_workbench.lib import remote_run_compose
     from vivarium_workbench_sms import remote_run_viva_v1
@@ -343,6 +353,7 @@ def test_a_raising_backend_does_not_stop_the_others(monkeypatch, sms_client):
     assert client.calls == [[5]], "the SMS batch call carries only the SMS ids, as before"
 
 
+@pytest.mark.plugin
 def test_an_unreachable_backend_is_asked_once_per_refresh(monkeypatch, sms_client):
     """Each ask is a synchronous request inside the status GET: a down host is not asked again for every item."""
     from vivarium_workbench.lib import remote_run_compose
@@ -356,6 +367,7 @@ def test_an_unreachable_backend_is_asked_once_per_refresh(monkeypatch, sms_clien
     assert all(it["status"] == "submitted" for it in job.to_dict()["items"])
 
 
+@pytest.mark.plugin
 def test_one_stale_viva_core_run_does_not_block_the_others(monkeypatch, sms_client):
     """Review of #1661: viva-core's adapter answers a 404 for an unknown run as 502 "unreachable", carrying the
     server's own status. A deleted run (or a reset server) answers about that run only; the backend is not down,
@@ -376,6 +388,7 @@ def test_one_stale_viva_core_run_does_not_block_the_others(monkeypatch, sms_clie
     assert (items[0]["status"], items[1]["status"]) == ("submitted", "done")
 
 
+@pytest.mark.plugin
 def test_a_viva_core_server_error_still_skips_the_backend(monkeypatch, sms_client):
     """A real 5xx (or no HTTP status at all: a refused connection) still means the backend did not answer."""
     from vivarium_workbench_sms import remote_run_viva_v1
@@ -421,6 +434,7 @@ _MAPPING = [
 ]
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("rows,update,job_status", [m[1:] for m in _MAPPING], ids=[m[0] for m in _MAPPING])
 def test_sms_batch_mapping_matches_the_base(sms_client, rows, update, job_status):
     client = sms_client(_Client(rows))
@@ -432,6 +446,7 @@ def test_sms_batch_mapping_matches_the_base(sms_client, rows, update, job_status
     assert client.calls == [[7]]
 
 
+@pytest.mark.plugin
 def test_a_non_text_status_now_drops_the_whole_batch(sms_client):
     """Declared change (Runs c2): the plugin builds every body before the core applies any, so a status that is not
     text (``.lower()`` raises) leaves EVERY item of that batch ``submitted``. Before, the rows ahead of it had
@@ -442,6 +457,7 @@ def test_a_non_text_status_now_drops_the_whole_batch(sms_client):
     assert [it["status"] for it in job.to_dict()["items"]] == ["submitted", "submitted"]
 
 
+@pytest.mark.plugin
 def test_an_id_stored_as_text_settles(sms_client):
     """Declared fix (Runs c2): an item whose id was stored as the text ``"12"`` is asked as ``12`` and now matches
     the batch's integer ``sim_id`` (before, ``by_sim.get("12")`` never matched and the item stayed submitted)."""
@@ -452,6 +468,7 @@ def test_an_id_stored_as_text_settles(sms_client):
     assert client.calls == [[12]]
 
 
+@pytest.mark.plugin
 def test_a_batch_answer_that_is_not_a_mapping_leaves_items_submitted_and_still_settles(monkeypatch):
     """``_refresh_many`` is total like the ``_refresh_sms`` it replaced: a ``status_many`` answering a non-mapping
     leaves its items submitted, and the job still rolls up once every item has resolved."""
@@ -486,11 +503,35 @@ def providers_off(monkeypatch):
     backends.reset_registry()
 
 
+def _providers_off_refresh(monkeypatch):
+    """Refresh a job of an integer item, a viva-core-style item and a compose-api item with providers off; return
+    the job's dict and the compose-api ids asked."""
+    from vivarium_workbench.lib import remote_run_compose
+
+    asked = _patch_status(monkeypatch, remote_run_compose, {
+        "compose-1": ({"kind": "run", "phase": "done", "raw_status": "completed", "error": None,
+                       "run_id": "compose-1"}, 200)})
+    job = _job({"status": "submitted", "simulation_id": 4},
+               {"status": "submitted", "simulation_id": "simulation-Q"},
+               {"status": "submitted", "simulation_id": "compose-1"})
+    run_jobs.refresh_submitted(job)
+    return job.to_dict(), asked
+
+
 def test_providers_off_integer_items_are_not_asked(monkeypatch, providers_off):
     """Declared change (Runs c2), providers off only: no active backend owns an integer id, so SMS is not asked
     (before, ``owner is None`` fell through to the SMS batch) and the item stays ``submitted``. A compose-api item
-    still settles, and a viva-core-style id no longer poisons an SMS batch either."""
-    from vivarium_workbench.lib import remote_run_compose
+    still settles, and a viva-core-style id no longer poisons an SMS batch either. (Core: also true with the plugin
+    absent; the SMS client being left alone is pinned below, where the plugin is there to ask.)"""
+    d, asked = _providers_off_refresh(monkeypatch)
+    assert [it["status"] for it in d["items"]] == ["submitted", "submitted", "done"]
+    assert asked == ["compose-1"]
+    assert d["status"] != "done"
+
+
+@pytest.mark.plugin
+def test_providers_off_the_installed_sms_client_is_not_asked(monkeypatch, providers_off):
+    """The same refresh with the plugin installed but providers off: its SMS client is never built."""
     from vivarium_workbench_sms import sms_legacy
 
     sms_asked = []  # recorded, not raised: refresh_submitted swallows every exception, so a raise would prove nothing
@@ -500,14 +541,7 @@ def test_providers_off_integer_items_are_not_asked(monkeypatch, providers_off):
         raise AssertionError("asked SMS with providers off")
 
     monkeypatch.setattr(sms_legacy, "SmsApiClient", _refuse)
-    asked = _patch_status(monkeypatch, remote_run_compose, {
-        "compose-1": ({"kind": "run", "phase": "done", "raw_status": "completed", "error": None,
-                       "run_id": "compose-1"}, 200)})
-    job = _job({"status": "submitted", "simulation_id": 4},
-               {"status": "submitted", "simulation_id": "simulation-Q"},
-               {"status": "submitted", "simulation_id": "compose-1"})
-    run_jobs.refresh_submitted(job)
-    d = job.to_dict()
+    d, asked = _providers_off_refresh(monkeypatch)
     assert [it["status"] for it in d["items"]] == ["submitted", "submitted", "done"]
     assert asked == ["compose-1"]
     assert sms_asked == []
@@ -515,14 +549,19 @@ def test_providers_off_integer_items_are_not_asked(monkeypatch, providers_off):
 
 
 def test_run_jobs_binds_no_sms_seam():
-    """Runs c2 moved the SMS batch status into the plugin: the core keeps no SMS name, and the plugin holds them."""
+    """Runs c2 moved the SMS batch status into the plugin: the core keeps no SMS name ..."""
     import inspect
-
-    from vivarium_workbench_sms import sms_legacy
 
     for name in ("_refresh_sms", "_UPSTREAM_DONE", "_UPSTREAM_FAILED"):
         assert not hasattr(run_jobs, name), name
     assert "client" not in inspect.signature(run_jobs.refresh_submitted).parameters
+
+
+@pytest.mark.plugin
+def test_the_plugin_holds_the_sms_batch_status():
+    """... and the plugin holds them."""
+    from vivarium_workbench_sms import sms_legacy
+
     assert sms_legacy._UPSTREAM_DONE == frozenset({"completed"})
     assert sms_legacy._UPSTREAM_FAILED == frozenset({"failed", "cancelled", "out_of_memory", "timeout"})
     assert callable(sms_legacy.status_batch)

@@ -90,6 +90,7 @@ def test_sweep_variant_delegates_to_workflow(tmp_v2ecoli_study, monkeypatch):
     assert "/out/" in invoked["out"]
 
 
+@pytest.mark.plugin
 def test_sweep_variant_on_remote_build_409(tmp_v2ecoli_study, monkeypatch):
     """The delegated-ensemble branch's own invoke_run guard (previously
     untested): a workspace stamped .viv-build.json must 409 BEFORE
@@ -104,6 +105,7 @@ def test_sweep_variant_on_remote_build_409(tmp_v2ecoli_study, monkeypatch):
     assert code == 409, resp
 
 
+@pytest.mark.plugin
 def test_sweep_variant_on_pinned_deployment_409(tmp_v2ecoli_study, monkeypatch):
     """Item 18: a deployment-wide pin, with NO .viv-build.json in this
     workspace, must ALSO 409 the delegated-ensemble branch before it
@@ -144,6 +146,7 @@ def test_plain_variant_unchanged(tmp_path, monkeypatch):
     assert len(calls) == 1  # single-run path untouched
 
 
+@pytest.mark.plugin
 def test_plain_variant_on_remote_build_409(tmp_path, monkeypatch):
     """The single-run branch's own invoke_run guard (previously untested): a
     workspace stamped .viv-build.json must 409 BEFORE resolving/running the
@@ -166,6 +169,7 @@ def test_plain_variant_on_remote_build_409(tmp_path, monkeypatch):
     assert code == 409, resp
 
 
+@pytest.mark.plugin
 def test_plain_variant_on_pinned_deployment_409(tmp_path, monkeypatch):
     """Item 18: a deployment-wide pin, with NO .viv-build.json in this
     workspace, must ALSO 409 the single-run branch before it runs the

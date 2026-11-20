@@ -8,6 +8,7 @@ import pytest
 # SP-A: remote-build workspace → 409 guard
 # ---------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_study_run_baseline_on_remote_build_409(tmp_path, monkeypatch):
     """A workspace stamped with .viv-build.json is a remote build; study runs
     must return 409 (RunTargetUnavailable) rather than attempting a local
@@ -21,6 +22,7 @@ def test_study_run_baseline_on_remote_build_409(tmp_path, monkeypatch):
     assert status == 409
 
 
+@pytest.mark.plugin
 def test_study_run_baseline_on_pinned_deployment_409(tmp_path, monkeypatch):
     """Item 18, the confirmed real bug (backlog items 18/20, 2026-08-04): a
     deployment-wide pin (VIVARIUM_WORKBENCH_REMOTE_PINNED) with NO
@@ -41,6 +43,7 @@ def test_study_run_baseline_on_pinned_deployment_409(tmp_path, monkeypatch):
     assert status == 409
 
 
+@pytest.mark.plugin
 def test_study_run_baseline_pinned_deployment_409_over_real_http(
     tmp_path, inproc_client, monkeypatch
 ):
@@ -145,6 +148,7 @@ def _pinned_on(monkeypatch, simulator_id):
     return captured
 
 
+@pytest.mark.plugin
 def test_study_run_baseline_on_deployment_delegates_to_the_sms_submit(tmp_path, monkeypatch):
     """The real, positive case: pinned deployment + a resolvable build +
     the study's default baseline entry → a REAL call into the SMS submit,
@@ -173,6 +177,7 @@ def test_study_run_baseline_on_deployment_delegates_to_the_sms_submit(tmp_path, 
     }]
 
 
+@pytest.mark.plugin
 def test_study_run_baseline_on_deployment_forwards_extra_composite_params(tmp_path, monkeypatch):
     """Backlog items 86/88: any baseline param beyond n_seeds/n_generations rides through
     to the SMS submit as a generic extra_params dict, keyed by whatever the composite
@@ -202,6 +207,7 @@ _TWO_ENTRIES = (
 )
 
 
+@pytest.mark.plugin
 def test_study_run_baseline_explicit_composite_on_deployment_still_409s(tmp_path, monkeypatch):
     """A build has no way to select a specific composite — it runs whatever
     the pinned simulator's own build contains. An explicit non-default
@@ -227,6 +233,7 @@ def test_study_run_baseline_explicit_composite_on_deployment_still_409s(tmp_path
     assert status == 409
 
 
+@pytest.mark.plugin
 def test_study_run_baseline_default_entry_reaches_the_patched_submit(tmp_path, monkeypatch):
     """Positive control for the test above: the same setup (pin on, two entries) with the default entry reaches
     ``sms_legacy.submit_tail``."""
@@ -241,6 +248,7 @@ def test_study_run_baseline_default_entry_reaches_the_patched_submit(tmp_path, m
     assert [c["simulator_id"] for c in captured] == [75]
 
 
+@pytest.mark.plugin
 def test_study_run_baseline_deployment_no_resolvable_build_409s_cleanly(tmp_path, monkeypatch):
     """resolve_pinned_simulator_id returning None (pinned mode off, or no
     build exists yet) must degrade to a clear 409, not an unhandled

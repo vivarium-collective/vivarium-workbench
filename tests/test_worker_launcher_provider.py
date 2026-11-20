@@ -66,6 +66,7 @@ def plugin_absent(monkeypatch):
 
 # --- providers on: unchanged ------------------------------------------------------------------------------------------
 
+@pytest.mark.plugin
 def test_a_truthy_proxy_base_means_the_configured_api(monkeypatch):
     """``PROXY_BASE=true`` (or 1/yes) relays through the deployment's configured viva-api, not a literal 'true'."""
     from vivarium_workbench_sms.env_workers import ProxyWorkerLauncher
@@ -80,6 +81,7 @@ def test_a_truthy_proxy_base_means_the_configured_api(monkeypatch):
     assert launcher._client.base_url == "http://api:8000"
 
 
+@pytest.mark.plugin
 def test_the_sms_provider_supplies_none_without_hosted_env_and_makes_no_network_call(monkeypatch):
     from vivarium_workbench_sms import sms_api_client
 
@@ -252,6 +254,7 @@ def _wire(monkeypatch, capabilities):
     return sent
 
 
+@pytest.mark.plugin
 @pytest.mark.parametrize("capabilities, prefix", [
     ((), "/env-worker/v1/"),
     (("viva-v1-workers",), "/viva/v1/workers/"),

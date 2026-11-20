@@ -6,6 +6,7 @@ from vivarium_workbench.lib.run_core import RunTargetUnavailable
 def test_target_local_without_viv_build(tmp_path):
     assert run_core.run_target_for(tmp_path) == "local"
 
+@pytest.mark.plugin
 def test_target_deployment_with_viv_build(tmp_path):
     (tmp_path / ".viv-build.json").write_text('{"simulator_id": 66}')
     assert run_core.run_target_for(tmp_path) == "deployment"
@@ -16,6 +17,7 @@ def test_invoke_run_local_returns_plan_with_run_id(tmp_path):
     assert plan.run_id.startswith("pkg.composites.x__")
     assert plan.target == "local" and plan.config == {"k": 2} and plan.label == "L"
 
+@pytest.mark.plugin
 def test_invoke_run_deployment_returns_plan(tmp_path):
     # SP-D2: deployment execution is now BUILT — invoke_run returns a plan with
     # target="deployment" (the detached runner dispatches to sms-api) instead of

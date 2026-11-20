@@ -1,3 +1,7 @@
+import pytest
+
+
+@pytest.mark.plugin
 def test_sms_api_base_default_and_override(monkeypatch):
     from vivarium_workbench_sms import sms_api_client  # the workspace_deps_views alias is gone (step P2 Builds B3)
     # "Unconfigured" means BOTH names unset — VIVA_API_BASE is read first, and
@@ -18,6 +22,7 @@ def test_normalize_repo_url_strips_git_suffix():
     assert normalize_repo_url("https://github.com/x/v2ecoli") == "https://github.com/x/v2ecoli"
 
 
+@pytest.mark.plugin
 def test_remote_run_start_requires_login(monkeypatch, tmp_path):
     from vivarium_workbench.lib import github_auth
     from vivarium_workbench_sms import remote_pipeline_views
