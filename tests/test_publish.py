@@ -1126,3 +1126,45 @@ def test_build_bundle_bakes_argument_overlay(tmp_workspace, tmp_path):
     # the stable shape the frontend reads (content depends on the derivation layer)
     assert {"investigation", "claims", "edges", "narrative", "gaps", "gates",
             "decisions", "available"} <= set(body)
+
+
+def test_build_bundle_stages_native_gallery_only_figures_zip(
+    tmp_workspace, tmp_path, monkeypatch
+):
+    """Regression: an investigation whose figures come ONLY from the native
+    gallery (committed viz/*.html, run viz.json HTML) must still get its
+    figures.zip staged in the published bundle.
+
+    `build_figures_zip` pulls from more sources than `build_investigation_figures`
+    (which sees only declared study.visualizations[] image files). Gating the
+    staging on the declared view (n_composites / files) wrongly skipped
+    investigations like eukaryogenesis / multicellularity, whose figures are all
+    native-gallery HTML — the zip existed but was never written, so the card's
+    `↓ figures` link 404'd offline. The real gate is `if blob`.
+    """
+    from vivarium_workbench import publish
+    from vivarium_workbench.lib import investigation_figures as figs
+
+    fake_zip = b"PK\x03\x04native-gallery-zip-bytes"
+
+    # The declared-only collector sees nothing (no declared image files, no
+    # composite-level figures) — exactly the native-gallery-only case.
+    monkeypatch.setattr(
+        figs, "build_investigation_figures",
+        lambda ws, inv: {"files": [], "n_composites": 0},
+    )
+    # But the zip builder produces a real archive from the native gallery.
+    monkeypatch.setattr(
+        figs, "build_figures_zip",
+        lambda ws, inv: fake_zip,
+    )
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(tmp_workspace, out)
+
+    zip_path = out / "figures" / "main-inv" / "figures.zip"
+    assert zip_path.is_file(), (
+        "figures.zip must be staged when build_figures_zip returns a real zip, "
+        "even if the declared-figures view (files/n_composites) is empty"
+    )
+    assert zip_path.read_bytes() == fake_zip
