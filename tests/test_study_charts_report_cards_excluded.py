@@ -65,8 +65,11 @@ def test_report_card_html_excluded_from_charts_payload(tmp_path):
     for c in p["charts"]:
         assert "report_card" not in (c.get("iframe_url") or ""), \
             f"a chart points at a report card: {c.get('iframe_url')}"
-    # The real declared figure still renders.
-    assert "01_grid" in keys, "the real charts/*.svg figure disappeared"
+    # The real declared figure still renders — under its study-authored name
+    # ("Severity grid"), not the bare file stem: the committed charts/01_grid.svg
+    # is deduped into the single declared record (see test_study_charts_dedup).
+    assert "Severity grid" in keys, "the real charts/*.svg figure disappeared"
+    assert "01_grid" not in keys, "the committed figure was not deduped against its declaration"
 
 
 def test_declared_figures_helper_skips_report_cards(tmp_path):
