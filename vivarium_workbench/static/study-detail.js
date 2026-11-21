@@ -1780,7 +1780,18 @@
     }
     var compositeId = fullId || fallbackId;
     if (!compositeId) return;
-    fetch('/api/composite-resolve?id=' + encodeURIComponent(compositeId))
+    // Snapshot-aware (same contract as _loadModelCards): a read-only bundle has
+    // no live /api/composite-resolve endpoint, so publish.py bakes the payload to
+    // api/composite-resolve/<id>.json. Without this branch the Model tab's
+    // Composition panel fetched the live ?id= route, got a 404 in the static
+    // bundle, and rendered blank (the Loom sub-pane still worked because its
+    // loader already branched here).
+    var _mdApi = (window.DataSource && window.DataSource.apiUrl)
+      ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
+    var _mdUrl = _isSnapshot()
+      ? _mdApi('/api/composite-resolve/' + encodeURIComponent(compositeId) + '.json')
+      : '/api/composite-resolve?id=' + encodeURIComponent(compositeId);
+    fetch(_mdUrl)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d || d.error) return;
