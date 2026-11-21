@@ -520,6 +520,32 @@ def test_synthesis_separates_status_and_classifies_evidence(tmp_path):
     assert claim["trap"] == "unsupported" and claim["reuse-ok"] == "supported"
 
 
+def test_findings_dict_gap_shape_does_not_crash_synthesis():
+    """A gap-analysis synthesis study carries ``findings`` as a dict
+    ``{entries: [...], summary: {...}}`` (a shape chain_derivation recognises),
+    not the v4 list. The report builder must normalise it instead of indexing
+    ``findings[0]`` (regression: mbp-06 raised ``KeyError: 0``)."""
+    from vivarium_workbench.lib.investigation_report import (
+        _findings_list, _syn_oneline, _build_synthesis)
+
+    # normaliser accepts both shapes and the empty/None cases
+    assert _findings_list({"findings": [{"id": "F-1"}]}) == [{"id": "F-1"}]
+    gap = {"findings": {"entries": [{"signature": "g1", "description": "A gap here. More."}],
+                        "summary": {"axis_A_count": 1}}}
+    assert _findings_list(gap) == [{"signature": "g1", "description": "A gap here. More."}]
+    assert _findings_list({"findings": None}) == []
+    assert _findings_list({"findings": {}}) == []   # dict without entries
+    assert _findings_list({}) == []
+
+    # one-line falls back to a gap entry's description when there's no claim/summary
+    assert _syn_oneline(gap).startswith("A gap here")
+
+    # the whole synthesis survives a dict-findings study (was KeyError: 0)
+    studies = [{"slug": "mbp-06-gap-analysis", "title": "Gap analysis", **gap}]
+    syn = _build_synthesis({}, studies, {})
+    assert any(s["slug"] == "mbp-06-gap-analysis" for s in syn["studies_index"])
+
+
 def test_report_studies_are_cards_in_main_no_supplement():
     """Studies render as collapsible cards in a single main 'Studies' section
     (renderStudies → renderStudy), and the Technical supplement is removed, so
