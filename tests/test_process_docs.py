@@ -179,3 +179,24 @@ def test_summarize_collapses_large_lists_keeps_structure():
 def test_summarize_handles_tuples_and_long_strings():
     assert summarize_large_values(tuple(range(50)), max_list=40) == "⟨50 items⟩"
     assert summarize_large_values("x" * 5000, max_str=100).endswith("…")
+
+
+from vivarium_workbench.lib.process_docs import attach_contract_mathml
+
+
+def test_attach_contract_mathml_fills_env_worker_contract():
+    # Simulates the env worker (older workbench) returning a _contract with `math`
+    # but no `math_mathml`: the in-process pass must render it so the Model view
+    # shows equations even when the worker predates _math_to_mathml.
+    doc = {"tell": {"_type": "process",
+                    "_contract": {"summary": "x", "math": [r"\frac{dX}{dt} = f(X,\, p)"]}}}
+    attach_contract_mathml(doc)
+    ml = doc["tell"]["_contract"]["math_mathml"]
+    assert len(ml) == 1 and ml[0].lstrip().startswith("<math") and "\\frac" not in ml[0]
+
+
+def test_attach_contract_mathml_idempotent():
+    doc = {"tell": {"_type": "process",
+                    "_contract": {"summary": "x", "math": ["a"], "math_mathml": ["<math>keep</math>"]}}}
+    attach_contract_mathml(doc)
+    assert doc["tell"]["_contract"]["math_mathml"] == ["<math>keep</math>"]
