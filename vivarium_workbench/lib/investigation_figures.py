@@ -372,43 +372,127 @@ def build_figures_gallery_page(ws_root, name: str) -> Optional[str]:
     }
     ws_root = Path(ws_root).resolve()
     figs = build_investigation_figures(ws_root, name)
-    files = figs.get("files") or []
-    if not files:
-        return None
-    # Group by study, preserving member order (files come in slug/member order).
-    by_study: "dict[str, list[dict]]" = {}
-    for f in files:
-        by_study.setdefault(str(f.get("study") or ""), []).append(f)
+    entries = figs.get("files") or []
+    composites = figs.get("composites") or []
+    inv = _load_investigation(ws_root, name) or {}
+    slugs = investigation_member_slugs(inv)
+
+    seen_arc: set[str] = set()
+    written_src: set[Path] = set()
+    # slug -> list of (data_uri, label, is_html, stem) — stem drives per-study dedup.
+    gallery: "dict[str, list[tuple[str, str, bool, str]]]" = {}
+    final_items: "list[tuple[str, str, bool, str]]" = []
+
+    def _inline(src: Path) -> "Optional[str]":
+        suf = src.suffix.lower()
+        if suf not in _GALLERY_EXT or not src.is_file():
+            return None
+        try:
+            raw = src.read_bytes()
+        except OSError:
+            return None
+        return "data:" + _MIME.get(suf, "application/octet-stream") + ";base64," + \
+            base64.b64encode(raw).decode("ascii")
+
+    def _label(arc: str, src: "Optional[Path]", is_html: bool) -> str:
+        stem = Path(arc).stem
+        if is_html and src is not None:
+            try:
+                return _fig_label(src.read_text(errors="replace"), stem)
+            except OSError:
+                return stem
+        if stem == "model-loom":
+            return "Model structure (loom)"
+        return stem.replace("-", " ").replace("_", " ").strip() or stem
+
+    # 1. Declared panels (skip the stitched figure_<N>, which go to Final figures).
+    for e in entries:
+        if _COMPOSITE_RE.match(Path(e["rel_path"]).stem):
+            continue
+        arc = e["arcname"]
+        if arc in seen_arc:
+            continue
+        src = ws_root / str(e.get("rel_path") or "")
+        du = _inline(src)
+        if du is None:
+            continue
+        seen_arc.add(arc)
+        try:
+            written_src.add(src.resolve())
+        except OSError:
+            pass
+        is_html = Path(arc).suffix.lower() == ".html"
+        gallery.setdefault(str(e.get("study") or ""), []).append(
+            (du, _label(arc, src, is_html), is_html, Path(arc).stem))
+
+    # 2. Composites -> Final figures.
+    for c in composites:
+        for rel in (c.get("svg_rel"), c.get("png_rel")):
+            if not rel:
+                continue
+            du = _inline(ws_root / rel)
+            if du is None:
+                continue
+            is_svg = str(rel).endswith(".svg")
+            label = ("Figure " + str(c.get("number")) + " — " + str(c.get("title"))) \
+                if is_svg else Path(rel).stem
+            final_items.append((du, label, False, Path(rel).stem))
+
+    # 3. Native-gallery outputs per study (committed viz/ + the latest run's
+    #    viz.json HTML panels) — the SAME interactive-HTML figures the figures.zip
+    #    ships. Without this, an investigation whose figures are interactive HTML
+    #    (not declared ``visualizations:``) rendered an empty gallery -> 404.
+    for slug in slugs:
+        try:
+            for p, arc in study_output_files(ws_root, slug):
+                try:
+                    if p.resolve() in written_src:
+                        continue
+                except OSError:
+                    pass
+                zarc = slug + "/" + arc
+                if zarc in seen_arc:
+                    continue
+                du = _inline(p)
+                if du is None:
+                    continue
+                seen_arc.add(zarc)
+                is_html = p.suffix.lower() == ".html"
+                gallery.setdefault(slug, []).append(
+                    (du, _label(zarc, p, is_html), is_html, p.stem))
+            for pname, html in study_output_html_panels(ws_root, slug).items():
+                arc = slug + "/visualizations/" + _safe_panel_name(pname)
+                if arc in seen_arc:
+                    continue
+                seen_arc.add(arc)
+                du = "data:text/html;base64," + base64.b64encode(html.encode("utf-8")).decode("ascii")
+                gallery.setdefault(slug, []).append((du, _fig_label(html, pname), True, Path(pname).stem))
+        except Exception:  # noqa: BLE001 — one bad study never breaks the gallery
+            continue
+
+    # Assemble groups: Final first, then each study in member order; dedup a study's
+    # items by stem (a committed viz/<name>.html and its re-rendered run panel are
+    # one figure). Strip the stem before handing groups to the renderer (3-tuples).
+    def _dedup(items: "list[tuple[str, str, bool, str]]") -> "list[tuple[str, str, bool]]":
+        seen_stems: set[str] = set()
+        out: list = []
+        for du, label, is_html, stem in items:
+            if stem in seen_stems:
+                continue
+            seen_stems.add(stem)
+            out.append((du, label, is_html))
+        return out
 
     groups: list = []
-    any_item = False
-    for slug, items in by_study.items():
-        rendered: list = []
-        for it in items:
-            p = ws_root / str(it.get("rel_path") or "")
-            suf = p.suffix.lower()
-            if suf not in _GALLERY_EXT or not p.is_file():
-                continue
-            try:
-                raw = p.read_bytes()
-            except OSError:
-                continue
-            is_html = suf == ".html"
-            stem = p.stem
-            if is_html:
-                try:
-                    label = _fig_label(raw.decode("utf-8", "replace"), stem)
-                except Exception:
-                    label = stem
-            else:
-                label = stem.replace("-", " ").replace("_", " ").strip() or stem
-            mime = _MIME.get(suf, "application/octet-stream")
-            data_uri = f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
-            rendered.append((data_uri, label, is_html))
-            any_item = True
-        if rendered:
-            groups.append((slug, None, rendered))
-    if not any_item:
+    if final_items:
+        groups.append(("Final figures", None, _dedup(final_items)))
+    for slug in slugs:
+        items = gallery.get(slug)
+        if not items:
+            continue
+        _, spec = _load_study(ws_root, slug)
+        groups.append((str(spec.get("title") or slug), slug, _dedup(items)))
+    if not groups:
         return None
     return figures_gallery_index_html(name, groups)
 
