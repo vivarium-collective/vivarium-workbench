@@ -319,6 +319,35 @@ def attach_model_antimony(ws_root: Any, doc: Any) -> Any:
     return doc
 
 
+def attach_contract_mathml(doc: Any) -> Any:
+    """Render each process ``_contract``'s governing equations to MathML, in place.
+
+    ``attach_process_docs(_via_worker)`` attaches the ``_contract`` (with its ``math``
+    LaTeX list); this fills ``math_mathml`` alongside it. Run in the SAME process as
+    the publish/resolve — NOT the env worker — so the Model view gets rendered
+    equations even when the workspace's env worker runs an older workbench that
+    predates ``_math_to_mathml`` (the env-worker path then produces a ``_contract``
+    with ``math`` but no ``math_mathml``). Idempotent: skips a contract that already
+    has it.
+    """
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            c = node.get("_contract")
+            if isinstance(c, dict) and c.get("math") and not c.get("math_mathml"):
+                c["math_mathml"] = [_math_to_mathml(m) for m in c["math"]]
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    try:
+        walk(doc)
+    except Exception:
+        pass
+    return doc
+
+
 def attach_process_docs_via_worker(ws_root: Any, doc: Any, spec_id: Any = None) -> Any:
     """Route :func:`attach_process_docs` decoration to the workspace's env worker,
     so the HTTP process imports no workspace Python to read process docstrings

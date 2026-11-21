@@ -385,6 +385,7 @@ def resolve_composite(
             # Per-process docstrings via the env worker (no in-process workspace
             # import); best-effort — decoration never fails the resolve.
             from vivarium_workbench.lib.process_docs import (
+                attach_contract_mathml,
                 attach_model_antimony,
                 attach_process_docs_via_worker,
             )
@@ -397,6 +398,11 @@ def resolve_composite(
             # shows the model for every run. Done here (valid workspace paths at
             # resolve/publish time) so it bakes into the read-only snapshot too.
             state = attach_model_antimony(ws_root, state)
+            # Render the contract equations to MathML HERE (same process as resolve),
+            # not in the env worker — so the Model view gets rendered math even when
+            # the workspace's env worker runs an older workbench (it then returns a
+            # _contract with `math` but no `math_mathml`).
+            state = attach_contract_mathml(state)
             # Embed the declared emit-all paths INSIDE `state` (not as a
             # sibling of it): the dashboard glue (walkthrough.js) and loom's
             # popup/static hydration paths all forward only `payload.state`
