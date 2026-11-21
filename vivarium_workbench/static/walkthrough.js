@@ -1466,6 +1466,78 @@
       _esc(label || 'Download') + '</a>';
   }
 
+  // The file URL for a workspace-relative path — same resolution as the download
+  // link (snapshot → GitHub raw base; live → '/' + path), but WITHOUT the download
+  // attribute, so it can be viewed inline.
+  function _inputsFileUrl(path) {
+    var cfg = window.__DASH_CONFIG__ || {};
+    var rel = String(path || '').replace(/^\/+/, '');
+    return (cfg.mode === 'snapshot' && cfg.inputsDownloadBase)
+      ? String(cfg.inputsDownloadBase).replace(/\/+$/, '') + '/' + rel
+      : '/' + rel;
+  }
+
+  // A "View" button that opens the file in an in-page modal (args URL-encoded so
+  // quotes/HTML in names never break the inline handler).
+  function _inputsViewBtn(path, name) {
+    if (!path) return '';
+    var u = encodeURIComponent(_inputsFileUrl(path));
+    var n = encodeURIComponent(String(name || path));
+    return '<button class="action-btn" style="font-size:0.8em;padding:1px 8px;' +
+      'margin-right:5px" onclick="_viewResource(\'' + u + '\',\'' + n + '\')">👁 View</button>';
+  }
+
+  // Extensions we can render inline as text; PDFs go in an <iframe>; anything else
+  // falls back to Download / open-in-new-tab.
+  var _RES_TEXT_EXT = ['xml', 'sbml', 'ant', 'txt', 'json', 'csv', 'tsv', 'bib',
+    'md', 'yaml', 'yml', 'html', 'log', 'py', 'r', 'csl'];
+
+  window._viewResource = function (encUrl, encName) {
+    _openResourceModal(decodeURIComponent(encUrl), decodeURIComponent(encName));
+  };
+
+  function _openResourceModal(url, name) {
+    var d = document;
+    var ext = (String(name || url).split('.').pop() || '').toLowerCase();
+    var overlay = d.createElement('div');
+    overlay.className = 'res-view-overlay';
+    var close = function () { if (overlay.parentNode) d.body.removeChild(overlay); d.removeEventListener('keydown', onKey); };
+    var onKey = function (e) { if (e.key === 'Escape') close(); };
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+
+    var head = '<div class="res-view-head"><strong class="res-view-title">' + _esc(name) + '</strong>' +
+      '<span style="flex:1"></span>' +
+      '<a class="action-btn" href="' + _esc(url) + '" download style="text-decoration:none">⬇ Download</a>' +
+      '<a class="action-btn" href="' + _esc(url) + '" target="_blank" rel="noopener" style="text-decoration:none">↗ New tab</a>' +
+      '<button class="action-btn res-view-close" title="Close (Esc)">✕</button></div>';
+    var body;
+    if (ext === 'pdf') {
+      body = '<iframe class="res-view-frame" src="' + _esc(url) + '" title="' + _esc(name) + '"></iframe>';
+    } else if (_RES_TEXT_EXT.indexOf(ext) !== -1) {
+      body = '<pre class="res-view-pre">Loading…</pre>';
+    } else {
+      body = '<div class="res-view-note">No inline preview for <code>.' + _esc(ext) +
+        '</code> — use Download or open in a new tab.</div>';
+    }
+    var panel = d.createElement('div');
+    panel.className = 'res-view-panel';
+    panel.innerHTML = head + '<div class="res-view-body">' + body + '</div>';
+    overlay.appendChild(panel);
+    d.body.appendChild(overlay);
+    panel.querySelector('.res-view-close').addEventListener('click', close);
+    d.addEventListener('keydown', onKey);
+
+    if (_RES_TEXT_EXT.indexOf(ext) !== -1) {
+      var pre = panel.querySelector('.res-view-pre');
+      fetch(url).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+        .then(function (t) { pre.textContent = t; })
+        .catch(function (err) {
+          pre.textContent = 'Could not load this file in the browser (' + err.message +
+            '). Use Download or “New tab”.';
+        });
+    }
+  }
+
   // Render a datasets list (name + path + download) as a compact table, or a
   // "none" line.
   function _inputsDatasetsHtml(datasets) {
@@ -1475,11 +1547,12 @@
       var name = _esc(ds.name || ds.path || '(unnamed)');
       var path = ds.path || '';
       var src = ds.path || ds.url || '';
+      var view = path ? _inputsViewBtn(path, ds.name || ds.path) : '';
       var dl = path ? _inputsDownloadLink(path, 'Download') :
         (ds.url ? '<a href="' + _esc(ds.url) + '" target="_blank" rel="noopener" ' +
           'class="action-btn" style="font-size:0.8em;padding:1px 8px;text-decoration:none">↗ Source</a>' : '');
       return '<tr class="res-item"><td><code>' + name + '</code></td><td><small class="muted">' +
-        _esc(src) + '</small></td><td style="text-align:right">' + dl + '</td></tr>';
+        _esc(src) + '</small></td><td style="text-align:right;white-space:nowrap">' + view + dl + '</td></tr>';
     }).join('');
     return '<table><thead><tr><th>Name</th><th>Source</th><th></th></tr></thead><tbody>' +
       rows + '</tbody></table>';
@@ -1533,7 +1606,8 @@
       : '';
 
     var actions = '';
-    if (ref.pdf_path) actions += ' ' + _inputsDownloadLink(ref.pdf_path, 'PDF');
+    if (ref.pdf_path) actions += ' ' + _inputsViewBtn(ref.pdf_path, (ref.title || key || 'reference') + '.pdf') +
+      _inputsDownloadLink(ref.pdf_path, 'PDF');
 
     var bibtex = ref.bibtex || '';
     var bibBlock = '';
@@ -1628,7 +1702,8 @@
         doc = doc || {};
         var name = _esc(doc.name || doc.path || '(unnamed)');
         var path = doc.path ? ' <small class="muted">' + _esc(doc.path) + '</small>' : '';
-        var dl = doc.path ? ' ' + _inputsDownloadLink(doc.path, 'Download') : '';
+        var dl = doc.path ? ' ' + _inputsViewBtn(doc.path, doc.name || doc.path) +
+          _inputsDownloadLink(doc.path, 'Download') : '';
         var desc = doc.description
           ? '<div class="muted" style="font-size:0.85em;margin-top:2px">' +
             _esc(doc.description) + '</div>'
