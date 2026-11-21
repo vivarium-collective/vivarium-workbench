@@ -6991,6 +6991,19 @@ body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]{
   padding:7px 13px; margin:0 0 5px; overflow-x:auto; white-space:nowrap; letter-spacing:0.01em; }
 .mdef-eq sub{ font-size:0.72em; line-height:0; vertical-align:-0.25em; }
 .mdef-eq sup{ font-size:0.72em; line-height:0; vertical-align:0.5em; }
+/* Server-rendered MathML (contract.math_mathml): browsers typeset it natively. */
+.mdef-eq math{ font-size:1.12em; }
+.mdef-eq-txt{ font-family:inherit; }
+/* Model Antimony source (p._antimony) — collapsible, clean monospace code view. */
+.mdef-ant{ margin:9px 0 3px; }
+.mdef-ant-lbl{ font-size:0.68em; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;
+  color:#0f766e; cursor:pointer; user-select:none; }
+.mdef-ant-src{ font-weight:500; text-transform:none; letter-spacing:0; color:var(--text-muted,#64748b); }
+.mdef-ant-pre{ margin:7px 0 0; padding:11px 14px; background:#0f172a; color:#e2e8f0; border-radius:7px;
+  overflow:auto; font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace; font-size:0.8em;
+  line-height:1.55; max-height:440px; -webkit-overflow-scrolling:touch; }
+.mdef-ant-pre code{ white-space:pre; }
+:root[data-theme="dark"] .mdef-ant-pre{ background:#0b1220; }
 .mdef-syms{ margin:9px 0 2px; }
 .mdef-sym-list{ display:grid; grid-template-columns:max-content 1fr; gap:3px 12px; margin:0; align-items:baseline; }
 .mdef-sym-list dt code{ font-size:0.82em; color:#3730a3; background:#eef2ff; padding:0 6px; border-radius:4px;
