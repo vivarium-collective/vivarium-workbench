@@ -132,3 +132,16 @@ def test_generation_request_rows_show_the_filler_skill():
 def test_kind_labels_cover_the_engine_generation_and_frontier_vocabulary():
     for k in ("propose_study", "acquire_model", "visualize", "hypothesize", "critique", "coverage_gap"):
         assert k + ":" in JS, f"KIND_LABELS missing {k}"
+
+
+def test_show_in_main_uses_the_canonical_workspace_entry():
+    # "show in main" must enter via _showInvestigationWorkspace (which switches the
+    # main view into the investigation workspace), NOT the retired
+    # _openInvestigationDetail directly — that left the investigations-list chrome
+    # up and painted the detail/graph into a hidden container (mixed/blank view).
+    sw = JS.split("function switchToInvestigation()", 1)
+    assert len(sw) == 2, "switchToInvestigation not found"
+    body = sw[1].split("function ", 1)[0]
+    assert "window._showInvestigationWorkspace" in body
+    # _openInvestigationDetail may remain only as a fallback, after the workspace entry
+    assert body.index("window._showInvestigationWorkspace") < body.index("window._openInvestigationDetail")
