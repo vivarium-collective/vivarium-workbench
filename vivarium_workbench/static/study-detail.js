@@ -1698,12 +1698,13 @@
       }).join('') + '</dl></div>';
   }
   // The model's Antimony source (p._antimony {text, format, source}), attached by
-  // the server for any model-bearing process — collapsed by default, monospace.
+  // the server for any model-bearing process — shown OPEN by default in a scrollable
+  // monospace pane (still collapsible via the summary).
   function _mdAntimony(p) {
     var a = p && p._antimony;
     if (!a || !a.text) return '';
     var src = a.source ? ' <span class="mdef-ant-src">· ' + _esc(String(a.source)) + '</span>' : '';
-    return '<details class="mdef-ant"><summary class="mdef-ant-lbl">Antimony' + src + '</summary>' +
+    return '<details open class="mdef-ant"><summary class="mdef-ant-lbl">Antimony' + src + '</summary>' +
       '<pre class="mdef-ant-pre"><code>' + _esc(String(a.text)) + '</code></pre></details>';
   }
   function _modelDefHtml(d) {

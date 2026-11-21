@@ -1499,6 +1499,13 @@
   function _openResourceModal(url, name) {
     var d = document;
     var ext = (String(name || url).split('.').pop() || '').toLowerCase();
+    // raw.githubusercontent.com sends `access-control-allow-origin: *`; the snapshot's
+    // github.com/<o>/<r>/raw/<ref>/<path> base 302-redirects there but drops CORS on
+    // the redirect, so a cross-origin fetch/embed of it fails ("Load failed"). Hit the
+    // raw host directly. (Download / New-tab keep the original url — navigation needs no CORS.)
+    var srcUrl = String(url).replace(
+      /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/raw\/(.+)$/,
+      'https://raw.githubusercontent.com/$1/$2/$3');
     var overlay = d.createElement('div');
     overlay.className = 'res-view-overlay';
     var close = function () { if (overlay.parentNode) d.body.removeChild(overlay); d.removeEventListener('keydown', onKey); };
@@ -1512,7 +1519,7 @@
       '<button class="action-btn res-view-close" title="Close (Esc)">✕</button></div>';
     var body;
     if (ext === 'pdf') {
-      body = '<iframe class="res-view-frame" src="' + _esc(url) + '" title="' + _esc(name) + '"></iframe>';
+      body = '<iframe class="res-view-frame" src="' + _esc(srcUrl) + '" title="' + _esc(name) + '"></iframe>';
     } else if (_RES_TEXT_EXT.indexOf(ext) !== -1) {
       body = '<pre class="res-view-pre">Loading…</pre>';
     } else {
@@ -1529,7 +1536,7 @@
 
     if (_RES_TEXT_EXT.indexOf(ext) !== -1) {
       var pre = panel.querySelector('.res-view-pre');
-      fetch(url).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      fetch(srcUrl).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
         .then(function (t) { pre.textContent = t; })
         .catch(function (err) {
           pre.textContent = 'Could not load this file in the browser (' + err.message +
