@@ -380,6 +380,20 @@
     },
 
     /**
+     * Load the baked study-completeness gate findings for an investigation:
+     * {investigation, findings:[{study, check, level, message}, ...]}.
+     * Snapshot-only: publish.py bakes /api/study-completeness/<slug>.json so the
+     * published page can show a "this investigation has incomplete studies"
+     * banner. In live mode there is no such endpoint (the needs-attention tab +
+     * the live linter already surface it) — returns null so the banner is skipped.
+     * @param {string} slug - the investigation slug.
+     */
+    async loadStudyCompleteness(slug) {
+      if (cfg().mode !== "snapshot") return null;
+      return _get(_base() + "/api/study-completeness/" + encodeURIComponent(slug) + ".json");
+    },
+
+    /**
      * Load the investigations summary list.
      * Local mode:    fetches GET /api/investigation-summaries
      * Snapshot mode: fetches /api/investigation-summaries.json from the static bundle

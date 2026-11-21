@@ -1185,3 +1185,44 @@ def test_build_bundle_bakes_needs_attention(tmp_workspace, tmp_path):
     assert body.get("investigation") == "main-inv"
     assert "items" in body and "summary" in body
     assert "total" in body["summary"]
+
+
+def test_build_bundle_bakes_study_completeness(tmp_workspace, tmp_path):
+    """build_bundle bakes api/study-completeness/<inv>.json so the published
+    investigation page can render the "incomplete studies" banner."""
+    from vivarium_workbench import publish
+    out = tmp_path / "bundle"
+    publish.build_bundle(tmp_workspace, out)
+    f = out / "api" / "study-completeness" / "main-inv.json"
+    assert f.is_file(), "study-completeness/main-inv.json not baked"
+    body = json.loads(f.read_text())
+    assert body.get("investigation") == "main-inv"
+    assert "findings" in body and isinstance(body["findings"], list)
+
+
+def test_build_bundle_strict_refuses_on_completeness_finding(tmp_workspace, tmp_path, monkeypatch):
+    """--strict turns a study-completeness finding into a publish-blocking error:
+    the build raises (CLI exits non-zero) instead of shipping a warning banner.
+    Without --strict the same workspace publishes with a warning."""
+    from vivarium_workbench import publish
+    from vivarium_workbench.lib import study_completeness as sc
+
+    finding = {"investigation": "main-inv", "study": "alpha",
+               "check": "declared_composite_unresolved", "level": "warning",
+               "field_path": "baseline[].composite", "message": "does not resolve"}
+    monkeypatch.setattr(sc, "collect", lambda ws, **k: {
+        "findings": [finding], "total": 1,
+        "by_check": {"declared_composite_unresolved": 1},
+        "by_investigation": {"main-inv": [finding]},
+    })
+
+    # non-strict: succeeds, and still bakes the finding for the banner
+    out1 = tmp_path / "warn"
+    publish.build_bundle(tmp_workspace, out1)
+    baked = json.loads((out1 / "api" / "study-completeness" / "main-inv.json").read_text())
+    assert baked["findings"] and baked["findings"][0]["study"] == "alpha"
+
+    # strict: refuses (raises)
+    out2 = tmp_path / "strict"
+    with pytest.raises(RuntimeError, match="study-completeness gate"):
+        publish.build_bundle(tmp_workspace, out2, strict=True)

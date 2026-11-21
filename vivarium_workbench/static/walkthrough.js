@@ -10807,8 +10807,49 @@
       _applyInvOverviewState();
     }
     if (typeof _openInvestigationDetail === 'function') _openInvestigationDetail(name);
+    _renderStudyCompletenessBanner(name, mountEl);
   }
   window._renderInvestigationDetailInto = _renderInvestigationDetailInto;
+
+  // Study-completeness gate banner (published read-only bundle only). publish.py
+  // bakes api/study-completeness/<inv>.json listing studies that LOOK done but are
+  // inconsistent (claims done with no runs; completed but verdict pending; declares
+  // a composite that doesn't resolve). A loud, non-blocking strip at the top of the
+  // investigation page so a reviewer doesn't read it as complete. Removed when the
+  // investigation is clean or in live mode (DataSource returns null).
+  function _renderStudyCompletenessBanner(name, mountEl) {
+    var host = mountEl || document.getElementById('ws-context') || document.body;
+    var existing = document.getElementById('inv-completeness-banner');
+    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+    if (!(window.DataSource && window.DataSource.loadStudyCompleteness)) return;
+    window.DataSource.loadStudyCompleteness(name).then(function (d) {
+      if (window._currentIset && window._currentIset !== name) return;  // stale
+      var items = (d && d.findings) || [];
+      if (!items.length) return;
+      // One line per flagged study (deduped), with the plain-English reason.
+      var _label = {
+        status_claims_done_no_runs_recorded: 'claims done but records no runs',
+        completed_but_verdict_pending: 'marked complete but its verdict is still pending',
+        declared_composite_unresolved: 'declares a model composite that does not resolve'
+      };
+      var rows = items.map(function (f) {
+        return '<li><strong>' + _esc(f.study || '?') + '</strong> — ' +
+          _esc(_label[f.check] || f.check || 'incomplete') + '</li>';
+      }).join('');
+      var banner = document.createElement('div');
+      banner.id = 'inv-completeness-banner';
+      banner.setAttribute('role', 'status');
+      banner.style.cssText = 'margin:0 0 10px;padding:9px 12px;border:1px solid #f59e0b;' +
+        'border-left-width:4px;border-radius:6px;background:#fffbeb;color:#92400e;' +
+        'font-size:0.9em;line-height:1.4';
+      banner.innerHTML =
+        '<div style="font-weight:700;margin-bottom:3px">⚠ ' + items.length +
+          ' stud' + (items.length === 1 ? 'y looks' : 'ies look') + ' done but need attention</div>' +
+        '<ul style="margin:2px 0 0;padding-left:18px">' + rows + '</ul>';
+      host.insertBefore(banner, host.firstChild);
+    }).catch(function () { /* best-effort; no banner on failure */ });
+  }
+  window._renderStudyCompletenessBanner = _renderStudyCompletenessBanner;
 
   // Report / Notebook actions in the workspace header (#ws-actions), moved off
   // the detail-view header (hidden by _renderInvestigationDetailInto).
