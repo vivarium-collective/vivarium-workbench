@@ -2587,7 +2587,7 @@
         data = data || {};
         var tools = data.tools || [];
         if (!tools.length) {
-          container.innerHTML = '<p class="empty-state">No analysis tools for this workspace. Tools are built-in (Parsimony Viewer) or contributed by the repo (a package\'s <code>workbench_viewers</code> module).</p>';
+          container.innerHTML = '<p class="empty-state">No analysis tools for this workspace. Tools are built in, or contributed by the repo (a package\'s <code>workbench_viewers</code> module).</p>';
           if (countEl) countEl.textContent = '';
           return;
         }
