@@ -398,7 +398,16 @@
     var slug = S.slug || (el("dcyc-inv") && el("dcyc-inv").value) || "";
     if (!slug) return;
     try {
-      if (typeof window._openInvestigationDetail === "function") {
+      // Enter the investigation through the SAME canonical entry the rest of the
+      // SPA uses — _showInvestigationWorkspace switches the main view INTO the
+      // investigation workspace (hides the investigations list, sizes + renders
+      // the detail + graph via _renderInvestigationDetailInto). Calling the
+      // retired _openInvestigationDetail directly instead left the list chrome up
+      // and painted into a hidden container — a mixed view with a blank graph.
+      if (typeof window._showInvestigationWorkspace === "function") {
+        window._showInvestigationWorkspace(slug);
+        setStatus("Showing “" + currentTitle(slug) + "” in the main window.");
+      } else if (typeof window._openInvestigationDetail === "function") {
         window._openInvestigationDetail(slug);
         setStatus("Showing “" + currentTitle(slug) + "” in the main window.");
       }
