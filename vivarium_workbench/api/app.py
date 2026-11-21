@@ -1695,9 +1695,9 @@ def create_app() -> FastAPI:
         summary="Capability-matched analysis tools for this workspace",
     )
     def analysis_tools(ws: Path = Depends(get_workspace)) -> JSONResponse:
-        """Tools-first Analysis Tools tab: external viewers + built-in tools
-        (data-explorer, parsimony-viewer), each matched to the runs/studies
-        whose capabilities satisfy the tool's ``requires``.
+        """Tools-first Analysis Tools tab: contributed viewers (a package's
+        workbench_viewers, incl. the 3D viewer) + core built-in tools, each
+        matched to the runs/studies whose capabilities satisfy ``requires``.
 
         Library-backed via ``lib.analysis_tools.build_analysis_tools``.
         """
@@ -4690,7 +4690,7 @@ def create_app() -> FastAPI:
 
     # -----------------------------------------------------------------------
     # Static + SPA-shell serving (Phase C, Batch 16): the SPA index, the
-    # standalone loom/parsimony viewer bundles, and a catch-all asset route.
+    # standalone loom + contributed-viewer bundles, and a catch-all asset route.
     # FileResponse (not a pydantic model); each reproduces the legacy
     # ``do_GET`` static branch byte-for-byte — the bundled→assets-strip→
     # workspace→reports resolution priority, the ``_guess_mime`` table, and
@@ -4874,25 +4874,28 @@ def create_app() -> FastAPI:
         return RedirectResponse(url=f"{base_path}/perfetto/", status_code=307)
 
     @app.get(
-        "/parsimony-viewer/{rel:path}",
+        "/contributed-viewer/{package}/{rel:path}",
         tags=["Static & shell"],
-        summary="pbg_parsimony 3D viewer bundle asset (404 when not installed)",
+        summary="Contributed viewer bundle asset (404 when the package is absent)",
         response_class=Response,
         include_in_schema=False,
     )
-    def parsimony_viewer_asset(rel: str = "") -> Response:
-        """Serve a ``pbg_parsimony`` viewer asset (feature-detected).
+    def contributed_viewer_asset(package: str, rel: str = "") -> Response:
+        """Serve a contributed viewer's bundle asset (feature-detected, generic).
 
-        HTTP 404 (empty body) when ``pbg_parsimony`` is not installed (the
-        Analyses gallery hides its 3D cards), or when the file is absent; HTTP
-        403 on a ``..`` path segment.  ``rel`` empty → ``index.html``.  Served
-        with the guessed bare mime + ``Cache-Control: no-store``.  Mirrors the
-        legacy ``/parsimony-viewer`` branch.
+        ``package`` is the distribution a ``workbench_viewers`` descriptor
+        declared as its ``bundle_package`` (e.g. the 3D viewer declares
+        ``viva_parsimony``); the asset dir is ``<package>/viewer/``. The workbench
+        core holds NO package-specific knowledge — it serves whatever the viewer
+        declared. HTTP 404 (empty body) when the package is not installed (the
+        Explore gallery hides that card) or the file is absent; HTTP 403 on a
+        ``..`` segment. ``rel`` empty → ``index.html``. Served with the guessed
+        bare mime + ``Cache-Control: no-store``.
 
-        Library-backed via ``lib.static_serving.resolve_parsimony_asset``.
+        Library-backed via ``lib.static_serving.resolve_contributed_viewer_asset``.
         """
         try:
-            target = _static_serving.resolve_parsimony_asset(rel)
+            target = _static_serving.resolve_contributed_viewer_asset(package, rel)
         except _static_serving.AssetTraversal:
             return Response(status_code=403)
         if target is None:
@@ -8992,7 +8995,7 @@ def create_app() -> FastAPI:
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)
     # so Starlette, which matches routes in registration order, resolves every
-    # specific route first (all ``/api/*``, ``/``, the loom/parsimony viewers,
+    # specific route first (all ``/api/*``, ``/``, the loom + contributed viewers,
     # FastAPI's ``/docs`` & ``/openapi.json``).  This route only handles
     # otherwise-unmatched paths.  DO NOT add routes below it.
     # -----------------------------------------------------------------------

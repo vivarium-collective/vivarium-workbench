@@ -1887,10 +1887,11 @@ def _launch_url_for_matched_tool(tool: dict, row: dict) -> "str | None":
     `_build3dSrc` / `_launchViewer`, so a chip built from this URL opens the
     exact same place a user would reach from the Analysis Tools tab:
 
-    - ``embed-3d`` (built-in Parsimony Viewer): a per-STUDY match — a study
+    - ``embed-3d`` (a contributed 3D viewer): a per-STUDY match — a study
       either has a 3D pack or it doesn't, so the row's ``study_slug`` selects
       the tool's matched pack candidate; its hosted ``viewer_url`` wins, else
-      the bundled viewer is pointed at the study's 3D models manifest.
+      the viewer's own bundle (``/contributed-viewer/<bundle_package>/``) is
+      pointed at the study's 3D models manifest.
     - ``launcher`` (repo-contributed viewer): the generic actuation endpoint
       (``GET /api/analysis-viewer/{uid}/launch``), scoped to this row's study
       + run — the frontend fetches it and opens the returned ``{"url": ...}``.
@@ -1910,10 +1911,13 @@ def _launch_url_for_matched_tool(tool: dict, row: dict) -> "str | None":
             return cand["viewer_url"]
         # Only deep-link when this study is actually one of the tool's matched
         # candidates (or there's no `matched` list to check at all) — a study
-        # with no 3D pack must not get a dead models.json link.
-        if study and (cand is not None or not matched):
+        # with no 3D pack must not get a dead models.json link. The local bundle
+        # URL needs the viewer's declared ``bundle_package``.
+        pkg = tool.get("bundle_package")
+        if pkg and study and (cand is not None or not matched):
             models_url = f"/api/study/{_urlquote(str(study), safe='')}/3d/models.json"
-            return f"/parsimony-viewer/index.html?models={_urlquote(models_url, safe='')}"
+            return (f"/contributed-viewer/{_urlquote(str(pkg), safe='')}"
+                    f"/index.html?models={_urlquote(models_url, safe='')}")
         return None
 
     if kind == "embed-simularium":
@@ -2009,7 +2013,7 @@ def _attach_matched_tools(rows: list[dict], ws_root: Path) -> None:
             for tool in tools:
                 requires = tool.get("requires") or []
                 caps_ok = bool(requires) and set(requires) <= caps
-                # embed-3d (Parsimony Viewer) is a per-STUDY tool: 3d_pack is a
+                # embed-3d (a contributed 3D viewer) is a per-STUDY tool: 3d_pack is a
                 # property of the run's STUDY (it has viz/3d packs), not of the
                 # run's emitter — so a run never carries the 3d_pack capability
                 # and the capability-subset rule above would never match it.

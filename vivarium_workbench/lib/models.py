@@ -308,6 +308,8 @@ class SavedViz(BaseModel):
     n_placed: Optional[int] = None
     created: Optional[int] = None
     viewer_url: Optional[str] = None  # set only when ui.viz_viewer_urls maps it
+    # set only when ui.viz_viewer_bundle names a local 3D-viewer package
+    viewer_bundle_package: Optional[str] = None
 
 
 class ReportCard(BaseModel):
@@ -323,7 +325,6 @@ class ReportCard(BaseModel):
 class SavedVisualizationsPayload(BaseModel):
     """``GET /api/saved-visualizations`` payload (lib.saved_visualizations)."""
 
-    parsimony_available: bool = False
     saved: list[SavedViz] = []
     report_cards: list[ReportCard] = []
 
@@ -331,10 +332,10 @@ class SavedVisualizationsPayload(BaseModel):
 class AnalysisToolsPayload(BaseModel):
     """``GET /api/analysis-tools`` payload — the tools-first Analysis Tools tab.
 
-    Composed by ``lib.analysis_tools.build_analysis_tools``: external
-    contributed viewers + built-in tools (data-explorer, parsimony-viewer),
-    each capability-matched to candidate runs/studies. Tool shapes vary
-    (external viewers carry extra fields), so unknown keys are preserved.
+    Composed by ``lib.analysis_tools.build_analysis_tools``: contributed viewers
+    (a package's ``workbench_viewers``, incl. the 3D viewer) + core built-in
+    tools, each capability-matched to candidate runs/studies. Tool shapes vary
+    (viewers carry extra fields), so unknown keys are preserved.
     """
 
     model_config = ConfigDict(extra="allow")

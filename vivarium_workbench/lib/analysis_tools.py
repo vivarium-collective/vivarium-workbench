@@ -17,10 +17,10 @@ def _excluded_tool_ids(ws_root) -> set[str]:
     ``ui.analysis_tools_exclude`` (a list of tool ids).
 
     Lets a workspace suppress a built-in or contributed Analysis Tool by id
-    without a code change — e.g. sms-ecoli descoped the 3D/structural layer
-    (moved to a separate repo) but keeps a hosted 3D pack, so it excludes
-    ``parsimony-viewer`` while still advertising the pack. Read directly from
-    workspace.yaml, mirroring ``analysis_tools_3d._hosted_viewer_urls``."""
+    without a code change — e.g. a workspace that keeps a hosted 3D pack but
+    does not want the local 3D viewer card excludes that contributed viewer by
+    its declared id. Read directly from workspace.yaml, mirroring
+    ``analysis_tools_3d._hosted_viewer_urls``."""
     try:
         ws = yaml.safe_load(
             (Path(ws_root) / "workspace.yaml").read_text(encoding="utf-8")
@@ -42,13 +42,14 @@ def match(requires, candidates: list[dict]) -> list[dict]:
 def builtin_tools() -> list[dict]:
     # Domain-specific built-in tools. They are only surfaced in a workspace
     # that can actually use them (see build_analysis_tools: a built-in with no
-    # matched candidate is skipped), so e.g. the Parsimony Viewer appears in a
-    # v2ecoli workspace with a 3D pack but not in an HRA/atlas workspace.
+    # matched candidate is skipped), so e.g. the Simularium Viewer appears only
+    # in a workspace with a recorded trajectory.
+    #
+    # The 3D (parsimony) viewer is NOT built in: it is a CONTRIBUTED module
+    # (a package's workbench_viewers.get_viewers() declaring kind "embed-3d",
+    # requires ["3d_pack"] and its own bundle_package). The workbench core holds
+    # no parsimony-specific knowledge; see build_analysis_tools.
     return [
-        {"id": "parsimony-viewer", "title": "Parsimony Viewer",
-         "description": "3D molecular packing of a cell — saved views at "
-                        "declared times.",
-         "kind": "embed-3d", "requires": ["3d_pack"]},
         {"id": "simularium-viewer", "title": "Simularium Viewer",
          "description": "Play a run's particle trajectory in the Simularium "
                         "viewer (agent positions over time).",
@@ -110,43 +111,43 @@ def build_analysis_tools(ws_root) -> list[dict]:
     excluded = _excluded_tool_ids(ws_root)
     tools: list[dict] = []
 
-    pack_ids = {c["ref"] for c in packs}
+    def _candidates_for(requires: list[str]) -> list[dict]:
+        # Map a tool's required capability to the candidate set advertising it.
+        if "3d_pack" in requires:
+            return packs
+        if "simularium" in requires:
+            return sims
+        return runs
 
-    # external contributed viewers (may or may not declare requires). The
-    # built-in Parsimony Viewer natively renders every 3D pack — it resolves the
-    # hosted/bundled viewer itself and always opens — so a legacy contributed
-    # viewer whose targets are ALL 3D-pack studies is a duplicate of it (and, in
-    # practice, the fragile one: its launch goes through the env worker and can
-    # 404). Drop such a viewer so there is exactly one, always-working 3D card.
-    native_3d = bool(packs)
+    # Contributed viewers (a package's workbench_viewers.get_viewers). A viewer
+    # that declares a capability in ``requires`` (e.g. ["3d_pack"]) is matched
+    # against the candidates advertising it, EXACTLY like a built-in — so a
+    # contributed embed-3d viewer is surfaced only where a study has a 3D pack,
+    # and skipped (no dead card) otherwise. This is how the 3D viewer is now a
+    # contributed module rather than hardcoded in the workbench. A viewer with no
+    # ``requires`` keeps its own ``targets`` (launcher semantics).
     for v in viewers_public(ws_root):
         v = dict(v)
         if v.get("id") in excluded:
             continue  # workspace opted this tool out (ui.analysis_tools_exclude)
         v.setdefault("requires", [])
-        tgts = v.get("targets") or []
-        if (native_3d and not v["requires"] and tgts
-                and all(isinstance(t, dict) and t.get("study") in pack_ids
-                        for t in tgts)):
-            continue  # duplicate of the built-in Parsimony Viewer
-        v["matched"] = match(v["requires"], runs) if v["requires"] else []
+        if v["requires"]:
+            v["matched"] = match(v["requires"], _candidates_for(v["requires"]))
+            if not v["matched"]:
+                continue  # required capability absent in this workspace → skip
+        else:
+            v["matched"] = []
         tools.append(v)
 
-    # built-in tools — only surfaced where the workspace can actually use them:
-    # a built-in whose required capability is absent (no matched run/pack) is
-    # a domain-specific tool irrelevant to this workspace, so skip it rather
-    # than showing a dead "No compatible runs" card.
+    # Built-in tools — only surfaced where the workspace can actually use them:
+    # a built-in whose required capability is absent (no matched run/pack) is a
+    # domain-specific tool irrelevant to this workspace, so skip it rather than
+    # showing a dead "No compatible runs" card.
     for t in builtin_tools():
         t = dict(t)
         if t.get("id") in excluded:
             continue  # workspace opted this tool out (ui.analysis_tools_exclude)
-        if "3d_pack" in t["requires"]:
-            cands = packs
-        elif "simularium" in t["requires"]:
-            cands = sims
-        else:
-            cands = runs
-        t["matched"] = match(t["requires"], cands)
+        t["matched"] = match(t["requires"], _candidates_for(t["requires"]))
         if not t["matched"]:
             continue
         t["unmatched_reason"] = ""

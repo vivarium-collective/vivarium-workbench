@@ -3,7 +3,7 @@
 These are the path-resolving helpers behind the Phase-C, Batch-16 **static /
 SPA-shell** routes — the ``do_GET`` page/static branches (the bundled assets,
 the workspace tree, the rendered ``reports/`` output, plus the standalone
-``bigraph-loom`` and ``pbg_parsimony`` viewer bundles).  Unlike the JSON view
+``bigraph-loom`` and contributed-viewer bundles).  Unlike the JSON view
 builders, the routes serve raw files (``FileResponse``), so these helpers return
 a resolved :class:`~pathlib.Path` (or ``None`` / a traversal signal) plus the
 mime guess — a single implementation driving both the legacy stdlib
@@ -17,8 +17,9 @@ Resolution contract (mirrors the legacy ``do_GET`` static branch EXACTLY):
   the returned path is not a file).
 * :func:`resolve_loom_asset` — ``vivarium_workbench.loom_assets.asset_dir()/rel``, raising
   :class:`AssetTraversal` on a ``..`` segment (the route maps it to 403).
-* :func:`resolve_parsimony_asset` — the optional ``pbg_parsimony`` viewer dir
-  (``None`` when the package is absent → the route 404s).
+* :func:`resolve_contributed_viewer_asset` — a contributed viewer's bundle dir
+  (``<package>/<subdir>/``; ``None`` when the package is absent → the route 404s).
+  Generic: the viewer descriptor names its ``bundle_package``; core names none.
 * :func:`index_html_path` — the SPA shell ``<ws>/reports/index.html`` (the route
   best-effort re-renders via ``lib.report.render_workspace_report`` first).
 
@@ -33,7 +34,7 @@ from pathlib import Path
 from typing import Optional
 
 import vivarium_workbench as _vd_pkg
-from vivarium_workbench.lib.saved_visualizations import parsimony_viewer_dir
+from vivarium_workbench.lib.saved_visualizations import contributed_viewer_bundle_dir
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 # Package-bundled static dir (style.css, walkthrough.js, vivarium-logo.png,
@@ -213,19 +214,22 @@ def loom_bundle_missing_html() -> str:
     )
 
 
-def resolve_parsimony_asset(rel: str) -> Optional[Path]:
-    """Resolve a ``parsimony-viewer`` asset, or ``None`` when unavailable.
+def resolve_contributed_viewer_asset(
+    package: str, rel: str, *, subdir: str = "viewer") -> Optional[Path]:
+    """Resolve a contributed viewer's bundle asset, or ``None`` when unavailable.
 
-    Returns ``None`` when the optional ``pbg_parsimony`` package is not installed
-    (the route 404s — the Analyses gallery hides its 3D cards).  ``rel`` is the
-    path AFTER the ``/parsimony-viewer`` prefix; ``""`` resolves to
-    ``index.html``.  Raises :class:`AssetTraversal` on a ``..`` segment.  Mirrors
-    the legacy ``/parsimony-viewer`` branch.
+    ``package`` is the distribution a ``workbench_viewers`` descriptor declared as
+    its ``bundle_package`` (the asset dir is ``<package>/<subdir>/``). Returns
+    ``None`` when that package is not installed or ships no such dir (the route
+    404s — the Explore gallery hides the card). ``rel`` is the path AFTER the
+    ``/contributed-viewer/<package>`` prefix; ``""`` resolves to ``index.html``.
+    Raises :class:`AssetTraversal` on a ``..`` segment. The workbench holds no
+    package-specific knowledge — it serves whatever the viewer declared.
     """
-    pv_dir = parsimony_viewer_dir()
-    if pv_dir is None:
+    base = contributed_viewer_bundle_dir(package, subdir)
+    if base is None:
         return None
     rel = rel or "index.html"
     if ".." in rel.split("/"):
         raise AssetTraversal(rel)
-    return pv_dir / rel
+    return base / rel

@@ -35,11 +35,12 @@ def test_tab_has_no_h2_or_paragraph(inproc_client, ws_copy):
 
 def test_analysis_tools_json_drives_cards(inproc_client, ws_copy):
     # the tools payload is the data source for the tab: the endpoint responds
-    # with a "tools" list. Built-ins are capability-gated now, and this fixture
-    # has no runs/packs, so parsimony-viewer (requires a 3d_pack) is correctly
-    # absent rather than shown as a dead card — see test_api_analysis_tools and
-    # test_analysis_tools.test_builtin_skipped_when_capability_absent.
+    # with a "tools" list. The 3D viewer is a contributed module (no longer a
+    # built-in), capability-gated on 3d_pack, and this fixture has no packs — so
+    # no 3D viewer card is shown rather than a dead one. See test_api_analysis_tools
+    # and test_analysis_tools.test_contributed_viewer_skipped_when_capability_absent.
     client = inproc_client(workspace=ws_copy)
     body = client.get("/api/analysis-tools").json()
     assert isinstance(body.get("tools"), list)
-    assert not any(t["id"] == "parsimony-viewer" for t in body["tools"])
+    # no built-in parsimony tool exists, and no contributed 3D viewer matches here
+    assert not any(t["id"] in ("parsimony-viewer", "ecoli-3d") for t in body["tools"])
