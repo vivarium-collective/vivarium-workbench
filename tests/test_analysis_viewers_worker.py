@@ -98,6 +98,46 @@ def test_resolve_targets_forwards_run_keyed_rows():
     ]
 
 
+def test_resolve_runs_lists_the_runs_a_viewer_can_open():
+    # A launcher may list the runs it can open (``runs``), resolved like
+    # ``targets``: a run id, or {run, study} to scope the id to one study.
+    viewer = {"runs": lambda ws: [
+        "r1",
+        {"run": "r2", "study": "s1"},
+        {"study": "s1"},   # no run → dropped
+        "",                # empty → dropped
+        7,                 # neither str nor dict → dropped
+    ]}
+    assert env_worker._av_resolve_runs(viewer, Path("/ws")) == [
+        {"run": "r1", "study": None},
+        {"run": "r2", "study": "s1"},
+    ]
+    assert env_worker._av_resolve_runs({"runs": ["r3"]}, Path("/ws")) == [
+        {"run": "r3", "study": None}]
+
+
+def test_resolve_runs_absent_or_broken_is_empty():
+    def _boom(ws):
+        raise RuntimeError("broken")
+
+    assert env_worker._av_resolve_runs({}, Path("/ws")) == []
+    assert env_worker._av_resolve_runs({"runs": _boom}, Path("/ws")) == []
+    assert env_worker._av_resolve_runs({"runs": "r1"}, Path("/ws")) == []
+
+
+def test_public_spec_forwards_runs(monkeypatch):
+    mod = _fake_viewers_module()
+    base = mod.get_viewers
+    mod.get_viewers = lambda ws: [dict(base(ws)[0], runs=lambda ws: ["r1"])]  # type: ignore[attr-defined]
+    _patch_candidates(monkeypatch, mod)
+    monkeypatch.setattr(env_worker, "_workspace", "/ws")
+    spec = env_worker._analysis_viewers({"action": "list"})["viewers"][0]
+    assert spec["runs"] == [{"run": "r1", "study": None}]
+    # the fake module's other viewers list no runs
+    _patch_candidates(monkeypatch, _fake_viewers_module())
+    assert all(v["runs"] == [] for v in env_worker._analysis_viewers({"action": "list"})["viewers"])
+
+
 def test_resolve_targets_labels_run_from_run_id_when_unlabeled():
     viewer = {"targets": lambda ws: [{"run": "cd2_run1_k4"}]}
     out = env_worker._av_resolve_targets(viewer, Path("/ws"))

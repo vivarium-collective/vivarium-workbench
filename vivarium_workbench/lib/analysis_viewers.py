@@ -31,6 +31,12 @@ Each viewer dict:
                                          #   from the request Host, for viewers
                                          #   that serve data back over HTTP.
       "targets":     callable|list,      # optional; (ws_root)->[{study,label,detail}]
+      "runs":        callable|list,      # optional; (ws_root)->[run_id | {run, study}]
+                                         #   runs this launcher can open: each gets
+                                         #   the viewer's button in the Simulations
+                                         #   table, as a `requires` match does. For
+                                         #   runs with no capability tags (an output
+                                         #   the workbench's store reader can't read).
       # embed-only:
       "assets":      {"js":[url,...], "mount_id": str, "api_prefix": str},
     }

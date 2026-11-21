@@ -169,3 +169,39 @@ def test_study_scoped_3d_match_does_not_leak_across_studies(monkeypatch):
     rows = [{"run_id": "r4", "study_slug": "some-other-study", "capabilities": []}]
     si._attach_matched_tools(rows, "/ws")
     assert rows[0]["matched_tools"] == []
+
+
+def _listing_launcher():
+    # A contributed launcher whose runs carry no capability tags (a format the
+    # store reader does not read) lists the runs it can open instead.
+    return [{"uid": "pkg::explorer", "id": "explorer", "title": "Explorer",
+             "kind": "launcher", "requires": [], "matched": [],
+             "runs": [{"run": "lin1", "study": None},
+                      {"run": "lin2", "study": "s1"}]}]
+
+
+def test_run_a_viewer_lists_gets_its_button(monkeypatch):
+    monkeypatch.setattr(
+        "vivarium_workbench.lib.analysis_tools.build_analysis_tools",
+        lambda ws: _listing_launcher(),
+    )
+    rows = [{"run_id": "lin1", "study_slug": "s9", "capabilities": []},
+            {"run_id": "lin2", "study_slug": "s1", "capabilities": []},
+            {"run_id": "other", "study_slug": "s1", "capabilities": []}]
+    si._attach_matched_tools(rows, "/ws")
+    assert [t["id"] for t in rows[0]["matched_tools"]] == ["pkg::explorer"]
+    assert rows[1]["matched_tools"][0]["launch_url"] == (
+        "/api/analysis-viewer/pkg%3A%3Aexplorer/launch?study=s1&run=lin2")
+    assert rows[1]["matched_tools"][0]["kind"] == "launcher"
+    assert rows[2]["matched_tools"] == []  # not listed → no button
+
+
+def test_a_study_scoped_listed_run_does_not_leak_across_studies(monkeypatch):
+    # The same run id in another study is a different run.
+    monkeypatch.setattr(
+        "vivarium_workbench.lib.analysis_tools.build_analysis_tools",
+        lambda ws: _listing_launcher(),
+    )
+    rows = [{"run_id": "lin2", "study_slug": "s2", "capabilities": []}]
+    si._attach_matched_tools(rows, "/ws")
+    assert rows[0]["matched_tools"] == []

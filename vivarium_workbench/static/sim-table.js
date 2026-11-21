@@ -236,7 +236,7 @@
     if (!url) return;
     var origLabel = btn.textContent;
     btn.disabled = true;
-    btn.textContent = "…";
+    btn.textContent = "Opening…";   // the launch can start the viewer's server: say so
     fetch(url).then(function (r) {
       return r.text().then(function (t) {
         var d = {};
@@ -389,8 +389,26 @@
   // column stops wrapping into a crowded 7-button block. The menu is a native
   // <details> (no toggle JS); its <summary>/items are .action-btn, which the
   // row's click-to-open handler already ignores.
+  // The run's matched launcher tools (row.matched_tools, e.g. a package's Explorer)
+  // as VIEW entries of the global Runs page's Actions menu: that page folds the Tools
+  // column away, so this is where its rows reach them. Same button and delegated
+  // handler as toolsCell (_onToolLaunchClick). Kept out of _actionList so the
+  // per-study Simulations tab, which has its own Tools column, shows each once.
+  function _toolActions(row) {
+    var tools = (row && row.matched_tools) || [];
+    return tools.filter(function (t) { return t.kind === "launcher" && t.launch_url; }).map(function (t) {
+      var label = esc(t.label || t.id || "Tool");
+      return {
+        group: "VIEW",
+        html: '<button type="button" class="action-btn js-authoring tool-launch-btn" ' +
+          'data-launch-url="' + esc(t.launch_url) + '" title="Launch ' + label + '">' + label + " &#8599;</button>",
+        desc: "Open this run in " + (t.label || t.id || "this tool"),
+      };
+    });
+  }
+
   function _globalActions(row) {
-    var list = _actionList(row);
+    var list = _actionList(row).concat(_toolActions(row));
     if (!list.length) return '<span style="color:#9ca3af;">—</span>';
     // One "⌄ Actions" menu per row: ALL actions — including 📊 Viz (first in VIEW) —
     // live inside it, grouped VIEW / DOWNLOAD / RE-RUN with an inline description each.
@@ -1103,5 +1121,6 @@
     investigation: investigation, composite: composite, sourceCell: sourceCell, toolsCell: toolsCell,
     renderRow: renderRow, renderTable: renderTable, dropEmptyColumns: dropEmptyColumns,
     rowWhere: _rowWhere, whereQuery: _whereQuery, actionList: _actionList,
+    globalActions: _globalActions,
   };
 })();
