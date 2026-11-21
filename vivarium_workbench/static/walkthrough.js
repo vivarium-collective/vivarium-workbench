@@ -12268,7 +12268,30 @@
         _renderInvNeedsAttention(name);
       })
       .catch(function(err) {
-        document.getElementById('investigation-detail-description').textContent = 'Failed to load: ' + err;
+        // The detail payload failed to load (a transient network blip survives the
+        // DataSource retries, or a real error). Do NOT leave the previously-opened
+        // investigation's graph on screen — clear it so it can't be mistaken for
+        // THIS investigation, and offer a one-click retry.
+        try {
+          var _n = document.getElementById('investigation-dag-nodes');
+          var _e = document.getElementById('investigation-dag-edges');
+          if (_n) _n.innerHTML = '';
+          if (_e) _e.innerHTML = '';
+        } catch (_) { /* best-effort */ }
+        var leadEl = document.getElementById('investigation-detail-description');
+        if (leadEl) {
+          leadEl.innerHTML = '';
+          var p = document.createElement('p');
+          p.style.color = '#c00';
+          p.textContent = 'Failed to load this investigation: ' + err + '. ';
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.style.cssText = 'font:inherit;font-size:12px;padding:3px 10px;border-radius:6px;border:1px solid #ccd;background:#fff;color:inherit;cursor:pointer';
+          btn.textContent = 'Retry';
+          btn.addEventListener('click', function () { _openInvestigationDetail(name); });
+          p.appendChild(btn);
+          leadEl.appendChild(p);
+        }
       });
   }
   window._openInvestigationDetail = _openInvestigationDetail;
