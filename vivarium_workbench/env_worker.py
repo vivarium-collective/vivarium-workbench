@@ -3070,6 +3070,12 @@ def _av_public_spec(viewer: dict, ws_root) -> dict:
         "requires": list(viewer.get("requires") or []),
         "targets": _av_resolve_targets(viewer, ws_root),
         "runs": _av_resolve_runs(viewer, ws_root),
+        # An ``embed-3d`` (or any bundled) viewer declares the distribution that
+        # carries its webapp bundle; the workbench serves it generically at
+        # ``/contributed-viewer/<bundle_package>/`` with no package-specific core
+        # knowledge. ``bundle_subdir`` defaults to ``viewer`` server-side.
+        "bundle_package": viewer.get("bundle_package"),
+        "bundle_subdir": viewer.get("bundle_subdir"),
         "assets": {
             "js": list(assets.get("js") or []),
             "mount_id": assets.get("mount_id"),

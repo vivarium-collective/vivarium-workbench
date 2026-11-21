@@ -1478,18 +1478,9 @@ a.viv-bs-commit:hover { text-decoration: underline; }
     <button class="iset-browse-tab registry-tab" data-browse="studies" role="tab"
             onclick="_setIsetBrowseTab('studies')">Studies <span class="count-badge" id="iset-tab-study-count"></span></button>
     <span class="iset-hdr-actions" style="margin-left:auto;align-self:center;display:inline-flex;gap:6px">
-      <button class="action-btn iset-hdr-btn" onclick="_openBrowseCreate('investigation')" title="Create a new investigation">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" aria-hidden="true">
-          <rect x="2.5" y="9" width="6" height="6"/><rect x="16" y="3" width="5.5" height="4"/><rect x="16" y="10" width="5.5" height="4"/><rect x="16" y="17" width="5.5" height="4"/><path d="M8.5 12 16 5"/><path d="M8.5 12h7.5"/><path d="M8.5 12 16 19"/>
-        </svg>+ Investigation</button>
-      <button class="action-btn iset-hdr-btn" onclick="_openBrowseCreate('study')" title="Create a new study">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" aria-hidden="true">
-          <path d="M9 3h6"/><path d="M10 3v6l-4.3 8.4A1.5 1.5 0 0 0 7 20h10a1.5 1.5 0 0 0 1.3-2.6L14 9V3"/><path d="M8 15h8"/>
-        </svg>+ Study</button>
-      <button class="action-btn iset-hdr-btn" onclick="_openAuditReport()" title="Open the reproducibility audit report (L0–L5) — latest, or re-run">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" aria-hidden="true">
-          <path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1z"/><rect x="4.5" y="4" width="15" height="17" rx="1.5"/><path d="M8.5 12.5l2 2 4-4.5"/>
-        </svg>Audit Report</button>
+      <button class="action-btn iset-hdr-btn iset-hdr-btn-primary" onclick="_openBrowseCreate('investigation')" title="Create a new investigation">+ Investigation</button>
+      <button class="action-btn iset-hdr-btn" onclick="_openBrowseCreate('study')" title="Create a new study">+ Study</button>
+      <button class="action-btn iset-hdr-btn" onclick="_openAuditReport()" title="Open the reproducibility audit report (L0–L5) — latest, or re-run">Audit Report</button>
     </span>
   </div>
   <!-- Two-row toolbar (mirrors the Registry/Modules layout): search + column
@@ -1505,17 +1496,14 @@ a.viv-bs-commit:hover { text-decoration: underline; }
          (populated + shown/hidden by _syncColsControls / _updateColsSlotVisibility). #}
       <span class="cols-ctl-slot" data-cols-surface="isets" title="Cards columns"></span>
       <span id="iset-zoom-toolbar" style="display:inline-flex;align-items:center">
-        {# Same 3-level semantic zoom as the Registry (Table/Cards/Full) — drives
-           BOTH the Investigations and Studies browse tabs. See _setIsetZoom. #}
-        <div class="registry-zoom" role="group" aria-label="View density" title="View density">
-          <button class="reg-zoom-btn" data-izoom="table" onclick="_setIsetZoom('table')" title="Table — dense &amp; sortable" aria-label="Table view">
+        {# Two views (List / Cards) — drives BOTH the Investigations and Studies
+           browse tabs. List is the default. See _setIsetZoom. #}
+        <div class="registry-zoom" role="group" aria-label="View" title="View">
+          <button class="reg-zoom-btn active" data-izoom="table" onclick="_setIsetZoom('table')" title="List — dense &amp; sortable" aria-label="List view">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
           </button>
-          <button class="reg-zoom-btn active" data-izoom="cards" onclick="_setIsetZoom('cards')" title="Cards — grid; adjust columns at left" aria-label="Cards view">
+          <button class="reg-zoom-btn" data-izoom="cards" onclick="_setIsetZoom('cards')" title="Cards — grid; adjust columns at left" aria-label="Cards view">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3.5" y="3.5" width="7" height="7" rx="1.4"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.4"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.4"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.4"/></svg>
-          </button>
-          <button class="reg-zoom-btn" data-izoom="full" onclick="_setIsetZoom('full')" title="Full — the whole card" aria-label="Full card view">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><line x1="7" y1="9" x2="17" y2="9"/><line x1="7" y1="13" x2="17" y2="13"/><line x1="7" y1="16.5" x2="13" y2="16.5"/></svg>
           </button>
         </div>
       </span>
@@ -1542,32 +1530,32 @@ a.viv-bs-commit:hover { text-decoration: underline; }
   </div>
 
   <div id="iset-workspace" style="display:none">
-    <div class="inv-header-bar" style="display:flex;align-items:center;flex-wrap:wrap;gap:5px 7px;margin:0 0 10px">
-      {# Investigation name: a small muted kicker label + the display name, shown
-         prominently on the left now that the nav controls are grouped on the right.
-         _showInvestigationWorkspace sets #ws-title (name) and #ws-title-kicker. #}
-      <span id="ws-title-wrap" style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1 1 auto;line-height:1.15">
-        {# The "INVESTIGATION" kicker was removed — the slim Investigation title bar
-           above this header already names the pane. #}
-        <strong id="ws-title" style="font-size:1.35em;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></strong>
-      </span>
-      <span id="ws-status"></span>
-      <span id="aig-needs-attention-chip" class="aig-na-chip-host"></span>
-      {# The three investigation-level nav controls — "All investigations" (back),
-         the "Overview" collapse toggle, and the "Export" dropdown (#ws-actions) —
-         clustered together as one tidy group on the right. Wired by _showExplore /
-         _toggleInvOverview / _wsSetInvestigationActions (by id). #}
-      <span class="inv-header-nav" style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;margin-left:auto">
+    {# Compact two-row header. Row 1: "← Back to Investigations" on the far left,
+       the detail controls clustered on the right (Details / Graph show-hide
+       toggles, + Study, and the Export/Run actions in #ws-actions). Row 2: the
+       investigation title. The Details + Graph toggles collapse the two detail
+       panels below so this top stays small. #}
+    <div class="inv-header-bar" style="display:flex;flex-direction:column;align-items:stretch;gap:6px;margin:0 0 10px">
+      <div class="inv-header-top" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px">
         <button id="ws-back" class="btn-mini" onclick="_showExplore()"
-                title="Back to all investigations" aria-label="All investigations"><span aria-hidden="true">←</span> Back</button>
-        <button type="button" id="inv-overview-toggle" class="btn-mini" aria-expanded="false"
-                title="Show investigation" aria-label="Toggle investigation section"
-                onclick="window._toggleInvOverview()"><span class="inv-ov-caret" aria-hidden="true">▸</span> Investigation</button>
-        <button type="button" id="inv-graph-toggle" class="btn-mini" aria-expanded="true"
-                title="Hide investigation graph" aria-label="Toggle investigation graph"
-                onclick="window._aigToggleInline()"><span class="inv-graph-caret" aria-hidden="true">▾</span> Graph</button>
-        <span id="ws-actions"></span>
-      </span>
+                title="Back to all investigations" aria-label="Back to Investigations"><span aria-hidden="true">←</span> Back to Investigations</button>
+        <span class="inv-header-nav" style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;margin-left:auto">
+          <button type="button" id="inv-overview-toggle" class="btn-mini" aria-expanded="false"
+                  title="Show the investigation details" aria-label="Toggle investigation details"
+                  onclick="window._toggleInvOverview()"><span class="inv-ov-caret" aria-hidden="true">▸</span> Details</button>
+          <button type="button" id="inv-graph-toggle" class="btn-mini" aria-expanded="true"
+                  title="Hide the investigation graph" aria-label="Toggle investigation graph"
+                  onclick="window._aigToggleInline()"><span class="inv-graph-caret" aria-hidden="true">▾</span> Graph</button>
+          <button type="button" id="ws-add-study" class="btn-mini"
+                  title="Add a new study to this investigation" aria-label="Add a study to this investigation"
+                  onclick="window._openBrowseCreate('study', window._currentIset)"><span aria-hidden="true">+</span> Study</button>
+          <span id="ws-actions"></span>
+        </span>
+      </div>
+      <div id="ws-title-wrap" style="display:flex;align-items:center;gap:8px;min-width:0;line-height:1.15">
+        <strong id="ws-title" style="font-size:1.35em;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></strong>
+        <span id="ws-status"></span>
+      </div>
     </div>
     <!-- slim collapsed bar (hidden until a study is open) -->
     <button id="ws-context-bar" onclick="_setInvestigationContextCollapsed(false)"

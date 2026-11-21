@@ -158,6 +158,49 @@ from vivarium_workbench.lib import study_variants as _study_variants
 from vivarium_workbench.lib.composite_resolve import resolve_composite_for_request, _degraded_result
 from vivarium_workbench.lib import composite_config_adapt as _composite_config_adapt
 from vivarium_workbench.lib.composites_query import composites_via_subprocess
+from vivarium_workbench.lib.json_serialize import _json_default, _json_sanitize
+
+
+class SanitizedJSONResponse(JSONResponse):
+    """A ``JSONResponse`` that can serialize composite run results.
+
+    Study/composite *run* handlers return a result dict that can embed values
+    ``json.dumps`` cannot encode natively — numpy arrays/scalars emitted by a
+    composite's state, plus non-finite floats (inf/nan). Starlette's stock
+    ``JSONResponse.render`` calls ``json.dumps`` with no ``default=`` and
+    ``allow_nan=False``, so such a body raises ``TypeError: Object of type
+    ndarray is not JSON serializable`` (or ``ValueError`` on a non-finite
+    float), surfacing as a 500 on e.g. ``POST /api/study-run-baseline`` even
+    though the run itself succeeded and runs.db was written.
+
+    This subclass renders with ``default=_json_default`` (numpy / Path / set /
+    dataclass fallback) and, if a non-finite float still trips ``allow_nan=
+    False``, falls back to a ``_json_sanitize`` pass (inf/nan → null). Every
+    other kwarg matches Starlette's ``JSONResponse.render`` exactly
+    (``ensure_ascii=False``, ``allow_nan=False``, compact separators), so the
+    wire bytes are byte-identical for any body that already serialized — it
+    only ADDS the ability to encode numpy/non-finite payloads.
+    """
+
+    def render(self, content) -> bytes:  # type: ignore[override]
+        try:
+            return json.dumps(
+                content,
+                ensure_ascii=False,
+                allow_nan=False,
+                indent=None,
+                separators=(",", ":"),
+                default=_json_default,
+            ).encode("utf-8")
+        except ValueError:
+            return json.dumps(
+                _json_sanitize(content),
+                ensure_ascii=False,
+                allow_nan=False,
+                indent=None,
+                separators=(",", ":"),
+                default=_json_default,
+            ).encode("utf-8")
 from vivarium_workbench.lib.models import (
     BackendFeatures,
     BibEntry,
@@ -1695,9 +1738,9 @@ def create_app() -> FastAPI:
         summary="Capability-matched analysis tools for this workspace",
     )
     def analysis_tools(ws: Path = Depends(get_workspace)) -> JSONResponse:
-        """Tools-first Analysis Tools tab: external viewers + built-in tools
-        (data-explorer, parsimony-viewer), each matched to the runs/studies
-        whose capabilities satisfy the tool's ``requires``.
+        """Tools-first Analysis Tools tab: contributed viewers (a package's
+        workbench_viewers, incl. the 3D viewer) + core built-in tools, each
+        matched to the runs/studies whose capabilities satisfy ``requires``.
 
         Library-backed via ``lib.analysis_tools.build_analysis_tools``.
         """
@@ -2289,6 +2332,33 @@ def create_app() -> FastAPI:
             return CompositeResolvePayload.model_validate(
                 _degraded_result(id, e, kind=kind)
             )
+
+    @app.get(
+        "/api/composite-loom-standalone",
+        tags=["Composites"],
+        summary="Download a composite baked into the single-file loom (self-contained HTML)",
+    )
+    def composite_loom_standalone(id: str, ws: Path = Depends(get_workspace)) -> Response:
+        """A server-free, self-contained HTML of the composite's loom: the single-file
+        loom bundle with the composite baked in via the ``composite:load`` handshake, so it
+        opens with no server (download, email, static host, offline). 404 on an unknown id;
+        503 when the single-file bundle has not been built (``scripts/build_loom.sh``)."""
+        import re as _re
+        from vivarium_workbench.lib.composite_resolve import resolve_composite
+        from vivarium_workbench.lib.loom_standalone import standalone_loom_html
+        resolved = resolve_composite(ws, id)
+        if not resolved or (isinstance(resolved, dict) and resolved.get("unresolved")):
+            return Response(status_code=404)
+        html = standalone_loom_html(resolved)
+        if html is None:
+            return Response(
+                "The single-file loom bundle is not built (run scripts/build_loom.sh).",
+                status_code=503, media_type="text/plain")
+        short = resolved.get("name") or str(id).split(".")[-1] or "composite"
+        safe = _re.sub(r"[^A-Za-z0-9._-]+", "_", str(short))
+        return Response(
+            content=html, media_type="text/html",
+            headers={"Content-Disposition": f'attachment; filename="{safe}-loom.html"'})
 
     @app.get(
         "/api/composite-contract-audit",
@@ -4294,6 +4364,37 @@ def create_app() -> FastAPI:
         )
 
     @app.get(
+        "/api/investigation/{slug}/figures.html",
+        tags=["Downloads"],
+        summary="Standalone HTML figure gallery (figures inlined) — open in browser",
+        response_class=Response,
+    )
+    def investigation_figures_gallery_route(
+        slug: str,
+        ws: Path = Depends(get_workspace),
+    ) -> Response:
+        """Serve a self-contained HTML gallery of all the investigation's figures
+        (each embedded inline as a ``data:`` URI), so the figures can be VIEWED in
+        the browser rather than only downloaded as a zip. Served inline
+        (``text/html``, no ``Content-Disposition``).
+
+        404 ``{"error": …}`` when the investigation has no displayable figures.
+        Library-backed via ``lib.investigation_figures.build_figures_gallery_page``.
+        """
+        from vivarium_workbench.lib import investigation_figures as _figs
+        html = _figs.build_figures_gallery_page(ws, slug)
+        if html is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"no figures for investigation {slug!r}"},
+            )
+        return Response(
+            content=html,
+            media_type="text/html",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get(
         "/api/investigation/{slug}/figures.zip",
         tags=["Downloads"],
         summary="Zip of ALL investigation figures (panels + composites)",
@@ -4477,14 +4578,16 @@ def create_app() -> FastAPI:
     def investigation_notebook_route(
         slug: str,
         format: str = "ipynb",
+        download: int = 1,
         ws: Path = Depends(get_workspace),
     ) -> Response:
         """Generate + download an investigation's notebook/script (mirrors the
         stdlib GET /api/investigation-notebook/<slug>[?format=py]).
 
         Deterministic export (no AI). ``?format=py`` → ``text/x-python``;
-        otherwise → ``application/x-ipynb+json``.  Served as an attachment with
-        ``Cache-Control: no-store``.
+        otherwise → ``application/x-ipynb+json``. Served as an attachment with
+        ``Cache-Control: no-store`` by default; ``?download=0`` serves it inline
+        so the browser can open it in a new tab.
 
         HTTP 400 ``{"error": "investigation slug required"}`` when ``slug`` is
         empty; HTTP 404 ``{"error": "no investigation '<slug>'"}`` when absent;
@@ -4501,14 +4604,10 @@ def create_app() -> FastAPI:
         # Set Content-Type via headers (not media_type) so Starlette does not
         # append "; charset=utf-8" to the legacy bare "text/x-python" /
         # "application/x-ipynb+json" values — keeps the header byte-identical.
-        return Response(
-            content=data,
-            headers={
-                "Content-Type": mime,
-                "Cache-Control": "no-store",
-                "Content-Disposition": f'attachment; filename="{filename}"',
-            },
-        )
+        headers = {"Content-Type": mime, "Cache-Control": "no-store"}
+        if download:
+            headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return Response(content=data, headers=headers)
 
     @app.get(
         "/api/study/{slug}/notebook",
@@ -4519,6 +4618,7 @@ def create_app() -> FastAPI:
     def study_notebook_route(
         slug: str,
         format: str = "ipynb",
+        download: int = 1,
         ws: Path = Depends(get_workspace),
     ) -> Response:
         """Generate + download ONE study's notebook/script.
@@ -4527,7 +4627,8 @@ def create_app() -> FastAPI:
         that study's setup / parameters / composite / visualization cells (no
         sibling studies). Deterministic export (no AI). ``?format=py`` →
         ``text/x-python``; otherwise → ``application/x-ipynb+json``. Served as an
-        attachment with ``Cache-Control: no-store``.
+        attachment with ``Cache-Control: no-store`` by default; ``?download=0``
+        serves it inline so the browser can open it in a new tab.
 
         HTTP 400 when ``slug`` is empty; HTTP 404 ``{"error": "no study
         '<slug>'"}`` when absent; HTTP 500 on export failure.
@@ -4540,14 +4641,43 @@ def create_app() -> FastAPI:
             )
         except _download_views.DownloadError as exc:
             return JSONResponse(status_code=exc.status, content=exc.body)
-        return Response(
-            content=data,
-            headers={
-                "Content-Type": mime,
-                "Cache-Control": "no-store",
-                "Content-Disposition": f'attachment; filename="{filename}"',
-            },
-        )
+        headers = {"Content-Type": mime, "Cache-Control": "no-store"}
+        if download:
+            headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return Response(content=data, headers=headers)
+
+    @app.get(
+        "/api/study-report/{slug}",
+        tags=["Downloads"],
+        summary="Self-contained single-study HTML report (inline, or ?download=1)",
+        response_class=Response,
+    )
+    def study_report_route(
+        slug: str,
+        download: int = 0,
+        ws: Path = Depends(get_workspace),
+    ) -> Response:
+        """Render ONE study to a self-contained HTML report and serve it **inline**
+        (so it opens in the browser), or as an attachment with ``?download=1`` —
+        the study-level counterpart to ``/api/investigation-report/{slug}``.
+
+        Deterministic/data-only (reads ``study.yaml`` + the study's ``viz/*.html``).
+        404 when the study spec doesn't exist. Library-backed via
+        ``lib.single_study_report.render_single_study_report`` (rendered to a temp
+        dir and streamed, so nothing is written into the workspace)."""
+        import tempfile
+        from vivarium_workbench.lib import single_study_report as _ssr
+        name = _path_safety.plain_name(slug, "study")
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                out = _ssr.render_single_study_report(ws, name, out_dir=Path(td))
+                html = out.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return JSONResponse(status_code=404, content={"error": f"no study {name!r}"})
+        headers = None
+        if download:
+            headers = {"Content-Disposition": f'attachment; filename="study-{name}.html"'}
+        return Response(content=html, media_type="text/html", headers=headers)
 
     # -----------------------------------------------------------------------
     # Events (Phase C, Batch 15): SSE workspace-state stream
@@ -4659,7 +4789,7 @@ def create_app() -> FastAPI:
 
     # -----------------------------------------------------------------------
     # Static + SPA-shell serving (Phase C, Batch 16): the SPA index, the
-    # standalone loom/parsimony viewer bundles, and a catch-all asset route.
+    # standalone loom + contributed-viewer bundles, and a catch-all asset route.
     # FileResponse (not a pydantic model); each reproduces the legacy
     # ``do_GET`` static branch byte-for-byte — the bundled→assets-strip→
     # workspace→reports resolution priority, the ``_guess_mime`` table, and
@@ -4843,25 +4973,28 @@ def create_app() -> FastAPI:
         return RedirectResponse(url=f"{base_path}/perfetto/", status_code=307)
 
     @app.get(
-        "/parsimony-viewer/{rel:path}",
+        "/contributed-viewer/{package}/{rel:path}",
         tags=["Static & shell"],
-        summary="pbg_parsimony 3D viewer bundle asset (404 when not installed)",
+        summary="Contributed viewer bundle asset (404 when the package is absent)",
         response_class=Response,
         include_in_schema=False,
     )
-    def parsimony_viewer_asset(rel: str = "") -> Response:
-        """Serve a ``pbg_parsimony`` viewer asset (feature-detected).
+    def contributed_viewer_asset(package: str, rel: str = "") -> Response:
+        """Serve a contributed viewer's bundle asset (feature-detected, generic).
 
-        HTTP 404 (empty body) when ``pbg_parsimony`` is not installed (the
-        Analyses gallery hides its 3D cards), or when the file is absent; HTTP
-        403 on a ``..`` path segment.  ``rel`` empty → ``index.html``.  Served
-        with the guessed bare mime + ``Cache-Control: no-store``.  Mirrors the
-        legacy ``/parsimony-viewer`` branch.
+        ``package`` is the distribution a ``workbench_viewers`` descriptor
+        declared as its ``bundle_package`` (e.g. the 3D viewer declares
+        ``viva_parsimony``); the asset dir is ``<package>/viewer/``. The workbench
+        core holds NO package-specific knowledge — it serves whatever the viewer
+        declared. HTTP 404 (empty body) when the package is not installed (the
+        Explore gallery hides that card) or the file is absent; HTTP 403 on a
+        ``..`` segment. ``rel`` empty → ``index.html``. Served with the guessed
+        bare mime + ``Cache-Control: no-store``.
 
-        Library-backed via ``lib.static_serving.resolve_parsimony_asset``.
+        Library-backed via ``lib.static_serving.resolve_contributed_viewer_asset``.
         """
         try:
-            target = _static_serving.resolve_parsimony_asset(rel)
+            target = _static_serving.resolve_contributed_viewer_asset(package, rel)
         except _static_serving.AssetTraversal:
             return Response(status_code=403)
         if target is None:
@@ -7108,7 +7241,7 @@ def create_app() -> FastAPI:
           - 200  run-result dict
         """
         body, status = _study_runs.run_study_baseline(ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
+        return SanitizedJSONResponse(status_code=status, content=body)
 
     @app.post(
         "/api/study-reproduce",
@@ -7140,7 +7273,7 @@ def create_app() -> FastAPI:
           - 200/202  new run's launch-result dict, plus ``origin``/``reran``
         """
         body, status = _rerun.run_rerun(ws, req.run_id)
-        return JSONResponse(status_code=status, content=body)
+        return SanitizedJSONResponse(status_code=status, content=body)
 
     @app.post(
         "/api/study-run-variant",
@@ -7168,7 +7301,7 @@ def create_app() -> FastAPI:
           - 200  run-result dict
         """
         body, status = _study_runs.run_study_variant(ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
+        return SanitizedJSONResponse(status_code=status, content=body)
 
     @app.post(
         "/api/investigation-rerun",
@@ -7197,7 +7330,7 @@ def create_app() -> FastAPI:
         known) member studies.
         """
         body, status = _rerun.rerun_investigation(ws, req.investigation)
-        return JSONResponse(status_code=status, content=body)
+        return SanitizedJSONResponse(status_code=status, content=body)
 
     @app.post(
         "/api/investigation-resolve",
@@ -8961,7 +9094,7 @@ def create_app() -> FastAPI:
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)
     # so Starlette, which matches routes in registration order, resolves every
-    # specific route first (all ``/api/*``, ``/``, the loom/parsimony viewers,
+    # specific route first (all ``/api/*``, ``/``, the loom + contributed viewers,
     # FastAPI's ``/docs`` & ``/openapi.json``).  This route only handles
     # otherwise-unmatched paths.  DO NOT add routes below it.
     # -----------------------------------------------------------------------

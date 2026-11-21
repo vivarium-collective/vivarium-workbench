@@ -841,19 +841,22 @@ def test_stage_report_cards_copies_and_prefixes(tmp_path):
 # Analyses-tab saved-visualizations export (parsimony 3D gallery)
 # ---------------------------------------------------------------------------
 
-def _pbg_parsimony_available() -> bool:
-    import importlib.util
-    try:
-        return importlib.util.find_spec("pbg_parsimony") is not None
-    except Exception:
-        return False
+def _viewer_bundle_available() -> bool:
+    # The generic contributed-viewer bundle (viva_parsimony ships viewer/).
+    from vivarium_workbench.lib.saved_visualizations import contributed_viewer_bundle_dir
+    return contributed_viewer_bundle_dir("viva_parsimony") is not None
 
 
 @pytest.fixture
 def ws_with_saved_pack(tmp_workspace):
-    """Add a stub study with a saved parsimony 3D pack (+ meta + meshes) to the
-    shared workspace. The pack's mesh LOD urls are workspace-rooted-relative
-    (as pbg-parsimony writes them)."""
+    """Add a stub study with a saved 3D pack (+ meta + meshes) to the shared
+    workspace, and declare the local viewer bundle (ui.viz_viewer_bundle) so the
+    publish bakes it in. The pack's mesh LOD urls are workspace-rooted-relative
+    (as the packer writes them)."""
+    wy = tmp_workspace / "workspace.yaml"
+    cfg = yaml.safe_load(wy.read_text()) if wy.exists() else {}
+    cfg.setdefault("ui", {})["viz_viewer_bundle"] = "viva_parsimony"
+    wy.write_text(yaml.safe_dump(cfg))
     sd = tmp_workspace / "studies" / "x" / "viz" / "3d"
     sd.mkdir(parents=True)
     # A stub study.yaml (no variants/composite) — exists only to host viz assets.
@@ -881,11 +884,11 @@ def ws_with_saved_pack(tmp_workspace):
     return tmp_workspace
 
 
-@pytest.mark.skipif(not _pbg_parsimony_available(),
-                    reason="pbg_parsimony not installed")
+@pytest.mark.skipif(not _viewer_bundle_available(),
+                    reason="viva_parsimony viewer bundle not installed")
 def test_build_bundle_exports_saved_visualizations(ws_with_saved_pack, tmp_path):
     """build_bundle with a base path writes the saved-visualizations API JSON,
-    copies the parsimony viewer assets, copies the pack + meta + meshes
+    bakes the declared contributed-viewer bundle, copies the pack + meta + meshes
     preserving the studies/<name>/viz/3d path, and rewrites the copied pack's
     mesh urls to be base-path-prefixed (so the viewer's resolveMeshUrl, which
     prepends '/', resolves them under the hosting base path)."""
@@ -896,17 +899,18 @@ def test_build_bundle_exports_saved_visualizations(ws_with_saved_pack, tmp_path)
 
     # api/saved-visualizations.json lists the stub study's pack.
     sv = json.loads((out / "api" / "saved-visualizations.json").read_text())
-    assert sv["parsimony_available"] is True
     saved = sv["saved"]
     assert any(e["study"] == "x" for e in saved)
     entry = next(e for e in saved if e["study"] == "x")
     # pack_url/meta_url stay workspace-rooted-absolute; the frontend prefixes base.
     assert entry["pack_url"] == "/studies/x/viz/3d/scene.pack.json"
     assert entry["meta_url"] == "/studies/x/viz/3d/scene.meta.json"
+    # the declared viewer bundle package is carried on the entry
+    assert entry["viewer_bundle_package"] == "viva_parsimony"
 
-    # Parsimony viewer assets copied.
-    assert (out / "parsimony-viewer" / "index.html").is_file()
-    assert (out / "parsimony-viewer" / "viewer.js").is_file()
+    # Contributed viewer bundle baked in generically (no parsimony-named path).
+    assert (out / "contributed-viewer" / "viva_parsimony" / "index.html").is_file()
+    assert (out / "contributed-viewer" / "viva_parsimony" / "viewer.js").is_file()
 
     # Pack + meta + meshes copied preserving the studies/<name>/viz/3d path.
     dst_pack = out / "studies" / "x" / "viz" / "3d" / "scene.pack.json"
@@ -923,8 +927,8 @@ def test_build_bundle_exports_saved_visualizations(ws_with_saved_pack, tmp_path)
     assert not lods[0]["url"].startswith("/")
 
 
-@pytest.mark.skipif(not _pbg_parsimony_available(),
-                    reason="pbg_parsimony not installed")
+@pytest.mark.skipif(not _viewer_bundle_available(),
+                    reason="viva_parsimony viewer bundle not installed")
 def test_build_bundle_saved_viz_root_hosting(ws_with_saved_pack, tmp_path):
     """With an empty base path (root hosting) the copied pack's mesh urls stay
     workspace-rooted-relative (resolveMeshUrl → /studies/...obj at the root)."""
@@ -1122,3 +1126,103 @@ def test_build_bundle_bakes_argument_overlay(tmp_workspace, tmp_path):
     # the stable shape the frontend reads (content depends on the derivation layer)
     assert {"investigation", "claims", "edges", "narrative", "gaps", "gates",
             "decisions", "available"} <= set(body)
+
+
+def test_build_bundle_stages_native_gallery_only_figures_zip(
+    tmp_workspace, tmp_path, monkeypatch
+):
+    """Regression: an investigation whose figures come ONLY from the native
+    gallery (committed viz/*.html, run viz.json HTML) must still get its
+    figures.zip staged in the published bundle.
+
+    `build_figures_zip` pulls from more sources than `build_investigation_figures`
+    (which sees only declared study.visualizations[] image files). Gating the
+    staging on the declared view (n_composites / files) wrongly skipped
+    investigations like eukaryogenesis / multicellularity, whose figures are all
+    native-gallery HTML — the zip existed but was never written, so the card's
+    `↓ figures` link 404'd offline. The real gate is `if blob`.
+    """
+    from vivarium_workbench import publish
+    from vivarium_workbench.lib import investigation_figures as figs
+
+    fake_zip = b"PK\x03\x04native-gallery-zip-bytes"
+
+    # The declared-only collector sees nothing (no declared image files, no
+    # composite-level figures) — exactly the native-gallery-only case.
+    monkeypatch.setattr(
+        figs, "build_investigation_figures",
+        lambda ws, inv: {"files": [], "n_composites": 0},
+    )
+    # But the zip builder produces a real archive from the native gallery.
+    monkeypatch.setattr(
+        figs, "build_figures_zip",
+        lambda ws, inv: fake_zip,
+    )
+
+    out = tmp_path / "bundle"
+    publish.build_bundle(tmp_workspace, out)
+
+    zip_path = out / "figures" / "main-inv" / "figures.zip"
+    assert zip_path.is_file(), (
+        "figures.zip must be staged when build_figures_zip returns a real zip, "
+        "even if the declared-figures view (files/n_composites) is empty"
+    )
+    assert zip_path.read_bytes() == fake_zip
+
+
+def test_build_bundle_bakes_needs_attention(tmp_workspace, tmp_path):
+    """build_bundle writes api/needs-attention/<inv>.json so the published
+    read-only "Needs attention" tab resolves offline (data-source.loadNeedsAttention
+    -> /api/needs-attention/<slug>.json) instead of hanging on "Scanning…". The
+    live tab hits the query-param route /api/needs-attention?investigation=<slug>,
+    which has no .json in a bundle."""
+    from vivarium_workbench import publish
+    out = tmp_path / "bundle"
+    publish.build_bundle(tmp_workspace, out)
+    f = out / "api" / "needs-attention" / "main-inv.json"
+    assert f.is_file(), "needs-attention/main-inv.json not baked"
+    body = json.loads(f.read_text())
+    assert body.get("investigation") == "main-inv"
+    assert "items" in body and "summary" in body
+    assert "total" in body["summary"]
+
+
+def test_build_bundle_bakes_study_completeness(tmp_workspace, tmp_path):
+    """build_bundle bakes api/study-completeness/<inv>.json so the published
+    investigation page can render the "incomplete studies" banner."""
+    from vivarium_workbench import publish
+    out = tmp_path / "bundle"
+    publish.build_bundle(tmp_workspace, out)
+    f = out / "api" / "study-completeness" / "main-inv.json"
+    assert f.is_file(), "study-completeness/main-inv.json not baked"
+    body = json.loads(f.read_text())
+    assert body.get("investigation") == "main-inv"
+    assert "findings" in body and isinstance(body["findings"], list)
+
+
+def test_build_bundle_strict_refuses_on_completeness_finding(tmp_workspace, tmp_path, monkeypatch):
+    """--strict turns a study-completeness finding into a publish-blocking error:
+    the build raises (CLI exits non-zero) instead of shipping a warning banner.
+    Without --strict the same workspace publishes with a warning."""
+    from vivarium_workbench import publish
+    from vivarium_workbench.lib import study_completeness as sc
+
+    finding = {"investigation": "main-inv", "study": "alpha",
+               "check": "declared_composite_unresolved", "level": "warning",
+               "field_path": "baseline[].composite", "message": "does not resolve"}
+    monkeypatch.setattr(sc, "collect", lambda ws, **k: {
+        "findings": [finding], "total": 1,
+        "by_check": {"declared_composite_unresolved": 1},
+        "by_investigation": {"main-inv": [finding]},
+    })
+
+    # non-strict: succeeds, and still bakes the finding for the banner
+    out1 = tmp_path / "warn"
+    publish.build_bundle(tmp_workspace, out1)
+    baked = json.loads((out1 / "api" / "study-completeness" / "main-inv.json").read_text())
+    assert baked["findings"] and baked["findings"][0]["study"] == "alpha"
+
+    # strict: refuses (raises)
+    out2 = tmp_path / "strict"
+    with pytest.raises(RuntimeError, match="study-completeness gate"):
+        publish.build_bundle(tmp_workspace, out2, strict=True)

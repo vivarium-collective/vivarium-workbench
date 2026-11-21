@@ -165,6 +165,49 @@
   }
   window._setSimSubtab = _setSimSubtab;
 
+  // Model tab secondary subtabs (Composition | Variants | Interventions |
+  // Readouts). All four panels live inside #panel-compose and are rendered at
+  // load, so this only toggles visibility — vanilla show/hide, mirroring
+  // _setSimSubtab. Readouts loaders fire when the Model tab opens, so no
+  // per-subtab dispatch is needed here.
+  function _setModelSubtab(sub) {
+    document.querySelectorAll('.model-subtab').forEach(function (b) {
+      var on = b.dataset.modelsub === sub;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('.model-subpanel').forEach(function (p) {
+      var on = p.dataset.modelsubpanel === sub;
+      p.classList.toggle('active', on);
+      p.hidden = !on;
+    });
+    if (sub === 'loom') _mountModelLoom();
+    if (window._autoGrowTextareas) window._autoGrowTextareas();
+  }
+  window._setModelSubtab = _setModelSubtab;
+
+  // When the Loom sub-tab opens, auto-open the FIRST composite card's bigraph
+  // (the baseline) so the tab shows a diagram directly — no extra click. The
+  // cards render expanded (no "Explore composite" toggle) in the Loom pane; this
+  // opens the card's "run · outputs · graph" explore section (via the shared
+  // _pcardToggleSec). Idempotent; retries briefly while _loadModelCards resolves.
+  function _mountModelLoom() {
+    var host = document.getElementById('model-loom-mount');
+    if (!host || host.dataset.opened) return;
+    var explore = host.querySelector('.pcard-sec-explore');
+    if (!explore) {
+      _mountModelLoom._tries = (_mountModelLoom._tries || 0) + 1;
+      if (_mountModelLoom._tries < 40) return void setTimeout(_mountModelLoom, 150);
+      return;
+    }
+    host.dataset.opened = '1';
+    if (!explore.classList.contains('pcard-sec-open')) {
+      var head = explore.querySelector('.pcard-sec-head');
+      if (head && typeof window._pcardToggleSec === 'function') window._pcardToggleSec(head);
+    }
+  }
+  window._mountModelLoom = _mountModelLoom;
+
   // Cross-tab link helper (Fable §6 #15, Task C1): a link on any tab can
   // point at an anchor that lives inside a DIFFERENT, currently-hidden tab
   // panel (e.g. an Overview finding's "via test <a>" citing a Tests-tab
@@ -698,6 +741,29 @@
   // absent file 404s; a bare <a download> to a 404 reads as a broken button.
   // (The "↓ Figures" jump button + _vivStudyJumpToFigures were removed — the
   // figures now live in their own Visualizations tab, opened via _setStudyTab.)
+
+  // Study Export "open in browser" variants — mirror the investigation Export:
+  // open the study's self-contained report / runnable notebook inline in a new
+  // tab, and "open figures" switches to the study's Visualizations tab (its
+  // in-page figure view). The download counterparts stay _vivStudy*FromCard.
+  function _hideStudyExportMenu(){ var m = document.getElementById('study-export-menu'); if (m) m.style.display = 'none'; }
+  window._vivStudyReportOpen = function (ev, slug) {
+    if (ev && ev.stopPropagation) ev.stopPropagation(); _hideStudyExportMenu();
+    window.open((window.__BASE_PATH__ || "") + '/api/study-report/' + encodeURIComponent(slug), '_blank', 'noopener');
+  };
+  window._vivStudyReportDownload = function (ev, slug) {
+    if (ev && ev.stopPropagation) ev.stopPropagation(); _hideStudyExportMenu();
+    window.open((window.__BASE_PATH__ || "") + '/api/study-report/' + encodeURIComponent(slug) + '?download=1', '_blank', 'noopener');
+  };
+  window._vivStudyNotebookOpen = function (ev, slug) {
+    if (ev && ev.stopPropagation) ev.stopPropagation(); _hideStudyExportMenu();
+    window.open((window.__BASE_PATH__ || "") + '/api/study/' + encodeURIComponent(slug) + '/notebook?download=0', '_blank', 'noopener');
+  };
+  window._vivStudyFiguresOpen = function (ev, slug) {
+    if (ev && ev.stopPropagation) ev.stopPropagation(); _hideStudyExportMenu();
+    if (typeof window._setStudyTab === 'function') window._setStudyTab('visualize');
+  };
+
   window._vivStudyFiguresFromCard = function (ev, slug) {
     if (ev && ev.stopPropagation) ev.stopPropagation();
     var c = window.__DASH_CONFIG__ || {};
@@ -1562,6 +1628,206 @@
       .catch(function () { if (pre) pre.textContent = ref + ' (could not load config)'; });
   }
 
+  // ---- Model Definition panel (model-forward contract/math/symbols) --------
+  // Renders the study's composite AS A MODEL — above the loom box — from
+  // /api/composite-resolve: each process's typed interface (the ports it reads
+  // and writes = the model's symbols), its transformation signature from the doc
+  // (the "math"), the shared stores (state variables), and the typed parameters.
+  // Degrades to nothing if resolve is unavailable (published snapshot, unbuilt).
+  function _mdClassName(addr) {
+    addr = String(addr || ''); var i = addr.indexOf(':');
+    return i >= 0 ? addr.slice(i + 1) : addr;
+  }
+  function _mdSig(doc) {           // first line of the process doc = its transformation signature
+    var first = String(doc || '').trim().split('\n')[0].trim();
+    return first.length > 180 ? first.slice(0, 177) + '…' : first;
+  }
+  function _mdPorts(obj, arrow) {  // {port: [store, key]} -> "port arrow store.key" chips
+    var ks = Object.keys(obj || {});
+    if (!ks.length) return '<span class="muted">—</span>';
+    return ks.map(function (port) {
+      var w = obj[port]; var path = Array.isArray(w) ? w.join('.') : String(w);
+      return '<span class="mdef-port"><code>' + _esc(port) + '</code> ' + arrow +
+        ' <span class="mdef-store-ref">' + _esc(path) + '</span></span>';
+    }).join('');
+  }
+  // The process's declared governing equations (contract.math) — surfaced
+  // prominently, the same math the loom node cards lead with. The server
+  // pre-renders each equation to MathML (contract.math_mathml), which browsers
+  // display natively — so heavy LaTeX (\frac, \mathrm, \sum) shows as real math.
+  // _prettyMath is the fallback for an equation MathML couldn't render.
+  // Prettify a contract.math one-liner toward a LaTeX-like reading WITHOUT a math
+  // typesetter: relational/arrow operators become symbols, `*` a middle dot, and
+  // single-letter-base `x_sub` tokens render as real subscripts (the physics
+  // convention — k_ext, c_base, m_start), `^x` as superscripts. Multi-letter
+  // identifiers (has_pump, decay_no_heredity) are left intact. Returns HTML.
+  function _prettyMath(raw) {
+    var s = String(raw == null ? '' : raw);
+    s = s.replace(/<=/g, '≤').replace(/>=/g, '≥')
+         .replace(/!=/g, '≠').replace(/->/g, '→');
+    s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    s = s.replace(/\*/g, '·');
+    s = s.replace(/\b([A-Za-z])_([A-Za-z0-9]+)/g, '$1<sub>$2</sub>');
+    s = s.replace(/\^\{([^}]*)\}/g, '<sup>$1</sup>').replace(/\^([A-Za-z0-9]+)/g, '<sup>$1</sup>');
+    return s;
+  }
+  function _mdEquations(c) {
+    var m = (c && Array.isArray(c.math)) ? c.math : [];
+    if (!m.length) return '';
+    var ml = (c && Array.isArray(c.math_mathml)) ? c.math_mathml : [];
+    return '<div class="mdef-eqs"><div class="mdef-eqs-lbl">Equations</div>' +
+      m.map(function (e, i) {
+        // Insert the server-rendered MathML when present (trusted, authored by the
+        // process contract — not user input); fall back to prettified text.
+        var mml = ml[i];
+        var body = (typeof mml === 'string' && mml.lastIndexOf('<math', 0) === 0)
+          ? mml
+          : '<span class="mdef-eq-txt">' + _prettyMath(String(e)) + '</span>';
+        return '<div class="mdef-eq">' + body + '</div>';
+      }).join('') +
+      '</div>';
+  }
+  // The symbols the equations use (contract.symbols: {sym: meaning}).
+  function _mdSymbols(c) {
+    var s = (c && c.symbols && typeof c.symbols === 'object') ? c.symbols : {};
+    var ks = Object.keys(s);
+    if (!ks.length) return '';
+    return '<div class="mdef-syms"><div class="mdef-syms-lbl">Symbols</div><dl class="mdef-sym-list">' +
+      ks.map(function (k) {
+        return '<dt><code>' + _esc(k) + '</code></dt><dd>' + _esc(String(s[k])) + '</dd>';
+      }).join('') + '</dl></div>';
+  }
+  // The model's Antimony source (p._antimony {text, format, source}), attached by
+  // the server for any model-bearing process — shown OPEN by default in a scrollable
+  // monospace pane (still collapsible via the summary).
+  function _mdAntimony(p) {
+    var a = p && p._antimony;
+    if (!a || !a.text) return '';
+    var src = a.source ? ' <span class="mdef-ant-src">· ' + _esc(String(a.source)) + '</span>' : '';
+    return '<details open class="mdef-ant"><summary class="mdef-ant-lbl">Antimony' + src + '</summary>' +
+      '<pre class="mdef-ant-pre"><code>' + _esc(String(a.text)) + '</code></pre></details>';
+  }
+  function _modelDefHtml(d) {
+    d = d || {};
+    var state = (d.state && typeof d.state === 'object') ? d.state : {};
+    var procNames = Object.keys(state).filter(function (k) {
+      var n = state[k];
+      if (!(n && typeof n === 'object' && (n._type === 'process' || n.address))) return false;
+      return !/emitter/i.test(String(n.address || '') + ' ' + k);   // emitters are plumbing, not model
+    });
+    var params = (d.parameters && typeof d.parameters === 'object') ? d.parameters : {};
+    if (!procNames.length && !Object.keys(params).length) return '';
+
+    // Shared stores = the model's state variables (the symbols the processes exchange).
+    var stores = {};
+    procNames.forEach(function (pn) {
+      var p = state[pn] || {};
+      ['inputs', 'outputs'].forEach(function (io) {
+        var m = p[io] || {};
+        Object.keys(m).forEach(function (port) {
+          var w = m[port];
+          if (Array.isArray(w) && w.length) {
+            var s = stores[w[0]] || (stores[w[0]] = {});
+            if (w.length >= 2) s[w[1]] = true;
+          }
+        });
+      });
+    });
+
+    var procHtml = procNames.map(function (pn) {
+      var p = state[pn] || {};
+      var sig = _mdSig(p.doc);
+      var cfg = (p.config && typeof p.config === 'object') ? p.config : {};
+      var cfgStr = Object.keys(cfg).map(function (k) {
+        return '<code>' + _esc(k) + '</code> = ' + _esc(JSON.stringify(cfg[k]));
+      }).join(' · ');
+      var contract = p._contract || p.contract || {};
+      return '<div class="mdef-proc">' +
+        '<div class="mdef-proc-hd"><strong>' + _esc(pn) + '</strong>' +
+          (p.address ? ' <span class="mdef-cls">' + _esc(_mdClassName(p.address)) + '</span>' : '') + '</div>' +
+        (sig ? '<div class="mdef-sig">' + _esc(sig) + '</div>' : '') +
+        _mdEquations(contract) +
+        '<div class="mdef-io"><div class="mdef-io-row"><span class="mdef-io-lbl">reads</span><span class="mdef-io-ports">' +
+          _mdPorts(p.inputs, '←') + '</span></div>' +
+        '<div class="mdef-io-row"><span class="mdef-io-lbl">writes</span><span class="mdef-io-ports">' +
+          _mdPorts(p.outputs, '→') + '</span></div></div>' +
+        (cfgStr ? '<div class="mdef-io-row"><span class="mdef-io-lbl">config</span><span class="mdef-io-ports">' + cfgStr + '</span></div>' : '') +
+        _mdSymbols(contract) +
+        _mdAntimony(p) +
+        '</div>';
+    }).join('');
+
+    var storeHtml = Object.keys(stores).sort().map(function (sn) {
+      var keys = Object.keys(stores[sn]).sort().map(function (k) { return '<code>' + _esc(k) + '</code>'; }).join(' ');
+      return '<div class="mdef-store-row"><span class="mdef-store-ref">' + _esc(sn) + '</span> ' + keys + '</div>';
+    }).join('');
+
+    var paramHtml = Object.keys(params).map(function (pn) {
+      var p = params[pn] || {};
+      var meta = [p.type, (p.default !== undefined ? 'default ' + JSON.stringify(p.default) : null)]
+        .filter(Boolean).join(' · ');
+      return '<div class="mdef-param"><code>' + _esc(pn) + '</code>' +
+        (meta ? ' <span class="mdef-ptype">' + _esc(meta) + '</span>' : '') +
+        (p.description ? '<div class="muted mdef-pdesc">' + _esc(p.description) + '</div>' : '') + '</div>';
+    }).join('');
+
+    var requires = Array.isArray(d.requires) && d.requires.length
+      ? '<div class="mdef-req muted">requires ' + d.requires.map(_esc).join(', ') + '</div>' : '';
+
+    return '<div class="mdef-panel">' +
+      '<div class="mdef-hd"><span class="overview-label" style="margin:0">Model definition</span>' +
+        (d.name ? '<code class="mdef-name">' + _esc(d.name) + '</code>' : '') +
+        (d.kind ? '<span class="mdef-kind">' + _esc(d.kind) + '</span>' : '') +
+        '</div>' +
+      (d.description ? '<p class="mdef-desc">' + _esc(d.description) + '</p>' : '') +
+      (procHtml ? '<div class="mdef-sect"><div class="mdef-sect-lbl">Processes · ' + procNames.length + '</div>' + procHtml + '</div>' : '') +
+      (storeHtml ? '<div class="mdef-sect"><div class="mdef-sect-lbl">State variables — shared stores</div><div class="mdef-stores">' + storeHtml + '</div></div>' : '') +
+      (paramHtml ? '<div class="mdef-sect"><div class="mdef-sect-lbl">Parameters</div><div class="mdef-params">' + paramHtml + '</div></div>' : '') +
+      requires + '</div>';
+  }
+  function _renderModelDefinition(mount, fallbackId, _tries) {
+    if (!mount) return;
+    _tries = _tries || 0;
+    // composite-resolve needs the FULL module address; study.baseline[].composite is
+    // the short name. The loom card carries the resolved full address as data-address,
+    // so wait briefly for it to mount, then use it (fall back to the short id). The
+    // composite cards now render in the Loom sub-pane, so search the whole Model tab
+    // for the resolved address, not just this (Composition) mount.
+    var _cpanel = document.getElementById('panel-compose') || document;
+    var card = _cpanel.querySelector('[data-address]');
+    var fullId = card && card.getAttribute('data-address');
+    if (!fullId && _tries < 25) {
+      return void setTimeout(function () { _renderModelDefinition(mount, fallbackId, _tries + 1); }, 120);
+    }
+    var compositeId = fullId || fallbackId;
+    if (!compositeId) return;
+    // Snapshot-aware (same contract as _loadModelCards): a read-only bundle has
+    // no live /api/composite-resolve endpoint, so publish.py bakes the payload to
+    // api/composite-resolve/<id>.json. Without this branch the Model tab's
+    // Composition panel fetched the live ?id= route, got a 404 in the static
+    // bundle, and rendered blank (the Loom sub-pane still worked because its
+    // loader already branched here).
+    var _mdApi = (window.DataSource && window.DataSource.apiUrl)
+      ? window.DataSource.apiUrl.bind(window.DataSource) : function (p) { return p; };
+    var _mdUrl = _isSnapshot()
+      ? _mdApi('/api/composite-resolve/' + encodeURIComponent(compositeId) + '.json')
+      : '/api/composite-resolve?id=' + encodeURIComponent(compositeId);
+    fetch(_mdUrl)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || d.error) return;
+        var html = _modelDefHtml(d);
+        if (!html) return;
+        var slot = document.getElementById('model-definition-panel');
+        if (!slot) {
+          slot = document.createElement('div'); slot.id = 'model-definition-panel';
+          mount.insertBefore(slot, mount.firstChild);   // above the loom card(s)
+        }
+        slot.innerHTML = html;
+      })
+      .catch(function () { /* resolve unavailable (snapshot / unbuilt) — no panel */ });
+  }
+
   function _loadModelCards(force) {
     var mount = document.getElementById('model-composite-cards');
     if (!mount) return;
@@ -1604,6 +1870,8 @@
     });
     if (!order.length) {
       mount.innerHTML = '<p class="empty-message">No composite declared for this study yet.</p>';
+      var _lm0 = document.getElementById('model-loom-mount');
+      if (_lm0) _lm0.innerHTML = '<p class="empty-message">No composite to show in the loom yet.</p>';
       return;
     }
     // Consolidation (Fable §4.2 / #14): the loom cards below ARE the study's
@@ -1653,7 +1921,10 @@
         if (modelSection.style.display === 'none') { _openPicker(); }
         else { modelSection.style.display = 'none'; _editToggleLabel(false); }
       });
-      mount.appendChild(_editToggle);
+      // Only a brand-new placeholder study needs the model picker surfaced here
+      // ("Choose a model", auto-opened below). A real study's "Change model" button
+      // is removed — the Model Definition panel is the model view.
+      if (_isPlaceholder) mount.appendChild(_editToggle);
       // Surface the picker immediately when there is no real model yet, so a
       // newly-created study lands on "Choose a model" without hunting (#1618).
       if (_isPlaceholder) _openPicker();
@@ -1668,6 +1939,16 @@
     var _studyCfgRef = (mount.getAttribute('data-study-config') || '').trim();
     var _hasStudyCfg = !!_studyCfgRef;
     if (_hasStudyCfg) _renderStudyConfigPanel(mount, _studyCfgRef, _esc0);
+    // Model-forward: render the composite AS A MODEL (contract/ports/math/symbols)
+    // in the Composition mount. Uses the primary (baseline) composite.
+    if (order.length) _renderModelDefinition(mount, order[0]);
+    // The interactive composite cards (baseline + each variant, each a collapsible
+    // "Explore composite" diagram) render in the LOOM sub-pane, not Composition —
+    // Composition shows the model's definition + config, the Loom tab shows the
+    // diagrams. _mountModelLoom() auto-opens the baseline card there.
+    var loomMount = document.getElementById('model-loom-mount');
+    var cardsMount = loomMount || mount;
+    if (loomMount) loomMount.innerHTML = '';
     order.forEach(function (id) {
       var entry = byId[id];
       var wrap = document.createElement('div');
@@ -1706,15 +1987,16 @@
         var lc = String(l || '').toLowerCase();
         return lc && lc !== _studySlug && lc !== _shortId.toLowerCase() && lc !== 'baseline';
       });
-      var _armHdr = '<div class="model-arm-head" style="display:flex;gap:7px;align-items:baseline;margin:0 0 5px 2px">' +
-        '<span style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted,#8a94a0)">Composite</span>' +
-        '<code style="font-size:0.86em;font-weight:600">' + esc(_shortId) + '</code>' +
-        (_armExtra.length ? '<span class="muted" style="font-size:0.8em">· ' + _armExtra.map(esc).join(' · ') + '</span>' : '') +
-        '</div>';
+      // The Model Definition panel already names the composite, so the bare
+      // "COMPOSITE <name>" header is dropped; show a compact header only when a
+      // VARIANT label adds information beyond the baseline.
+      var _armHdr = _armExtra.length ? ('<div class="model-arm-head" style="display:flex;gap:7px;align-items:baseline;margin:6px 0 5px 2px">' +
+        '<span style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted,#8a94a0)">Variant</span>' +
+        '<code style="font-size:0.86em;font-weight:600">' + esc(_armExtra.map(String).join(' · ')) + '</code>' +
+        '</div>') : '';
       wrap.innerHTML = _armHdr +
-        _cfgUsedHtml +
         '<p class="muted" style="font-size:0.85em;margin:0">Resolving composite…</p>';
-      mount.appendChild(wrap);
+      cardsMount.appendChild(wrap);
       // Expand a config-file reference (the vecoli arm's whole_config, or a
       // config_file) to the ACTUAL config that runs, so "Config used" shows the
       // real config instead of a bare path. (ecoli_baseline's config_file is
@@ -1792,16 +2074,30 @@
           } catch (e) { /* seeding is best-effort — bare loom still works */ }
           // The model file — each process's config formatted (for viva-smoldyn:
           // species / reactions / bounds) — shown ABOVE the loom explorer.
-          var cfgHost = document.createElement('div');
-          _renderCompositeSource(cfgHost, body.state, esc);
-          if (cfgHost.firstChild) {
-            var head = document.createElement('div');
-            head.style.cssText = 'margin:8px 0 4px 2px';
-            head.innerHTML =
-              '<div class="muted" style="font-size:0.78em;font-weight:600;text-transform:uppercase;letter-spacing:0.02em">Model configuration</div>' +
-              '<div class="muted" style="font-size:0.76em;font-weight:400;opacity:0.82;margin-top:1px">The fully resolved composite — each process’s complete config (what the run parameters above expand into).</div>';
-            wrap.insertBefore(cfgHost, cardEl);
-            wrap.insertBefore(head, cfgHost);
+          // The Model Definition panel above renders each process's config cleanly,
+          // so the raw "Model configuration" dump is gone. Collapse the composite
+          // card (loom + code) behind an "Explore composite" toggle so the Model tab
+          // stays card-like until the user opens the diagram — and the heavy loom is
+          // only mounted on demand (it is lazy, so this also avoids load failures for
+          // users who never open it).
+          // Collapse behind an "Explore composite" toggle ONLY when the cards live
+          // in the Composition mount. In the Loom sub-pane (cardsMount !== mount)
+          // the card IS the content — show it directly, no toggle.
+          if (cardsMount === mount && cardEl && cardEl.parentNode === wrap) {
+            cardEl.style.display = 'none';
+            var _expl = document.createElement('button');
+            _expl.type = 'button';
+            _expl.className = 'mdef-explore-btn';
+            var _explLbl = function (open) {
+              _expl.textContent = (open ? '▾ ' : '▸ ') + 'Explore composite — diagram, config & code';
+            };
+            _explLbl(false);
+            _expl.addEventListener('click', function () {
+              var open = cardEl.style.display === 'none';
+              cardEl.style.display = open ? '' : 'none';
+              _explLbl(open);
+            });
+            wrap.insertBefore(_expl, cardEl);
           }
         })
         .catch(function () {

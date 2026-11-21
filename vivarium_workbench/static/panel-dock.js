@@ -520,6 +520,15 @@
                         : (target.after ? 'Stack right' : 'Stack left'));
               lblEl.textContent = txt;
               lblEl.style.cssText = 'left:' + Math.round(lx) + 'px;top:' + Math.round(ly) + 'px;';
+              // The label is centered on (lx,ly) via translate(-50%,-50%), so a
+              // line along a panel edge near the viewport border pushes half the
+              // pill off-screen — "Stack above" / "Stack below" (and the left/right
+              // variants) got clipped every time. Clamp the center so the whole
+              // pill stays on-screen (measure now; it's already visible).
+              var _lb = lblEl.getBoundingClientRect(), _m = 6;
+              var _cx = Math.min(Math.max(lx, _lb.width / 2 + _m), innerWidth - _lb.width / 2 - _m);
+              var _cy = Math.min(Math.max(ly, _lb.height / 2 + _m), innerHeight - _lb.height / 2 - _m);
+              lblEl.style.left = Math.round(_cx) + 'px'; lblEl.style.top = Math.round(_cy) + 'px';
             }
           }
         }

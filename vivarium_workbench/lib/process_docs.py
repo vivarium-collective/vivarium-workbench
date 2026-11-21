@@ -16,7 +16,9 @@ this can never break the composite-state response.
 from __future__ import annotations
 
 import importlib
+import os
 import re
+from pathlib import Path
 from typing import Any
 
 # A Composite Process built via ``type(name, bases, dict)`` (and some builtins)
@@ -63,6 +65,26 @@ def _describe_class(cls: Any) -> str:
     return "" if _is_junk_doc(doc) else doc
 
 
+def _math_to_mathml(latex: str) -> str:
+    """Render one contract equation (LaTeX) to MathML for native browser display.
+
+    Server-side so the Model view needs no JS math lib and the read-only snapshot
+    renders offline. Returns '' on any failure (empty, unparseable, lib missing)
+    so a bad equation degrades to the client's plain-text fallback, never breaks
+    the payload. ``latex2mathml`` is pure-Python and import-light.
+    """
+    s = str(latex or "").strip()
+    if not s:
+        return ""
+    try:
+        from latex2mathml.converter import convert
+
+        out = convert(s, display="block")  # governing equations → displaystyle
+    except Exception:
+        return ""
+    return out if isinstance(out, str) and out.lstrip().startswith("<math") else ""
+
+
 def _contract_for_class(cls: Any) -> dict | None:
     """The structured ``.contract`` a process advertises (summary + governing
     equations + symbol key), expanded to the loom's ``_contract`` shape so the
@@ -85,11 +107,16 @@ def _contract_for_class(cls: Any) -> dict | None:
     # ProcessContract that declares them must have them carried through, not
     # dropped. `config` is forwarded too (the Contract type carries it). Keys the
     # contract omits default to empty on both sides (contract.ts `blankContract`).
+    math = list(c.get("math", []))
     return {
         "summary": c["summary"],
         "description": c.get("description") or c["summary"],
         "status": c.get("status", ""),
-        "math": list(c.get("math", [])),
+        "math": math,
+        # Pre-rendered MathML, one per equation (server-side, '' where it couldn't
+        # render). The Model view inserts these so heavy LaTeX (\frac, \sum, …)
+        # displays as real math instead of leaking raw source.
+        "math_mathml": [_math_to_mathml(m) for m in math],
         "symbols": dict(c.get("symbols", {})),
         "inputs": dict(c.get("inputs", {})),
         "outputs": dict(c.get("outputs", {})),
@@ -180,6 +207,134 @@ def attach_process_docs(doc: Any) -> Any:
                 # equations), live — the same contract the static figures bake in.
                 if contract and "_contract" not in node:
                     node["_contract"] = contract
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    try:
+        walk(doc)
+    except Exception:
+        pass
+    return doc
+
+
+def _resolve_ws_file(ws_root: Any, model_file: str) -> "Path | None":
+    """Resolve a config ``model_file`` to a real path. The stored path is often
+    absolute from another machine/CI (``/home/runner/…``), so fall back to matching
+    its basename anywhere under the workspace."""
+    try:
+        p = Path(model_file)
+        if p.is_file():
+            return p
+        name = os.path.basename(str(model_file))
+        if not name:
+            return None
+        for cand in Path(ws_root).rglob(name):
+            if cand.is_file():
+                return cand
+    except Exception:
+        return None
+    return None
+
+
+def _sbml_to_antimony(sbml_text: str) -> str:
+    """Convert SBML text to Antimony, or '' if no converter is available. Prefers
+    libantimony (light) over tellurium (heavy); both are optional."""
+    s = str(sbml_text or "")
+    if "<sbml" not in s:
+        return ""
+    try:
+        import antimony as _sb  # libantimony
+
+        if _sb.loadSBMLString(s) < 0:
+            return ""
+        return _sb.getAntimonyString() or ""
+    except Exception:
+        pass
+    try:
+        import tellurium as _te
+
+        return _te.sbmlToAntimony(s) or ""
+    except Exception:
+        return ""
+
+
+def _antimony_for_config(ws_root: Any, config: Any) -> "dict | None":
+    """Derive the human-readable Antimony for a process's model config, or None.
+
+    Order: inline Antimony in config → a model file (preferring a sibling ``.ant``,
+    else converting the SBML) → an inline SBML string. Pure/best-effort."""
+    if not isinstance(config, dict):
+        return None
+    model = config.get("model")
+    fmt = str(config.get("model_format") or "").lower()
+    model_file = config.get("model_file")
+    if isinstance(model, str) and model.strip() and fmt == "antimony":
+        return {"format": "antimony", "text": model.strip(), "source": "config"}
+    if isinstance(model_file, str) and model_file.strip():
+        p = _resolve_ws_file(ws_root, model_file)
+        if p is not None:
+            try:
+                sibling = p.with_suffix(".ant")
+                if sibling.is_file():
+                    return {"format": "antimony", "text": sibling.read_text(encoding="utf-8"),
+                            "source": p.name.rsplit(".", 1)[0] + ".ant"}
+                if p.suffix.lower() in (".xml", ".sbml"):
+                    t = _sbml_to_antimony(p.read_text(encoding="utf-8"))
+                    if t:
+                        return {"format": "antimony", "text": t, "source": p.name + " → antimony"}
+                if p.suffix.lower() == ".ant":
+                    return {"format": "antimony", "text": p.read_text(encoding="utf-8"), "source": p.name}
+            except Exception:
+                return None
+    if isinstance(model, str) and model.strip() and fmt in ("sbml", "xml"):
+        t = _sbml_to_antimony(model)
+        if t:
+            return {"format": "antimony", "text": t, "source": "config SBML → antimony"}
+    return None
+
+
+def attach_model_antimony(ws_root: Any, doc: Any) -> Any:
+    """Walk a composite-state doc; attach ``_antimony`` to each process whose config
+    declares an SBML/Antimony model, so the Model view can show the model source for
+    every run. Best-effort and in place; returns the same object."""
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if node.get("_type") in ("process", "step") and "_antimony" not in node:
+                a = _antimony_for_config(ws_root, node.get("config"))
+                if a:
+                    node["_antimony"] = a
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    try:
+        walk(doc)
+    except Exception:
+        pass
+    return doc
+
+
+def attach_contract_mathml(doc: Any) -> Any:
+    """Render each process ``_contract``'s governing equations to MathML, in place.
+
+    ``attach_process_docs(_via_worker)`` attaches the ``_contract`` (with its ``math``
+    LaTeX list); this fills ``math_mathml`` alongside it. Run in the SAME process as
+    the publish/resolve — NOT the env worker — so the Model view gets rendered
+    equations even when the workspace's env worker runs an older workbench that
+    predates ``_math_to_mathml`` (the env-worker path then produces a ``_contract``
+    with ``math`` but no ``math_mathml``). Idempotent: skips a contract that already
+    has it.
+    """
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            c = node.get("_contract")
+            if isinstance(c, dict) and c.get("math") and not c.get("math_mathml"):
+                c["math_mathml"] = [_math_to_mathml(m) for m in c["math"]]
             for v in node.values():
                 walk(v)
         elif isinstance(node, list):

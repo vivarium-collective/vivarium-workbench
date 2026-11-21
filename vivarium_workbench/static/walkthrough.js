@@ -1466,6 +1466,85 @@
       _esc(label || 'Download') + '</a>';
   }
 
+  // The file URL for a workspace-relative path — same resolution as the download
+  // link (snapshot → GitHub raw base; live → '/' + path), but WITHOUT the download
+  // attribute, so it can be viewed inline.
+  function _inputsFileUrl(path) {
+    var cfg = window.__DASH_CONFIG__ || {};
+    var rel = String(path || '').replace(/^\/+/, '');
+    return (cfg.mode === 'snapshot' && cfg.inputsDownloadBase)
+      ? String(cfg.inputsDownloadBase).replace(/\/+$/, '') + '/' + rel
+      : '/' + rel;
+  }
+
+  // A "View" button that opens the file in an in-page modal (args URL-encoded so
+  // quotes/HTML in names never break the inline handler).
+  function _inputsViewBtn(path, name) {
+    if (!path) return '';
+    var u = encodeURIComponent(_inputsFileUrl(path));
+    var n = encodeURIComponent(String(name || path));
+    return '<button class="action-btn" style="font-size:0.8em;padding:1px 8px;' +
+      'margin-right:5px" onclick="_viewResource(\'' + u + '\',\'' + n + '\')">👁 View</button>';
+  }
+
+  // Extensions we can render inline as text; PDFs go in an <iframe>; anything else
+  // falls back to Download / open-in-new-tab.
+  var _RES_TEXT_EXT = ['xml', 'sbml', 'ant', 'txt', 'json', 'csv', 'tsv', 'bib',
+    'md', 'yaml', 'yml', 'html', 'log', 'py', 'r', 'csl'];
+
+  window._viewResource = function (encUrl, encName) {
+    _openResourceModal(decodeURIComponent(encUrl), decodeURIComponent(encName));
+  };
+
+  function _openResourceModal(url, name) {
+    var d = document;
+    var ext = (String(name || url).split('.').pop() || '').toLowerCase();
+    // raw.githubusercontent.com sends `access-control-allow-origin: *`; the snapshot's
+    // github.com/<o>/<r>/raw/<ref>/<path> base 302-redirects there but drops CORS on
+    // the redirect, so a cross-origin fetch/embed of it fails ("Load failed"). Hit the
+    // raw host directly. (Download / New-tab keep the original url — navigation needs no CORS.)
+    var srcUrl = String(url).replace(
+      /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/raw\/(.+)$/,
+      'https://raw.githubusercontent.com/$1/$2/$3');
+    var overlay = d.createElement('div');
+    overlay.className = 'res-view-overlay';
+    var close = function () { if (overlay.parentNode) d.body.removeChild(overlay); d.removeEventListener('keydown', onKey); };
+    var onKey = function (e) { if (e.key === 'Escape') close(); };
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+
+    var head = '<div class="res-view-head"><strong class="res-view-title">' + _esc(name) + '</strong>' +
+      '<span style="flex:1"></span>' +
+      '<a class="action-btn" href="' + _esc(url) + '" download style="text-decoration:none">⬇ Download</a>' +
+      '<a class="action-btn" href="' + _esc(url) + '" target="_blank" rel="noopener" style="text-decoration:none">↗ New tab</a>' +
+      '<button class="action-btn res-view-close" title="Close (Esc)">✕</button></div>';
+    var body;
+    if (ext === 'pdf') {
+      body = '<iframe class="res-view-frame" src="' + _esc(srcUrl) + '" title="' + _esc(name) + '"></iframe>';
+    } else if (_RES_TEXT_EXT.indexOf(ext) !== -1) {
+      body = '<pre class="res-view-pre">Loading…</pre>';
+    } else {
+      body = '<div class="res-view-note">No inline preview for <code>.' + _esc(ext) +
+        '</code> — use Download or open in a new tab.</div>';
+    }
+    var panel = d.createElement('div');
+    panel.className = 'res-view-panel';
+    panel.innerHTML = head + '<div class="res-view-body">' + body + '</div>';
+    overlay.appendChild(panel);
+    d.body.appendChild(overlay);
+    panel.querySelector('.res-view-close').addEventListener('click', close);
+    d.addEventListener('keydown', onKey);
+
+    if (_RES_TEXT_EXT.indexOf(ext) !== -1) {
+      var pre = panel.querySelector('.res-view-pre');
+      fetch(srcUrl).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+        .then(function (t) { pre.textContent = t; })
+        .catch(function (err) {
+          pre.textContent = 'Could not load this file in the browser (' + err.message +
+            '). Use Download or “New tab”.';
+        });
+    }
+  }
+
   // Render a datasets list (name + path + download) as a compact table, or a
   // "none" line.
   function _inputsDatasetsHtml(datasets) {
@@ -1475,11 +1554,12 @@
       var name = _esc(ds.name || ds.path || '(unnamed)');
       var path = ds.path || '';
       var src = ds.path || ds.url || '';
+      var view = path ? _inputsViewBtn(path, ds.name || ds.path) : '';
       var dl = path ? _inputsDownloadLink(path, 'Download') :
         (ds.url ? '<a href="' + _esc(ds.url) + '" target="_blank" rel="noopener" ' +
           'class="action-btn" style="font-size:0.8em;padding:1px 8px;text-decoration:none">↗ Source</a>' : '');
       return '<tr class="res-item"><td><code>' + name + '</code></td><td><small class="muted">' +
-        _esc(src) + '</small></td><td style="text-align:right">' + dl + '</td></tr>';
+        _esc(src) + '</small></td><td style="text-align:right;white-space:nowrap">' + view + dl + '</td></tr>';
     }).join('');
     return '<table><thead><tr><th>Name</th><th>Source</th><th></th></tr></thead><tbody>' +
       rows + '</tbody></table>';
@@ -1533,7 +1613,8 @@
       : '';
 
     var actions = '';
-    if (ref.pdf_path) actions += ' ' + _inputsDownloadLink(ref.pdf_path, 'PDF');
+    if (ref.pdf_path) actions += ' ' + _inputsViewBtn(ref.pdf_path, (ref.title || key || 'reference') + '.pdf') +
+      _inputsDownloadLink(ref.pdf_path, 'PDF');
 
     var bibtex = ref.bibtex || '';
     var bibBlock = '';
@@ -1628,7 +1709,8 @@
         doc = doc || {};
         var name = _esc(doc.name || doc.path || '(unnamed)');
         var path = doc.path ? ' <small class="muted">' + _esc(doc.path) + '</small>' : '';
-        var dl = doc.path ? ' ' + _inputsDownloadLink(doc.path, 'Download') : '';
+        var dl = doc.path ? ' ' + _inputsViewBtn(doc.path, doc.name || doc.path) +
+          _inputsDownloadLink(doc.path, 'Download') : '';
         var desc = doc.description
           ? '<div class="muted" style="font-size:0.85em;margin-top:2px">' +
             _esc(doc.description) + '</div>'
@@ -2276,40 +2358,49 @@
 
   function _render3dVizCard(v) {
     // Snapshot base-path: in a hosted read-only bundle (e.g. /v2ecoli/dashboard)
-    // both the parsimony viewer assets and the saved pack live under the base
+    // both the viewer assets and the saved pack live under the base
     // path, so prefix both. basePath is "" in local mode, leaving URLs unchanged.
     var base = (window.DataSource && window.DataSource.basePath)
       ? window.DataSource.basePath()
       : ((window.__DASH_CONFIG__ && window.__DASH_CONFIG__.basePath) || "");
     var packUrl = base + v.pack_url;
     // An external viewer_url (e.g. assets hosted on Cloudflare R2) overrides the
-    // bundled gh-pages viewer + pack — used to dodge GitHub Pages rate-limiting
-    // for heavy packs. Configured via ui.viz_viewer_urls in workspace.yaml.
+    // bundled viewer + pack — used to dodge GitHub Pages rate-limiting for heavy
+    // packs. Configured via ui.viz_viewer_urls in workspace.yaml. Otherwise, if
+    // the workspace declares a local 3D-viewer bundle package (ui.viz_viewer_bundle
+    // → viewer_bundle_package), point the generic contributed-viewer route at the
+    // pack. The workbench names no specific viewer.
     var src = v.viewer_url
       ? v.viewer_url
-      : (base + '/parsimony-viewer/index.html?file=' + encodeURIComponent(packUrl));
+      : (v.viewer_bundle_package
+          ? (base + '/contributed-viewer/' + encodeURIComponent(v.viewer_bundle_package) +
+             '/index.html?file=' + encodeURIComponent(packUrl))
+          : null);
     var meta = [];
     if (v.study) meta.push('study: ' + _esc(v.study));
     if (v.n_placed) meta.push(Number(v.n_placed).toLocaleString() + ' instances');
-    // How the model was built. Server may supply a per-pack `description`;
-    // otherwise fall back to the default E. coli structural-model blurb.
+    // The contributing workspace/viewer supplies the real description; the
+    // workbench core keeps only a generic fallback blurb.
     var desc = v.description ||
-      'Generated from <strong>v2ecoli</strong>\'s whole-cell molecular state: the ' +
-      'simulated copy number of each protein and complex sets how many copies are ' +
-      'placed in the cell. Each species is mapped to a real 3D structure &mdash; ' +
-      'AlphaFold-predicted monomers plus curated experimental assemblies (e.g. the ' +
-      '70S ribosome and RNA polymerase) &mdash; and packed into a capsule-shaped ' +
-      'cell volume by the <strong>parsimony</strong> engine, a Rust cellPACK-style ' +
-      'packer (via pbg-parsimony). Colors group molecules by functional category.';
+      'A 3D molecular packing of the cell: each species’ simulated copy number ' +
+      'sets how many copies are placed, mapped to real 3D structures and packed ' +
+      'into the cell volume. Colors group molecules by functional category.';
+    // No viewer_url and no declared local bundle → the pack exists but there is
+    // no viewer to render it; show the card without a dead Open link / blank iframe.
+    var body = src
+      ? ('<iframe class="viz-embed" src="' + _esc(src) + '" loading="lazy" ' +
+         'style="width:100%;height:460px;border:1px solid #2a313c;border-radius:6px;background:#0e1116"></iframe>')
+      : ('<p class="muted" style="font-size:0.82em">No 3D viewer is configured for this ' +
+         'workspace. Set <code>ui.viz_viewer_urls</code> (hosted) or ' +
+         '<code>ui.viz_viewer_bundle</code> (a local viewer package) in workspace.yaml.</p>');
     return '<div class="analyses-card">' +
       '<div class="analyses-card-head">' +
         '<strong>' + _esc(v.name || '3D model') + '</strong>' +
-        '<a class="btn-mini" href="' + _esc(src) + '" target="_blank" rel="noopener" title="Open full-window in a new tab">Open &#8599;</a>' +
+        (src ? ('<a class="btn-mini" href="' + _esc(src) + '" target="_blank" rel="noopener" title="Open full-window in a new tab">Open &#8599;</a>') : '') +
       '</div>' +
       (meta.length ? '<div class="muted" style="font-size:0.82em;margin:2px 0 6px">' + meta.join(' &middot; ') + '</div>' : '') +
       '<p class="muted" style="font-size:0.85em;line-height:1.45;margin:2px 0 8px">' + desc + '</p>' +
-      '<iframe class="viz-embed" src="' + _esc(src) + '" loading="lazy" ' +
-        'style="width:100%;height:460px;border:1px solid #2a313c;border-radius:6px;background:#0e1116"></iframe>' +
+      body +
     '</div>';
   }
 
@@ -2439,16 +2530,18 @@
     return (window.__DASH_CONFIG__ || {}).mode === 'snapshot';
   }
 
-  // Build the parsimony-viewer src for a matched 3D study. Prefer a hosted
-  // viewer_url (assets on R2, dodging Pages rate-limits); else the bundled
-  // viewer pointed at the study's 3D models manifest.
-  function _build3dSrc(m) {
+  // Build the 3D-viewer src for a matched study. Prefer a hosted viewer_url
+  // (assets on R2, dodging Pages rate-limits); else, if the contributed viewer
+  // declares a bundle package, point the generic /contributed-viewer/<pkg>/
+  // route at the study's 3D models manifest. Returns null when neither exists.
+  function _build3dSrc(m, bundlePackage) {
     var base = _analysesBase();
     var ref = m.ref || m.study || '';
-    return m.viewer_url
-      ? m.viewer_url
-      : base + '/parsimony-viewer/index.html?models=' +
-          encodeURIComponent(base + '/api/study/' + encodeURIComponent(ref) + '/3d/models.json');
+    if (m.viewer_url) return m.viewer_url;
+    if (!bundlePackage) return null;
+    return base + '/contributed-viewer/' + encodeURIComponent(bundlePackage) +
+        '/index.html?models=' +
+        encodeURIComponent(base + '/api/study/' + encodeURIComponent(ref) + '/3d/models.json');
   }
 
   function _buildSimulariumSrc(m) {
@@ -2527,7 +2620,7 @@
   }
 
   // Open a tool's selected result full-window in a new tab. Per kind:
-  //   embed-3d       -> the (hosted or bundled) parsimony viewer for the study
+  //   embed-3d       -> the contributed 3D viewer (hosted viewer_url, else the
   //   launcher       -> the target's external href, else the live launch endpoint
   function _openTool(toolId, btn) {
     var t = _TOOLS_BY_ID[toolId]; if (!t) return;
@@ -2537,7 +2630,8 @@
     var idx = sel ? (parseInt(sel.value, 10) || 0) : 0;
     var m = items[idx] || items[0]; if (!m) return;
     if (t.kind === 'embed-3d') {
-      window.open(_build3dSrc(m), '_blank', 'noopener');
+      var src3d = _build3dSrc(m, t.bundle_package);
+      if (src3d) window.open(src3d, '_blank', 'noopener');
     } else if (t.kind === 'embed-simularium') {
       window.open(_buildSimulariumSrc(m), '_blank', 'noopener');
     } else {
@@ -2567,7 +2661,7 @@
     var countEl   = document.getElementById('viz-count');
     if (!container) return;
     // Tools-first Analysis Tools tab, backed by GET /api/analysis-tools: built-in
-    // tools (Parsimony Viewer) + external contributed viewers, each
+    // tools + contributed viewers (incl. the 3D viewer), each
     // capability-matched to the runs/studies that satisfy its `requires`. Snapshot
     // mode reads the static api/analysis-tools.json bundle file; live mode hits the
     // endpoint. Parse defensively via text() so a missing/HTML response degrades to
@@ -2587,7 +2681,7 @@
         data = data || {};
         var tools = data.tools || [];
         if (!tools.length) {
-          container.innerHTML = '<p class="empty-state">No analysis tools for this workspace. Tools are built-in (Parsimony Viewer) or contributed by the repo (a package\'s <code>workbench_viewers</code> module).</p>';
+          container.innerHTML = '<p class="empty-state">No analysis tools for this workspace. Tools are built in, or contributed by the repo (a package\'s <code>workbench_viewers</code> module).</p>';
           if (countEl) countEl.textContent = '';
           return;
         }
@@ -9926,14 +10020,14 @@
   }
   window._showInvestigationList = _showInvestigationList;
 
-  // ── Investigations/Studies semantic zoom ────────────────────────────────
-  // Same 3-level framework as the Registry: 'table' (dense, sortable-looking)
-  // | 'cards' (grid — the historical default) | 'full' (cards with detail
-  // expanded). Drives BOTH the Investigations and Studies browse tabs.
-  // Persists in localStorage, mirroring window._registryZoom.
+  // ── Investigations/Studies view ─────────────────────────────────────────
+  // Two views: 'table' (the List view — dense, sortable; the DEFAULT) and
+  // 'cards' (grid). Drives BOTH the Investigations and Studies browse tabs.
+  // Persists in localStorage. (The old 'full' detail view was removed; any
+  // persisted 'full' falls back to the List default below.)
   window._isetZoom = (function () {
     var z; try { z = localStorage.getItem('viv.isetZoom'); } catch (e) { z = null; }
-    return (z === 'table' || z === 'cards' || z === 'full') ? z : 'cards';
+    return (z === 'table' || z === 'cards') ? z : 'table';
   })();
   function _syncIsetToolbar() {
     // Scoped to [data-izoom] — .reg-zoom-btn is shared with the Registry zoom
@@ -9959,11 +10053,10 @@
     _renderInvestigationSets();
   }
   window._setIsetZoom = _setIsetZoom;
-  // Double-click a card → zoom in one level (table → cards → full), mirroring
-  // the Registry's _zoomInOn.
+  // Double-click a card → switch to the other view (table ↔ cards).
   function _isetZoomIn() {
-    var order = ['table', 'cards', 'full'];
-    var i = order.indexOf(window._isetZoom || 'cards');
+    var order = ['table', 'cards'];
+    var i = order.indexOf(window._isetZoom || 'table');
     _setIsetZoom(order[Math.min(order.length - 1, i + 1)]);
   }
   window._isetZoomIn = _isetZoomIn;
@@ -9974,7 +10067,7 @@
     _syncIsetToolbar();
     if (window._isetBrowseTab === 'studies') {
       if (window._isetZoom === 'table') _renderStudyBrowseTable(list);
-      else _renderStudyBrowseCards(list, window._isetZoom === 'full');
+      else _renderStudyBrowseCards(list, false);
       return;
     }
     if (!window._isetIndex.length) {
@@ -10140,15 +10233,7 @@
           '<span class="iset-studies-toggle" role="button" tabindex="0" ' +
             'onclick="event.stopPropagation();var d=this.closest(\'.investigation-set-card\').querySelector(\'.iset-studies-detail\');var open=d.style.display===\'none\';d.style.display=open?\'block\':\'none\';this.querySelector(\'.iset-chev\').textContent=open?\'▾\':\'▸\'" ' +
             'style="flex:1;cursor:pointer;user-select:none"><strong>' + iset.n_studies + '</strong> stud' + (iset.n_studies === 1 ? 'y' : 'ies') + ' <span class="iset-chev" style="color:#94a3b8">' + (full ? '▾' : '▸') + '</span></span>' +
-          '<a href="#" title="Download the rendered HTML report for this investigation" ' +
-            'onclick="window._vivReportFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ report</a>' +
-          '<a href="#" title="Download the runnable notebook for this investigation" ' +
-            'onclick="window._vivNotebookFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ notebook</a>' +
-          (iset.n_figures ? '<a href="#" title="Download all figures for this investigation (studies figures + post-study composites), as a zip" ' +
-            'onclick="window._vivFiguresFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;white-space:nowrap">↓ figures</a>' : '') +
+          '<span style="white-space:nowrap">' + window._vivInvLinksHtml(iset) + '</span>' +
         '</div>' +
         '<div class="iset-studies-detail" style="display:' + (full ? 'block' : 'none') + ';margin-top:8px;border-top:1px solid #f1f5f9;padding-top:6px">' + (studyRows || '<span class="muted" style="font-size:0.85em">No studies.</span>') + '</div>' +
         // "Run this investigation in your terminal" chip (like the composite/process card).
@@ -10157,7 +10242,7 @@
     }
 
     var GRID = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px;margin:6px 0 14px';
-    var _isetFull = (window._isetZoom === 'full');
+    var _isetFull = false;  // the 'full' detail view was removed; cards render compact.
     // Render a grid of investigation cards. A header is drawn only when `label`
     // is given; called with '' it yields one flat, headerless grid (the single
     // combined list — no Active/Closed section split).
@@ -10539,24 +10624,29 @@
     }
     return h;
   }
+  // Fills the Validation TAB (#inv-validation-mount) in the investigation-detail
+  // tab strip. (Was a standalone collapsible labeled "Validation (RFC-0007)";
+  // now it's just another tab, so the RFC label is dropped.)
   function _vivLoadValidationPanel(slug) {
-    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot' || !slug) return;
+    if (!slug) return;
+    var mount = function () { return document.getElementById('inv-validation-mount'); };
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') {
+      var ms = mount();
+      if (ms) ms.innerHTML = '<div class="muted" style="padding:6px 2px">The validation panel is available in the live workbench.</div>';
+      return;
+    }
     fetch('/api/validation-panel/' + encodeURIComponent(slug), {headers: {Accept: 'application/json'}})
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (window._currentIset !== slug) return;
-        var host = document.getElementById('inv-validation-panel');
-        if (!d || !d.types || !d.records) { if (host) host.remove(); return; }
-        if (!host) {
-          var anchor = document.getElementById('investigation-intro');
-          if (!anchor || !anchor.parentNode) return;
-          host = document.createElement('details');
-          host.id = 'inv-validation-panel';
-          host.className = 'vp-panel';
-          anchor.parentNode.insertBefore(host, anchor.nextSibling);
+        var m = mount();
+        if (!m) return;
+        if (!d || !d.types || !d.records) {
+          m.innerHTML = '<div class="muted" style="padding:6px 2px">No validation records for this investigation yet.</div>';
+          return;
         }
-        host.innerHTML = '<summary>Validation (RFC-0007)</summary>' + _vpRender(d);
-      }).catch(function () { /* optional surface */ });
+        m.innerHTML = _vpRender(d);
+      }).catch(function () { /* leave the loading note in place */ });
   }
   window._vivLoadValidationPanel = _vivLoadValidationPanel;
   window._vivPaintEvidence = _vivPaintEvidence;
@@ -10799,8 +10889,49 @@
       _applyInvOverviewState();
     }
     if (typeof _openInvestigationDetail === 'function') _openInvestigationDetail(name);
+    _renderStudyCompletenessBanner(name, mountEl);
   }
   window._renderInvestigationDetailInto = _renderInvestigationDetailInto;
+
+  // Study-completeness gate banner (published read-only bundle only). publish.py
+  // bakes api/study-completeness/<inv>.json listing studies that LOOK done but are
+  // inconsistent (claims done with no runs; completed but verdict pending; declares
+  // a composite that doesn't resolve). A loud, non-blocking strip at the top of the
+  // investigation page so a reviewer doesn't read it as complete. Removed when the
+  // investigation is clean or in live mode (DataSource returns null).
+  function _renderStudyCompletenessBanner(name, mountEl) {
+    var host = mountEl || document.getElementById('ws-context') || document.body;
+    var existing = document.getElementById('inv-completeness-banner');
+    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+    if (!(window.DataSource && window.DataSource.loadStudyCompleteness)) return;
+    window.DataSource.loadStudyCompleteness(name).then(function (d) {
+      if (window._currentIset && window._currentIset !== name) return;  // stale
+      var items = (d && d.findings) || [];
+      if (!items.length) return;
+      // One line per flagged study (deduped), with the plain-English reason.
+      var _label = {
+        status_claims_done_no_runs_recorded: 'claims done but records no runs',
+        completed_but_verdict_pending: 'marked complete but its verdict is still pending',
+        declared_composite_unresolved: 'declares a model composite that does not resolve'
+      };
+      var rows = items.map(function (f) {
+        return '<li><strong>' + _esc(f.study || '?') + '</strong> — ' +
+          _esc(_label[f.check] || f.check || 'incomplete') + '</li>';
+      }).join('');
+      var banner = document.createElement('div');
+      banner.id = 'inv-completeness-banner';
+      banner.setAttribute('role', 'status');
+      banner.style.cssText = 'margin:0 0 10px;padding:9px 12px;border:1px solid #f59e0b;' +
+        'border-left-width:4px;border-radius:6px;background:#fffbeb;color:#92400e;' +
+        'font-size:0.9em;line-height:1.4';
+      banner.innerHTML =
+        '<div style="font-weight:700;margin-bottom:3px">⚠ ' + items.length +
+          ' stud' + (items.length === 1 ? 'y looks' : 'ies look') + ' done but need attention</div>' +
+        '<ul style="margin:2px 0 0;padding-left:18px">' + rows + '</ul>';
+      host.insertBefore(banner, host.firstChild);
+    }).catch(function () { /* best-effort; no banner on failure */ });
+  }
+  window._renderStudyCompletenessBanner = _renderStudyCompletenessBanner;
 
   // Report / Notebook actions in the workspace header (#ws-actions), moved off
   // the detail-view header (hidden by _renderInvestigationDetailInto).
@@ -10824,21 +10955,33 @@
     // snapshot — leaving the ↓ figures button greyed even when figures.zip is
     // baked. DataSource is always present in a published bundle.
     var _mi = 'class="btn-mini" role="menuitem" style="display:block;width:100%;text-align:left;border:none;background:transparent"';
+    // Section header inside the menu (groups the Open / Download choices per artifact).
+    var _sec = function (t) {
+      return '<div style="padding:6px 8px 2px;font-size:0.72em;font-weight:700;text-transform:uppercase;' +
+        'letter-spacing:0.04em;color:#94a3b8">' + t + '</div>';
+    };
+    // Figures: Open (gallery) + Download (zip). Starts disabled; upgraded async
+    // below when the investigation actually has figures.
     var _figuresMenuItem =
       '<span id="ws-actions-figures">' +
         '<button class="btn-mini" role="menuitem" disabled ' +
           'title="No figures yet — run this investigation\'s studies to generate them" ' +
-          'style="display:block;width:100%;text-align:left;border:none;background:transparent;opacity:0.5;cursor:not-allowed">Figures (none yet)</button>' +
+          'style="display:block;width:100%;text-align:left;border:none;background:transparent;opacity:0.5;cursor:not-allowed">No figures yet</button>' +
       '</span>';
     var _exportDd =
       '<span class="inv-report-wrap" style="position:relative;display:inline-flex">' +
         '<button class="btn-mini" id="inv-report-btn" aria-haspopup="true" ' +
-          'aria-label="Export" title="Export — report, notebook, or figures" onclick="_toggleInvReportMenu(event)"><span aria-hidden="true">↓</span> Export ▾</button>' +
-        '<div id="inv-report-menu" role="menu" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;' +
-          'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:170px;padding:4px">' +
-          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'html\')">HTML report</button>' +
-          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'pdf\')">PDF report</button>' +
-          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationNotebook()">Notebook</button>' +
+          'aria-label="Shortcuts" title="Shortcuts — open in the browser or download (report, notebook, figures)" onclick="_toggleInvReportMenu(event)">Shortcuts ▾</button>' +
+        '<div id="inv-report-menu" role="menu" style="display:none;position:absolute;right:0;left:auto;top:100%;margin-top:4px;' +
+          'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:190px;padding:4px">' +
+          _sec('Report') +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();window._vivReportOpen(event)">Open in browser</button>' +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'html\')">Download HTML</button>' +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationReport(null,\'pdf\')">Download PDF</button>' +
+          _sec('Notebook') +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();window._vivNotebookOpen(event)">Open in browser</button>' +
+          '<button ' + _mi + ' onclick="_closeInvReportMenu();_downloadInvestigationNotebook()">Download .ipynb</button>' +
+          _sec('Figures') +
           _figuresMenuItem +
         '</div>' +
       '</span> ';
@@ -10857,12 +11000,14 @@
           var me = ((j && j.investigations) || []).filter(function (i) { return i.name === name; })[0];
           var host = document.getElementById('ws-actions-figures');
           if (me && me.n_figures && host) {
-            host.innerHTML = '<button class="btn-mini" role="menuitem" ' +
-              'style="display:block;width:100%;text-align:left;border:none;background:transparent" ' +
-              'onclick="_closeInvReportMenu();window._vivFiguresFromCard(event,\'' + _esc(name) + '\')" ' +
-              'title="Download all figures (studies figures + post-study composites) as a zip">Figures (zip)</button>';
+            var _row = 'class="btn-mini" role="menuitem" style="display:block;width:100%;text-align:left;border:none;background:transparent"';
+            host.innerHTML =
+              '<button ' + _row + ' onclick="_closeInvReportMenu();window._vivFiguresOpen(event,\'' + _esc(name) + '\')" ' +
+                'title="See all figures in a new browser tab">Open in browser</button>' +
+              '<button ' + _row + ' onclick="_closeInvReportMenu();window._vivFiguresFromCard(event,\'' + _esc(name) + '\')" ' +
+                'title="Download all figures (studies figures + post-study composites) as a zip">Download (zip)</button>';
           }
-          // else: leave the disabled/greyed ↓ figures in place.
+          // else: leave the disabled/greyed "No figures yet" in place.
         }).catch(function () {});
     }
   }
@@ -11202,7 +11347,7 @@
       mountEl.innerHTML = '<p class="empty-state">No investigations declared. Author one at <code>investigations/&lt;name&gt;/investigation.yaml</code>.</p>';
       return;
     }
-    var th = [['Name', 'left'], ['Status', 'left'], ['Studies', 'right'], ['Question', 'left'], ['Links', 'left']]
+    var th = [['Name', 'left'], ['Status', 'left'], ['Studies', 'right'], ['Question', 'left'], ['Shortcuts', 'left']]
       .map(function (c) {
         return '<th style="text-align:' + c[1] + ';position:sticky;top:0;background:#f8fafc;padding:7px 10px;' +
           'font-size:0.78em;text-transform:uppercase;letter-spacing:0.03em;color:#475569;' +
@@ -11236,15 +11381,7 @@
         '<td style="padding:7px 10px;text-align:right;color:' + (iset.n_studies ? '#1e293b' : '#cbd5e1') + '">' + (iset.n_studies || 0) + '</td>' +
         '<td style="padding:7px 10px;color:#64748b">' + (q ? _esc(q) : '<span style="color:#cbd5e1">—</span>') + '</td>' +
         '<td style="padding:7px 10px;white-space:nowrap;font-size:0.85em">' +
-          '<a href="#" title="Download the rendered HTML report for this investigation" ' +
-            'onclick="window._vivReportFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;margin-right:10px">↓ report</a>' +
-          '<a href="#" title="Download the runnable notebook for this investigation" ' +
-            'onclick="window._vivNotebookFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none">↓ notebook</a>' +
-          (iset.n_figures ? '<a href="#" title="Download all figures for this investigation (studies figures + post-study composites), as a zip" ' +
-            'onclick="window._vivFiguresFromCard(event,\'' + _esc(iset.name) + '\');return false;" ' +
-            'style="color:#3b82f6;text-decoration:none;margin-left:10px">↓ figures</a>' : '') +
+          window._vivInvLinksHtml(iset) +
         '</td>' +
         '</tr>';
     }).join('');
@@ -11951,6 +12088,17 @@
         badge: _nDec ? (_nDec + ' needed') : 'all clear', attention: _nDec > 0 });
     }
 
+    // Validation (RFC-0007 content, label dropped) — filled async by
+    // _vivLoadValidationPanel into #inv-validation-mount once the panel loads.
+    tabs.push({ id: 'validation', label: 'Validation',
+      html: '<div id="inv-validation-mount" class="muted" style="padding:8px 2px;font-size:0.92em">Loading validation…</div>' });
+
+    // Needs attention — the deterministic needs-attention scan, moved here from a
+    // top-bar chip. Filled async by _renderInvNeedsAttention into #inv-attention-mount
+    // (which also sets this tab's badge).
+    tabs.push({ id: 'attention', label: 'Needs attention',
+      html: '<div id="inv-attention-mount" class="muted" style="padding:8px 2px;font-size:0.92em">Scanning…</div>' });
+
     // Overview is pushed first, so it is the default (active) tab via the i===0
     // rule below; every other tab (Verdict, Background, …) is reached by a click.
     if (tabs.length) {
@@ -12255,7 +12403,30 @@
         _renderInvNeedsAttention(name);
       })
       .catch(function(err) {
-        document.getElementById('investigation-detail-description').textContent = 'Failed to load: ' + err;
+        // The detail payload failed to load (a transient network blip survives the
+        // DataSource retries, or a real error). Do NOT leave the previously-opened
+        // investigation's graph on screen — clear it so it can't be mistaken for
+        // THIS investigation, and offer a one-click retry.
+        try {
+          var _n = document.getElementById('investigation-dag-nodes');
+          var _e = document.getElementById('investigation-dag-edges');
+          if (_n) _n.innerHTML = '';
+          if (_e) _e.innerHTML = '';
+        } catch (_) { /* best-effort */ }
+        var leadEl = document.getElementById('investigation-detail-description');
+        if (leadEl) {
+          leadEl.innerHTML = '';
+          var p = document.createElement('p');
+          p.style.color = '#c00';
+          p.textContent = 'Failed to load this investigation: ' + err + '. ';
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.style.cssText = 'font:inherit;font-size:12px;padding:3px 10px;border-radius:6px;border:1px solid #ccd;background:#fff;color:inherit;cursor:pointer';
+          btn.textContent = 'Retry';
+          btn.addEventListener('click', function () { _openInvestigationDetail(name); });
+          p.appendChild(btn);
+          leadEl.appendChild(p);
+        }
       });
   }
   window._openInvestigationDetail = _openInvestigationDetail;
@@ -12304,9 +12475,10 @@
   }
 
   function _aigCloseAllClearInfo() { var p = document.getElementById('aig-allclear-pop'); if (p) p.remove(); }
-  function _aigShowAllClearInfo(anchor) {
-    if (document.getElementById('aig-allclear-pop')) { _aigCloseAllClearInfo(); return; }   // toggle
-    var d = window._lastNeedsAttention || {};
+  // Shared body of the needs-attention scan (honest headline + per-check rows with
+  // drill-in). Rendered both into the Needs-attention tab and the legacy popover.
+  function _aigScanBodyHtml(d) {
+    d = d || {};
     var summary = d.summary || {};
     var checks = d.checks || [];
     var memberCount = (summary.member_count != null) ? summary.member_count : null;
@@ -12383,14 +12555,7 @@
     var _headline = clear
       ? _quiet.label
       : '⚠ ' + total + ' need' + (total === 1 ? 's' : '') + ' attention';
-    var pop = document.createElement('div');
-    pop.id = 'aig-allclear-pop';
-    pop.setAttribute('role', 'dialog');
-    pop.setAttribute('aria-label', 'Needs-attention scan');
-    pop.style.cssText = 'position:absolute;z-index:80;background:#fff;border:1px solid #e2e8f0;border-radius:8px;'
-      + 'box-shadow:0 8px 28px rgba(0,0,0,0.16);padding:10px 12px;min-width:320px;max-width:440px;text-align:left;'
-      + 'max-height:78vh;overflow:auto;font-size:0.85em;color:#334155;line-height:1.32';
-    pop.innerHTML =
+    return (
       '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:2px">'
         + '<span style="font-weight:700;color:' + _headColor + '">'
           + _headline + '</span>'
@@ -12400,7 +12565,21 @@
       + '<div style="margin-top:9px;padding-top:7px;border-top:1px solid #f1f5f9">'
         + '<a href="#" onclick="window._aigOpenDecisionsTab&&window._aigOpenDecisionsTab();return false;" '
         + 'style="color:#2563eb;text-decoration:none;font-size:0.92em">What are these checks? Open the Decisions tab →</a>'
-      + '</div>';
+      + '</div>'
+    );
+  }
+
+  // Legacy floating popover around the shared scan body (kept for back-compat).
+  function _aigShowAllClearInfo(anchor) {
+    if (document.getElementById('aig-allclear-pop')) { _aigCloseAllClearInfo(); return; }   // toggle
+    var pop = document.createElement('div');
+    pop.id = 'aig-allclear-pop';
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', 'Needs-attention scan');
+    pop.style.cssText = 'position:absolute;z-index:80;background:#fff;border:1px solid #e2e8f0;border-radius:8px;'
+      + 'box-shadow:0 8px 28px rgba(0,0,0,0.16);padding:10px 12px;min-width:320px;max-width:440px;text-align:left;'
+      + 'max-height:78vh;overflow:auto;font-size:0.85em;color:#334155;line-height:1.32';
+    pop.innerHTML = _aigScanBodyHtml(window._lastNeedsAttention || {});
     document.body.appendChild(pop);
     var r = anchor.getBoundingClientRect();
     var top = Math.round(r.bottom + (window.scrollY || window.pageYOffset || 0) + 6);
@@ -12431,44 +12610,60 @@
     _aigCloseAllClearInfo();
   }, true);
 
+  // Needs-attention is now a TAB in the investigation-detail strip (not a top-bar
+  // chip). This fills the tab's panel (#inv-attention-mount) with the full scan and
+  // reflects the flagged count on the tab button's badge.
   function _renderInvNeedsAttention(name) {
-    var container = document.getElementById('investigation-needs-attention');
-    var chip = document.getElementById('aig-needs-attention-chip');
-    if (!container && !chip) return;
-    if (container) container.innerHTML = '';
-    if (chip) chip.innerHTML = '';
-    var _fetch = fetch('/api/needs-attention?investigation=' + encodeURIComponent(name),
-                       {headers: {Accept: 'application/json'}})
-      .then(function(r) { return r.ok ? r.json() : null; });
-    _fetch.then(function(d) {
-      if (!d || !d.summary) return;
-      window._lastNeedsAttention = d;   // the all-clear popover reads this
-      var lbl = '<span class="muted" style="font-size:0.85em">code-computed by the needs-attention scan (deterministic)</span>';
-      var total = (d.summary.total) || 0;
-      if (!total) {
-        // Nothing flagged — but only call it a green "✓ All clear" when a study
-        // has actually run; an empty / never-run investigation gets a neutral
-        // "No studies yet" / "No runs yet" chip instead (issue #1618, bug 3).
+    var mount = document.getElementById('inv-attention-mount');
+    var tab = document.querySelector('.inv-brief-tab[onclick*="attention"]');
+    if (!mount && !tab) return;
+    // Clear the "Scanning…" spinner with a note — so the tab never hangs on a
+    // 404 / failed load (e.g. a snapshot whose needs-attention JSON is missing,
+    // or a transient error). Only touch the mount when it's still OUR scan.
+    var _clear = function (msg) {
+      if (window._currentIset && window._currentIset !== name) return;
+      var m = document.getElementById('inv-attention-mount');
+      if (m) m.innerHTML = '<div class="muted" style="padding:6px 2px">' + msg + '</div>';
+    };
+    // Snapshot-aware: DataSource maps this to the baked
+    // /api/needs-attention/<slug>.json offline; live hits the query endpoint.
+    // Raw fetch (the .json-less live path) 404s in a bundle and hangs the tab.
+    var _load = (window.DataSource && window.DataSource.loadNeedsAttention)
+      ? window.DataSource.loadNeedsAttention(name)
+      : fetch('/api/needs-attention?investigation=' + encodeURIComponent(name),
+              {headers: {Accept: 'application/json'}})
+          .then(function (r) { return r.ok ? r.json() : null; });
+    _load
+      .then(function (d) {
+        if (!d || !d.summary) { _clear('Needs-attention scan unavailable.'); return; }
+        if (window._currentIset && window._currentIset !== name) return;  // stale
+        window._lastNeedsAttention = d;   // the popover/tab read this
+        var total = (d.summary.total) || 0;
+        // Honest quiet/clear state (issue #1618, bug 3): "✓ All clear" only when
+        // something was actually evaluated — otherwise "No studies yet" / "No runs
+        // yet", a neutral state, not a validated pass. Drives the tab's tooltip.
         var _q = _naQuietState(d.summary);
-        if (chip) chip.innerHTML =
-          '<button type="button" class="aig-na-chip ' + _q.cls + '" onclick="window._aigShowAllClearInfo(this)" '
-          + 'title="Click to see what the needs-attention scan checked">' + _q.label + '</button>';
-        return;
-      }
-      var bySev = d.summary.by_severity || {};
-      var high = bySev.high || 0;
-      // Compact clickable chip in the toolbar — the SOLE needs-attention surface.
-      // Clicking it opens the rich scan popover (per-check counts + drill-in per
-      // flagged item); there is no longer a duplicate in-body banner.
-      if (chip) chip.innerHTML =
-        '<button type="button" class="aig-na-chip aig-na-flag' + (high ? ' aig-na-high' : '') + '" '
-        + 'onclick="window._aigShowAllClearInfo(this)" '
-        + 'title="' + high + ' high · ' + total + ' total — click for details">⚠ ' + total
-        + ' need' + (total === 1 ? 's' : '') + ' attention</button>';
-      // The flagged items + per-check breakdown render inside the chip's popover
-      // (window._aigShowAllClearInfo, which reads window._lastNeedsAttention set
-      // above). No in-body banner is drawn — the chip is the single surface.
-    }).catch(function() { /* tolerant — leave the chip empty */ });
+        var m = document.getElementById('inv-attention-mount');
+        if (m) m.innerHTML = _aigScanBodyHtml(d);
+        // Reflect the flagged count on the tab button (amber badge when > 0),
+        // and never let a quiet/never-run investigation read as a validated pass.
+        var tb = document.querySelector('.inv-brief-tab[onclick*="attention"]');
+        if (tb) {
+          var old = tb.querySelector('.inv-brief-tab-badge');
+          if (old) old.remove();
+          if (total > 0) {
+            tb.classList.add('inv-brief-tab-attn');
+            tb.title = total + ' item' + (total === 1 ? '' : 's') + ' need attention';
+            var b = document.createElement('span');
+            b.className = 'inv-brief-tab-badge attn';
+            b.textContent = total;
+            tb.appendChild(b);
+          } else {
+            tb.classList.remove('inv-brief-tab-attn');
+            tb.title = _q.label;   // "No studies yet" / "No runs yet" / "✓ All clear"
+          }
+        }
+      }).catch(function () { _clear('Needs-attention scan unavailable.'); });
   }
   window._renderInvNeedsAttention = _renderInvNeedsAttention;
 
@@ -12952,11 +13147,13 @@
     view.classList.toggle('inv-overview-collapsed', collapsed);
     var btn = document.getElementById('inv-overview-toggle');
     if (btn) {
-      // Keep the "Investigation" text label beside the caret (iTerm-style labeled
-      // control); only the caret direction reflects collapsed/expanded.
-      btn.innerHTML = '<span class="inv-ov-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span> Investigation';
-      btn.setAttribute('title', collapsed ? 'Show investigation' : 'Hide investigation');
+      // "Details" toggle: the caret shows collapsed/expanded; when expanded the
+      // button takes a pressed/active look so it clearly reads as "showing the
+      // investigation details" rather than a dropdown menu.
+      btn.innerHTML = '<span class="inv-ov-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span> Details';
+      btn.setAttribute('title', collapsed ? 'Show the investigation details' : 'Hide the investigation details');
       btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      btn.classList.toggle('inv-toggle-on', !collapsed);
     }
   }
   function _toggleInvOverview() {
@@ -14279,7 +14476,8 @@
     var shown = _aigGraphShown();
     btn.innerHTML = '<span class="inv-graph-caret" aria-hidden="true">' + (shown ? '▾' : '▸') + '</span> Graph';
     btn.setAttribute('aria-expanded', shown ? 'true' : 'false');
-    btn.setAttribute('title', shown ? 'Hide investigation graph' : 'Show investigation graph');
+    btn.setAttribute('title', shown ? 'Hide the investigation graph' : 'Show the investigation graph');
+    btn.classList.toggle('inv-toggle-on', shown);
   }
   window._aigCollapseInline = _aigCollapseInline;
   window._aigExpandInline = _aigExpandInline;
@@ -15191,6 +15389,139 @@
     var a = document.createElement('a');
     a.href = url; a.download = name + '-figures.zip';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
+
+  // ── "Open in the browser" link variants (vs. the ↓ download handlers above) ──
+  // Report: open the self-contained HTML report inline in a new tab. Live route
+  // serves it inline by default (no ?download); snapshot is a plain .html file.
+  window._vivReportOpen = function (ev, name) {
+    if (ev) ev.stopPropagation();
+    name = name || window._wsInvestigation || window._currentIset;
+    if (!name) return;
+    window.open(_investigationReportUrl(name), '_blank', 'noopener');
+  };
+  // Report download, HTML or PDF (wraps the existing exporter).
+  window._vivReportDownload = function (ev, name, fmt) {
+    if (ev) ev.stopPropagation();
+    _downloadInvestigationReport(name, fmt);
+  };
+  // Notebook: open inline so the browser shows it (live serves ?download=0 inline;
+  // snapshot opens the static .ipynb).
+  window._vivNotebookOpen = function (ev, name) {
+    if (ev) ev.stopPropagation();
+    name = name || window._wsInvestigation || window._currentIset;
+    if (!name) return;
+    var c = window.__DASH_CONFIG__ || {};
+    var base = c.basePath || '';
+    var url = (c.mode === 'snapshot')
+      ? base + '/investigation-notebooks/' + encodeURIComponent(name) + '.ipynb'
+      : '/api/investigation-notebook/' + encodeURIComponent(name) + '?download=0';
+    window.open(url, '_blank', 'noopener');
+  };
+  // Figures: open a standalone figure gallery (every figure inline) in a new tab.
+  // Live: the server renders /figures.html; snapshot has no standalone gallery, so
+  // fall back to the report (which inlines the figures).
+  window._vivFiguresOpen = function (ev, name) {
+    if (ev) ev.stopPropagation();
+    name = name || window._wsInvestigation || window._currentIset;
+    if (!name) return;
+    var c = window.__DASH_CONFIG__ || {};
+    var base = c.basePath || '';
+    var url = (c.mode === 'snapshot')
+      ? base + '/reports/investigation-' + encodeURIComponent(name) + '.html'
+      : '/api/investigation/' + encodeURIComponent(name) + '/figures.html';
+    window.open(url, '_blank', 'noopener');
+  };
+
+  // Shared LINKS cell for an investigation (used by both the List table and the
+  // Cards view) — each artifact offers open-in-browser AND download, so nothing
+  // is forced to auto-download. report: open HTML | download HTML | download PDF;
+  // notebook: open | download .ipynb; figures (when present): open gallery | zip.
+  // Close every open row-level Shortcuts menu (list table + card view).
+  window._closeRowShortcuts = function () {
+    var ms = document.querySelectorAll('.inv-row-shortcuts-menu');
+    for (var i = 0; i < ms.length; i++) {
+      ms[i].style.display = 'none';
+      // Restore the markup defaults so a reopened menu starts from a clean
+      // absolute/right-aligned anchor (the open path lifts it to fixed).
+      ms[i].style.position = 'absolute';
+      ms[i].style.left = 'auto';
+      ms[i].style.right = '0';
+      ms[i].style.top = '100%';
+      ms[i].style.marginTop = '4px';
+      var b = ms[i].previousElementSibling;
+      if (b && b.setAttribute) b.setAttribute('aria-expanded', 'false');
+    }
+  };
+  // Toggle a single row's Shortcuts dropdown (btn's next sibling is its menu).
+  // Mirrors the investigation-detail _toggleInvReportMenu: stopPropagation keeps
+  // the row/card's own onclick from firing, and the outside-click closer is
+  // registered on a 0ms timeout so THIS click doesn't immediately close it.
+  window._toggleRowShortcuts = function (ev, btn) {
+    if (ev) ev.stopPropagation();
+    var menu = btn.nextElementSibling;
+    if (!menu) return;
+    var isOpen = menu.style.display !== 'none' && menu.style.display !== '';
+    window._closeRowShortcuts();          // close any other open menu first
+    btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+    if (!isOpen) {
+      // Lift the menu to position:fixed so it escapes the list table's
+      // overflow-x:auto / overflow:hidden clipping (last-row menus were cut
+      // off at the panel bottom). Anchor it to the button's viewport rect,
+      // right-aligned, and flip it above the button when it would spill past
+      // the bottom edge.
+      menu.style.display = 'block';
+      menu.style.position = 'fixed';
+      menu.style.right = 'auto';
+      menu.style.marginTop = '0';
+      var r = btn.getBoundingClientRect();
+      var left = r.right - menu.offsetWidth;
+      if (left < 8) left = 8;
+      var top = r.bottom + 4;
+      if (top + menu.offsetHeight > window.innerHeight - 8) {
+        top = r.top - menu.offsetHeight - 4;   // open upward
+      }
+      if (top < 8) top = 8;
+      menu.style.left = left + 'px';
+      menu.style.top = top + 'px';
+      setTimeout(function () {
+        document.addEventListener('click', window._closeRowShortcuts, { once: true, capture: true });
+      }, 0);
+    }
+  };
+  // LINKS cell for an investigation (used by both the List table and the cards):
+  // a single "Shortcuts ▾" button that opens the SAME grouped menu as the
+  // investigation-detail ↓ Shortcuts (Report / Notebook / Figures, each with
+  // open-in-browser + download), instead of a row of inline text links.
+  window._vivInvLinksHtml = function (iset) {
+    var nm = _esc(iset.name);
+    var _mi = 'class="btn-mini" role="menuitem" style="display:block;width:100%;text-align:left;border:none;background:transparent"';
+    var _sec = function (t) {
+      return '<div style="padding:6px 8px 2px;font-size:0.72em;font-weight:700;text-transform:uppercase;' +
+        'letter-spacing:0.04em;color:#94a3b8">' + t + '</div>';
+    };
+    var items =
+      _sec('Report') +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivReportOpen(event,\'' + nm + '\')">Open in browser</button>' +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivReportDownload(event,\'' + nm + '\',\'html\')">Download HTML</button>' +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivReportDownload(event,\'' + nm + '\',\'pdf\')">Download PDF</button>' +
+      _sec('Notebook') +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivNotebookOpen(event,\'' + nm + '\')">Open in browser</button>' +
+        '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivNotebookFromCard(event,\'' + nm + '\')">Download .ipynb</button>';
+    if (iset.n_figures) {
+      items +=
+        _sec('Figures') +
+          '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivFiguresOpen(event,\'' + nm + '\')">Open in browser</button>' +
+          '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivFiguresFromCard(event,\'' + nm + '\')">Download (zip)</button>';
+    }
+    return '<span class="inv-row-shortcuts" style="position:relative;display:inline-flex">' +
+      '<button type="button" class="btn-mini" aria-haspopup="true" aria-expanded="false" ' +
+        'title="Shortcuts — open in the browser or download (report, notebook, figures)" ' +
+        'onclick="window._toggleRowShortcuts(event, this)">Shortcuts ▾</button>' +
+      '<div class="inv-row-shortcuts-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;' +
+        'margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);' +
+        'z-index:70;min-width:190px;padding:4px">' + items + '</div>' +
+    '</span>';
   };
   // A single study's OUTPUTS (its image figures + any embedded HTML report /
   // dashboard and its viz assets) as a zip.

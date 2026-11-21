@@ -10,8 +10,8 @@ from vivarium_workbench.lib import simulations_index as si
 
 def _fake_tools():
     return [
-        {"id": "parsimony-viewer", "title": "Parsimony Viewer", "kind": "embed-3d",
-         "requires": ["3d_pack"],
+        {"id": "ecoli-3d-viewer", "title": "3D E. coli viewer", "kind": "embed-3d",
+         "requires": ["3d_pack"], "bundle_package": "viva_parsimony",
          "matched": [{"ref": "ecoli-3d", "label": "ecoli-3d"}]},
     ]
 
@@ -25,7 +25,7 @@ def test_row_with_3d_pack_capability_gets_matched_tool(monkeypatch):
     si._attach_matched_tools(rows, "/ws")
     matched = rows[0]["matched_tools"]
     assert len(matched) == 1
-    assert matched[0]["id"] == "parsimony-viewer"
+    assert matched[0]["id"] == "ecoli-3d-viewer"
     assert matched[0]["kind"] == "embed-3d"
     assert matched[0]["launch_url"]
 
@@ -60,12 +60,21 @@ def test_3d_launch_url_prefers_hosted_viewer_url():
 
 
 def test_3d_launch_url_falls_back_to_bundled_models_manifest():
-    tool = {"id": "parsimony-viewer", "kind": "embed-3d", "requires": ["3d_pack"],
-            "matched": [{"ref": "ecoli-3d"}]}
+    tool = {"id": "ecoli-3d-viewer", "kind": "embed-3d", "requires": ["3d_pack"],
+            "bundle_package": "viva_parsimony", "matched": [{"ref": "ecoli-3d"}]}
     row = {"run_id": "r1", "study_slug": "ecoli-3d"}
     url = si._launch_url_for_matched_tool(tool, row)
-    assert url.startswith("/parsimony-viewer/index.html?models=")
+    assert url.startswith("/contributed-viewer/viva_parsimony/index.html?models=")
     assert "ecoli-3d" in url
+
+
+def test_3d_launch_url_none_without_bundle_package_or_hosted_url():
+    # No hosted viewer_url and no declared bundle_package → no local viewer to
+    # point at, so no launch URL (the generalized, no-parsimony-core behavior).
+    tool = {"id": "ecoli-3d-viewer", "kind": "embed-3d", "requires": ["3d_pack"],
+            "matched": [{"ref": "ecoli-3d"}]}
+    row = {"run_id": "r1", "study_slug": "ecoli-3d"}
+    assert si._launch_url_for_matched_tool(tool, row) is None
 
 
 def test_3d_tool_omitted_when_studys_own_pack_not_in_matched():
@@ -128,7 +137,7 @@ def test_build_simulations_data_attaches_matched_tools_end_to_end(monkeypatch, t
     monkeypatch.setattr(si, "_append_remote_simulations", lambda sims, ws, **kw: sims)
     data = si.build_simulations_data(tmp_path)
     row = data["simulations"][0]
-    assert row["matched_tools"][0]["id"] == "parsimony-viewer"
+    assert row["matched_tools"][0]["id"] == "ecoli-3d-viewer"
 
 
 def _hosted_3d_tools():

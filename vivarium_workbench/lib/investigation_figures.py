@@ -311,6 +311,12 @@ _GALLERY_CSS = (
 )
 
 
+# A fixed top-right "download this page as .html" control for the standalone
+# gallery — so the HTML can be saved without hunting for an Export menu. Prefers
+# the current URL's served bytes; falls back to serializing the live DOM.
+_GALLERY_DL_BTN = r"""<button id="dl-html-btn" onclick="__dlPageHtml()" title="Download this figure gallery as a self-contained .html file" style="position:fixed;top:14px;right:16px;z-index:50;font:inherit;font-size:12.5px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--soft);border-radius:8px;padding:7px 11px;box-shadow:0 2px 8px rgba(0,0,0,0.08);white-space:nowrap">&#8595; HTML</button><script>function __dlPageHtml(){var name=(document.title||'figures').replace(/[^\w.-]+/g,'_')||'figures';try{var html='<!doctype html>\n'+document.documentElement.outerHTML;var b=new Blob([html],{type:'text/html'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name+'.html';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},4000);}catch(e){}}</script>"""
+
+
 def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[str], list[tuple[str, str, bool]]]]) -> str:
     """One navigable ``index.html`` for a figures export. ``groups`` is an ordered
     list of ``(heading, subtitle_or_None, [(arcname, label, is_html), …])``. Each
@@ -345,7 +351,150 @@ def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[s
             f'<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel=stylesheet>'
             f'<style>{_GALLERY_CSS}</style></head><body><div class="wrap">'
             f'<nav><h1>Figures</h1><p class="sub">{n_fig} figures &middot; {len(groups)} studies</p>'
-            + "".join(nav) + '</nav><main>' + hdr + "".join(body) + '</main></div></body></html>')
+            + "".join(nav) + '</nav><main>' + hdr + "".join(body) + '</main></div>'
+            + _GALLERY_DL_BTN + '</body></html>')
+
+
+def build_figures_gallery_page(ws_root, name: str) -> Optional[str]:
+    """A STANDALONE (self-contained) HTML figure gallery for one investigation —
+    every member study's figure files embedded inline as ``data:`` URIs, grouped
+    by study, so the page opens in the browser with no further requests. Reuses
+    :func:`figures_gallery_index_html` (the same gallery the zip ships). Returns
+    ``None`` when the investigation has no displayable figures. Backs
+    ``GET /api/investigation/<slug>/figures.html`` (the "open figures in the
+    browser" action)."""
+    import base64
+
+    _MIME = {
+        ".svg": "image/svg+xml", ".png": "image/png", ".gif": "image/gif",
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+        ".html": "text/html",
+    }
+    ws_root = Path(ws_root).resolve()
+    figs = build_investigation_figures(ws_root, name)
+    entries = figs.get("files") or []
+    composites = figs.get("composites") or []
+    inv = _load_investigation(ws_root, name) or {}
+    slugs = investigation_member_slugs(inv)
+
+    seen_arc: set[str] = set()
+    written_src: set[Path] = set()
+    # slug -> list of (data_uri, label, is_html, stem) — stem drives per-study dedup.
+    gallery: "dict[str, list[tuple[str, str, bool, str]]]" = {}
+    final_items: "list[tuple[str, str, bool, str]]" = []
+
+    def _inline(src: Path) -> "Optional[str]":
+        suf = src.suffix.lower()
+        if suf not in _GALLERY_EXT or not src.is_file():
+            return None
+        try:
+            raw = src.read_bytes()
+        except OSError:
+            return None
+        return "data:" + _MIME.get(suf, "application/octet-stream") + ";base64," + \
+            base64.b64encode(raw).decode("ascii")
+
+    def _label(arc: str, src: "Optional[Path]", is_html: bool) -> str:
+        stem = Path(arc).stem
+        if is_html and src is not None:
+            try:
+                return _fig_label(src.read_text(errors="replace"), stem)
+            except OSError:
+                return stem
+        if stem == "model-loom":
+            return "Model structure (loom)"
+        return stem.replace("-", " ").replace("_", " ").strip() or stem
+
+    # 1. Declared panels (skip the stitched figure_<N>, which go to Final figures).
+    for e in entries:
+        if _COMPOSITE_RE.match(Path(e["rel_path"]).stem):
+            continue
+        arc = e["arcname"]
+        if arc in seen_arc:
+            continue
+        src = ws_root / str(e.get("rel_path") or "")
+        du = _inline(src)
+        if du is None:
+            continue
+        seen_arc.add(arc)
+        try:
+            written_src.add(src.resolve())
+        except OSError:
+            pass
+        is_html = Path(arc).suffix.lower() == ".html"
+        gallery.setdefault(str(e.get("study") or ""), []).append(
+            (du, _label(arc, src, is_html), is_html, Path(arc).stem))
+
+    # 2. Composites -> Final figures.
+    for c in composites:
+        for rel in (c.get("svg_rel"), c.get("png_rel")):
+            if not rel:
+                continue
+            du = _inline(ws_root / rel)
+            if du is None:
+                continue
+            is_svg = str(rel).endswith(".svg")
+            label = ("Figure " + str(c.get("number")) + " — " + str(c.get("title"))) \
+                if is_svg else Path(rel).stem
+            final_items.append((du, label, False, Path(rel).stem))
+
+    # 3. Native-gallery outputs per study (committed viz/ + the latest run's
+    #    viz.json HTML panels) — the SAME interactive-HTML figures the figures.zip
+    #    ships. Without this, an investigation whose figures are interactive HTML
+    #    (not declared ``visualizations:``) rendered an empty gallery -> 404.
+    for slug in slugs:
+        try:
+            for p, arc in study_output_files(ws_root, slug):
+                try:
+                    if p.resolve() in written_src:
+                        continue
+                except OSError:
+                    pass
+                zarc = slug + "/" + arc
+                if zarc in seen_arc:
+                    continue
+                du = _inline(p)
+                if du is None:
+                    continue
+                seen_arc.add(zarc)
+                is_html = p.suffix.lower() == ".html"
+                gallery.setdefault(slug, []).append(
+                    (du, _label(zarc, p, is_html), is_html, p.stem))
+            for pname, html in study_output_html_panels(ws_root, slug).items():
+                arc = slug + "/visualizations/" + _safe_panel_name(pname)
+                if arc in seen_arc:
+                    continue
+                seen_arc.add(arc)
+                du = "data:text/html;base64," + base64.b64encode(html.encode("utf-8")).decode("ascii")
+                gallery.setdefault(slug, []).append((du, _fig_label(html, pname), True, Path(pname).stem))
+        except Exception:  # noqa: BLE001 — one bad study never breaks the gallery
+            continue
+
+    # Assemble groups: Final first, then each study in member order; dedup a study's
+    # items by stem (a committed viz/<name>.html and its re-rendered run panel are
+    # one figure). Strip the stem before handing groups to the renderer (3-tuples).
+    def _dedup(items: "list[tuple[str, str, bool, str]]") -> "list[tuple[str, str, bool]]":
+        seen_stems: set[str] = set()
+        out: list = []
+        for du, label, is_html, stem in items:
+            if stem in seen_stems:
+                continue
+            seen_stems.add(stem)
+            out.append((du, label, is_html))
+        return out
+
+    groups: list = []
+    if final_items:
+        groups.append(("Final figures", None, _dedup(final_items)))
+    for slug in slugs:
+        items = gallery.get(slug)
+        if not items:
+            continue
+        _, spec = _load_study(ws_root, slug)
+        groups.append((str(spec.get("title") or slug), slug, _dedup(items)))
+    if not groups:
+        return None
+    return figures_gallery_index_html(name, groups)
 
 
 def build_figures_zip(ws_root, name: str) -> Optional[bytes]:

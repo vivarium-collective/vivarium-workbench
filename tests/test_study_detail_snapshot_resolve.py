@@ -37,6 +37,18 @@ def test_composite_resolve_and_assurance_urls_use_the_helper():
     assert "/api/composite-resolve/' + encodeURIComponent" in js
 
 
+def test_model_definition_panel_resolve_uses_the_helper():
+    """The Model tab's Composition panel (_renderModelDefinition, the #1682
+    Model Definition card) must also route its composite-resolve fetch through
+    _isSnapshot() — otherwise it hits the live ?id= route, 404s in a static
+    bundle, and the Composition panel renders blank (while the Loom sub-pane,
+    which already branched here, still works)."""
+    js = _js()
+    assert "var _mdUrl = _isSnapshot()" in js
+    # live ?id= route must not be the UNCONDITIONAL head of this fetch
+    assert "fetch('/api/composite-resolve?id=' + encodeURIComponent(compositeId))" not in js
+
+
 def test_no_bare_body_class_check_gates_a_resolve_url():
     """The bare body.snapshot check must appear ONLY inside _isSnapshot() — never
     as the head of a URL decision, which is exactly the race that 404'd."""

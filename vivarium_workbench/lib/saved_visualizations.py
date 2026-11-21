@@ -17,25 +17,24 @@ from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 from vivarium_workbench.lib.yaml_io import load_yaml
 
 
-def parsimony_viewer_dir() -> Path | None:
-    """Return the bundled parsimony viewer asset dir, or None when the optional
-    parsimony package is not installed (feature-detect seam).
+def contributed_viewer_bundle_dir(package: str, subdir: str = "viewer") -> Path | None:
+    """Resolve a contributed viewer's bundled asset dir (``<package>/<subdir>/``),
+    or None when that package is not installed or ships no such dir.
 
-    The package was renamed ``pbg_parsimony`` -> ``viva_parsimony`` (the new dist
-    ships ``viewer/`` as ``viva_parsimony`` package-data; ``pbg_parsimony`` remains
-    only as a Python import shim WITHOUT the viewer assets). Probe both names and
-    return whichever module actually carries a ``viewer/`` dir, so both the old
-    pinned installs and current ``viva-parsimony`` resolve."""
+    Generic feature-detect seam: a ``workbench_viewers`` descriptor declares which
+    package carries its viewer bundle (``bundle_package`` / ``bundle_subdir``) and
+    the workbench serves it, with NO package-specific knowledge in core. (The 3D
+    E. coli viewer, for instance, declares ``viva_parsimony``; the workbench does
+    not name it.)"""
+    if not package or not package.replace("_", "").replace(".", "").isalnum():
+        return None  # not a plausible module name — reject
     try:
         import importlib.util
-        for pkg in ("viva_parsimony", "pbg_parsimony"):
-            spec = importlib.util.find_spec(pkg)
-            if spec is None or not spec.origin:
-                continue
-            d = Path(spec.origin).parent / "viewer"
-            if d.is_dir():
-                return d
-        return None
+        spec = importlib.util.find_spec(package)
+        if spec is None or not spec.origin:
+            return None
+        d = Path(spec.origin).parent / subdir
+        return d if d.is_dir() else None
     except Exception:
         return None
 
@@ -43,7 +42,7 @@ def parsimony_viewer_dir() -> Path | None:
 def build_saved_visualizations(ws_root) -> dict:
     """Discover saved, interactive visualizations in the workspace.
 
-    Returns ``{parsimony_available, saved: [...], report_cards: [...]}``.
+    Returns ``{saved: [...], report_cards: [...]}``.
     Pure (no socket I/O) — call with an explicit ``ws_root``.
     """
     ws_root = Path(ws_root)
@@ -157,8 +156,16 @@ def build_saved_visualizations(ws_root) -> dict:
             if url:
                 entry["viewer_url"] = str(url)
 
+    # Optional local 3D-viewer bundle package (ui.viz_viewer_bundle: the
+    # distribution that ships a ``viewer/`` webapp, e.g. ``viva_parsimony``).
+    # The frontend points the generic /contributed-viewer/<pkg>/ route at the
+    # pack when there is no hosted viewer_url. The workbench names no viewer.
+    viewer_bundle = ui.get("viz_viewer_bundle")
+    if isinstance(viewer_bundle, str) and viewer_bundle.strip():
+        for entry in saved:
+            entry.setdefault("viewer_bundle_package", viewer_bundle.strip())
+
     return {
-        "parsimony_available": parsimony_viewer_dir() is not None,
         "saved": saved,
         "report_cards": report_cards,
     }

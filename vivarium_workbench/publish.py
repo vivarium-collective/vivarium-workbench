@@ -466,40 +466,49 @@ def _rewrite_pack_mesh_urls(obj, pack_dir_rel: str, base_no_slash: str) -> None:
 
 def _export_saved_visualizations(ws_root: Path, out_dir: Path,
                                  base_path: str) -> None:
-    """Export the Analyses-tab saved 3D visualizations into the static bundle.
+    """Export the Explore-tab saved 3D visualizations into the static bundle.
 
-    Feature-detected on the optional ``pbg_parsimony`` package (mirrors the live
-    ``/parsimony-viewer/*`` route + ``/api/saved-visualizations`` endpoint). When
-    it's not installed this is a no-op, so the snapshot simply omits the gallery.
+    Mirrors the live ``/api/saved-visualizations`` endpoint + the generic
+    ``/contributed-viewer/<pkg>/*`` route. No package-specific knowledge: the
+    gallery is exported whenever the workspace has any saved 3D pack, and any
+    *declared* local viewer bundle (``ui.viz_viewer_bundle`` →
+    ``viewer_bundle_package``) is baked in beside it. A workspace that uses only
+    hosted viewer URLs still gets the gallery + packs (no local bundle copied).
 
     Writes:
-      - ``api/saved-visualizations.json`` — same payload as the live endpoint
-        (``_build_saved_visualizations``). ``pack_url``/``meta_url`` stay
-        workspace-rooted-absolute (``/studies/...``); the frontend prefixes the
-        hosting base path at render time, identical to the live (empty-base) case.
-      - ``parsimony-viewer/`` — the bundled viewer assets (index.html, viewer.js,
-        obj-worker.js) copied from ``pbg_parsimony/viewer/``.
+      - ``api/saved-visualizations.json`` — same payload as the live endpoint.
+        ``pack_url``/``meta_url`` stay workspace-rooted-absolute (``/studies/...``);
+        the frontend prefixes the hosting base path at render time.
+      - ``contributed-viewer/<pkg>/`` — each declared viewer bundle's assets,
+        copied from ``<pkg>/viewer/``.
       - ``studies/<name>/viz/3d/`` — each saved pack + ``.meta.json`` sidecar +
         sibling ``meshes/`` dir, with the COPIED pack's mesh urls rewritten to be
         base-path-correct (see ``_rewrite_pack_mesh_urls``).
     """
     from vivarium_workbench.lib import saved_visualizations as _savedviz
 
-    viewer_dir = _savedviz.parsimony_viewer_dir()
-    if viewer_dir is None:
-        return  # pbg_parsimony not installed → no parsimony assets in this bundle
-
     payload = _savedviz.build_saved_visualizations(ws_root)
+    saved = payload.get("saved") or []
+    if not saved:
+        return  # no saved 3D packs → omit the gallery entirely
 
     api_dir = out_dir / "api"
     api_dir.mkdir(parents=True, exist_ok=True)
     _write_json(api_dir / "saved-visualizations.json", payload)
 
-    # Copy the viewer assets → bundle/parsimony-viewer/.
-    viewer_dst = out_dir / "parsimony-viewer"
-    if viewer_dst.exists():
-        shutil.rmtree(viewer_dst)
-    shutil.copytree(str(viewer_dir), str(viewer_dst))
+    # Bake each DECLARED local viewer bundle → bundle/contributed-viewer/<pkg>/
+    # (the package a study's entry names via ui.viz_viewer_bundle). The workbench
+    # names no specific viewer.
+    for pkg in {e.get("viewer_bundle_package") for e in saved
+                if e.get("viewer_bundle_package")}:
+        viewer_dir = _savedviz.contributed_viewer_bundle_dir(pkg)
+        if viewer_dir is None:
+            continue  # declared bundle package not installed → hosted-only
+        viewer_dst = out_dir / "contributed-viewer" / pkg
+        if viewer_dst.exists():
+            shutil.rmtree(viewer_dst)
+        viewer_dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(str(viewer_dir), str(viewer_dst))
 
     base_no_slash = (base_path or "").lstrip("/")
 
@@ -780,6 +789,7 @@ def build_bundle(
     *,
     interactive_url: str = "",
     base_path: str = "",
+    strict: bool = False,
 ) -> dict:
     """Export the workspace at *ws_root* into a static bundle at *out_dir*.
 
@@ -823,6 +833,7 @@ def build_bundle(
         ws_root, out_dir,
         interactive_url=interactive_url,
         base_path=base_path,
+        strict=strict,
     )
 
 
@@ -832,6 +843,7 @@ def _do_build(
     *,
     interactive_url: str = "",
     base_path: str = "",
+    strict: bool = False,
 ) -> dict:
     """Internal build routine — reads the workspace at ws_root via lib fns."""
     from vivarium_workbench.lib.static_serving import STATIC_DIR
@@ -924,6 +936,53 @@ def _do_build(
                     "narrative": {"units": [], "limitations": [], "open_questions": []},
                     "gaps": [], "gates": [], "decisions": [], "available": False}
         _write_json(api_dir / "argument-overlay" / f"{inv_name}.json", body)
+
+    # api/needs-attention/<inv>.json — the deterministic, code-computed (AI-free)
+    # needs-attention scan {investigation, items, summary} so the published
+    # read-only bundle's "Needs attention" tab shows the real scan instead of
+    # hanging on "Scanning…". The live tab hits GET /api/needs-attention?
+    # investigation=<slug> (a query-param route with no .json in a bundle);
+    # data-source.loadNeedsAttention resolves /api/needs-attention/<slug>.json in
+    # snapshot mode. A graceful empty payload when the scan is unavailable.
+    (api_dir / "needs-attention").mkdir(parents=True, exist_ok=True)
+    from vivarium_workbench.lib.report_views import build_needs_attention
+    for inv_name in investigations:
+        try:
+            na_body, _ = build_needs_attention(ws_root, investigation=inv_name)
+        except Exception:  # noqa: BLE001 — never fail the publish on one investigation
+            na_body = {"investigation": inv_name, "items": [],
+                       "summary": {"by_severity": {}, "by_kind": {}, "total": 0}}
+        _write_json(api_dir / "needs-attention" / f"{inv_name}.json", na_body)
+
+    # api/study-completeness/<inv>.json + the WARN/REFUSE gate. The study-
+    # completeness gate flags a study that LOOKS done but is inconsistent
+    # (claims done with no runs; completed but verdict pending; declares a
+    # composite that doesn't resolve). The engine owns rules 1-2 (lint findings);
+    # this computes rule 3 (unresolvable composite) and bakes the combined per-
+    # investigation signal so the published investigation page can render a
+    # banner. Always a loud WARN (summary + GitHub Actions ::warning:: lines);
+    # under --strict / VIVARIUM_WORKBENCH_PUBLISH_STRICT it REFUSES the publish
+    # (raised at the end of the build, so the bundle is fully built for
+    # inspection but the CLI exits non-zero and the deploy step is skipped).
+    _completeness_strict_violation = None
+    try:
+        from vivarium_workbench.lib import study_completeness as _sc
+        _sc_result = _sc.collect(ws_root)
+        (api_dir / "study-completeness").mkdir(parents=True, exist_ok=True)
+        _by_inv = _sc_result.get("by_investigation", {})
+        for inv_name in investigations:
+            _write_json(
+                api_dir / "study-completeness" / f"{inv_name}.json",
+                {"investigation": inv_name, "findings": _by_inv.get(inv_name, [])},
+            )
+        for _line in _sc.summary_lines(_sc_result):
+            print(f"  {_line}")
+        for _ann in _sc.ci_annotations(_sc_result):
+            print(_ann)
+        if _sc_result.get("total", 0) and _sc.is_strict(strict):
+            _completeness_strict_violation = _sc_result
+    except Exception as exc:  # noqa: BLE001 — gate is best-effort; never crash the build on it
+        print(f"  warn: study-completeness gate failed: {exc}")
 
     # reports/investigation-<slug>.html — pre-rendered investigation reports. In
     # the live app these come from GET /api/investigation-report/<slug>; in the
@@ -1328,19 +1387,22 @@ def _do_build(
                 continue
             for f in figdata.get("files", []):
                 studies_with_figures.add(f["study"])
-            # Emit the investigation figures.zip whenever the investigation has
-            # ANY figures — either composite-level figures (n_composites) or
-            # study-level ones from studies' visualizations/ (files). Gating on
-            # n_composites alone dropped the aggregate zip for investigations
-            # whose figures come only from study visualizations, leaving the
-            # card's `↓ figures` link 404ing. `build_figures_zip` already returns
-            # None when there is genuinely nothing, so `if blob` is the real gate.
-            if figdata.get("n_composites") or figdata.get("files"):
-                blob = _figs.build_figures_zip(ws_root, inv_name)
-                if blob:
-                    dst = figures_root / inv_name / "figures.zip"
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    dst.write_bytes(blob)
+            # Emit the investigation figures.zip whenever `build_figures_zip`
+            # actually produces one. It pulls from MORE sources than
+            # build_investigation_figures does — native-gallery outputs
+            # (committed viz/*.html, run viz.json HTML panels) as well as the
+            # declared study.visualizations[] — so gating this on figdata
+            # (n_composites / declared files) wrongly skipped investigations
+            # whose figures are all native-gallery HTML (eukaryogenesis,
+            # multicellularity), leaving their card `↓ figures` link 404ing in
+            # the published bundle even though a real zip exists. `build_figures_zip`
+            # already returns None when there is genuinely nothing, so call it
+            # unconditionally and let `if blob` be the only gate.
+            blob = _figs.build_figures_zip(ws_root, inv_name)
+            if blob:
+                dst = figures_root / inv_name / "figures.zip"
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes(blob)
         # Per-study OUTPUTS zips (image figures + embedded HTML reports/dashboards)
         # backing the study-scoped `↓ outputs`. Cover every study that produces
         # one — figure studies AND dashboard-only studies (embed_visualizations
@@ -1524,9 +1586,9 @@ def _do_build(
             gallery = {"run_id": None, "panels": {}}
         _write_json(native_gallery_api_dir / f"{slug}.json", gallery)
 
-    # api/saved-visualizations.json + parsimony-viewer/ + copied packs/meshes —
-    # the Analyses-tab gallery. Feature-detected on pbg_parsimony; no-op when the
-    # viewer package isn't installed (mirrors the live /parsimony-viewer route).
+    # api/saved-visualizations.json + contributed-viewer/<pkg>/ + copied
+    # packs/meshes — the Explore-tab 3D gallery. No-op when the workspace has no
+    # saved 3D pack (mirrors the live /contributed-viewer/<pkg>/ route).
     try:
         _export_saved_visualizations(ws_root, out_dir, base_path)
     except Exception as exc:  # noqa: BLE001 — never abort a publish on the gallery
@@ -1662,6 +1724,19 @@ def _do_build(
         json.dumps(config, indent=2), encoding="utf-8"
     )
 
+    # --strict / VIVARIUM_WORKBENCH_PUBLISH_STRICT: REFUSE a publish that carries
+    # any study-completeness finding. Raised AFTER the full build so the bundle
+    # exists for inspection, but the CLI exits non-zero (the deploy step is
+    # gated on a clean build). Default (no strict) already WARNed above.
+    if _completeness_strict_violation is not None:
+        n = _completeness_strict_violation.get("total", 0)
+        by = _completeness_strict_violation.get("by_check", {})
+        raise RuntimeError(
+            f"study-completeness gate (--strict): refusing publish — {n} finding(s) "
+            + ", ".join(f"{k}={v}" for k, v in sorted(by.items()))
+            + ". Resolve them, or publish without --strict to ship with a warning banner."
+        )
+
     return {
         "investigations": investigations,
         "studies":        studies,
@@ -1708,11 +1783,21 @@ def main(argv=None):
             "correctly.  Default '' keeps root-absolute (domain-root) behavior."
         ),
     )
+    parser.add_argument(
+        "--strict", action="store_true",
+        help=(
+            "Treat study-completeness findings (a study that looks done but is "
+            "inconsistent) as a publish-blocking error: refuse the publish instead "
+            "of shipping with a warning banner. Also enabled by "
+            "VIVARIUM_WORKBENCH_PUBLISH_STRICT=1."
+        ),
+    )
     args = parser.parse_args(argv)
     summary = build_bundle(
         Path(args.workspace), Path(args.out),
         interactive_url=args.interactive_url,
         base_path=args.base_path,
+        strict=args.strict,
     )
     print(json.dumps(summary, indent=2))
 

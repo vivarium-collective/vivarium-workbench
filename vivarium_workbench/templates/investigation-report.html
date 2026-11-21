@@ -567,8 +567,26 @@ footer .wrap{display:flex;flex-direction:column;gap:6px}
 <div class="topbar"><div class="wrap">
   <span class="brand">Vivarium <span class="dot">·</span> Workbench</span>
   <span class="switch-label" id="wsname"></span>
+  <button id="dl-html-btn" onclick="__dlPageHtml()" title="Download this report as a self-contained .html file"
+          style="font:inherit;font-size:12.5px;line-height:1;cursor:pointer;border:1px solid var(--line);background:none;color:var(--ink-2);border-radius:8px;padding:7px 11px;white-space:nowrap">&#8595; HTML</button>
   <button class="themebtn" id="themebtn" title="Toggle theme">◐</button>
 </div></div>
+<script>
+// Download-at-the-top: save THIS page as a self-contained .html without going
+// back to the Export menu. Serializes the live DOM (no network — the report is
+// fully self-contained, and this works live or opened from a file).
+function __dlPageHtml(){
+  var name = (document.title || 'report').replace(/\s+[—-]\s+report$/i,'').replace(/[^\w.-]+/g,'_') || 'report';
+  try {
+    var html = '<!doctype html>\n' + document.documentElement.outerHTML;
+    var b = new Blob([html], {type:'text/html'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(b); a.download = name + '.html';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+  } catch(e){ /* ignore */ }
+}
+</script>
 
 <main id="app"></main>
 
