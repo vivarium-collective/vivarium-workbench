@@ -10849,7 +10849,7 @@
       '<span class="inv-report-wrap" style="position:relative;display:inline-flex">' +
         '<button class="btn-mini" id="inv-report-btn" aria-haspopup="true" ' +
           'aria-label="Shortcuts" title="Shortcuts — open in the browser or download (report, notebook, figures)" onclick="_toggleInvReportMenu(event)">Shortcuts ▾</button>' +
-        '<div id="inv-report-menu" role="menu" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;' +
+        '<div id="inv-report-menu" role="menu" style="display:none;position:absolute;right:0;left:auto;top:100%;margin-top:4px;' +
           'background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:190px;padding:4px">' +
           _sec('Report') +
           '<button ' + _mi + ' onclick="_closeInvReportMenu();window._vivReportOpen(event)">Open in browser</button>' +
@@ -12494,11 +12494,25 @@
     var mount = document.getElementById('inv-attention-mount');
     var tab = document.querySelector('.inv-brief-tab[onclick*="attention"]');
     if (!mount && !tab) return;
-    fetch('/api/needs-attention?investigation=' + encodeURIComponent(name),
-          {headers: {Accept: 'application/json'}})
-      .then(function (r) { return r.ok ? r.json() : null; })
+    // Clear the "Scanning…" spinner with a note — so the tab never hangs on a
+    // 404 / failed load (e.g. a snapshot whose needs-attention JSON is missing,
+    // or a transient error). Only touch the mount when it's still OUR scan.
+    var _clear = function (msg) {
+      if (window._currentIset && window._currentIset !== name) return;
+      var m = document.getElementById('inv-attention-mount');
+      if (m) m.innerHTML = '<div class="muted" style="padding:6px 2px">' + msg + '</div>';
+    };
+    // Snapshot-aware: DataSource maps this to the baked
+    // /api/needs-attention/<slug>.json offline; live hits the query endpoint.
+    // Raw fetch (the .json-less live path) 404s in a bundle and hangs the tab.
+    var _load = (window.DataSource && window.DataSource.loadNeedsAttention)
+      ? window.DataSource.loadNeedsAttention(name)
+      : fetch('/api/needs-attention?investigation=' + encodeURIComponent(name),
+              {headers: {Accept: 'application/json'}})
+          .then(function (r) { return r.ok ? r.json() : null; });
+    _load
       .then(function (d) {
-        if (!d || !d.summary) return;
+        if (!d || !d.summary) { _clear('Needs-attention scan unavailable.'); return; }
         if (window._currentIset && window._currentIset !== name) return;  // stale
         window._lastNeedsAttention = d;   // the popover/tab read this
         var total = (d.summary.total) || 0;
@@ -12526,7 +12540,7 @@
             tb.title = _q.label;   // "No studies yet" / "No runs yet" / "✓ All clear"
           }
         }
-      }).catch(function () { /* tolerant — leave the scanning note */ });
+      }).catch(function () { _clear('Needs-attention scan unavailable.'); });
   }
   window._renderInvNeedsAttention = _renderInvNeedsAttention;
 
