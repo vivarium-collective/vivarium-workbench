@@ -33,23 +33,34 @@ GATE_CLASSES = ("regression_pin", "acceptance_criterion")
 
 
 def _outcomes_by_test(spec: dict) -> dict:
-    """Merge per-run ``outcomes`` keyed by test name; a ``canonical`` run wins.
+    """Merge per-run graded outcomes keyed by test name; a ``canonical`` run wins.
 
     Mirrors ``behavior_test_card._outcomes_by_test`` (duplicated here rather
     than imported so ``behavior_test_card`` can import this module without a
-    cycle).
+    cycle). Prefers each run's ``computed_outcomes[T]`` over authored
+    ``outcomes[T]`` — the same precedence as the engine's
+    ``canonical_graded_outcomes`` — so a CLI-graded study (grades in
+    ``computed_outcomes``) agrees with the gate instead of rendering PENDING.
     """
     merged: dict = {}
     for run in (spec.get("runs") or []) if isinstance(spec, dict) else []:
         if not isinstance(run, dict):
             continue
-        oc = run.get("outcomes")
-        if not isinstance(oc, dict):
+        per_run: dict = {}
+        authored = run.get("outcomes")
+        if isinstance(authored, dict):
+            for tname, o in authored.items():
+                per_run[tname] = o if isinstance(o, dict) else {}
+        computed = run.get("computed_outcomes")
+        if isinstance(computed, dict):
+            for tname, o in computed.items():  # computed wins over authored
+                per_run[tname] = o if isinstance(o, dict) else {}
+        if not per_run:
             continue
         canonical = bool(run.get("canonical"))
-        for tname, o in oc.items():
+        for tname, o in per_run.items():
             if canonical or tname not in merged:
-                merged[tname] = o if isinstance(o, dict) else {}
+                merged[tname] = o
     return merged
 
 
