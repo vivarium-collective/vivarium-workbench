@@ -892,14 +892,31 @@ def _syn_first_sentence(t, n=220):
     return (m.group(0) if m else t)[:n]
 
 
+def _findings_list(s):
+    """A study's findings as a list, accepting both authored shapes.
+
+    v4 studies carry ``findings`` as a LIST of ``{statement, status, evidence}``.
+    Gap-analysis synthesis studies (e.g. mbp-06) carry it as a DICT
+    ``{entries: [...], summary: {...}}`` — a shape ``chain_derivation`` already
+    recognises. The report builder iterates findings as a list, so normalise the
+    dict shape to its ``entries`` here; anything else yields an empty list.
+    """
+    f = (s or {}).get("findings")
+    if isinstance(f, dict):
+        e = f.get("entries")
+        return e if isinstance(e, list) else []
+    return f if isinstance(f, list) else []
+
+
 def _syn_oneline(s):
     c = str(s.get("claim") or "").strip()
     if c:
         return _syn_first_sentence(c)
-    fs = s.get("findings") or []
+    fs = _findings_list(s)
     if fs:
         f0 = fs[0] or {}
-        return _syn_first_sentence(f0.get("summary") or f0.get("statement") or "")
+        return _syn_first_sentence(
+            f0.get("summary") or f0.get("statement") or f0.get("description") or "")
     return _syn_first_sentence(s.get("experiment") or s.get("objective") or s.get("question") or "")
 
 
@@ -932,7 +949,7 @@ def _build_synthesis(inv, studies, spine):
         model_dependence = ("supported" in grades) and bool(grades & {"refuted", "qualified"})
         fnds = []
         for m in members:
-            for f in (m["_s"].get("findings") or [])[:3]:
+            for f in _findings_list(m["_s"])[:3]:
                 # evidence may be a plain string (a prose description) rather than
                 # a {observed, units} dict; guard before .get() so _build_synthesis
                 # doesn't crash the whole report on `'str' object has no attribute
@@ -980,7 +997,7 @@ def _build_synthesis(inv, studies, spine):
                 "discriminating": (fps[0] if isinstance(fps, list) and fps else None),
             })
     for r in recs:
-        for f in (r["_s"].get("findings") or []):
+        for f in _findings_list(r["_s"]):
             if str((f or {}).get("status") or "").lower() in ("contradicts", "refutes", "partial"):
                 contradictions.append({
                     "kind": "finding-conflict", "topic": r["title"],
