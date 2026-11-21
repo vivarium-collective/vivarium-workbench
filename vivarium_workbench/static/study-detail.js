@@ -1652,9 +1652,10 @@
     }).join('');
   }
   // The process's declared governing equations (contract.math) — surfaced
-  // prominently, the same math the loom node cards lead with. No KaTeX on this
-  // page, so render as clean monospace equation lines (these contracts author
-  // math as readable one-liners, not heavy LaTeX).
+  // prominently, the same math the loom node cards lead with. The server
+  // pre-renders each equation to MathML (contract.math_mathml), which browsers
+  // display natively — so heavy LaTeX (\frac, \mathrm, \sum) shows as real math.
+  // _prettyMath is the fallback for an equation MathML couldn't render.
   // Prettify a contract.math one-liner toward a LaTeX-like reading WITHOUT a math
   // typesetter: relational/arrow operators become symbols, `*` a middle dot, and
   // single-letter-base `x_sub` tokens render as real subscripts (the physics
@@ -1673,8 +1674,17 @@
   function _mdEquations(c) {
     var m = (c && Array.isArray(c.math)) ? c.math : [];
     if (!m.length) return '';
+    var ml = (c && Array.isArray(c.math_mathml)) ? c.math_mathml : [];
     return '<div class="mdef-eqs"><div class="mdef-eqs-lbl">Equations</div>' +
-      m.map(function (e) { return '<div class="mdef-eq">' + _prettyMath(String(e)) + '</div>'; }).join('') +
+      m.map(function (e, i) {
+        // Insert the server-rendered MathML when present (trusted, authored by the
+        // process contract — not user input); fall back to prettified text.
+        var mml = ml[i];
+        var body = (typeof mml === 'string' && mml.lastIndexOf('<math', 0) === 0)
+          ? mml
+          : '<span class="mdef-eq-txt">' + _prettyMath(String(e)) + '</span>';
+        return '<div class="mdef-eq">' + body + '</div>';
+      }).join('') +
       '</div>';
   }
   // The symbols the equations use (contract.symbols: {sym: meaning}).

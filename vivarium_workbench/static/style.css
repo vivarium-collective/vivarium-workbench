@@ -6991,6 +6991,9 @@ body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]{
   padding:7px 13px; margin:0 0 5px; overflow-x:auto; white-space:nowrap; letter-spacing:0.01em; }
 .mdef-eq sub{ font-size:0.72em; line-height:0; vertical-align:-0.25em; }
 .mdef-eq sup{ font-size:0.72em; line-height:0; vertical-align:0.5em; }
+/* Server-rendered MathML (contract.math_mathml): browsers typeset it natively. */
+.mdef-eq math{ font-size:1.12em; }
+.mdef-eq-txt{ font-family:inherit; }
 .mdef-syms{ margin:9px 0 2px; }
 .mdef-sym-list{ display:grid; grid-template-columns:max-content 1fr; gap:3px 12px; margin:0; align-items:baseline; }
 .mdef-sym-list dt code{ font-size:0.82em; color:#3730a3; background:#eef2ff; padding:0 6px; border-radius:4px;

@@ -63,6 +63,26 @@ def _describe_class(cls: Any) -> str:
     return "" if _is_junk_doc(doc) else doc
 
 
+def _math_to_mathml(latex: str) -> str:
+    """Render one contract equation (LaTeX) to MathML for native browser display.
+
+    Server-side so the Model view needs no JS math lib and the read-only snapshot
+    renders offline. Returns '' on any failure (empty, unparseable, lib missing)
+    so a bad equation degrades to the client's plain-text fallback, never breaks
+    the payload. ``latex2mathml`` is pure-Python and import-light.
+    """
+    s = str(latex or "").strip()
+    if not s:
+        return ""
+    try:
+        from latex2mathml.converter import convert
+
+        out = convert(s, display="block")  # governing equations → displaystyle
+    except Exception:
+        return ""
+    return out if isinstance(out, str) and out.lstrip().startswith("<math") else ""
+
+
 def _contract_for_class(cls: Any) -> dict | None:
     """The structured ``.contract`` a process advertises (summary + governing
     equations + symbol key), expanded to the loom's ``_contract`` shape so the
@@ -85,11 +105,16 @@ def _contract_for_class(cls: Any) -> dict | None:
     # ProcessContract that declares them must have them carried through, not
     # dropped. `config` is forwarded too (the Contract type carries it). Keys the
     # contract omits default to empty on both sides (contract.ts `blankContract`).
+    math = list(c.get("math", []))
     return {
         "summary": c["summary"],
         "description": c.get("description") or c["summary"],
         "status": c.get("status", ""),
-        "math": list(c.get("math", [])),
+        "math": math,
+        # Pre-rendered MathML, one per equation (server-side, '' where it couldn't
+        # render). The Model view inserts these so heavy LaTeX (\frac, \sum, …)
+        # displays as real math instead of leaking raw source.
+        "math_mathml": [_math_to_mathml(m) for m in math],
         "symbols": dict(c.get("symbols", {})),
         "inputs": dict(c.get("inputs", {})),
         "outputs": dict(c.get("outputs", {})),

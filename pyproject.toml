@@ -18,6 +18,10 @@ dependencies = [
     "boto3>=1.34",
     "jinja2",
     "pyyaml",
+    # Server-side LaTeX -> MathML for the Model view's governing equations
+    # (lib/process_docs._math_to_mathml): browsers render MathML natively, so the
+    # read-only snapshot needs no client math lib and works offline.
+    "latex2mathml>=3.77",
     "jsonschema[format-nongpl]>=4.21",
     "pypdf>=4.0",
     "numpy",

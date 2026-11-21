@@ -3,7 +3,49 @@ from vivarium_workbench.lib.process_docs import (
     attach_process_docs,
     _doc_for_address,
     _contract_for_class,
+    _math_to_mathml,
 )
+
+
+class _WithLatexMath:
+    """A contract whose governing equations are heavy LaTeX (like the Tellurium
+    SBML bridge) — the case that used to leak raw \\frac onto the Model view."""
+
+    contract = {
+        "summary": "Integrates an SBML model.",
+        "math": [
+            r"\frac{dX}{dt} = f(X,\, p;\, t) = S\, v(X,\, p)",
+            r"X(t + \Delta t) = \mathrm{CVODE}\big(f,\, X(t),\, [t,\, t + \Delta t]\big)",
+            r"\text{coupled mode: } X_{n+1} = X_n + \textstyle\sum_i \big(X^{(i)} - X_n\big)",
+        ],
+    }
+
+
+# Tokens that mean LaTeX leaked through unrendered — none may survive into the
+# MathML the Model view inserts.
+_RAW_LATEX = (r"\frac", r"\mathrm", r"\sum", r"\Delta", r"\big", r"\text", r"\textstyle")
+
+
+def test_contract_math_renders_to_mathml_no_raw_latex():
+    """GUARD: heavy-LaTeX equations must render to MathML with no raw source left.
+
+    This is what keeps 'raw \\frac on the Model tab' from ever shipping again — a
+    regression here (lib removed, renderer broken) fails CI loudly.
+    """
+    c = _contract_for_class(_WithLatexMath)
+    assert c is not None
+    assert len(c["math_mathml"]) == len(c["math"])
+    for src, mathml in zip(c["math"], c["math_mathml"]):
+        assert mathml.lstrip().startswith("<math"), f"did not render to MathML: {src!r}"
+        for tok in _RAW_LATEX:
+            assert tok not in mathml, f"raw LaTeX {tok!r} leaked into MathML for {src!r}"
+
+
+def test_math_to_mathml_degrades_on_bad_input():
+    # Empty / unparseable input returns '' so the client falls back to plain text,
+    # never emitting a broken <math> fragment.
+    assert _math_to_mathml("") == ""
+    assert _math_to_mathml("   ") == ""
 
 
 class _WithFullContract:
