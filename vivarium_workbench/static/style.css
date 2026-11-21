@@ -7001,7 +7001,7 @@ body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]{
 .mdef-ant-src{ font-weight:500; text-transform:none; letter-spacing:0; color:var(--text-muted,#64748b); }
 .mdef-ant-pre{ margin:7px 0 0; padding:11px 14px; background:#0f172a; color:#e2e8f0; border-radius:7px;
   overflow:auto; font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace; font-size:0.8em;
-  line-height:1.55; max-height:440px; -webkit-overflow-scrolling:touch; }
+  line-height:1.55; height:460px; min-height:160px; resize:vertical; -webkit-overflow-scrolling:touch; }
 .mdef-ant-pre code{ white-space:pre; }
 :root[data-theme="dark"] .mdef-ant-pre{ background:#0b1220; }
 .mdef-syms{ margin:9px 0 2px; }

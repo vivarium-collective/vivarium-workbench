@@ -44,3 +44,14 @@ def test_model_antimony_open_by_default():
     # collapsible), not hidden behind a collapsed summary.
     js = SD.read_text(encoding="utf-8")
     assert 'details open class="mdef-ant"' in js
+
+
+STYLE = Path(__file__).resolve().parents[1] / "vivarium_workbench" / "static" / "style.css"
+
+
+def test_model_antimony_pane_is_resizable():
+    # The Antimony pane is user-resizable (drag to enlarge), not a fixed slice.
+    css = STYLE.read_text(encoding="utf-8")
+    i = css.find(".mdef-ant-pre{")
+    block = css[i:i + 400]
+    assert "resize:vertical" in block or "resize: vertical" in block
