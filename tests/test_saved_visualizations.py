@@ -14,7 +14,7 @@ import pytest
 
 from vivarium_workbench.lib.saved_visualizations import (
     build_saved_visualizations as _build_saved_visualizations,
-    parsimony_viewer_dir as _parsimony_viewer_dir,
+    contributed_viewer_bundle_dir as _contributed_viewer_bundle_dir,
 )
 
 
@@ -79,8 +79,6 @@ def test_empty_workspace(tmp_path):
     (ws / "workspace.yaml").write_text("name: empty\n")
     data = _build_saved_visualizations(ws)
     assert data["saved"] == []
-    # parsimony_available is a bool reflecting the optional dep.
-    assert isinstance(data["parsimony_available"], bool)
 
 
 def test_pack_without_meta_sidecar(tmp_path):
@@ -98,14 +96,16 @@ def test_pack_without_meta_sidecar(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _parsimony_viewer_dir
+# contributed_viewer_bundle_dir (generic — no package-specific knowledge)
 # ---------------------------------------------------------------------------
 
-def test_parsimony_viewer_dir_is_dir_or_none():
-    """Never raises; returns a real viewer dir (with index.html) or None when
-    the optional pbg_parsimony package is not installed."""
-    d = _parsimony_viewer_dir()
+def test_contributed_viewer_bundle_dir_is_dir_or_none():
+    """Never raises; returns a real bundle dir (``<package>/<subdir>/``) or None
+    when the package is absent / ships no such dir. A bogus package → None; a
+    bogus module name → None."""
+    assert _contributed_viewer_bundle_dir("no_such_package_xyz") is None
+    assert _contributed_viewer_bundle_dir("../etc") is None  # rejected name
+    d = _contributed_viewer_bundle_dir("viva_parsimony")  # may or may not be installed
     if d is not None:
         assert d.is_dir()
-        assert (d / "index.html").is_file()
         assert (d / "viewer.js").is_file()

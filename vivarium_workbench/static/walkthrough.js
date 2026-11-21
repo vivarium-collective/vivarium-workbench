@@ -2276,40 +2276,49 @@
 
   function _render3dVizCard(v) {
     // Snapshot base-path: in a hosted read-only bundle (e.g. /v2ecoli/dashboard)
-    // both the parsimony viewer assets and the saved pack live under the base
+    // both the viewer assets and the saved pack live under the base
     // path, so prefix both. basePath is "" in local mode, leaving URLs unchanged.
     var base = (window.DataSource && window.DataSource.basePath)
       ? window.DataSource.basePath()
       : ((window.__DASH_CONFIG__ && window.__DASH_CONFIG__.basePath) || "");
     var packUrl = base + v.pack_url;
     // An external viewer_url (e.g. assets hosted on Cloudflare R2) overrides the
-    // bundled gh-pages viewer + pack — used to dodge GitHub Pages rate-limiting
-    // for heavy packs. Configured via ui.viz_viewer_urls in workspace.yaml.
+    // bundled viewer + pack — used to dodge GitHub Pages rate-limiting for heavy
+    // packs. Configured via ui.viz_viewer_urls in workspace.yaml. Otherwise, if
+    // the workspace declares a local 3D-viewer bundle package (ui.viz_viewer_bundle
+    // → viewer_bundle_package), point the generic contributed-viewer route at the
+    // pack. The workbench names no specific viewer.
     var src = v.viewer_url
       ? v.viewer_url
-      : (base + '/parsimony-viewer/index.html?file=' + encodeURIComponent(packUrl));
+      : (v.viewer_bundle_package
+          ? (base + '/contributed-viewer/' + encodeURIComponent(v.viewer_bundle_package) +
+             '/index.html?file=' + encodeURIComponent(packUrl))
+          : null);
     var meta = [];
     if (v.study) meta.push('study: ' + _esc(v.study));
     if (v.n_placed) meta.push(Number(v.n_placed).toLocaleString() + ' instances');
-    // How the model was built. Server may supply a per-pack `description`;
-    // otherwise fall back to the default E. coli structural-model blurb.
+    // The contributing workspace/viewer supplies the real description; the
+    // workbench core keeps only a generic fallback blurb.
     var desc = v.description ||
-      'Generated from <strong>v2ecoli</strong>\'s whole-cell molecular state: the ' +
-      'simulated copy number of each protein and complex sets how many copies are ' +
-      'placed in the cell. Each species is mapped to a real 3D structure &mdash; ' +
-      'AlphaFold-predicted monomers plus curated experimental assemblies (e.g. the ' +
-      '70S ribosome and RNA polymerase) &mdash; and packed into a capsule-shaped ' +
-      'cell volume by the <strong>parsimony</strong> engine, a Rust cellPACK-style ' +
-      'packer (via pbg-parsimony). Colors group molecules by functional category.';
+      'A 3D molecular packing of the cell: each species’ simulated copy number ' +
+      'sets how many copies are placed, mapped to real 3D structures and packed ' +
+      'into the cell volume. Colors group molecules by functional category.';
+    // No viewer_url and no declared local bundle → the pack exists but there is
+    // no viewer to render it; show the card without a dead Open link / blank iframe.
+    var body = src
+      ? ('<iframe class="viz-embed" src="' + _esc(src) + '" loading="lazy" ' +
+         'style="width:100%;height:460px;border:1px solid #2a313c;border-radius:6px;background:#0e1116"></iframe>')
+      : ('<p class="muted" style="font-size:0.82em">No 3D viewer is configured for this ' +
+         'workspace. Set <code>ui.viz_viewer_urls</code> (hosted) or ' +
+         '<code>ui.viz_viewer_bundle</code> (a local viewer package) in workspace.yaml.</p>');
     return '<div class="analyses-card">' +
       '<div class="analyses-card-head">' +
         '<strong>' + _esc(v.name || '3D model') + '</strong>' +
-        '<a class="btn-mini" href="' + _esc(src) + '" target="_blank" rel="noopener" title="Open full-window in a new tab">Open &#8599;</a>' +
+        (src ? ('<a class="btn-mini" href="' + _esc(src) + '" target="_blank" rel="noopener" title="Open full-window in a new tab">Open &#8599;</a>') : '') +
       '</div>' +
       (meta.length ? '<div class="muted" style="font-size:0.82em;margin:2px 0 6px">' + meta.join(' &middot; ') + '</div>' : '') +
       '<p class="muted" style="font-size:0.85em;line-height:1.45;margin:2px 0 8px">' + desc + '</p>' +
-      '<iframe class="viz-embed" src="' + _esc(src) + '" loading="lazy" ' +
-        'style="width:100%;height:460px;border:1px solid #2a313c;border-radius:6px;background:#0e1116"></iframe>' +
+      body +
     '</div>';
   }
 
@@ -2439,16 +2448,18 @@
     return (window.__DASH_CONFIG__ || {}).mode === 'snapshot';
   }
 
-  // Build the parsimony-viewer src for a matched 3D study. Prefer a hosted
-  // viewer_url (assets on R2, dodging Pages rate-limits); else the bundled
-  // viewer pointed at the study's 3D models manifest.
-  function _build3dSrc(m) {
+  // Build the 3D-viewer src for a matched study. Prefer a hosted viewer_url
+  // (assets on R2, dodging Pages rate-limits); else, if the contributed viewer
+  // declares a bundle package, point the generic /contributed-viewer/<pkg>/
+  // route at the study's 3D models manifest. Returns null when neither exists.
+  function _build3dSrc(m, bundlePackage) {
     var base = _analysesBase();
     var ref = m.ref || m.study || '';
-    return m.viewer_url
-      ? m.viewer_url
-      : base + '/parsimony-viewer/index.html?models=' +
-          encodeURIComponent(base + '/api/study/' + encodeURIComponent(ref) + '/3d/models.json');
+    if (m.viewer_url) return m.viewer_url;
+    if (!bundlePackage) return null;
+    return base + '/contributed-viewer/' + encodeURIComponent(bundlePackage) +
+        '/index.html?models=' +
+        encodeURIComponent(base + '/api/study/' + encodeURIComponent(ref) + '/3d/models.json');
   }
 
   function _buildSimulariumSrc(m) {
@@ -2527,7 +2538,7 @@
   }
 
   // Open a tool's selected result full-window in a new tab. Per kind:
-  //   embed-3d       -> the (hosted or bundled) parsimony viewer for the study
+  //   embed-3d       -> the contributed 3D viewer (hosted viewer_url, else the
   //   launcher       -> the target's external href, else the live launch endpoint
   function _openTool(toolId, btn) {
     var t = _TOOLS_BY_ID[toolId]; if (!t) return;
@@ -2537,7 +2548,8 @@
     var idx = sel ? (parseInt(sel.value, 10) || 0) : 0;
     var m = items[idx] || items[0]; if (!m) return;
     if (t.kind === 'embed-3d') {
-      window.open(_build3dSrc(m), '_blank', 'noopener');
+      var src3d = _build3dSrc(m, t.bundle_package);
+      if (src3d) window.open(src3d, '_blank', 'noopener');
     } else if (t.kind === 'embed-simularium') {
       window.open(_buildSimulariumSrc(m), '_blank', 'noopener');
     } else {
@@ -2567,7 +2579,7 @@
     var countEl   = document.getElementById('viz-count');
     if (!container) return;
     // Tools-first Analysis Tools tab, backed by GET /api/analysis-tools: built-in
-    // tools (Parsimony Viewer) + external contributed viewers, each
+    // tools + contributed viewers (incl. the 3D viewer), each
     // capability-matched to the runs/studies that satisfy its `requires`. Snapshot
     // mode reads the static api/analysis-tools.json bundle file; live mode hits the
     // endpoint. Parse defensively via text() so a missing/HTML response degrades to

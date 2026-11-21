@@ -150,6 +150,7 @@ export interface SavedViz {
   n_placed: number | null;
   created: number | null;
   viewer_url: string | null;
+  viewer_bundle_package: string | null;
 }
 
 export interface ReportCard {
@@ -161,7 +162,6 @@ export interface ReportCard {
 }
 
 export interface SavedVisualizationsPayload {
-  parsimony_available: boolean;
   saved: SavedViz[];
   report_cards: ReportCard[];
 }

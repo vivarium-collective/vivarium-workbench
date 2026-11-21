@@ -118,20 +118,20 @@ def test_loom_bundle_missing_html_names_cause_and_path(monkeypatch):
     assert "missing" in html.lower()      # states the cause plainly
 
 
-def test_resolve_parsimony_asset_none_when_no_dir(monkeypatch):
-    monkeypatch.setattr(ss, "parsimony_viewer_dir", lambda: None)
-    assert ss.resolve_parsimony_asset("") is None
-    assert ss.resolve_parsimony_asset("foo.js") is None
+def test_resolve_contributed_viewer_asset_none_when_no_dir(monkeypatch):
+    monkeypatch.setattr(ss, "contributed_viewer_bundle_dir", lambda pkg, subdir="viewer": None)
+    assert ss.resolve_contributed_viewer_asset("viva_parsimony", "") is None
+    assert ss.resolve_contributed_viewer_asset("viva_parsimony", "foo.js") is None
 
 
-def test_resolve_parsimony_asset_serves_when_present(monkeypatch):
+def test_resolve_contributed_viewer_asset_serves_when_present(monkeypatch):
     fake_dir = Path("/tmp/pv")
-    monkeypatch.setattr(ss, "parsimony_viewer_dir", lambda: fake_dir)
-    assert ss.resolve_parsimony_asset("") == fake_dir / "index.html"
-    assert ss.resolve_parsimony_asset("viz/x.js") == fake_dir / "viz/x.js"
+    monkeypatch.setattr(ss, "contributed_viewer_bundle_dir", lambda pkg, subdir="viewer": fake_dir)
+    assert ss.resolve_contributed_viewer_asset("viva_parsimony", "") == fake_dir / "index.html"
+    assert ss.resolve_contributed_viewer_asset("viva_parsimony", "viz/x.js") == fake_dir / "viz/x.js"
 
 
-def test_resolve_parsimony_asset_traversal_rejected(monkeypatch):
-    monkeypatch.setattr(ss, "parsimony_viewer_dir", lambda: Path("/tmp/pv"))
+def test_resolve_contributed_viewer_asset_traversal_rejected(monkeypatch):
+    monkeypatch.setattr(ss, "contributed_viewer_bundle_dir", lambda pkg, subdir="viewer": Path("/tmp/pv"))
     with pytest.raises(ss.AssetTraversal):
-        ss.resolve_parsimony_asset("../etc")
+        ss.resolve_contributed_viewer_asset("viva_parsimony", "../etc")

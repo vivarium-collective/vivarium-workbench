@@ -12,27 +12,34 @@ def test_match_requires_subset():
     got2 = at.match(["fluxes"], cands)
     assert {m["ref"] for m in got2} == {"r1"}
 
-def test_builtin_tools_declare_requires():
-    ids = {t["id"]: t for t in at.builtin_tools()}
-    # Data Explorer was removed from the core built-ins; every remaining
-    # built-in still declares its capability requirement.
+def test_builtin_tools_have_no_parsimony():
+    ids = {t["id"] for t in at.builtin_tools()}
+    # The 3D (parsimony) viewer is NOT a core built-in any more — it is a
+    # contributed module (a package's workbench_viewers). Data Explorer was also
+    # removed from the core built-ins. Every remaining built-in still declares
+    # its capability requirement.
+    assert "parsimony-viewer" not in ids
     assert "data-explorer" not in ids
-    assert ids["parsimony-viewer"]["requires"] == ["3d_pack"]
     assert all(t.get("requires") for t in at.builtin_tools())
 
-def test_build_composes_external_and_builtin(monkeypatch):
+def test_contributed_3d_viewer_matches_pack_capability(monkeypatch):
+    # A contributed embed-3d viewer (requires ["3d_pack"]) is matched against the
+    # pack candidates — exactly how the old built-in was — so it surfaces
+    # wherever a study has a 3D pack. A no-requires contributed viewer keeps its
+    # own targets verbatim.
     monkeypatch.setattr(at, "viewers_public",
-        lambda ws: [{"id": "omics", "title": "Omics", "requires": [],
+        lambda ws: [{"id": "ecoli-3d-viewer", "title": "3D E. coli viewer",
+                     "kind": "embed-3d", "requires": ["3d_pack"],
+                     "bundle_package": "viva_parsimony"},
+                    {"id": "omics", "title": "Omics", "requires": [],
                      "targets": [{"study": "s1", "label": "s1"}]}])
     monkeypatch.setattr(at, "_run_candidates",
         lambda ws: [{"ref": "run1", "label": "run1", "capabilities": ["observables"]}])
     monkeypatch.setattr(at, "_pack_candidates",
         lambda ws: [{"ref": "ecoli-3d", "label": "ecoli-3d", "capabilities": ["3d_pack"]}])
     tools = {t["id"]: t for t in at.build_analysis_tools("/ws")}
-    # external tool with no requires keeps its targets verbatim
+    assert {m["ref"] for m in tools["ecoli-3d-viewer"]["matched"]} == {"ecoli-3d"}
     assert tools["omics"]["matched"] == [] and tools["omics"]["targets"]
-    # parsimony matched the 3d_pack study
-    assert {m["ref"] for m in tools["parsimony-viewer"]["matched"]} == {"ecoli-3d"}
 
 def test_run_candidates_reads_simulations_key(monkeypatch):
     monkeypatch.setattr(at, "build_simulations_data", lambda ws: {
@@ -48,42 +55,29 @@ def test_run_candidates_reads_simulations_key(monkeypatch):
     assert {c["ref"] for c in cands} == {"r1", "r2"}
     assert {c["ref"] for c in cands if "observables" in c["capabilities"]} == {"r1"}
 
-def test_builtin_skipped_when_capability_absent(monkeypatch):
-    # A built-in whose required capability isn't present in the workspace (here:
-    # no 3d_pack for the Parsimony Viewer) is skipped entirely, not shown as a
-    # dead "No compatible runs" card — so domain-specific tools don't clutter
+def test_contributed_viewer_skipped_when_capability_absent(monkeypatch):
+    # A contributed viewer whose required capability isn't present in the
+    # workspace (here: no 3d_pack) is skipped entirely, not shown as a dead
+    # "No compatible runs" card — so domain-specific tools don't clutter
     # unrelated workspaces.
-    monkeypatch.setattr(at, "viewers_public", lambda ws: [])
+    monkeypatch.setattr(at, "viewers_public",
+        lambda ws: [{"id": "ecoli-3d-viewer", "requires": ["3d_pack"],
+                     "kind": "embed-3d", "bundle_package": "viva_parsimony"}])
     monkeypatch.setattr(at, "build_simulations_data", lambda ws: {
         "simulations": [{"run_id": "r1", "label": "run one",
                          "emitter_type": "XArray", "capabilities": ["observables"]}],
         "current": None})
     monkeypatch.setattr(at, "_pack_candidates", lambda ws: [])  # no 3d pack
-    tools = {t["id"]: t for t in at.build_analysis_tools("/ws")}
-    assert "parsimony-viewer" not in tools  # skipped: no 3d_pack in this workspace
+    tools = {t["id"] for t in at.build_analysis_tools("/ws")}
+    assert "ecoli-3d-viewer" not in tools  # skipped: no 3d_pack in this workspace
 
-
-def test_contributed_3d_duplicate_dropped_in_favor_of_native(monkeypatch):
-    # A contributed viewer whose targets are ALL 3D-pack studies duplicates the
-    # native Parsimony Viewer (which always resolves a working viewer). Drop the
-    # contributed one; keep the built-in — exactly one, always-working 3D card.
+def test_non_3d_contributed_viewer_kept_alongside_3d(monkeypatch):
+    # A non-3D contributed viewer (Omics, no requires) and a contributed 3D
+    # viewer (requires 3d_pack) coexist — there is no dedup; the contributed 3D
+    # viewer is THE 3D card.
     monkeypatch.setattr(at, "viewers_public", lambda ws: [
-        {"id": "ecoli-3d", "title": "3D E. coli viewer", "requires": [],
-         "targets": [{"study": "ecoli-3d", "label": "ecoli-3d",
-                      "detail": "1,302,935 molecules placed"}]},
-    ])
-    monkeypatch.setattr(at, "_run_candidates", lambda ws: [])
-    monkeypatch.setattr(at, "_pack_candidates",
-        lambda ws: [{"ref": "ecoli-3d", "label": "ecoli-3d", "capabilities": ["3d_pack"]}])
-    ids = [t["id"] for t in at.build_analysis_tools("/ws")]
-    assert "ecoli-3d" not in ids          # contributed duplicate dropped
-    assert "parsimony-viewer" in ids      # native viewer kept
-
-
-def test_non_3d_contributed_viewer_not_dropped(monkeypatch):
-    # A contributed viewer targeting a NON-pack study (e.g. Omics) is not a 3D
-    # duplicate and must survive.
-    monkeypatch.setattr(at, "viewers_public", lambda ws: [
+        {"id": "ecoli-3d-viewer", "requires": ["3d_pack"], "kind": "embed-3d",
+         "bundle_package": "viva_parsimony"},
         {"id": "pathway-tools", "title": "Omics", "requires": [],
          "targets": [{"study": "showcase", "label": "showcase"}]},
     ])
@@ -91,29 +85,19 @@ def test_non_3d_contributed_viewer_not_dropped(monkeypatch):
     monkeypatch.setattr(at, "_pack_candidates",
         lambda ws: [{"ref": "ecoli-3d", "label": "ecoli-3d", "capabilities": ["3d_pack"]}])
     ids = [t["id"] for t in at.build_analysis_tools("/ws")]
-    assert "pathway-tools" in ids         # non-3D viewer kept
-    assert "parsimony-viewer" in ids      # native 3D viewer also present
+    assert "pathway-tools" in ids
+    assert "ecoli-3d-viewer" in ids
 
-
-def test_parsimony_viewer_kept_when_no_contributed_3d_viewer(monkeypatch):
-    # With packs but no contributed viewer covering them, the built-in Parsimony
-    # Viewer is the native fallback and IS shown.
-    monkeypatch.setattr(at, "viewers_public", lambda ws: [])
-    monkeypatch.setattr(at, "_run_candidates", lambda ws: [])
-    monkeypatch.setattr(at, "_pack_candidates",
-        lambda ws: [{"ref": "ecoli-3d", "label": "ecoli-3d", "capabilities": ["3d_pack"]}])
-    tools = {t["id"]: t for t in at.build_analysis_tools("/ws")}
-    assert {m["ref"] for m in tools["parsimony-viewer"]["matched"]} == {"ecoli-3d"}
-
-
-def test_workspace_can_exclude_a_tool(monkeypatch):
+def test_workspace_can_exclude_a_contributed_viewer(monkeypatch):
     # A workspace opts a tool out via ui.analysis_tools_exclude — the suppressed
-    # tool is dropped from BOTH the contributed-viewer and built-in branches even
-    # when it otherwise matches. Here sms-ecoli suppresses the Parsimony Viewer
-    # while keeping a 3d_pack (so it WOULD match without the exclude).
-    monkeypatch.setattr(at, "_excluded_tool_ids", lambda ws: {"parsimony-viewer", "omics"})
+    # contributed viewer is dropped even when it otherwise matches (here the 3D
+    # viewer, despite a 3d_pack).
+    monkeypatch.setattr(at, "_excluded_tool_ids",
+                        lambda ws: {"ecoli-3d-viewer", "omics"})
     monkeypatch.setattr(at, "viewers_public",
-        lambda ws: [{"id": "omics", "title": "Omics", "requires": [],
+        lambda ws: [{"id": "ecoli-3d-viewer", "requires": ["3d_pack"],
+                     "kind": "embed-3d", "bundle_package": "viva_parsimony"},
+                    {"id": "omics", "title": "Omics", "requires": [],
                      "targets": [{"study": "s1", "label": "s1"}]},
                     {"id": "pathway-tools", "title": "PTools", "requires": [],
                      "targets": [{"study": "s1", "label": "s1"}]}])
@@ -121,17 +105,15 @@ def test_workspace_can_exclude_a_tool(monkeypatch):
     monkeypatch.setattr(at, "_pack_candidates",
         lambda ws: [{"ref": "ecoli-3d", "label": "ecoli-3d", "capabilities": ["3d_pack"]}])
     ids = {t["id"] for t in at.build_analysis_tools("/ws")}
-    assert "parsimony-viewer" not in ids   # built-in suppressed despite a 3d_pack
-    assert "omics" not in ids               # contributed viewer suppressed
-    assert "pathway-tools" in ids           # a non-excluded viewer still shows
-
+    assert "ecoli-3d-viewer" not in ids   # contributed 3D viewer suppressed despite a pack
+    assert "omics" not in ids              # contributed viewer suppressed
+    assert "pathway-tools" in ids          # a non-excluded viewer still shows
 
 def test_no_exclude_by_default(monkeypatch, tmp_path):
     # Missing/blank ui.analysis_tools_exclude → nothing suppressed (default).
     (tmp_path / "workspace.yaml").write_text("name: x\nui: {}\n")
     assert at._excluded_tool_ids(tmp_path) == set()
     assert at._excluded_tool_ids(tmp_path / "nonexistent") == set()
-
 
 def test_run_label_strips_module_prefix():
     # a run's dropdown label should be the concise, unique id — not the verbose

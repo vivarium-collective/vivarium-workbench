@@ -841,19 +841,22 @@ def test_stage_report_cards_copies_and_prefixes(tmp_path):
 # Analyses-tab saved-visualizations export (parsimony 3D gallery)
 # ---------------------------------------------------------------------------
 
-def _pbg_parsimony_available() -> bool:
-    import importlib.util
-    try:
-        return importlib.util.find_spec("pbg_parsimony") is not None
-    except Exception:
-        return False
+def _viewer_bundle_available() -> bool:
+    # The generic contributed-viewer bundle (viva_parsimony ships viewer/).
+    from vivarium_workbench.lib.saved_visualizations import contributed_viewer_bundle_dir
+    return contributed_viewer_bundle_dir("viva_parsimony") is not None
 
 
 @pytest.fixture
 def ws_with_saved_pack(tmp_workspace):
-    """Add a stub study with a saved parsimony 3D pack (+ meta + meshes) to the
-    shared workspace. The pack's mesh LOD urls are workspace-rooted-relative
-    (as pbg-parsimony writes them)."""
+    """Add a stub study with a saved 3D pack (+ meta + meshes) to the shared
+    workspace, and declare the local viewer bundle (ui.viz_viewer_bundle) so the
+    publish bakes it in. The pack's mesh LOD urls are workspace-rooted-relative
+    (as the packer writes them)."""
+    wy = tmp_workspace / "workspace.yaml"
+    cfg = yaml.safe_load(wy.read_text()) if wy.exists() else {}
+    cfg.setdefault("ui", {})["viz_viewer_bundle"] = "viva_parsimony"
+    wy.write_text(yaml.safe_dump(cfg))
     sd = tmp_workspace / "studies" / "x" / "viz" / "3d"
     sd.mkdir(parents=True)
     # A stub study.yaml (no variants/composite) — exists only to host viz assets.
@@ -881,11 +884,11 @@ def ws_with_saved_pack(tmp_workspace):
     return tmp_workspace
 
 
-@pytest.mark.skipif(not _pbg_parsimony_available(),
-                    reason="pbg_parsimony not installed")
+@pytest.mark.skipif(not _viewer_bundle_available(),
+                    reason="viva_parsimony viewer bundle not installed")
 def test_build_bundle_exports_saved_visualizations(ws_with_saved_pack, tmp_path):
     """build_bundle with a base path writes the saved-visualizations API JSON,
-    copies the parsimony viewer assets, copies the pack + meta + meshes
+    bakes the declared contributed-viewer bundle, copies the pack + meta + meshes
     preserving the studies/<name>/viz/3d path, and rewrites the copied pack's
     mesh urls to be base-path-prefixed (so the viewer's resolveMeshUrl, which
     prepends '/', resolves them under the hosting base path)."""
@@ -896,17 +899,18 @@ def test_build_bundle_exports_saved_visualizations(ws_with_saved_pack, tmp_path)
 
     # api/saved-visualizations.json lists the stub study's pack.
     sv = json.loads((out / "api" / "saved-visualizations.json").read_text())
-    assert sv["parsimony_available"] is True
     saved = sv["saved"]
     assert any(e["study"] == "x" for e in saved)
     entry = next(e for e in saved if e["study"] == "x")
     # pack_url/meta_url stay workspace-rooted-absolute; the frontend prefixes base.
     assert entry["pack_url"] == "/studies/x/viz/3d/scene.pack.json"
     assert entry["meta_url"] == "/studies/x/viz/3d/scene.meta.json"
+    # the declared viewer bundle package is carried on the entry
+    assert entry["viewer_bundle_package"] == "viva_parsimony"
 
-    # Parsimony viewer assets copied.
-    assert (out / "parsimony-viewer" / "index.html").is_file()
-    assert (out / "parsimony-viewer" / "viewer.js").is_file()
+    # Contributed viewer bundle baked in generically (no parsimony-named path).
+    assert (out / "contributed-viewer" / "viva_parsimony" / "index.html").is_file()
+    assert (out / "contributed-viewer" / "viva_parsimony" / "viewer.js").is_file()
 
     # Pack + meta + meshes copied preserving the studies/<name>/viz/3d path.
     dst_pack = out / "studies" / "x" / "viz" / "3d" / "scene.pack.json"
@@ -923,8 +927,8 @@ def test_build_bundle_exports_saved_visualizations(ws_with_saved_pack, tmp_path)
     assert not lods[0]["url"].startswith("/")
 
 
-@pytest.mark.skipif(not _pbg_parsimony_available(),
-                    reason="pbg_parsimony not installed")
+@pytest.mark.skipif(not _viewer_bundle_available(),
+                    reason="viva_parsimony viewer bundle not installed")
 def test_build_bundle_saved_viz_root_hosting(ws_with_saved_pack, tmp_path):
     """With an empty base path (root hosting) the copied pack's mesh urls stay
     workspace-rooted-relative (resolveMeshUrl → /studies/...obj at the root)."""

@@ -404,7 +404,6 @@ def test_saved_visualizations_empty(client):
 
 def test_saved_visualizations_typed(client, monkeypatch):
     payload = {
-        "parsimony_available": True,
         "saved": [{"study": "s1", "name": "ecoli_3d",
                    "pack_url": "/studies/s1/viz/3d/ecoli_3d.pack.json",
                    "meta_url": None, "n_placed": 1200, "created": 1700000000,
@@ -416,7 +415,6 @@ def test_saved_visualizations_typed(client, monkeypatch):
     monkeypatch.setattr(api_app._saved_viz, "build_saved_visualizations",
                         lambda ws: payload)
     b = client.get("/api/saved-visualizations").json()
-    assert b["parsimony_available"] is True
     sv = b["saved"][0]
     assert sv["name"] == "ecoli_3d" and sv["n_placed"] == 1200
     assert sv["viewer_url"] == "http://x"
@@ -3163,17 +3161,21 @@ class TestStaticRoutes:
         # A missing *asset* (not the HTML entry) still 404s — only the entry is guarded.
         assert client.get("/bigraph-loom/assets/index.js").status_code == 404
 
-    def test_parsimony_404_when_no_dir(self, client, monkeypatch):
-        monkeypatch.setattr(api_app._static_serving, "parsimony_viewer_dir", lambda: None)
-        r = client.get("/parsimony-viewer/")
+    def test_contributed_viewer_404_when_no_dir(self, client, monkeypatch):
+        monkeypatch.setattr(api_app._static_serving,
+                            "contributed_viewer_bundle_dir",
+                            lambda pkg, subdir="viewer": None)
+        r = client.get("/contributed-viewer/viva_parsimony/")
         assert r.status_code == 404
 
-    def test_parsimony_serves_when_present(self, client, tmp_path, monkeypatch):
+    def test_contributed_viewer_serves_when_present(self, client, tmp_path, monkeypatch):
         pv = tmp_path / "pv"
         pv.mkdir()
         (pv / "index.html").write_text("<pv/>")
-        monkeypatch.setattr(api_app._static_serving, "parsimony_viewer_dir", lambda: pv)
-        r = client.get("/parsimony-viewer/")
+        monkeypatch.setattr(api_app._static_serving,
+                            "contributed_viewer_bundle_dir",
+                            lambda pkg, subdir="viewer": pv)
+        r = client.get("/contributed-viewer/viva_parsimony/")
         assert r.status_code == 200
         assert r.text == "<pv/>"
         assert r.headers["cache-control"] == "no-store"
