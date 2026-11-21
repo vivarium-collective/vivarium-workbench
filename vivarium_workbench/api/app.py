@@ -158,6 +158,49 @@ from vivarium_workbench.lib import study_variants as _study_variants
 from vivarium_workbench.lib.composite_resolve import resolve_composite_for_request, _degraded_result
 from vivarium_workbench.lib import composite_config_adapt as _composite_config_adapt
 from vivarium_workbench.lib.composites_query import composites_via_subprocess
+from vivarium_workbench.lib.json_serialize import _json_default, _json_sanitize
+
+
+class SanitizedJSONResponse(JSONResponse):
+    """A ``JSONResponse`` that can serialize composite run results.
+
+    Study/composite *run* handlers return a result dict that can embed values
+    ``json.dumps`` cannot encode natively — numpy arrays/scalars emitted by a
+    composite's state, plus non-finite floats (inf/nan). Starlette's stock
+    ``JSONResponse.render`` calls ``json.dumps`` with no ``default=`` and
+    ``allow_nan=False``, so such a body raises ``TypeError: Object of type
+    ndarray is not JSON serializable`` (or ``ValueError`` on a non-finite
+    float), surfacing as a 500 on e.g. ``POST /api/study-run-baseline`` even
+    though the run itself succeeded and runs.db was written.
+
+    This subclass renders with ``default=_json_default`` (numpy / Path / set /
+    dataclass fallback) and, if a non-finite float still trips ``allow_nan=
+    False``, falls back to a ``_json_sanitize`` pass (inf/nan → null). Every
+    other kwarg matches Starlette's ``JSONResponse.render`` exactly
+    (``ensure_ascii=False``, ``allow_nan=False``, compact separators), so the
+    wire bytes are byte-identical for any body that already serialized — it
+    only ADDS the ability to encode numpy/non-finite payloads.
+    """
+
+    def render(self, content) -> bytes:  # type: ignore[override]
+        try:
+            return json.dumps(
+                content,
+                ensure_ascii=False,
+                allow_nan=False,
+                indent=None,
+                separators=(",", ":"),
+                default=_json_default,
+            ).encode("utf-8")
+        except ValueError:
+            return json.dumps(
+                _json_sanitize(content),
+                ensure_ascii=False,
+                allow_nan=False,
+                indent=None,
+                separators=(",", ":"),
+                default=_json_default,
+            ).encode("utf-8")
 from vivarium_workbench.lib.models import (
     BackendFeatures,
     BibEntry,
@@ -7142,7 +7185,7 @@ def create_app() -> FastAPI:
           - 200  run-result dict
         """
         body, status = _study_runs.run_study_baseline(ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
+        return SanitizedJSONResponse(status_code=status, content=body)
 
     @app.post(
         "/api/study-reproduce",
@@ -7174,7 +7217,7 @@ def create_app() -> FastAPI:
           - 200/202  new run's launch-result dict, plus ``origin``/``reran``
         """
         body, status = _rerun.run_rerun(ws, req.run_id)
-        return JSONResponse(status_code=status, content=body)
+        return SanitizedJSONResponse(status_code=status, content=body)
 
     @app.post(
         "/api/study-run-variant",
@@ -7202,7 +7245,7 @@ def create_app() -> FastAPI:
           - 200  run-result dict
         """
         body, status = _study_runs.run_study_variant(ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
+        return SanitizedJSONResponse(status_code=status, content=body)
 
     @app.post(
         "/api/investigation-rerun",
@@ -7231,7 +7274,7 @@ def create_app() -> FastAPI:
         known) member studies.
         """
         body, status = _rerun.rerun_investigation(ws, req.investigation)
-        return JSONResponse(status_code=status, content=body)
+        return SanitizedJSONResponse(status_code=status, content=body)
 
     @app.post(
         "/api/investigation-resolve",
