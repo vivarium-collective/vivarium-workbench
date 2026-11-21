@@ -631,6 +631,14 @@ def discover_declared_figure_charts(study_dir: Path,
         try:
             if fig.name == "model-loom.html" or not fig.is_file():
                 continue  # model-loom is reserved for the Model section
+            # viz/report_card/<card>.html are the Tests-tab report cards
+            # (verdict pills + Δ meters, rendered by report_card_section.render_
+            # report_cards_section). They are NOT visualizations — swept up here
+            # they showed as blank "CHART <verdict-name>" iframes in the
+            # Visualizations tab (live dashboard AND the published snapshot).
+            # Keep them out of the charts list; they still render in Tests.
+            if "report_card" in fig.relative_to(viz_dir).parts:
+                continue
             resolved = fig.resolve()
             if resolved in seen_paths or fig.stem in seen_keys:
                 continue
