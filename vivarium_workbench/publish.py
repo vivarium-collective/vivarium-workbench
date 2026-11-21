@@ -789,6 +789,7 @@ def build_bundle(
     *,
     interactive_url: str = "",
     base_path: str = "",
+    strict: bool = False,
 ) -> dict:
     """Export the workspace at *ws_root* into a static bundle at *out_dir*.
 
@@ -832,6 +833,7 @@ def build_bundle(
         ws_root, out_dir,
         interactive_url=interactive_url,
         base_path=base_path,
+        strict=strict,
     )
 
 
@@ -841,6 +843,7 @@ def _do_build(
     *,
     interactive_url: str = "",
     base_path: str = "",
+    strict: bool = False,
 ) -> dict:
     """Internal build routine — reads the workspace at ws_root via lib fns."""
     from vivarium_workbench.lib.static_serving import STATIC_DIR
@@ -950,6 +953,36 @@ def _do_build(
             na_body = {"investigation": inv_name, "items": [],
                        "summary": {"by_severity": {}, "by_kind": {}, "total": 0}}
         _write_json(api_dir / "needs-attention" / f"{inv_name}.json", na_body)
+
+    # api/study-completeness/<inv>.json + the WARN/REFUSE gate. The study-
+    # completeness gate flags a study that LOOKS done but is inconsistent
+    # (claims done with no runs; completed but verdict pending; declares a
+    # composite that doesn't resolve). The engine owns rules 1-2 (lint findings);
+    # this computes rule 3 (unresolvable composite) and bakes the combined per-
+    # investigation signal so the published investigation page can render a
+    # banner. Always a loud WARN (summary + GitHub Actions ::warning:: lines);
+    # under --strict / VIVARIUM_WORKBENCH_PUBLISH_STRICT it REFUSES the publish
+    # (raised at the end of the build, so the bundle is fully built for
+    # inspection but the CLI exits non-zero and the deploy step is skipped).
+    _completeness_strict_violation = None
+    try:
+        from vivarium_workbench.lib import study_completeness as _sc
+        _sc_result = _sc.collect(ws_root)
+        (api_dir / "study-completeness").mkdir(parents=True, exist_ok=True)
+        _by_inv = _sc_result.get("by_investigation", {})
+        for inv_name in investigations:
+            _write_json(
+                api_dir / "study-completeness" / f"{inv_name}.json",
+                {"investigation": inv_name, "findings": _by_inv.get(inv_name, [])},
+            )
+        for _line in _sc.summary_lines(_sc_result):
+            print(f"  {_line}")
+        for _ann in _sc.ci_annotations(_sc_result):
+            print(_ann)
+        if _sc_result.get("total", 0) and _sc.is_strict(strict):
+            _completeness_strict_violation = _sc_result
+    except Exception as exc:  # noqa: BLE001 — gate is best-effort; never crash the build on it
+        print(f"  warn: study-completeness gate failed: {exc}")
 
     # reports/investigation-<slug>.html — pre-rendered investigation reports. In
     # the live app these come from GET /api/investigation-report/<slug>; in the
@@ -1691,6 +1724,19 @@ def _do_build(
         json.dumps(config, indent=2), encoding="utf-8"
     )
 
+    # --strict / VIVARIUM_WORKBENCH_PUBLISH_STRICT: REFUSE a publish that carries
+    # any study-completeness finding. Raised AFTER the full build so the bundle
+    # exists for inspection, but the CLI exits non-zero (the deploy step is
+    # gated on a clean build). Default (no strict) already WARNed above.
+    if _completeness_strict_violation is not None:
+        n = _completeness_strict_violation.get("total", 0)
+        by = _completeness_strict_violation.get("by_check", {})
+        raise RuntimeError(
+            f"study-completeness gate (--strict): refusing publish — {n} finding(s) "
+            + ", ".join(f"{k}={v}" for k, v in sorted(by.items()))
+            + ". Resolve them, or publish without --strict to ship with a warning banner."
+        )
+
     return {
         "investigations": investigations,
         "studies":        studies,
@@ -1737,11 +1783,21 @@ def main(argv=None):
             "correctly.  Default '' keeps root-absolute (domain-root) behavior."
         ),
     )
+    parser.add_argument(
+        "--strict", action="store_true",
+        help=(
+            "Treat study-completeness findings (a study that looks done but is "
+            "inconsistent) as a publish-blocking error: refuse the publish instead "
+            "of shipping with a warning banner. Also enabled by "
+            "VIVARIUM_WORKBENCH_PUBLISH_STRICT=1."
+        ),
+    )
     args = parser.parse_args(argv)
     summary = build_bundle(
         Path(args.workspace), Path(args.out),
         interactive_url=args.interactive_url,
         base_path=args.base_path,
+        strict=args.strict,
     )
     print(json.dumps(summary, indent=2))
 
