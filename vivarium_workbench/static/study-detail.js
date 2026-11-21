@@ -1697,6 +1697,15 @@
         return '<dt><code>' + _esc(k) + '</code></dt><dd>' + _esc(String(s[k])) + '</dd>';
       }).join('') + '</dl></div>';
   }
+  // The model's Antimony source (p._antimony {text, format, source}), attached by
+  // the server for any model-bearing process — collapsed by default, monospace.
+  function _mdAntimony(p) {
+    var a = p && p._antimony;
+    if (!a || !a.text) return '';
+    var src = a.source ? ' <span class="mdef-ant-src">· ' + _esc(String(a.source)) + '</span>' : '';
+    return '<details class="mdef-ant"><summary class="mdef-ant-lbl">Antimony' + src + '</summary>' +
+      '<pre class="mdef-ant-pre"><code>' + _esc(String(a.text)) + '</code></pre></details>';
+  }
   function _modelDefHtml(d) {
     d = d || {};
     var state = (d.state && typeof d.state === 'object') ? d.state : {};
@@ -1743,6 +1752,7 @@
           _mdPorts(p.outputs, '→') + '</span></div></div>' +
         (cfgStr ? '<div class="mdef-io-row"><span class="mdef-io-lbl">config</span><span class="mdef-io-ports">' + cfgStr + '</span></div>' : '') +
         _mdSymbols(contract) +
+        _mdAntimony(p) +
         '</div>';
     }).join('');
 

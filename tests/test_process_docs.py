@@ -48,6 +48,37 @@ def test_math_to_mathml_degrades_on_bad_input():
     assert _math_to_mathml("   ") == ""
 
 
+from vivarium_workbench.lib.process_docs import attach_model_antimony
+
+
+def test_attach_model_antimony_inline_config():
+    # A process whose config IS the Antimony (model_format=antimony) gets it shown
+    # verbatim — no files, no converter needed.
+    doc = {"tell": {"_type": "process", "address": "local:T",
+                    "config": {"model": "S1 -> S2; k = 0.3", "model_format": "antimony"}}}
+    attach_model_antimony("/nonexistent", doc)
+    assert doc["tell"]["_antimony"]["format"] == "antimony"
+    assert "S1 -> S2" in doc["tell"]["_antimony"]["text"]
+
+
+def test_attach_model_antimony_prefers_sibling_ant(tmp_path):
+    # An SBML model_file with a sibling .ant shows the human-authored Antimony,
+    # and resolves by basename even when the stored path is absolute/stale.
+    (tmp_path / "m.xml").write_text("<sbml/>", encoding="utf-8")
+    (tmp_path / "m.ant").write_text("S1 -> S2; k = 0.3", encoding="utf-8")
+    doc = {"tell": {"_type": "process",
+                    "config": {"model_file": "/stale/ci/path/m.xml", "model_format": "sbml"}}}
+    attach_model_antimony(tmp_path, doc)
+    assert "S1 -> S2" in doc["tell"]["_antimony"]["text"]
+    assert doc["tell"]["_antimony"]["source"].endswith(".ant")
+
+
+def test_attach_model_antimony_absent_when_no_model():
+    doc = {"math": {"_type": "process", "config": {"expressions": []}}}
+    attach_model_antimony("/x", doc)
+    assert "_antimony" not in doc["math"]
+
+
 class _WithFullContract:
     """A class declaring a full (plain-dict) contract, like a ProcessContract.to_dict()."""
 

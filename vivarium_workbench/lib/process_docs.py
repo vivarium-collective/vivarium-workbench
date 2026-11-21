@@ -16,7 +16,9 @@ this can never break the composite-state response.
 from __future__ import annotations
 
 import importlib
+import os
 import re
+from pathlib import Path
 from typing import Any
 
 # A Composite Process built via ``type(name, bases, dict)`` (and some builtins)
@@ -205,6 +207,105 @@ def attach_process_docs(doc: Any) -> Any:
                 # equations), live — the same contract the static figures bake in.
                 if contract and "_contract" not in node:
                     node["_contract"] = contract
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    try:
+        walk(doc)
+    except Exception:
+        pass
+    return doc
+
+
+def _resolve_ws_file(ws_root: Any, model_file: str) -> "Path | None":
+    """Resolve a config ``model_file`` to a real path. The stored path is often
+    absolute from another machine/CI (``/home/runner/…``), so fall back to matching
+    its basename anywhere under the workspace."""
+    try:
+        p = Path(model_file)
+        if p.is_file():
+            return p
+        name = os.path.basename(str(model_file))
+        if not name:
+            return None
+        for cand in Path(ws_root).rglob(name):
+            if cand.is_file():
+                return cand
+    except Exception:
+        return None
+    return None
+
+
+def _sbml_to_antimony(sbml_text: str) -> str:
+    """Convert SBML text to Antimony, or '' if no converter is available. Prefers
+    libantimony (light) over tellurium (heavy); both are optional."""
+    s = str(sbml_text or "")
+    if "<sbml" not in s:
+        return ""
+    try:
+        import antimony as _sb  # libantimony
+
+        if _sb.loadSBMLString(s) < 0:
+            return ""
+        return _sb.getAntimonyString() or ""
+    except Exception:
+        pass
+    try:
+        import tellurium as _te
+
+        return _te.sbmlToAntimony(s) or ""
+    except Exception:
+        return ""
+
+
+def _antimony_for_config(ws_root: Any, config: Any) -> "dict | None":
+    """Derive the human-readable Antimony for a process's model config, or None.
+
+    Order: inline Antimony in config → a model file (preferring a sibling ``.ant``,
+    else converting the SBML) → an inline SBML string. Pure/best-effort."""
+    if not isinstance(config, dict):
+        return None
+    model = config.get("model")
+    fmt = str(config.get("model_format") or "").lower()
+    model_file = config.get("model_file")
+    if isinstance(model, str) and model.strip() and fmt == "antimony":
+        return {"format": "antimony", "text": model.strip(), "source": "config"}
+    if isinstance(model_file, str) and model_file.strip():
+        p = _resolve_ws_file(ws_root, model_file)
+        if p is not None:
+            try:
+                sibling = p.with_suffix(".ant")
+                if sibling.is_file():
+                    return {"format": "antimony", "text": sibling.read_text(encoding="utf-8"),
+                            "source": p.name.rsplit(".", 1)[0] + ".ant"}
+                if p.suffix.lower() in (".xml", ".sbml"):
+                    t = _sbml_to_antimony(p.read_text(encoding="utf-8"))
+                    if t:
+                        return {"format": "antimony", "text": t, "source": p.name + " → antimony"}
+                if p.suffix.lower() == ".ant":
+                    return {"format": "antimony", "text": p.read_text(encoding="utf-8"), "source": p.name}
+            except Exception:
+                return None
+    if isinstance(model, str) and model.strip() and fmt in ("sbml", "xml"):
+        t = _sbml_to_antimony(model)
+        if t:
+            return {"format": "antimony", "text": t, "source": "config SBML → antimony"}
+    return None
+
+
+def attach_model_antimony(ws_root: Any, doc: Any) -> Any:
+    """Walk a composite-state doc; attach ``_antimony`` to each process whose config
+    declares an SBML/Antimony model, so the Model view can show the model source for
+    every run. Best-effort and in place; returns the same object."""
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if node.get("_type") in ("process", "step") and "_antimony" not in node:
+                a = _antimony_for_config(ws_root, node.get("config"))
+                if a:
+                    node["_antimony"] = a
             for v in node.values():
                 walk(v)
         elif isinstance(node, list):
