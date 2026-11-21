@@ -182,3 +182,48 @@ def test_render_omits_bar_without_axis():
     v = btc.build_behavior_tests_verdict(_spec(["a"], {"a": {"result": "PASS"}}))
     html = btc.render_behavior_tests_html(v, {"name": "s"})
     assert "pass boundary at centre" not in html
+
+
+def test_card_reads_computed_outcomes_from_cli_grader():
+    """The `vwb run study` CLI grader writes graded results to
+    `runs[].computed_outcomes` (with a `_grader` stamp), not `runs[].outcomes`.
+    The card must prefer `computed_outcomes` — the SAME precedence as the engine's
+    canonical_graded_outcomes / the gate — so a CLI-graded study reads N/N instead
+    of rendering every test PENDING (0/N) while the gate shows passed."""
+    spec = {
+        "name": "s1",
+        "behavior_tests": [{"name": n, "en": f"{n} does X"} for n in ("a", "b", "c")],
+        "runs": [{
+            "name": "r", "canonical": True,
+            "computed_outcomes": {  # CLI-grader shape: computed, NOT authored outcomes
+                "a": {"result": "PASS"}, "b": {"result": "PASS"}, "c": {"result": "PASS"},
+                "_grader": {"version": "3-freshness"},
+            },
+        }],
+    }
+    v = btc.build_behavior_tests_verdict(spec)
+    assert v["n_pass"] == 3 and v["n_fail"] == 0 and v["overall"] == "within_tol"
+
+
+def test_card_prefers_computed_over_authored_outcomes():
+    """When a run carries BOTH, computed_outcomes wins per test (engine precedence)."""
+    spec = {
+        "name": "s1",
+        "behavior_tests": [{"name": "a", "en": "a does X"}],
+        "runs": [{
+            "name": "r", "canonical": True,
+            "outcomes": {"a": {"result": "FAIL"}},            # authored / stale
+            "computed_outcomes": {"a": {"result": "PASS"}},   # freshly graded — wins
+        }],
+    }
+    assert btc._outcomes_by_test(spec)["a"]["result"] == "PASS"
+
+
+def test_gate_rigor_reader_mirrors_card_reader():
+    """gate_rigor._outcomes_by_test is a duplicate of the card reader; it must
+    apply the same computed_outcomes precedence so the two never disagree."""
+    from vivarium_workbench.lib import gate_rigor
+    spec = {"runs": [{"name": "r", "canonical": True,
+                      "computed_outcomes": {"t": {"result": "pass"}}}]}
+    assert gate_rigor._outcomes_by_test(spec)["t"]["result"] == "pass"
+    assert btc._outcomes_by_test(spec)["t"]["result"] == "pass"

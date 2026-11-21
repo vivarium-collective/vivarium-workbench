@@ -36,18 +36,35 @@ SCHEMA = "behavior_test_card/v1"
 
 
 def _outcomes_by_test(spec: dict) -> dict:
-    """Merge per-run ``outcomes`` keyed by test name; a ``canonical`` run wins."""
+    """Merge per-run graded outcomes keyed by test name; a ``canonical`` run wins.
+
+    Prefers each run's ``computed_outcomes[T]`` over authored ``outcomes[T]`` —
+    the SAME precedence as the engine's ``canonical_graded_outcomes``. The
+    ``vwb run study`` CLI grader writes graded results to ``computed_outcomes``
+    (with a ``_grader`` stamp); ``vwb serve`` / authored results land in
+    ``outcomes``. Reading only ``outcomes`` rendered every test PENDING (0/N) on
+    a CLI-graded study even though its gate — which reads ``computed_outcomes`` —
+    passed. Reading both (computed preferred) makes the card agree with the gate.
+    """
     merged: dict = {}
     for run in spec.get("runs") or []:
         if not isinstance(run, dict):
             continue
-        oc = run.get("outcomes")
-        if not isinstance(oc, dict):
+        per_run: dict = {}
+        authored = run.get("outcomes")
+        if isinstance(authored, dict):
+            for tname, o in authored.items():
+                per_run[tname] = o if isinstance(o, dict) else {}
+        computed = run.get("computed_outcomes")
+        if isinstance(computed, dict):
+            for tname, o in computed.items():  # computed wins over authored
+                per_run[tname] = o if isinstance(o, dict) else {}
+        if not per_run:
             continue
         canonical = bool(run.get("canonical"))
-        for tname, o in oc.items():
+        for tname, o in per_run.items():
             if canonical or tname not in merged:
-                merged[tname] = o if isinstance(o, dict) else {}
+                merged[tname] = o
     return merged
 
 
