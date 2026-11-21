@@ -174,6 +174,17 @@
       : "/api/argument-overlay?investigation=" + encodeURIComponent(slug);
   }
 
+  // publish.py bakes the deterministic needs-attention scan to
+  // /api/needs-attention/<slug>.json. The live route is a query-param endpoint
+  // (/api/needs-attention?investigation=<slug>), which has no .json in a bundle —
+  // so the raw live fetch 404s offline and the Needs-attention tab hangs on
+  // "Scanning…". Snapshot callers must read the baked static file instead.
+  function _needsAttentionUrl(slug) {
+    return cfg().mode === "snapshot"
+      ? _base() + "/api/needs-attention/" + encodeURIComponent(slug) + ".json"
+      : "/api/needs-attention?investigation=" + encodeURIComponent(slug);
+  }
+
   function _auditUrl() {
     return cfg().mode === "snapshot"
       ? _base() + "/api/audit.json"
@@ -355,6 +366,17 @@
      */
     async loadArgumentOverlay(slug) {
       return _get(_argumentOverlayUrl(slug));
+    },
+
+    /**
+     * Load the deterministic needs-attention scan for an investigation:
+     * {investigation, items, summary}.
+     * Local mode:    GET /api/needs-attention?investigation=<slug>
+     * Snapshot mode: /api/needs-attention/<slug>.json from the static bundle.
+     * @param {string} slug - the investigation slug.
+     */
+    async loadNeedsAttention(slug) {
+      return _get(_needsAttentionUrl(slug));
     },
 
     /**

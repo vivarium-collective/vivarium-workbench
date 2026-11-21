@@ -934,6 +934,23 @@ def _do_build(
                     "gaps": [], "gates": [], "decisions": [], "available": False}
         _write_json(api_dir / "argument-overlay" / f"{inv_name}.json", body)
 
+    # api/needs-attention/<inv>.json — the deterministic, code-computed (AI-free)
+    # needs-attention scan {investigation, items, summary} so the published
+    # read-only bundle's "Needs attention" tab shows the real scan instead of
+    # hanging on "Scanning…". The live tab hits GET /api/needs-attention?
+    # investigation=<slug> (a query-param route with no .json in a bundle);
+    # data-source.loadNeedsAttention resolves /api/needs-attention/<slug>.json in
+    # snapshot mode. A graceful empty payload when the scan is unavailable.
+    (api_dir / "needs-attention").mkdir(parents=True, exist_ok=True)
+    from vivarium_workbench.lib.report_views import build_needs_attention
+    for inv_name in investigations:
+        try:
+            na_body, _ = build_needs_attention(ws_root, investigation=inv_name)
+        except Exception:  # noqa: BLE001 — never fail the publish on one investigation
+            na_body = {"investigation": inv_name, "items": [],
+                       "summary": {"by_severity": {}, "by_kind": {}, "total": 0}}
+        _write_json(api_dir / "needs-attention" / f"{inv_name}.json", na_body)
+
     # reports/investigation-<slug>.html — pre-rendered investigation reports. In
     # the live app these come from GET /api/investigation-report/<slug>; in the
     # static bundle (no server) the ↓ report button opens these files. Figures +

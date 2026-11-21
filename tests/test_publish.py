@@ -1168,3 +1168,20 @@ def test_build_bundle_stages_native_gallery_only_figures_zip(
         "even if the declared-figures view (files/n_composites) is empty"
     )
     assert zip_path.read_bytes() == fake_zip
+
+
+def test_build_bundle_bakes_needs_attention(tmp_workspace, tmp_path):
+    """build_bundle writes api/needs-attention/<inv>.json so the published
+    read-only "Needs attention" tab resolves offline (data-source.loadNeedsAttention
+    -> /api/needs-attention/<slug>.json) instead of hanging on "Scanning…". The
+    live tab hits the query-param route /api/needs-attention?investigation=<slug>,
+    which has no .json in a bundle."""
+    from vivarium_workbench import publish
+    out = tmp_path / "bundle"
+    publish.build_bundle(tmp_workspace, out)
+    f = out / "api" / "needs-attention" / "main-inv.json"
+    assert f.is_file(), "needs-attention/main-inv.json not baked"
+    body = json.loads(f.read_text())
+    assert body.get("investigation") == "main-inv"
+    assert "items" in body and "summary" in body
+    assert "total" in body["summary"]
