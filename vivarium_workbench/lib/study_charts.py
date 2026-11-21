@@ -611,6 +611,10 @@ def discover_declared_figure_charts(study_dir: Path,
         # even if the resolved file happens to carry a stamped meta sidecar
         # (that would attribute provenance the study author didn't declare).
         rec["run_id"] = None
+        # The underlying figure-file stem, so build_study_charts_payload can
+        # dedup this declared record against a same-file static chart (which is
+        # keyed by stem) even though this record is keyed by the study name.
+        rec["fig_stem"] = fig.stem
         out.append(rec)
         seen_keys.add(key)
         try:
@@ -1817,6 +1821,24 @@ def build_study_charts_payload(ws_root, name: str, *, hide_superseded: bool = Fa
     declared_figs = discover_declared_figure_charts(
         study_dir, (spec or {}).get("visualizations") or [], ws_root=_wp.root)
     if declared_figs:
+        # A declared visualization may point at a committed charts/<stem>.svg
+        # that discover_static_study_charts ALSO surfaced (keyed by file STEM).
+        # When the declaration carries a custom NAME, the two describe ONE file
+        # under two keys (study name vs stem), so the by-key merge below misses
+        # and the figure renders twice in the Visualizations tab. Drop the static
+        # duplicate for such renamed declarations — the declared record wins (it
+        # carries the study-authored name/caption/display order).
+        #
+        # When the declaration's key EQUALS the stem (no custom name), the by-key
+        # merge already dedupes it, and the STATIC record is the one kept — it
+        # carries the per-chart freshness badge, which the declared record does
+        # not. So only drop static charts shadowed by a *renamed* declaration.
+        declared_renamed_stems = {
+            c.get("fig_stem") for c in declared_figs
+            if c.get("fig_stem") and c.get("key") != c.get("fig_stem")
+        }
+        static_charts = [
+            c for c in static_charts if c.get("key") not in declared_renamed_stems]
         static_keys = {c.get("key") for c in static_charts}
         # A study's ``embed_visualizations`` are rendered separately as iframes
         # (study-detail tab + the report), so a declared figure that is ALSO an
