@@ -1707,8 +1707,116 @@
     return '<details open class="mdef-ant"><summary class="mdef-ant-lbl">Antimony' + src + '</summary>' +
       '<pre class="mdef-ant-pre"><code>' + _esc(String(a.text)) + '</code></pre></details>';
   }
+  // A compact one-line summary of a large config value (array/object), so the
+  // model section stays scannable: "4 items (virus, ifn, chemokine, il10)".
+  function _mdCfgSummary(v) {
+    if (Array.isArray(v)) {
+      var names = v.map(function (it) {
+        return (it && typeof it === 'object') ? (it.name || it.type || it.kind || it.id || null) : it;
+      }).filter(function (x) { return x !== null && x !== undefined && typeof x !== 'object'; });
+      var shown = names.slice(0, 4).map(function (x) { return _esc(String(x)); }).join(', ');
+      var more = names.length > 4 ? ' …' : '';
+      return v.length + ' item' + (v.length === 1 ? '' : 's') + (shown ? ' (' + shown + more + ')' : '');
+    }
+    if (v && typeof v === 'object') {
+      var ks = Object.keys(v);
+      var kk = ks.slice(0, 5).map(_esc).join(', ') + (ks.length > 5 ? ' …' : '');
+      return ks.length + ' field' + (ks.length === 1 ? '' : 's') + (ks.length ? ' (' + kk + ')' : '');
+    }
+    return '';
+  }
+  // One config parameter. Small scalars render inline; large arrays/objects
+  // collapse to a summary with a chevron to expand the pretty-printed JSON.
+  function _mdCfgItem(k, v) {
+    var js = ''; try { js = JSON.stringify(v); } catch (e) { js = String(v); }
+    var isBig = (v && typeof v === 'object')
+      && (Array.isArray(v) ? v.length : Object.keys(v).length) > 0
+      && js.length > 60;
+    if (!isBig) {
+      return '<span class="mdef-cfg-inline"><code>' + _esc(k) + '</code> = ' + _esc(js) + '</span>';
+    }
+    var pretty = ''; try { pretty = JSON.stringify(v, null, 2); } catch (e) { pretty = js; }
+    return '<details class="mdef-cfg-item"><summary class="mdef-cfg-sum">' +
+      '<code>' + _esc(k) + '</code> <span class="mdef-cfg-note">' + _mdCfgSummary(v) + '</span></summary>' +
+      '<pre class="mdef-cfg-json">' + _esc(pretty) + '</pre></details>';
+  }
+  function _mdCfgHtml(cfg) {
+    var keys = Object.keys(cfg || {});
+    if (!keys.length) return '';
+    var items = keys.map(function (k) { return _mdCfgItem(k, cfg[k]); }).join('');
+    return '<div class="mdef-io-row mdef-cfg-row"><span class="mdef-io-lbl">config</span>' +
+      '<span class="mdef-cfg-items">' + items + '</span></div>';
+  }
+
+  // Trigger a client-side JSON download of `obj` as `<name>.json`.
+  function _mdDownloadJson(obj, name) {
+    if (obj === undefined) return;
+    var txt; try { txt = JSON.stringify(obj, null, 2); } catch (e) { return; }
+    var blob = new Blob([txt], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = (name || 'model') + '.json';
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
+  }
+  // Blueprint source, if the resolved model carries one (a blueprint_pipeline
+  // generator stashes it under d.blueprint / d.config.blueprint / a param).
+  function _mdBlueprint(d) {
+    if (!d) return null;
+    // Server attaches the resolved blueprint source (composite_resolve.py).
+    if (d.blueprint && typeof d.blueprint === 'object') return d.blueprint;
+    var cfg = d.config || {};
+    if (cfg.blueprint && typeof cfg.blueprint === 'object') return cfg.blueprint;
+    return null;
+  }
+  // Export menu: a button that drops down what model JSON to download.
+  function _mdExportHtml(d) {
+    var items = ['<button type="button" class="mdef-exp-item" data-exp="full">Full model (JSON)</button>'];
+    if (_mdBlueprint(d)) items.push('<button type="button" class="mdef-exp-item" data-exp="blueprint">Blueprint (JSON)</button>');
+    var state = (d && d.state && typeof d.state === 'object') ? d.state : {};
+    var procs = Object.keys(state).filter(function (k) {
+      var n = state[k];
+      return n && typeof n === 'object' && (n._type === 'process' || n.address) && !/emitter/i.test(String(n.address || '') + ' ' + k);
+    });
+    if (procs.length) {
+      items.push('<div class="mdef-exp-sub">Per process</div>');
+      procs.forEach(function (pn) {
+        items.push('<button type="button" class="mdef-exp-item mdef-exp-proc" data-exp="proc" data-proc="' + _esc(pn) + '">' + _esc(pn) + '</button>');
+      });
+    }
+    return '<span class="mdef-export"><button type="button" class="mdef-exp-btn" onclick="_mdToggleExport(this)">⬇ Export JSON ▾</button>' +
+      '<div class="mdef-exp-menu" hidden onclick="_mdExportPick(event)">' + items.join('') + '</div></span>';
+  }
+  window._mdToggleExport = function (btn) {
+    var menu = btn.parentNode && btn.parentNode.querySelector('.mdef-exp-menu');
+    if (!menu) return;
+    var show = menu.hasAttribute('hidden');
+    document.querySelectorAll('.mdef-exp-menu').forEach(function (m) { m.setAttribute('hidden', ''); });
+    if (show) menu.removeAttribute('hidden');
+  };
+  window._mdExportPick = function (ev) {
+    var t = ev.target && ev.target.closest ? ev.target.closest('.mdef-exp-item') : null;
+    if (!t) return;
+    var d = window.__mdefDoc || {};
+    var kind = t.getAttribute('data-exp');
+    if (kind === 'full') _mdDownloadJson(d, (d.name || 'model'));
+    else if (kind === 'blueprint') _mdDownloadJson(_mdBlueprint(d), (d.name || 'model') + '-blueprint');
+    else if (kind === 'proc') {
+      var pn = t.getAttribute('data-proc');
+      var node = (d.state || {})[pn] || {};
+      _mdDownloadJson((node.config && typeof node.config === 'object') ? node.config : node, pn);
+    }
+    var menu = t.closest('.mdef-exp-menu'); if (menu) menu.setAttribute('hidden', '');
+  };
+  // Close any open export menu on an outside click.
+  document.addEventListener('click', function (ev) {
+    if (ev.target && ev.target.closest && ev.target.closest('.mdef-export')) return;
+    document.querySelectorAll('.mdef-exp-menu').forEach(function (m) { m.setAttribute('hidden', ''); });
+  });
+
   function _modelDefHtml(d) {
     d = d || {};
+    window.__mdefDoc = d;
     var state = (d.state && typeof d.state === 'object') ? d.state : {};
     var procNames = Object.keys(state).filter(function (k) {
       var n = state[k];
@@ -1738,9 +1846,6 @@
       var p = state[pn] || {};
       var sig = _mdSig(p.doc);
       var cfg = (p.config && typeof p.config === 'object') ? p.config : {};
-      var cfgStr = Object.keys(cfg).map(function (k) {
-        return '<code>' + _esc(k) + '</code> = ' + _esc(JSON.stringify(cfg[k]));
-      }).join(' · ');
       var contract = p._contract || p.contract || {};
       return '<div class="mdef-proc">' +
         '<div class="mdef-proc-hd"><strong>' + _esc(pn) + '</strong>' +
@@ -1751,7 +1856,7 @@
           _mdPorts(p.inputs, '←') + '</span></div>' +
         '<div class="mdef-io-row"><span class="mdef-io-lbl">writes</span><span class="mdef-io-ports">' +
           _mdPorts(p.outputs, '→') + '</span></div></div>' +
-        (cfgStr ? '<div class="mdef-io-row"><span class="mdef-io-lbl">config</span><span class="mdef-io-ports">' + cfgStr + '</span></div>' : '') +
+        _mdCfgHtml(cfg) +
         _mdSymbols(contract) +
         _mdAntimony(p) +
         '</div>';
@@ -1778,6 +1883,7 @@
       '<div class="mdef-hd"><span class="overview-label" style="margin:0">Model definition</span>' +
         (d.name ? '<code class="mdef-name">' + _esc(d.name) + '</code>' : '') +
         (d.kind ? '<span class="mdef-kind">' + _esc(d.kind) + '</span>' : '') +
+        _mdExportHtml(d) +
         '</div>' +
       (d.description ? '<p class="mdef-desc">' + _esc(d.description) + '</p>' : '') +
       (procHtml ? '<div class="mdef-sect"><div class="mdef-sect-lbl">Processes · ' + procNames.length + '</div>' + procHtml + '</div>' : '') +
