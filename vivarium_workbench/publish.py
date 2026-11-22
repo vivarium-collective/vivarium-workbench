@@ -1400,9 +1400,33 @@ def _do_build(
             # unconditionally and let `if blob` be the only gate.
             blob = _figs.build_figures_zip(ws_root, inv_name)
             if blob:
-                dst = figures_root / inv_name / "figures.zip"
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                dst.write_bytes(blob)
+                inv_fig_dir = figures_root / inv_name
+                inv_fig_dir.mkdir(parents=True, exist_ok=True)
+                (inv_fig_dir / "figures.zip").write_bytes(blob)
+                # Also EXTRACT the gallery (its index.html + the figure files)
+                # next to the zip, so the snapshot "Figures → Open in browser"
+                # can VIEW the gallery (it references files relatively) rather
+                # than falling back to the report. The live dashboard serves the
+                # same gallery dynamically via /api/investigation/<slug>/figures.html;
+                # a static bundle has no backend, so it needs the files on disk.
+                import io as _io
+                import zipfile as _zipfile
+
+                try:
+                    inv_fig_root = inv_fig_dir.resolve()
+                    with _zipfile.ZipFile(_io.BytesIO(blob)) as _z:
+                        for _member in _z.namelist():
+                            if _member.endswith("/"):
+                                continue
+                            _target = (inv_fig_dir / _member).resolve()
+                            # zip-slip guard: never let a member escape the dir.
+                            if inv_fig_root not in _target.parents:
+                                print(f"  warn: skipping unsafe figure path {_member!r}")
+                                continue
+                            _target.parent.mkdir(parents=True, exist_ok=True)
+                            _target.write_bytes(_z.read(_member))
+                except Exception as exc:  # noqa: BLE001 — a bad zip must not abort the publish
+                    print(f"  warn: figures gallery extract failed for {inv_name!r}: {exc}")
         # Per-study OUTPUTS zips (image figures + embedded HTML reports/dashboards)
         # backing the study-scoped `↓ outputs`. Cover every study that produces
         # one — figure studies AND dashboard-only studies (embed_visualizations
