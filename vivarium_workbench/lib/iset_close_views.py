@@ -4,7 +4,7 @@
 Phase 2.1h (rewire-first, ``docs/superpowers/plans/2026-08-04-phase2.1-rewire-
 first.md`` §2.1h): the workbench keeps importing the plugin's compute to BACK
 this endpoint (no module move yet — that's 2.1k). This lets
-``skills/viva-investigation/SKILL.md``'s ``close`` subcommand stop shelling out
+``skills/investigate/SKILL.md``'s ``close`` subcommand stop shelling out
 to ``python -m discovery_engine.investigation.close`` and call the dashboard API
 instead — realizing the "Close investigation" endpoint the skill's prose already
 anticipated (``the dashboard button ... will call the same close_investigation

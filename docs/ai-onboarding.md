@@ -135,7 +135,7 @@ curl -s "$BASE/openapi.json"                 # exact API shapes
 # --- AI layer (Claude Code) ---
 # /viva-init         (once per machine: install skills)
 # /viva-server start (launch + write server-info)
-# /viva-catalog /viva-study /viva-run /viva-expert /viva-investigation ...
+# /viva:catalog /viva:study /viva:run /viva:model /viva:investigate ...
 ```
 
 **Key files:** `workspace.yaml` (workspace root marker) · `.pbg/server/server-info` (live base URL) · `studies/<slug>/runs.db` (durable run artifacts) · `composites/`, `studies/`, `investigations/` (the documents).

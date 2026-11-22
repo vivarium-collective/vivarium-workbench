@@ -3,7 +3,7 @@
 
 Phase 2.1k step 0: wraps
 ``discovery_engine.integration.scaffold.scaffold_investigation_from_wrapper`` so the
-``/viva-expert`` skill can stop shelling ``python -m discovery_engine.integration.scaffold
+``/viva:model`` skill can stop shelling ``python -m discovery_engine.integration.scaffold
 investigation-from-wrapper``. Bootstrap (pre-server) op → a ``vwb`` verb.
 """
 import json

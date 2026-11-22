@@ -4361,7 +4361,7 @@
   // lib.loop_provenance_views.build_study_loop_state). Was the pass earned
   // honestly? Locked-tests hash, the reopen trail, iteration history,
   // current state. GRACEFUL empty state (`present: false`) when a study was
-  // never run through /viva-model-build — the common case, not an error.
+  // never run through /viva:model-build — the common case, not an error.
   var _BUILD_STATE_COLORS = {
     DONE: { bg: '#d1fae5', fg: '#065f46' },
     GIVE_UP: { bg: 'var(--err-bg, #fee2e2)', fg: 'var(--err-fg, #991b1b)' }
@@ -4454,11 +4454,11 @@
     var e = escapeHtmlForTests;
     if (!state || !state.present) {
       // Directly-authored studies have no loop artifact (.pbg/loop/<study>.json
-      // is written only by /viva-model-build). Explain that plainly and point to
+      // is written only by /viva:model-build). Explain that plainly and point to
       // where the model + its bar actually live, instead of a bare dead-end.
       return '<div class="empty-message">'
         + '<p>This model was <strong>authored directly</strong> — wrapped and composed via '
-        + '<code>/viva-expert</code> — not iterated through the <code>/viva-model-build</code> loop '
+        + '<code>/viva:model</code> — not iterated through the <code>/viva:model-build</code> loop '
         + 'that records a draft → frozen-tests → iteration trajectory. There is no loop '
         + 'provenance to show here.</p>'
         + '<p style="margin-top:8px">See <strong>Model</strong> for the composite structure and '

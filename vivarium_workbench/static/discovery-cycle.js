@@ -1214,7 +1214,7 @@
       esc(S.steerGoal || "") + '">' +
       '<button class="dcyc-btn dcyc-btn-primary dcyc-btn-sm" id="dcyc-steer-go">Go ▸</button></div>' +
       '<div class="dcyc-steer-note">Hands a free-text goal to the AI assistant to drive the cycle ' +
-      "(<code>/drive-engine</code>) — floats on-goal work first, while the frontier stays derived from the evidence.</div>" +
+      "(<code>/viva:discover</code>) — floats on-goal work first, while the frontier stays derived from the evidence.</div>" +
       "</div>";
   }
   function steerEngine(goal) {
@@ -1229,7 +1229,7 @@
         setStatus("AI assistant isn't set up yet — pick a provider in the chat (claude-code needs no key), then Steer again.");
         return;
       }
-      var prompt = "/drive-engine " + S.slug + " " + goal;
+      var prompt = "/viva:discover " + S.slug + " " + goal;
       if (typeof global._aiSeedPrompt === "function") {
         global._aiSeedPrompt(prompt);
         setStatus("Steering goal sent to the AI assistant — review and run it in the chat.");
