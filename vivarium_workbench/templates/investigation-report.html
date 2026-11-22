@@ -2065,6 +2065,10 @@ window.__reportPrintPrep = function(){
     // below ensures figures inside the now-visible cards render + fit the page.
     try{ document.querySelectorAll('.card.collapsed').forEach(c=>c.classList.remove('collapsed')); }catch(e){}
     try{ document.querySelectorAll('details').forEach(d=>{ d.open=true; }); }catch(e){}
+    // The details are force-open in the PDF, so their expander summaries are just
+    // redundant headers — hide the 'Technical record' one (the live HTML keeps it
+    // as the clickable section header).
+    try{ document.querySelectorAll('.tech-record>summary').forEach(s=>{ s.style.display='none'; }); }catch(e){}
     try{ setupLazyPlotly(); }catch(e){}
     try{ document.querySelectorAll('figure.embedded-plotly').forEach(f=>{ try{ renderPlotlyFigure(f); }catch(e){} }); }catch(e){}
     // Re-fit every Plotly figure to its container (page) width. The saved figures
