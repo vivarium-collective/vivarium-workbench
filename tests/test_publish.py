@@ -1128,24 +1128,37 @@ def test_build_bundle_bakes_argument_overlay(tmp_workspace, tmp_path):
             "decisions", "available"} <= set(body)
 
 
-def test_build_bundle_stages_native_gallery_only_figures_zip(
+def test_build_bundle_stages_native_gallery_only_figures(
     tmp_workspace, tmp_path, monkeypatch
 ):
     """Regression: an investigation whose figures come ONLY from the native
-    gallery (committed viz/*.html, run viz.json HTML) must still get its
-    figures.zip staged in the published bundle.
+    gallery (committed viz/*.html, run viz.json HTML) must still get its figures
+    STAGED in the published bundle — as the extracted browsable gallery, so the
+    card's `↓ figures` / "Open in browser" works offline.
 
     `build_figures_zip` pulls from more sources than `build_investigation_figures`
     (which sees only declared study.visualizations[] image files). Gating the
     staging on the declared view (n_composites / files) wrongly skipped
     investigations like eukaryogenesis / multicellularity, whose figures are all
-    native-gallery HTML — the zip existed but was never written, so the card's
-    `↓ figures` link 404'd offline. The real gate is `if blob`.
+    native-gallery HTML. The real gate is `if blob`.
+
+    De-dup (vs. the old behavior): the pre-built figures.zip is NOT also stored
+    in the bundle — the figure files are staged once (extracted gallery) plus a
+    files.json manifest, and the snapshot download is rebuilt client-side.
     """
+    import io
+    import json
+    import zipfile
+
     from vivarium_workbench import publish
     from vivarium_workbench.lib import investigation_figures as figs
 
-    fake_zip = b"PK\x03\x04native-gallery-zip-bytes"
+    # A REAL gallery zip (index.html + one figure file): the publish extracts it.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("index.html", "<html>gallery</html>")
+        z.writestr("fig-1/panel.png", b"\x89PNG\r\n\x1a\n native-gallery")
+    gallery_zip = buf.getvalue()
 
     # The declared-only collector sees nothing (no declared image files, no
     # composite-level figures) — exactly the native-gallery-only case.
@@ -1154,20 +1167,21 @@ def test_build_bundle_stages_native_gallery_only_figures_zip(
         lambda ws, inv: {"files": [], "n_composites": 0},
     )
     # But the zip builder produces a real archive from the native gallery.
-    monkeypatch.setattr(
-        figs, "build_figures_zip",
-        lambda ws, inv: fake_zip,
-    )
+    monkeypatch.setattr(figs, "build_figures_zip", lambda ws, inv: gallery_zip)
 
     out = tmp_path / "bundle"
     publish.build_bundle(tmp_workspace, out)
 
-    zip_path = out / "figures" / "main-inv" / "figures.zip"
-    assert zip_path.is_file(), (
-        "figures.zip must be staged when build_figures_zip returns a real zip, "
-        "even if the declared-figures view (files/n_composites) is empty"
+    fig_dir = out / "figures" / "main-inv"
+    assert (fig_dir / "index.html").is_file(), "gallery index.html must be staged"
+    assert (fig_dir / "fig-1" / "panel.png").is_file(), "figure files must be extracted"
+    assert not (fig_dir / "figures.zip").exists(), (
+        "the pre-built figures.zip must NOT be duplicated in the bundle "
+        "(de-dup: the download is rebuilt client-side from files.json)"
     )
-    assert zip_path.read_bytes() == fake_zip
+    manifest = json.loads((fig_dir / "files.json").read_text())
+    assert "fig-1/panel.png" in manifest
+    assert "index.html" not in manifest
 
 
 def test_build_bundle_bakes_needs_attention(tmp_workspace, tmp_path):

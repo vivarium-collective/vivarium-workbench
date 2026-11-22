@@ -15383,12 +15383,63 @@
     if (ev) ev.stopPropagation();
     var c = window.__DASH_CONFIG__ || {};
     var base = c.basePath || '';
-    var url = (c.mode === 'snapshot')
-      ? base + '/figures/' + encodeURIComponent(name) + '/figures.zip'
-      : '/api/investigation/' + encodeURIComponent(name) + '/figures.zip';
+    // Snapshot bundles no longer store a duplicate figures.zip (it doubled the
+    // figures footprint on disk + in gh-pages history). The gallery files ARE
+    // published (for "Open in browser"); rebuild the zip from them client-side.
+    if (c.mode === 'snapshot') { _vivFiguresZipClient(base, name); return; }
+    var url = '/api/investigation/' + encodeURIComponent(name) + '/figures.zip';
     var a = document.createElement('a');
     a.href = url; a.download = name + '-figures.zip';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
+
+  // Lazily load JSZip once (snapshot download only — never on the hot path).
+  function _vivEnsureJSZip() {
+    if (window.JSZip) return Promise.resolve(window.JSZip);
+    if (window._jsZipLoading) return window._jsZipLoading;
+    window._jsZipLoading = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+      s.onload = function () { window.JSZip ? resolve(window.JSZip) : reject(new Error('JSZip missing')); };
+      s.onerror = function () { reject(new Error('JSZip failed to load')); };
+      document.head.appendChild(s);
+    });
+    return window._jsZipLoading;
+  }
+
+  // Build an investigation's figures zip in the browser from the published
+  // gallery files (listed in figures/<name>/files.json). Falls back to opening
+  // the gallery when zipping isn't possible (offline, blocked CDN, fetch error).
+  window._vivFiguresZipClient = function (base, name) {
+    var dir = base + '/figures/' + encodeURIComponent(name);
+    var note = (window._toast || function (m) { try { console.log(m); } catch (e) {} });
+    note('Building figures zip…');
+    fetch(dir + '/files.json')
+      .then(function (r) { if (!r.ok) throw new Error('manifest ' + r.status); return r.json(); })
+      .then(function (files) {
+        return _vivEnsureJSZip().then(function (JSZip) {
+          var zip = new JSZip();
+          return Promise.all((files || []).map(function (rel) {
+            var u = dir + '/' + rel.split('/').map(encodeURIComponent).join('/');
+            return fetch(u)
+              .then(function (r) { if (!r.ok) throw new Error(rel + ' ' + r.status); return r.blob(); })
+              .then(function (b) { zip.file(rel, b); });
+          })).then(function () { return zip.generateAsync({ type: 'blob' }); });
+        });
+      })
+      .then(function (blob) {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name + '-figures.zip';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { try { URL.revokeObjectURL(a.href); } catch (e) {} }, 10000);
+        note('Figures zip ready.');
+      })
+      .catch(function (err) {
+        try { console.error('figures zip (client) failed', err); } catch (e) {}
+        note('Could not build the zip — opening the gallery instead.');
+        window.open(dir + '/index.html', '_blank', 'noopener');
+      });
   };
 
   // ── "Open in the browser" link variants (vs. the ↓ download handlers above) ──

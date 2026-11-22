@@ -1402,18 +1402,27 @@ def _do_build(
             if blob:
                 inv_fig_dir = figures_root / inv_name
                 inv_fig_dir.mkdir(parents=True, exist_ok=True)
-                (inv_fig_dir / "figures.zip").write_bytes(blob)
-                # Also EXTRACT the gallery (its index.html + the figure files)
-                # next to the zip, so the snapshot "Figures → Open in browser"
-                # can VIEW the gallery (it references files relatively) rather
-                # than falling back to the report. The live dashboard serves the
-                # same gallery dynamically via /api/investigation/<slug>/figures.html;
-                # a static bundle has no backend, so it needs the files on disk.
+                # EXTRACT the gallery (its index.html + the figure files) so the
+                # snapshot "Figures → Open in browser" can VIEW the gallery (it
+                # references the files relatively), instead of falling back to the
+                # report. The live dashboard serves this gallery dynamically via
+                # /api/investigation/<slug>/figures.html; a static bundle has no
+                # backend, so it needs the files on disk.
+                #
+                # We deliberately do NOT also store the pre-built figures.zip here:
+                # that would duplicate every figure byte (extracted + zipped), ~2x
+                # the figures footprint in the bundle and in gh-pages history. The
+                # snapshot "Download (zip)" is instead rebuilt CLIENT-SIDE from
+                # these same extracted files (walkthrough.js `_vivFiguresZipClient`,
+                # driven by the files.json manifest written below). The live mode
+                # still streams /api/investigation/<slug>/figures.zip server-side.
                 import io as _io
+                import json as _json
                 import zipfile as _zipfile
 
                 try:
                     inv_fig_root = inv_fig_dir.resolve()
+                    extracted: "list[str]" = []
                     with _zipfile.ZipFile(_io.BytesIO(blob)) as _z:
                         for _member in _z.namelist():
                             if _member.endswith("/"):
@@ -1425,6 +1434,13 @@ def _do_build(
                                 continue
                             _target.parent.mkdir(parents=True, exist_ok=True)
                             _target.write_bytes(_z.read(_member))
+                            extracted.append(_member)
+                    # Manifest the downloadable figure files (everything but the
+                    # gallery shell itself) for the client-side zip builder.
+                    (inv_fig_dir / "files.json").write_text(
+                        _json.dumps(sorted(m for m in extracted if m != "index.html")),
+                        encoding="utf-8",
+                    )
                 except Exception as exc:  # noqa: BLE001 — a bad zip must not abort the publish
                     print(f"  warn: figures gallery extract failed for {inv_name!r}: {exc}")
         # Per-study OUTPUTS zips (image figures + embedded HTML reports/dashboards)
