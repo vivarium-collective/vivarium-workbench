@@ -27,9 +27,15 @@
     return 'data:image/svg+xml,' + encodeURIComponent(svg);
   }
 
-  // Consistent rounded-square marks so the three states read as one family.
+  // The "ready" favicon is the Vivarium mark the server rendered into <head>
+  // (a data-URI <link rel="icon">). Capture it so the ready state restores the
+  // real logo; fall back to a simple lettermark if the page shipped none.
+  var _initialIcon = (function () {
+    var l = document.querySelector('link[rel="icon"]');
+    return (l && l.getAttribute("href")) || null;
+  })();
   var FAVICONS = {
-    ready: svgDataUri(
+    ready: _initialIcon || svgDataUri(
       '<rect width="32" height="32" rx="7" fill="#157a70"/>' +
       '<text x="16" y="23" font-family="system-ui,sans-serif" font-size="20"' +
       ' font-weight="700" fill="#fff" text-anchor="middle">V</text>'),
