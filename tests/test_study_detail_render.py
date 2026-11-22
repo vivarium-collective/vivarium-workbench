@@ -1987,7 +1987,10 @@ def test_compose_panel_keeps_notebook_and_explore_actions(tmp_path):
     assert 'data-model-composite="pkg.composites.core"' in compose
 
 
-def test_compose_panel_variant_rows_carry_model_composite_attrs(tmp_path):
+def test_compose_panel_omits_duplicated_variants(tmp_path):
+    """Composition shows the model only. The baseline composite renders, but
+    variants are NOT duplicated into the Composition panel — they live in the
+    dedicated Variants sub-tab."""
     from vivarium_workbench.lib.study_page import render_study_detail_html
 
     spec = {
@@ -2005,13 +2008,11 @@ def test_compose_panel_variant_rows_carry_model_composite_attrs(tmp_path):
     html = render_study_detail_html(tmp_path, "variant-cards-study", spec)
     compose = html[html.index('id="panel-compose"'):html.index('id="panel-simulate"')]
 
-    # The "hot" variant declares its own base_composite -> carries the
-    # attribute so _loadModelCards() picks it up alongside the baseline.
+    # The baseline composite still renders in Composition (the model this study runs).
     assert 'data-model-composite="pkg.composites.core"' in compose
-    assert 'data-model-overrides=\'{&#34;temp&#34;: 42}\'' in compose or '"temp": 42' in compose
-    # The "inherits" variant declares no composite of its own -> an empty
-    # attribute the JS skips (never a stray undefined-id fetch).
-    assert 'data-model-composite=""' in compose
+    # Variants are no longer duplicated into Composition — the variant-specific
+    # override does not appear in the Composition panel.
+    assert '&#34;temp&#34;: 42' not in compose and '"temp": 42' not in compose
 
 
 def test_study_header_is_compact():

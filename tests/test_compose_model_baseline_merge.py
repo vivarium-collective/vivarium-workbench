@@ -169,12 +169,16 @@ def test_v4_required_before_run_marker_renders_inline(tmp_path):
     assert i_growth < i_marker < i_seed
 
 
-def test_v4_variants_table_preserved(tmp_path):
+def test_v4_variants_not_duplicated_in_composition(tmp_path):
+    """Variants are shown only in the dedicated Variants sub-tab — they are no
+    longer duplicated in the Composition panel (which shows just the model).
+    Model settings (unique, editable) stay in Composition."""
     html = _render(tmp_path, "v4-study", _V4_SPEC)
     panel = _panel_compose(html)
-    assert "cond-table" in panel
-    assert "hot" in panel
-    assert "temperature" in panel
+    # The variant row (name "hot") no longer appears in Composition.
+    assert ">hot<" not in panel and '"hot"' not in panel
+    # Model settings (editable, not duplicated elsewhere) remain in Composition.
+    assert "cond-expert-table" in panel and "growth_rate" in panel
 
 
 def test_v4_editable_model_settings_table_preserved(tmp_path):
