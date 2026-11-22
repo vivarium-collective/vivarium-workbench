@@ -6631,8 +6631,13 @@ body.vp-dragging .viv-studies-head{ cursor:grabbing; }
 .viv-cycle-panel.vp-collapsed .viv-cycle-expand:hover{ background:#eef2ff; color:#3730a3; }
 /* Body hosts the relocated study-browser section; it scrolls when the study list
    is long. The hosted section keeps its own .viv-rail-* styling. */
-.viv-studies-body{ flex:1 1 auto; min-height:0; min-width:0; overflow:auto; position:relative; }
-.viv-studies-body #viv-rail-studies-section{ display:block; }
+.viv-studies-body{ flex:1 1 auto; min-height:0; min-width:0; overflow:auto; position:relative; display:flex; flex-direction:column; }
+/* The relocated study-browser section must FILL the panel body (not sit at its
+   natural, short height leaving the panel half-empty): keep it a flex column at
+   least as tall as the body, with the dependency-ordered study list flexing to
+   take the remaining height. The search/stepper head stays sticky at the top. */
+.viv-studies-body #viv-rail-studies-section{ display:flex; flex-direction:column; flex:1 1 auto; min-height:100%; box-sizing:border-box; }
+.viv-studies-body #viv-rail-investigations{ flex:1 1 auto; min-height:0; }
 /* Collapsed: shrink to a thin edge strip showing only the expand handle. */
 .viv-studies-expand{ display:none; }
 .viv-studies-panel.vp-collapsed{ flex:0 0 auto !important; }
