@@ -13603,6 +13603,40 @@
   var _aigPosKey = 'aig-card-pos:investigation';   // per-investigation localStorage key (set each render)
   function _aigLoadPos() { try { return JSON.parse(localStorage.getItem(_aigPosKey) || '{}') || {}; } catch (e) { return {}; } }
   function _aigSavePos(m) { try { localStorage.setItem(_aigPosKey, JSON.stringify(m)); } catch (e) {} }
+  var _aigRenderCtx = null;        // {pos, studies, CARD_W, gap} — for live collision during a drag
+  function _aigResolveOverlaps(pos, studies, CARD_W, gap, fixedSlug) {
+    // Iteratively separate overlapping card rectangles (CARD_W × measured height, + gap margin),
+    // pushing along the axis of LEAST overlap so cards never sit on top of each other. fixedSlug
+    // (optional) stays put and others yield around it (drag: the held card is fixed). Mutates
+    // pos[].x/y only — the caller writes the DOM. Returns true if anything moved.
+    var it, i, j, changed = false;
+    for (it = 0; it < 40; it++) {
+      var any = false;
+      for (i = 0; i < studies.length; i++) {
+        for (j = i + 1; j < studies.length; j++) {
+          var a = pos[studies[i].name], b = pos[studies[j].name];
+          if (!a || !b) continue;
+          var ah = a.h || 120, bh = b.h || 120;
+          var ox = Math.min(a.x + CARD_W, b.x + CARD_W) - Math.max(a.x, b.x) + gap;  // x-overlap (+gap)
+          var oy = Math.min(a.y + ah, b.y + bh) - Math.max(a.y, b.y) + gap;          // y-overlap (+gap)
+          if (ox <= 0 || oy <= 0) continue;        // already separated (with margin)
+          var af = (studies[i].name === fixedSlug), bf = (studies[j].name === fixedSlug);
+          if (af && bf) continue;
+          any = true; changed = true;
+          if (ox < oy) {                            // least overlap on X → push apart horizontally
+            var dx = (a.x <= b.x) ? ox : -ox;
+            if (af) b.x += dx; else if (bf) a.x -= dx; else { a.x -= dx / 2; b.x += dx / 2; }
+          } else {                                  // push apart vertically
+            var dy = (a.y <= b.y) ? oy : -oy;
+            if (af) b.y += dy; else if (bf) a.y -= dy; else { a.y -= dy / 2; b.y += dy / 2; }
+          }
+        }
+      }
+      if (!any) break;
+    }
+    if (changed) studies.forEach(function (s) { var p = pos[s.name]; if (p) { if (p.x < 0) p.x = 0; if (p.y < 0) p.y = 0; } });
+    return changed;
+  }
   function _aigNodeZoom(node) {
     // Effective on-screen scale = rendered width / layout width (the CSS transform:scale zoom),
     // read from the DOM so this doesn't depend on the zoom var's scope.
@@ -13634,7 +13668,19 @@
     var startX = e.clientX, startY = e.clientY, z = _aigNodeZoom(node);
     var baseLeft = parseFloat(node.style.left) || 0, baseTop = parseFloat(node.style.top) || 0;
     var moved = false, pending = null, raf = 0;
-    function flush() { raf = 0; if (pending) { node.style.left = pending.x + 'px'; node.style.top = pending.y + 'px'; pending = null; } }
+    function flush() {
+      raf = 0;
+      if (!pending) return;
+      var ctx = _aigRenderCtx;
+      if (ctx && ctx.pos[slug]) {
+        ctx.pos[slug].x = pending.x; ctx.pos[slug].y = pending.y;
+        _aigResolveOverlaps(ctx.pos, ctx.studies, ctx.CARD_W, ctx.gap, slug);   // held card fixed; others yield
+        ctx.studies.forEach(function (s) { var p = ctx.pos[s.name]; if (p) { p.node.style.left = p.x + 'px'; p.node.style.top = p.y + 'px'; } });
+      } else {
+        node.style.left = pending.x + 'px'; node.style.top = pending.y + 'px';
+      }
+      pending = null;
+    }
     function mm(ev) {
       var dx = (ev.clientX - startX) / (z || 1), dy = (ev.clientY - startY) / (z || 1);
       if (!moved && (Math.abs(dx) + Math.abs(dy)) < 4) return;   // threshold: a real drag, not a click
@@ -14158,7 +14204,7 @@
           });
         })(s, chainsBySlug[s.name]);
       }
-      pos[s.name] = { x: x, node: node, depth: depth[s.name] };
+      pos[s.name] = { x: x, lx: x, node: node, depth: depth[s.name] };
     });
 
     // Measure + position + draw, wrapped in a closure so it can RE-RUN. The
@@ -14228,15 +14274,25 @@
     // computed layout, grow the canvas to fit them, and wire drag/resize once. Edges below redraw
     // from these positions. A loose OR connected card can be moved; only a drag past the threshold
     // repositions, so click-to-select / dblclick-to-open still work.
-    (function _aigApplySavedPositions() {
-      var saved = _aigLoadPos();
+    (function _aigPlaceSeparateWire() {
+      var saved = _aigLoadPos(), GAP = Math.max(14, BREADTH_GAP);
+      // Reset to the layout baseline (lx from Pass 1, y from Pass 2) so re-renders don't accumulate,
+      // then apply saved (dragged) positions.
       studies.forEach(function (s) {
-        var sp = saved[s.name], p = pos[s.name];
-        if (!p || !sp || typeof sp.x !== 'number' || typeof sp.y !== 'number') return;
-        p.x = sp.x; p.y = sp.y; p.node.style.left = sp.x + 'px'; p.node.style.top = sp.y + 'px';
-        if (sp.x + CARD_W + PAD_X > canvasW) canvasW = sp.x + CARD_W + PAD_X;
-        if (sp.y + (p.h || 120) + PAD_Y > canvasH) canvasH = sp.y + (p.h || 120) + PAD_Y;
+        var p = pos[s.name], sp = saved[s.name]; if (!p) return;
+        p.x = (sp && typeof sp.x === 'number') ? sp.x : (p.lx != null ? p.lx : p.x);
+        if (sp && typeof sp.y === 'number') p.y = sp.y;   // else keep the fresh Pass-2 layout y
       });
+      // Separate ANY overlaps so cards never sit on top of each other (large/full-detail cards or
+      // manual placement push each other apart), then write the DOM + grow the canvas to fit.
+      _aigResolveOverlaps(pos, studies, CARD_W, GAP, null);
+      studies.forEach(function (s) {
+        var p = pos[s.name]; if (!p) return;
+        p.node.style.left = p.x + 'px'; p.node.style.top = p.y + 'px';
+        if (p.x + CARD_W + PAD_X > canvasW) canvasW = p.x + CARD_W + PAD_X;
+        if (p.y + (p.h || 120) + PAD_Y > canvasH) canvasH = p.y + (p.h || 120) + PAD_Y;
+      });
+      _aigRenderCtx = { pos: pos, studies: studies, CARD_W: CARD_W, gap: GAP };  // for live drag collision
     })();
     _aigWireCardManipulation(nodesHost);
 
