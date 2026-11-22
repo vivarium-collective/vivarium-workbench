@@ -238,6 +238,15 @@ a:hover{text-decoration:underline}
 .ttable .tname{font-weight:600}
 .ttable .texp{color:var(--ink-3);font-family:var(--mono);font-size:12px}
 .ttable .tv{text-align:right;white-space:nowrap}
+/* compact, uniform test rows (statement + verdict chip + one muted meta line) */
+.tests-list{margin-top:4px}
+.test-row{padding:7px 0;border-top:1px solid var(--line)}
+.test-row:first-child{border-top:none}
+.test-head{display:flex;gap:10px;align-items:baseline;justify-content:space-between}
+.test-desc{font-weight:600;font-size:12.5px;color:var(--ink-2)}
+.test-row .fmeta{margin-top:3px;font-size:11px;color:var(--ink-3);line-height:1.5}
+.test-row .fmeta .mono{font-family:var(--mono);font-size:10.5px;color:var(--ink-3)}
+.test-row .fmeta .sep{color:var(--line-2);margin:0 2px}
 
 /* decision box */
 .decbox{display:flex;gap:14px;align-items:flex-start;padding:14px 16px;background:var(--sunken);
@@ -1147,16 +1156,17 @@ function testsTable(tests, traj){
     const cls=t.classification;
     const fin=finals[name]; const v=fin?(fin.v==='within_tol'?'pass':'fail'):null;
     const exp=(fin&&fin.exp)||(prov[name]&&prov[name].exp)||(t.pass_if&&(t.pass_if.op+' '+t.pass_if.value))||'';
-    const pv=provText((prov[name]&&prov[name].provenance))||provText(t.pass_if&&t.pass_if.provenance)||(t.measure&&t.measure.kind==='audit-axis'?('audit axis '+meas):'');
     const obs=(fin&&fin.obs!=null)?`observed ${fmt(fin.obs)}`:'';
     const mg=(fin&&fin.m!=null)?` · margin ${fmt(fin.m)}`:'';
-    return `<tr id="test-${esc(name)}"><td class="tname">${esc(desc||name)}
-        <div class="texp mono">${esc(name)}${cls?' · '+esc(cls):''}${meas?' · '+esc(meas):''}</div>
-        ${pv?`<div class="kv rationale" style="font-size:12px;margin-top:3px">${esc(pv)}</div>`:''}</td>
-      <td class="tv"><div>${exp?`<span class="mono texp">${esc(exp)}</span>`:''} ${v?`<span class="chip ${v}" style="margin-left:6px">${v==='pass'?'✓ pass':'✗ fail'}</span>`:'<span class="chip">pending</span>'}</div>
-        ${obs?`<div class="texp mono" style="margin-top:3px">${esc(obs)}${esc(mg)}</div>`:''}</td></tr>`;
+    const chip=v?`<span class="chip ${v}">${v==='pass'?'✓ pass':'✗ fail'}</span>`:'<span class="chip">pending</span>';
+    const meta=[`<span class="mono">${esc(name)}</span>${cls?' · '+esc(cls):''}${meas?' · '+esc(meas):''}`];
+    if(exp) meta.push(esc(exp));
+    if(obs) meta.push(esc(obs)+esc(mg));
+    return `<div class="test-row" id="test-${esc(name)}">
+      <div class="test-head"><span class="test-desc">${esc(desc||name)}</span>${chip}</div>
+      <div class="fmeta">${meta.join(' <span class="sep">·</span> ')}</div></div>`;
   }).join('');
-  return `<table class="ttable">${rows}</table>`;
+  return `<div class="tests-list">${rows}</div>`;
 }
 function fmt(n){ if(typeof n!=='number') return esc(n); return Number.isInteger(n)?n:(Math.abs(n)<0.01?n.toExponential(1):n.toFixed(2)); }
 // Report card (SIM vs EXPT): render the structured per-axis verdict table +
@@ -1363,8 +1373,7 @@ function renderStudy(s, inv, idx){
   let runBody = runs.length?runs.map(r=>{
     return `<div class="kv" style="margin:6px 0"><span class="chip ${r.status==='completed'?'pass':''}">${esc(r.status)}</span>
       <span class="mono" style="margin-left:8px;color:var(--ink-2)">${esc(r.name||r.module||'')}</span>
-      ${outcomeRows(r.outcomes)}
-      ${r.provenance?`<div class="texp mono" style="margin-top:2px">${esc(provText(r.provenance))}</div>`:''}</div>`;
+      ${outcomeRows(r.outcomes)}</div>`;
   }).join(''):'';
   // run-command chips: show the base reproduce command ONCE, then list the
   // variants cleanly. The variant's `name` in the data is a long descriptive
