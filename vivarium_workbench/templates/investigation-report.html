@@ -208,6 +208,9 @@ a:hover{text-decoration:underline}
 .claim{font-family:var(--serif);font-size:16.5px;color:var(--ink);margin:8px 0 2px;max-width:none;font-style:italic}
 .biology{color:var(--ink-2);font-size:14px;margin:8px 0 4px;max-width:none}
 .study-thesis{color:var(--ink);font-size:14px;line-height:1.5;margin:8px 0 4px;max-width:none}
+.study-result{margin:10px 0 4px;max-width:none}
+.study-result .ov-k{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);margin-bottom:2px}
+.study-result>*:not(.ov-k){color:var(--ink);font-size:14px;line-height:1.5;margin:0}
 
 /* spine stage */
 .stage{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}
@@ -361,8 +364,13 @@ details.exp .body{font-size:13.5px;color:var(--ink-2);margin-top:8px;max-width:n
 .ho-dir{font-size:11px;font-weight:700;letter-spacing:.03em;color:var(--ink-2);white-space:nowrap}
 .ho-who{color:var(--ink-3);font-weight:600}
 .ho-items{display:flex;gap:5px;flex-wrap:wrap}
-.tech-record{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line-2)}
-.tech-record>.body{margin-top:12px}
+.tech-record{margin-top:14px;padding-top:10px;border-top:1px dashed var(--line-2)}
+.tech-record>summary{font-size:11.5px;font-weight:600;color:var(--ink-3);letter-spacing:.02em}
+/* the technical record is supporting material — render it compact + muted */
+.tech-record>.body{margin-top:10px;font-size:12.5px;color:var(--ink-2)}
+.tech-record>.body .kicker{font-size:10.5px;color:var(--ink-3)}
+.tech-record>.body .texp,.tech-record>.body .mono{font-size:11.5px;color:var(--ink-3)}
+.tech-record>.body .kv .rationale{font-size:12px;color:var(--ink-2)}
 
 /* appendix */
 .appendix{margin:52px 0 24px}
@@ -1316,9 +1324,13 @@ function renderStudy(s, inv, idx){
   // this the card showed only the question.
   const bioText = s.biological_summary || pm;
   const thesis = (question && s.claim && String(s.claim).trim()) ? s.claim : '';
+  const resultText = (s.result && String(s.result).trim()) ? s.result : '';
   let overview = '';
   if(thesis) overview += `<div class="study-thesis">${mdLite(thesis)}</div>`;
   if(bioText) overview += `<div class="biology">${esc(bioText)}</div>`;
+  // the study's RESULT — a human-readable summary of what it found, mirroring the
+  // live study Overview's Result section.
+  if(resultText) overview += `<div class="study-result"><div class="ov-k">Result</div>${mdLite(resultText)}</div>`;
 
   // MODEL — a COMPACT model card: the composite id + topology counts
   // (processes · compartments · links) + the sourcing decision. The full
@@ -1339,7 +1351,6 @@ function renderStudy(s, inv, idx){
     (_topo.stores||[]).forEach(n=>{ if(n&&n.name!=null) _comps.add(n.name); });
     const nc=_comps.size, nl=_links.size;
     modelBody+=`<div class="texp" style="margin-top:4px">${np} process${np===1?'':'es'} · ${nc} compartment${nc===1?'':'s'} · ${nl} link${nl===1?'':'s'}</div>`;
-    modelBody+=`<div class="texp model-interactive-hint" style="margin-top:4px;color:var(--ink-3)">▸ full interactive bigraph in the live workbench</div>`;
   }
   if(s.sourcing){
     modelBody += `<div class="decision-line" style="margin-top:8px"><span class="chip decision">${esc(s.sourcing.decision)}</span>
@@ -1568,7 +1579,7 @@ function renderStudy(s, inv, idx){
     + part('Provenance & anchors', anchorsBody, 'study:'+s.slug+'/provenance', s.title+' · Provenance')
     + part('Limitations & follow-ups', debtsBody, 'study:'+s.slug+'/debts', s.title+' · Limitations');
   const techRecord = techInner.trim()
-    ? `<details class="exp tech-record"><summary>Technical record — model internals, full figure set, tests, provenance &amp; follow-ups</summary><div class="body">${techInner}</div></details>`
+    ? `<details class="exp tech-record"><summary>Technical record</summary><div class="body">${techInner}</div></details>`
     : '';
 
   // card badge uses the SAME status derivation as the graph + ladder (workbench
@@ -2086,12 +2097,19 @@ window.__reportPrintPrep = function(){
       const proms=[];
       try{
         if(!(window.Plotly && Plotly.toImage)) return proms;
+        // Rasterize EVERY rendered Plotly figure to a static PNG (not only the
+        // WebGL/canvas ones): a canvas doesn't capture in the headless print
+        // surface, and a figure that never got a real-width layout renders as a
+        // tall BLANK bordered box. toImage gives a PNG that always prints; if it
+        // fails (a figure that never actually drew), hide the empty holder so it
+        // leaves no blank space. SVG→PNG at scale 2 is crisp enough for an A4 PDF.
         document.querySelectorAll('figure.embedded-plotly .plotly-graph-div, figure.embedded-plotly .js-plotly-plot').forEach(gd=>{
           try{
-            if(!gd.querySelector('canvas')) return;   // SVG figure already prints
             const holder=gd.closest('.plotly-holder')||gd.parentElement;
             const w=Math.max(220, ((holder&&holder.clientWidth)||680)-14);
             const h=Math.max(220, gd.clientHeight||gd.offsetHeight||440);
+            const _hideFig=function(){ try{ const fig=gd.closest('figure.embedded-plotly'); if(fig) fig.style.display='none'; }catch(e){} };
+            if(!gd.data || !gd.data.length){ _hideFig(); return; }  // never drew → no blank box
             proms.push(Plotly.toImage(gd,{format:'png', width:w, height:h, scale:2}).then(function(uri){
               try{
                 const img=document.createElement('img');
@@ -2099,7 +2117,7 @@ window.__reportPrintPrep = function(){
                 img.style.width='100%'; img.style.height='auto'; img.style.display='block';
                 if(gd.parentNode) gd.parentNode.replaceChild(img, gd);
               }catch(e){}
-            }).catch(function(){}));
+            }).catch(_hideFig));
           }catch(e){}
         });
       }catch(e){}
@@ -2131,7 +2149,29 @@ window.__reportPrintPrep = function(){
     }catch(e){}
     // Settle (figures + graph laid out), THEN rasterize WebGL figures and resolve
     // once every static snapshot has been swapped in.
-    const _finish=()=>{ try{ Promise.all(_rasterizePlotly()).then(function(){setTimeout(resolve,500);}, function(){setTimeout(resolve,500);}); }catch(e){ setTimeout(resolve,700); } };
+    // Inline-ify committed-HTML / local: viz figures: they render in a viz-frame
+    // <iframe> that collapses to a thin strip in a static PDF. Pull each iframe's
+    // SVG into the page so it prints (colony vizzes, committed SVG charts). A
+    // figure whose iframe has no SVG is left as-is.
+    function _inlineVizFrames(){
+      try{
+        document.querySelectorAll('iframe.viz-frame').forEach(function(fr){
+          try{
+            var doc=fr.contentDocument; if(!doc) return;
+            var svgs=doc.querySelectorAll('svg'); if(!svgs.length) return;
+            var wrap=document.createElement('div'); wrap.className='viz-inlined';
+            svgs.forEach(function(sv){
+              var c=sv.cloneNode(true);
+              c.removeAttribute('height'); c.removeAttribute('width');
+              c.style.width='100%'; c.style.height='auto'; c.style.display='block'; c.style.margin='6px 0';
+              wrap.appendChild(c);
+            });
+            if(fr.parentNode) fr.parentNode.replaceChild(wrap, fr);
+          }catch(e){}
+        });
+      }catch(e){}
+    }
+    const _finish=()=>{ try{ _inlineVizFrames(); }catch(e){} try{ Promise.all(_rasterizePlotly()).then(function(){setTimeout(resolve,500);}, function(){setTimeout(resolve,500);}); }catch(e){ setTimeout(resolve,700); } };
     let n=0; const tick=()=>{ if(++n<6){ try{requestAnimationFrame(tick);}catch(e){setTimeout(tick,16);} } else { _finish(); } };
     try{ requestAnimationFrame(tick); }catch(e){ _finish(); }
   });
