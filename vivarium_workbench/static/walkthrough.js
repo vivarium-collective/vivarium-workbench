@@ -11922,7 +11922,7 @@
     // not an ad-hoc union of whatever fields happen to be present. Each section
     // maps to one canonical investigation.yaml field; a tab appears when its
     // field is authored, always in this order. Add/remove a section in ONE place
-    // (here). Reader flow: the answer (Verdict) → context (Background, Biology) →
+    // (here). Reader flow: the answer (Findings) → context (Background, incl. Biology) →
     // argument (Hypothesis & evidence) → aids (How to read, Glossary) → the plan
     // (Plan progress) → the open calls (Decisions).
     var _refsMap = d.references_resolved || {};
@@ -11990,16 +11990,34 @@
     if (ovParts.length)
       tabs.push({ id:'overview', label:'Overview', html: ovParts.join('') });
 
-    // 2. Verdict — the full campaign answer (executive.verdict); behind a click.
-    if (verdict)
-      tabs.push({ id:'verdict', label:'Verdict', badge: vs ? vsLabel : '',
-        html: '<div class="inv-fresh-mount" data-fresh-tab="verdict" data-slug="' + _esc(d.name || window._currentIset || '') + '"></div>' +
+    // 2. Findings — the campaign answer (executive.verdict) + the synthesized
+    // claims AND the ordered scientific reading (narrative), consolidated into one
+    // tab (Verdict and Narrative were highly overlapping — both render the same
+    // RFC-0005 claim layer, one as a verdict + claim list, one as ordered prose).
+    // Both async mounts are kept (#inv-verdict-claims-mount, #inv-narrative-mount)
+    // so argument-graph.js still fills them, and both freshness mounts are kept
+    // (data-fresh-tab verdict + narrative) so tab-freshness.js still stamps each.
+    {
+      var findParts = [];
+      if (verdict)
+        findParts.push(
+          '<div class="inv-fresh-mount" data-fresh-tab="verdict" data-slug="' + _esc(d.name || window._currentIset || '') + '"></div>' +
           '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
           '<span class="inv-vs-pill">' + _esc(vsLabel) + '</span>' +
           '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>' +
           // Claims (RFC-0005 synthesis layer): each claim, its verdict, and what
           // supports/challenges it — filled async by argument-graph.js.
-          '<div id="inv-verdict-claims-mount" class="inv-claims-mount"></div>' });
+          '<div id="inv-verdict-claims-mount" class="inv-claims-mount"></div>');
+      // Ordered scientific reading (RFC-0005): the claims arranged by explanatory
+      // dependence, audit gaps marked inline. Filled async by argument-graph.js;
+      // shows nothing if the derivation layer is unavailable.
+      findParts.push(
+        '<div class="inv-fresh-mount" data-fresh-tab="narrative" data-slug="' + _esc(d.name || window._currentIset || '') + '"></div>' +
+        '<div id="inv-narrative-mount" class="inv-narrative-mount">' +
+        '<p class="muted" style="padding:16px">Loading narrative…</p></div>');
+      tabs.push({ id:'findings', label:'Findings', badge: vs ? vsLabel : '',
+        html: findParts.join('') });
+    }
 
     // 3. Background — the lead intro, the driving Question + Hypothesis, and the
     // structured argument (Hypothesis & evidence folded in here per the owner).
@@ -12019,22 +12037,16 @@
     if (_evBody)
       bgParts.push('<div class="inv-brief-evidence">' +
         '<div class="inv-brief-frameworks-label">Hypothesis &amp; evidence</div>' + _evBody + '</div>');
+    // Biology — the plain-English mechanism narrative (biological_story), folded
+    // into Background as a section rather than its own tab (per the owner).
+    if (bio)
+      bgParts.push('<div class="inv-brief-biology">' +
+        '<div class="inv-brief-frameworks-label">Biology</div>' +
+        '<div class="inv-brief-prose">' + _renderInvLeadMarkdown(bio) + '</div></div>');
     if (bgParts.length)
       tabs.push({ id:'background', label:'Background', html: bgParts.join('') });
 
-    // Narrative — the ordered scientific reading (RFC-0005): the investigation's
-    // claims arranged by explanatory dependence, with the audit gaps marked
-    // inline. A derived document, next to Background. Filled async by
-    // argument-graph.js; shows nothing if the derivation layer is unavailable.
-    tabs.push({ id:'narrative', label:'Narrative', html:
-      '<div class="inv-fresh-mount" data-fresh-tab="narrative" data-slug="' + _esc(d.name || window._currentIset || '') + '"></div>' +
-      '<div id="inv-narrative-mount" class="inv-narrative-mount">' +
-      '<p class="muted" style="padding:16px">Loading narrative…</p></div>' });
-
-    // 4. Biology — the plain-English mechanism narrative (biological_story).
-    if (bio)
-      tabs.push({ id:'biology', label:'Biology', html:
-        '<div class="inv-brief-prose">' + _renderInvLeadMarkdown(bio) + '</div>' });
+    // (Narrative folded into Findings above; Biology folded into Background above.)
 
     // 5. How to read — evaluator tips (string prose or a list of tips).
     if (hasHowto)
@@ -12100,7 +12112,7 @@
       html: '<div id="inv-attention-mount" class="muted" style="padding:8px 2px;font-size:0.92em">Scanning…</div>' });
 
     // Overview is pushed first, so it is the default (active) tab via the i===0
-    // rule below; every other tab (Verdict, Background, …) is reached by a click.
+    // rule below; every other tab (Findings, Background, …) is reached by a click.
     if (tabs.length) {
       H.push('<div class="inv-brief-tabs" role="tablist">' + tabs.map(function(t, i) {
         var _cls = 'inv-brief-tab' + (i === 0 ? ' active' : '') + (t.attention ? ' inv-brief-tab-attn' : '');
