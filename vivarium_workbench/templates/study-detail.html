@@ -1110,48 +1110,14 @@ h1.study-title .study-name>.ie-pencil{right:4px;top:6px}
      Runnable models above, so this section is skipped when it would
      otherwise render empty — Absent ≠ empty.) Edit a value in the Current
      column and the next pbg_runner invocation picks it up. #}
-  {% if _cond and (_cond.variants or _model_settings) %}
+  {# Variants used to be duplicated here AND in the dedicated Variants sub-tab;
+     the Composition tab is now just the model, so Variants/Interventions live
+     only in their own tabs. This section keeps only Model settings — the
+     editable per-study values the model still needs set. #}
+  {% if _model_settings %}
   <div class="overview-section" id="conditions-section">
-    <h3>Conditions <span class="muted" style="font-size:0.85em;font-weight:normal">— what we set up to test it</span></h3>
-    <p class="muted" style="font-size:0.88em">The experimental knobs: how variants perturb the baseline, and which model settings still need a human-set value.</p>
-
-    {% if _cond.variants %}
-    <div class="cond-block">
-      <div class="cond-block-title">Variants <span class="muted" style="font-weight:normal;font-size:0.85em">({{ _cond.variants | length }})</span></div>
-      <table class="cond-table">
-        <thead><tr><th>Variant</th><th>Composite / base</th><th>Parameter overrides</th><th>Notes</th></tr></thead>
-        <tbody>
-          {% for v in _cond.variants %}
-          {# data-model-composite/-overrides let _loadModelCards() (study-spine
-             reorg Task 6) pick up variant composites too, alongside the
-             baseline .cond-block entries above — same attribute convention,
-             so one JS scan covers baseline + variants. Empty
-             data-model-composite (inherits baseline) is skipped by the JS. #}
-          {% set _vcomposite = v.composite or v.base_composite or '' %}
-          {% set _ovr = v.parameter_overrides or v.params or {} %}
-          <tr data-model-composite="{{ _vcomposite }}" data-model-overrides='{{ _ovr | tojson }}'>
-            <td><code>{{ v.name or '?' }}</code></td>
-            <td>
-              {% if v.composite %}<code>{{ v.composite }}</code>
-              {% elif v.base_composite %}<code>{{ v.base_composite }}</code>
-              {% else %}<em class="muted">(inherits baseline)</em>{% endif %}
-            </td>
-            <td>
-              {% if _ovr %}
-                {% for k, val in _ovr.items() %}
-                <div><span class="cond-pill-k">{{ k }}</span>=<code>{{ val }}</code></div>
-                {% endfor %}
-              {% else %}
-                <em class="muted">(no overrides)</em>
-              {% endif %}
-            </td>
-            <td>{{ v.description or v.notes or '' }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
+    <h3>Model settings <span class="muted" style="font-size:0.85em;font-weight:normal">— values this study still needs set</span></h3>
+    <p class="muted" style="font-size:0.88em">Model settings that still need a human-set value. Variants (how the study perturbs the baseline) and interventions live in their own tabs.</p>
 
     {% if _model_settings %}
     <div class="cond-block">
