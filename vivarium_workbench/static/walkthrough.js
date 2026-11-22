@@ -13590,6 +13590,98 @@
       .catch(function () {});
   }
 
+  // ---- Card-graph direct manipulation (investigation DAG) ----
+  // (A) RESIZE the SELECTED card from its right edge to set the GLOBAL card width for all
+  //     cards (drives aigWidthScale via _setAigWidthScale — the same knob as the width slider).
+  // (B) DRAG any card to reposition, with snap-to-grid, persisted per investigation. Only a
+  //     drag past a small threshold moves a card, so click-to-select / dblclick-to-open still
+  //     fire. _renderInvestigationDag applies the saved position map over the computed layout
+  //     (below) so manual placement survives re-renders, and edges redraw from the moved spots.
+  var _AIG_SNAP = 16;              // snap grid (layout px)
+  var _AIG_RESIZE_EDGE = 12;       // px from the selected card's right edge = resize handle
+  var _aigBandCardW = 150;         // _opts.cardW of the current band (set each render; resize -> scale)
+  var _aigPosKey = 'aig-card-pos:investigation';   // per-investigation localStorage key (set each render)
+  function _aigLoadPos() { try { return JSON.parse(localStorage.getItem(_aigPosKey) || '{}') || {}; } catch (e) { return {}; } }
+  function _aigSavePos(m) { try { localStorage.setItem(_aigPosKey, JSON.stringify(m)); } catch (e) {} }
+  function _aigNodeZoom(node) {
+    // Effective on-screen scale = rendered width / layout width (the CSS transform:scale zoom),
+    // read from the DOM so this doesn't depend on the zoom var's scope.
+    var lw = parseFloat(node.style.width) || _aigBandCardW || 150;
+    var rw = node.getBoundingClientRect().width;
+    return (lw > 0 && rw > 0) ? (rw / lw) : 1;
+  }
+  function _aigStartResizeSelected(e, node) {
+    e.preventDefault(); e.stopPropagation();
+    var startX = e.clientX, z = _aigNodeZoom(node);
+    var startLayoutW = parseFloat(node.style.width) || _aigBandCardW;
+    var base = _aigBandCardW || 150, pending = null, raf = 0;
+    function flush() { raf = 0; if (pending != null) { try { _setAigWidthScale(pending); } catch (x) {} pending = null; } }
+    function mm(ev) {
+      var newLayoutW = startLayoutW + (ev.clientX - startX) / (z || 1);
+      pending = newLayoutW / base;               // aigWidthScale = layout width / band base width
+      if (!raf) raf = requestAnimationFrame(flush);
+    }
+    function mu() {
+      document.removeEventListener('pointermove', mm, true);
+      document.removeEventListener('pointerup', mu, true);
+      if (raf) cancelAnimationFrame(raf);
+      flush();
+    }
+    document.addEventListener('pointermove', mm, true);
+    document.addEventListener('pointerup', mu, true);
+  }
+  function _aigStartMove(e, node, slug) {
+    var startX = e.clientX, startY = e.clientY, z = _aigNodeZoom(node);
+    var baseLeft = parseFloat(node.style.left) || 0, baseTop = parseFloat(node.style.top) || 0;
+    var moved = false, pending = null, raf = 0;
+    function flush() { raf = 0; if (pending) { node.style.left = pending.x + 'px'; node.style.top = pending.y + 'px'; pending = null; } }
+    function mm(ev) {
+      var dx = (ev.clientX - startX) / (z || 1), dy = (ev.clientY - startY) / (z || 1);
+      if (!moved && (Math.abs(dx) + Math.abs(dy)) < 4) return;   // threshold: a real drag, not a click
+      moved = true; ev.preventDefault();
+      pending = { x: baseLeft + dx, y: baseTop + dy };
+      if (!raf) raf = requestAnimationFrame(flush);
+    }
+    function mu(ev) {
+      document.removeEventListener('pointermove', mm, true);
+      document.removeEventListener('pointerup', mu, true);
+      if (!moved) return;                         // a click (no real drag) → let select/open fire
+      ev.preventDefault(); ev.stopPropagation();
+      if (raf) cancelAnimationFrame(raf);
+      flush();
+      var fx = Math.round((parseFloat(node.style.left) || 0) / _AIG_SNAP) * _AIG_SNAP;
+      var fy = Math.round((parseFloat(node.style.top) || 0) / _AIG_SNAP) * _AIG_SNAP;
+      var m = _aigLoadPos(); m[slug] = { x: fx, y: fy }; _aigSavePos(m);
+      if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);  // settle at snap + redraw edges
+    }
+    document.addEventListener('pointermove', mm, true);
+    document.addEventListener('pointerup', mu, true);
+  }
+  function _aigWireCardManipulation(host) {
+    if (!host || host._aigManipWired) return;
+    host._aigManipWired = true;
+    host.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || !e.target.closest) return;
+      var node = e.target.closest('.iset-dag-node[data-study]');
+      if (!node) return;
+      // Leave clicks on interactive sub-elements (buttons, pills, the expand affordance) alone.
+      if (e.target.closest('button, a, [onclick], .aig-more-wrap, .aig-progress-pill, .aig-verdict-pill, .dag-followups-btn')) return;
+      var rect = node.getBoundingClientRect();
+      if (node.classList.contains('aig-node-selected') && (rect.right - e.clientX) <= _AIG_RESIZE_EDGE) {
+        _aigStartResizeSelected(e, node);          // right edge of the SELECTED card → resize-to-width
+      } else {
+        _aigStartMove(e, node, node.dataset.study); // anywhere else → drag-to-reposition
+      }
+    });
+    host.addEventListener('pointermove', function (e) {   // cursor hint: resize on the selected card's right edge
+      if (!e.target.closest) return;
+      var node = e.target.closest('.iset-dag-node.aig-node-selected');
+      if (!node) return;
+      var rect = node.getBoundingClientRect();
+      node.style.cursor = (rect.right - e.clientX) <= _AIG_RESIZE_EDGE ? 'ew-resize' : 'grab';
+    });
+  }
+
   function _renderInvestigationDag(studies, chainsBySlug, studyEdges) {
     _lastDagArgs = [studies, chainsBySlug, studyEdges];
     // Assigned to _layoutAndDraw below; each card's expand toggle calls it to
@@ -13755,6 +13847,9 @@
     // the zoom band. DEPTH_GAP widens a little with the cards so columns don't
     // crowd; BREADTH_GAP (same-depth stacking) stays fixed.
     var CARD_W = Math.round(_opts.cardW * aigWidthScale);
+    // Current band base width + per-investigation position store (for direct manipulation above).
+    _aigBandCardW = _opts.cardW;
+    _aigPosKey = 'aig-card-pos:' + (_dagInvSlug || 'investigation');
     var DEPTH_GAP = Math.round(_opts.xGap * (1 + (aigWidthScale - 1) * 0.5)), BREADTH_GAP = 22;
     var PAD_X = 24, PAD_Y = 16;
     var svgNS = 'http://www.w3.org/2000/svg';
@@ -14128,6 +14223,22 @@
       });
       canvasW = PAD_X * 2 + (depths.length ? depths[depths.length - 1] : 0) * (CARD_W + DEPTH_GAP) + CARD_W;
     }
+
+    // Apply any user-dragged card positions (persisted per investigation, snap-to-grid) over the
+    // computed layout, grow the canvas to fit them, and wire drag/resize once. Edges below redraw
+    // from these positions. A loose OR connected card can be moved; only a drag past the threshold
+    // repositions, so click-to-select / dblclick-to-open still work.
+    (function _aigApplySavedPositions() {
+      var saved = _aigLoadPos();
+      studies.forEach(function (s) {
+        var sp = saved[s.name], p = pos[s.name];
+        if (!p || !sp || typeof sp.x !== 'number' || typeof sp.y !== 'number') return;
+        p.x = sp.x; p.y = sp.y; p.node.style.left = sp.x + 'px'; p.node.style.top = sp.y + 'px';
+        if (sp.x + CARD_W + PAD_X > canvasW) canvasW = sp.x + CARD_W + PAD_X;
+        if (sp.y + (p.h || 120) + PAD_Y > canvasH) canvasH = sp.y + (p.h || 120) + PAD_Y;
+      });
+    })();
+    _aigWireCardManipulation(nodesHost);
 
     nodesHost.style.width = canvasW + 'px';
     nodesHost.style.height = canvasH + 'px';
