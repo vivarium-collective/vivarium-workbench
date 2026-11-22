@@ -15418,9 +15418,10 @@
       : '/api/investigation-notebook/' + encodeURIComponent(name) + '?download=0';
     window.open(url, '_blank', 'noopener');
   };
-  // Figures: open a standalone figure gallery (every figure inline) in a new tab.
-  // Live: the server renders /figures.html; snapshot has no standalone gallery, so
-  // fall back to the report (which inlines the figures).
+  // Figures: open a standalone figure gallery in a new tab.
+  // Live: the server renders /figures.html (figures inlined). Snapshot: the
+  // publish extracts the gallery (index.html + figure files) to figures/<name>/,
+  // so open that — NOT the report (the old fallback, which showed the report).
   window._vivFiguresOpen = function (ev, name) {
     if (ev) ev.stopPropagation();
     name = name || window._wsInvestigation || window._currentIset;
@@ -15428,7 +15429,7 @@
     var c = window.__DASH_CONFIG__ || {};
     var base = c.basePath || '';
     var url = (c.mode === 'snapshot')
-      ? base + '/reports/investigation-' + encodeURIComponent(name) + '.html'
+      ? base + '/figures/' + encodeURIComponent(name) + '/index.html'
       : '/api/investigation/' + encodeURIComponent(name) + '/figures.html';
     window.open(url, '_blank', 'noopener');
   };
