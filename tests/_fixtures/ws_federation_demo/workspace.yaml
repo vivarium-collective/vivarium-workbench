@@ -1,1 +1,6 @@
 name: host_ws
+# Federation is opt-in: this host allow-lists the donor module so its studies and
+# investigations are surfaced (its composites are available regardless).
+dashboard:
+  federation:
+    include: [donor-repo]

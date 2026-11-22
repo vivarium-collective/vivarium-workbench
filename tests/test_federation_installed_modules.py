@@ -28,7 +28,10 @@ def _write(p: Path, data: dict) -> None:
 def _host_ws(tmp_path: Path) -> Path:
     ws = tmp_path / "host"
     _write(ws / "workspace.yaml", {
-        "name": "host", "imports": {"my-mod": {"package": "my_mod", "mode": "pypi"}}})
+        "name": "host",
+        "imports": {"my-mod": {"package": "my_mod", "mode": "pypi"}},
+        # Federation is opt-in: allow-list the module so its studies/investigations surface.
+        "dashboard": {"federation": {"include": ["my-mod"]}}})
     return ws
 
 

@@ -40,9 +40,9 @@ import yaml
 
 from vivarium_workbench.lib.composite_lookup import discover_installed_composites_all
 from vivarium_workbench.lib.federation import (
+    all_federated_investigation_sets,
+    all_federated_studies,
     federated_composites,
-    federated_investigation_sets,
-    federated_studies,
     linked_workspaces,
 )
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
@@ -550,7 +550,7 @@ def module_content_stats(ws_root: Path) -> dict[str, dict]:
 
     studies_by_norm: dict[str, set[str]] = {}
     try:
-        for s in federated_studies(ws_root):
+        for s in all_federated_studies(ws_root):
             repo = s.get("origin_repo")
             if repo and s.get("id"):
                 studies_by_norm.setdefault(_norm(repo), set()).add(s["id"])
@@ -559,7 +559,7 @@ def module_content_stats(ws_root: Path) -> dict[str, dict]:
 
     n_investigations_by_norm: dict[str, int] = {}
     try:
-        for iset in federated_investigation_sets(ws_root):
+        for iset in all_federated_investigation_sets(ws_root):
             repo = iset.get("origin_repo")
             if repo:
                 key = _norm(repo)
@@ -611,7 +611,7 @@ def module_content_stats(ws_root: Path) -> dict[str, dict]:
     # study's unique id ("<repo>::<name>").
     fed_refs: dict[str, set[str]] = {}
     try:
-        for s in federated_studies(ws_root):
+        for s in all_federated_studies(ws_root):
             sid = s.get("id")
             spec = s.get("spec")
             if not sid or not isinstance(spec, dict):
