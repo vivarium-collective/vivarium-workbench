@@ -4,12 +4,13 @@
  * (Formerly a graph-view toggle; the claim graph proved hard to read, so the
  * synthesis/narrative products now live in tabs, as readable documents.)
  *
- * Both now live in the consolidated Findings tab (Verdict + Narrative were merged):
- *   - claims list (#inv-verdict-claims-mount): each claim, its verdict, and what
- *     it builds on / is supported by / is challenged by.
+ * The Findings tab (Verdict + Narrative, merged) renders the ordered reading only:
  *   - ordered reading (#inv-narrative-mount): claims by explanatory dependence,
- *     full text, verdict badges, audit gaps inline, plus limitations and open
- *     questions.
+ *     full text, verdict badges, audit gaps inline, evidence refs, scope, and
+ *     per-study figures/open-study links, plus limitations and open questions.
+ * The claims list (_renderClaims → #inv-verdict-claims-mount) was a second rendering
+ * of the same findings and is no longer mounted in the UI; the renderer is kept for
+ * back-compat / reuse and simply finds no host (a null-guarded no-op).
  *
  * Fed by /api/argument-overlay. A poller fills the mounts whenever they appear
  * for the current investigation; tolerant — an unavailable derivation layer just

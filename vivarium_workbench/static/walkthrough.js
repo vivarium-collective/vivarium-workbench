@@ -11922,7 +11922,7 @@
     // not an ad-hoc union of whatever fields happen to be present. Each section
     // maps to one canonical investigation.yaml field; a tab appears when its
     // field is authored, always in this order. Add/remove a section in ONE place
-    // (here). Reader flow: the answer (Findings) → context (Background, incl. Biology) →
+    // (here). Reader flow: context (Background, incl. Biology) → the answer (Findings) →
     // argument (Hypothesis & evidence) → aids (How to read, Glossary) → the plan
     // (Plan progress) → the open calls (Decisions).
     var _refsMap = d.references_resolved || {};
@@ -11990,37 +11990,10 @@
     if (ovParts.length)
       tabs.push({ id:'overview', label:'Overview', html: ovParts.join('') });
 
-    // 2. Findings — the campaign answer (executive.verdict) + the synthesized
-    // claims AND the ordered scientific reading (narrative), consolidated into one
-    // tab (Verdict and Narrative were highly overlapping — both render the same
-    // RFC-0005 claim layer, one as a verdict + claim list, one as ordered prose).
-    // Both async mounts are kept (#inv-verdict-claims-mount, #inv-narrative-mount)
-    // so argument-graph.js still fills them, and both freshness mounts are kept
-    // (data-fresh-tab verdict + narrative) so tab-freshness.js still stamps each.
-    {
-      var findParts = [];
-      if (verdict)
-        findParts.push(
-          '<div class="inv-fresh-mount" data-fresh-tab="verdict" data-slug="' + _esc(d.name || window._currentIset || '') + '"></div>' +
-          '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
-          '<span class="inv-vs-pill">' + _esc(vsLabel) + '</span>' +
-          '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>' +
-          // Claims (RFC-0005 synthesis layer): each claim, its verdict, and what
-          // supports/challenges it — filled async by argument-graph.js.
-          '<div id="inv-verdict-claims-mount" class="inv-claims-mount"></div>');
-      // Ordered scientific reading (RFC-0005): the claims arranged by explanatory
-      // dependence, audit gaps marked inline. Filled async by argument-graph.js;
-      // shows nothing if the derivation layer is unavailable.
-      findParts.push(
-        '<div class="inv-fresh-mount" data-fresh-tab="narrative" data-slug="' + _esc(d.name || window._currentIset || '') + '"></div>' +
-        '<div id="inv-narrative-mount" class="inv-narrative-mount">' +
-        '<p class="muted" style="padding:16px">Loading narrative…</p></div>');
-      tabs.push({ id:'findings', label:'Findings', badge: vs ? vsLabel : '',
-        html: findParts.join('') });
-    }
-
-    // 3. Background — the lead intro, the driving Question + Hypothesis, and the
-    // structured argument (Hypothesis & evidence folded in here per the owner).
+    // 2. Background — the lead intro, the driving Question + Hypothesis, the
+    // structured argument (Hypothesis & evidence), and Biology (biological_story,
+    // folded in here as a section per the owner). Sits before Findings (owner's
+    // order: context first, then the answer).
     var bgParts = [];
     if (leadProse)
       bgParts.push('<div class="inv-brief-prose"' +
@@ -12046,7 +12019,26 @@
     if (bgParts.length)
       tabs.push({ id:'background', label:'Background', html: bgParts.join('') });
 
-    // (Narrative folded into Findings above; Biology folded into Background above.)
+    // 3. Findings — the campaign answer (executive.verdict headline) + the ordered
+    // scientific reading (narrative, RFC-0005): evidence refs, scope, and per-study
+    // figures/open-study links (#inv-narrative-mount, filled async by argument-graph.js).
+    // The separate claims list (#inv-verdict-claims-mount) was a SECOND rendering of
+    // the same findings, so it's dropped — the narrative is the single, richer view.
+    // No tab badge (the verdict status shows on the headline pill inside the tab).
+    {
+      var findParts = [];
+      if (verdict)
+        findParts.push(
+          '<div class="inv-fresh-mount" data-fresh-tab="verdict" data-slug="' + _esc(d.name || window._currentIset || '') + '"></div>' +
+          '<div class="inv-brief-verdict-tab inv-vs-' + vsClass + '">' +
+          '<span class="inv-vs-pill">' + _esc(vsLabel) + '</span>' +
+          '<div class="inv-brief-verdict-text">' + _invInline(verdict) + '</div></div>');
+      findParts.push(
+        '<div class="inv-fresh-mount" data-fresh-tab="narrative" data-slug="' + _esc(d.name || window._currentIset || '') + '"></div>' +
+        '<div id="inv-narrative-mount" class="inv-narrative-mount">' +
+        '<p class="muted" style="padding:16px">Loading narrative…</p></div>');
+      tabs.push({ id:'findings', label:'Findings', html: findParts.join('') });
+    }
 
     // 5. How to read — evaluator tips (string prose or a list of tips).
     if (hasHowto)
@@ -12067,17 +12059,12 @@
     // a tab rather than a space-consuming always-open board under the brief.
     var _planHtml = _planBoardHtml(d, { compact: true });
     if (_planHtml) {
-      var _pb = d.plan_board || [];
-      // Count EVALUATED gates (any terminal verdict), not strict "passed" — honest
-      // met/qualified/refuted verdicts are real progress, so "0/N passed" misread an
-      // evaluated board as no progress. The per-outcome breakdown is in the board tally.
-      var _TERMINAL = { passed: 1, met: 1, qualified: 1, refuted: 1 };
-      var _evaluated = _pb.filter(function (g) { return _TERMINAL[g.status]; }).length;
       // The formalized synthesis spine (canonical gate verdicts rolled up from
       // member claims) replaces this content when argument-graph.js loads the
       // overlay; _planHtml is the sync fallback if the derivation layer is absent.
-      tabs.push({ id:'plan', label:'Plan progress', html:'<div id="inv-plan-mount">' + _planHtml + '</div>',
-        badge: _pb.length ? (_evaluated + '/' + _pb.length + ' evaluated') : '' });
+      // No tab badge (per the owner) — "Plan progress" stands on its own; the
+      // evaluated/total tally lives in the board inside the tab.
+      tabs.push({ id:'plan', label:'Plan progress', html:'<div id="inv-plan-mount">' + _planHtml + '</div>' });
     }
 
     // 8. Decisions — the discovery cycle's "what to do next" (value-ranked
@@ -12112,7 +12099,7 @@
       html: '<div id="inv-attention-mount" class="muted" style="padding:8px 2px;font-size:0.92em">Scanning…</div>' });
 
     // Overview is pushed first, so it is the default (active) tab via the i===0
-    // rule below; every other tab (Findings, Background, …) is reached by a click.
+    // rule below; every other tab (Background, Findings, …) is reached by a click.
     if (tabs.length) {
       H.push('<div class="inv-brief-tabs" role="tablist">' + tabs.map(function(t, i) {
         var _cls = 'inv-brief-tab' + (i === 0 ? ' active' : '') + (t.attention ? ' inv-brief-tab-attn' : '');
@@ -12518,68 +12505,119 @@
       nondeterministic: 'Runs are reproducible (seeded / deterministic where required).',
       phantom_observable: 'Every declared observable actually exists in the built composite’s structure.'
     };
-    // One row per check, driven by the LIVE scan numbers (passing / examined),
-    // not prose. ✓ when nothing is flagged; amber with a drill-in list otherwise.
-    var rows = checks.map(function (c) {
-      var flagged = c.flagged || 0;
-      var examined = c.examined || 0;
-      var help = HELP[c.kind] || '';
-      var metric;
-      if (examined > 0) metric = '<span style="color:#64748b;font-variant-numeric:tabular-nums">' + (c.passing || 0) + ' / ' + examined + '</span>';
-      else metric = '<span class="muted" style="font-size:0.9em">none to check</span>';
-      var sub = '';
-      if (flagged > 0 && byKindItems[c.kind]) {
-        sub = '<ul style="margin:2px 0 0 17px;padding:0;list-style:none">'
-          + byKindItems[c.kind].map(function (it) {
-              var ref = (it.study || it.ref || '').toString();
-              var label = _esc((it.title || it.ref || it.kind || '').toString());
-              // Surface the CONCRETE issue (detail) + what to do (action_hint),
-              // not just a link — e.g. "composite not found in registry: <ref>".
-              var detail = it.detail ? _esc(it.detail.toString()) : '';
-              var hint = it.action_hint ? _esc(it.action_hint.toString()) : '';
-              var studyTag = (it.study && it.title && it.title.indexOf(it.study) < 0)
-                ? ' <span class="muted" style="font-size:0.85em">· ' + _esc(it.study) + '</span>' : '';
-              return '<li style="margin-top:4px;font-size:0.9em;line-height:1.28">'
-                + (ref
-                    ? '<a href="#" onclick="_openStudyInsideInvestigation(\'' + _esc(ref) + '\',\'conclusions\');return false;" style="color:#2563eb;text-decoration:none">' + label + ' →</a>'
-                    : label) + studyTag
-                + (detail ? '<span style="color:#475569;word-break:break-word"> — ' + detail + '</span>' : '')
-                + (hint ? '<span style="color:#aab4c0;font-size:0.92em"> · ' + hint + '</span>' : '')
-                + '</li>';
-            }).join('')
-          + '</ul>';
-      }
-      return '<li style="margin-top:5px"' + (help ? ' title="' + _esc(help) + '"' : '') + '>'
-        + '<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between">'
-          + '<span style="display:flex;gap:8px;align-items:flex-start">'
-            + '<span style="color:' + (flagged ? '#b45309' : '#16a34a') + ';font-weight:700;flex:none">' + (flagged ? '•' : '✓') + '</span>'
-            + '<span style="border-bottom:1px dotted #cbd5e1;cursor:help">' + _esc(c.label || c.kind) + '</span>'
-          + '</span>'
-          + metric
-        + '</div>' + sub
-        + '</li>';
-    }).join('');
-    var clear = total === 0;
-    // Honest headline: "✓ All clear" only when something was actually evaluated;
-    // otherwise "No studies yet" / "No runs yet" (neutral), never a green pass.
+    // Only the checks that FLAG something — the passing checks are rolled into one
+    // muted line so this tab is just a list of the things to fix, not a wall of ✓.
+    var flaggedChecks = checks.filter(function (c) { return (c.flagged || 0) > 0; });
+    var passingCount = checks.length - flaggedChecks.length;
     var _quiet = _naQuietState(summary);
-    var _headColor = clear ? _quiet.color : '#b45309';
-    var _headline = clear
-      ? _quiet.label
-      : '⚠ ' + total + ' need' + (total === 1 ? 's' : '') + ' attention';
+
+    if (total === 0 || flaggedChecks.length === 0) {
+      // Nothing to fix — honest quiet / all-clear, no green wall.
+      return '<div style="font-weight:700;color:' + _quiet.color + '">' + _esc(_quiet.label) + '</div>'
+        + (checks.length ? '<div class="muted" style="font-size:0.9em;margin-top:4px">✓ all ' + checks.length + ' checks clear'
+            + (memberCount != null ? ' across ' + memberCount + ' member stud' + (memberCount === 1 ? 'y' : 'ies') : '') + '</div>' : '')
+        + '<div style="margin-top:9px;padding-top:7px;border-top:1px solid #f1f5f9">'
+          + '<a href="#" onclick="window._aigOpenDecisionsTab&&window._aigOpenDecisionsTab();return false;" style="color:#2563eb;text-decoration:none;font-size:0.92em">What are these checks? Open the Decisions tab →</a>'
+        + '</div>';
+    }
+
+    // Build the visible sections AND a plain-text copy payload (one line per item,
+    // ready to paste straight to Claude).
+    var copyLines = [];
+    var sections = flaggedChecks.map(function (c) {
+      var help = HELP[c.kind] || '';
+      var items = byKindItems[c.kind] || [];
+      var flagged = c.flagged || items.length || 0;
+      var lis;
+      if (items.length) {
+        lis = items.map(function (it) {
+          var ref = (it.study || it.ref || '').toString();
+          var label = _esc((it.title || it.ref || it.kind || '').toString());
+          var detail = it.detail ? _esc(it.detail.toString()) : '';
+          var hint = it.action_hint ? _esc(it.action_hint.toString()) : '';
+          var studyTag = (it.study && it.title && it.title.indexOf(it.study) < 0)
+            ? ' <span class="muted" style="font-size:0.85em">· ' + _esc(it.study) + '</span>' : '';
+          // plain-text copy line
+          var ct = '- [' + (c.label || c.kind) + '] ' + (it.title || it.ref || it.kind || '');
+          if (it.study && (!it.title || it.title.indexOf(it.study) < 0)) ct += ' (' + it.study + ')';
+          if (it.detail) ct += ' — ' + it.detail;
+          if (it.action_hint) ct += ' · ' + it.action_hint;
+          copyLines.push(ct);
+          // Link to exactly where it's fixed: the member study (opened to its
+          // conclusions tab); an investigation-level item (no study) → Decisions.
+          var link = ref
+            ? '<a href="#" onclick="_openStudyInsideInvestigation(\'' + _esc(ref) + '\',\'conclusions\');return false;" style="color:#2563eb;text-decoration:none">' + label + ' →</a>'
+            : '<a href="#" onclick="window._aigOpenDecisionsTab&&window._aigOpenDecisionsTab();return false;" style="color:#2563eb;text-decoration:none">' + label + ' →</a>';
+          return '<li style="margin-top:4px;font-size:0.92em;line-height:1.3">'
+            + link + studyTag
+            + (detail ? '<span style="color:#475569;word-break:break-word"> — ' + detail + '</span>' : '')
+            + (hint ? '<span style="color:#aab4c0;font-size:0.92em"> · ' + hint + '</span>' : '')
+            + '</li>';
+        }).join('');
+      } else {
+        // Flagged but the scan gave no per-item detail — surface count + a route.
+        copyLines.push('- [' + (c.label || c.kind) + '] ' + flagged + ' flagged (see Decisions tab for detail)');
+        lis = '<li style="margin-top:4px;font-size:0.9em;color:#64748b">' + flagged + ' flagged — '
+          + '<a href="#" onclick="window._aigOpenDecisionsTab&&window._aigOpenDecisionsTab();return false;" style="color:#2563eb;text-decoration:none">open Decisions →</a></li>';
+      }
+      return '<div style="margin-top:10px">'
+        + '<div style="font-weight:600;color:#b45309;font-size:0.92em"' + (help ? ' title="' + _esc(help) + '"' : '') + '>'
+          + _esc(c.label || c.kind) + ' <span class="muted" style="font-weight:400">· ' + flagged + '</span></div>'
+        + '<ul style="margin:3px 0 0;padding:0;list-style:none">' + lis + '</ul>'
+        + '</div>';
+    }).join('');
+
+    var invName = (d.investigation || window._currentIset || '').toString();
+    var copyText = 'Needs attention — investigation "' + invName + '" (' + total + ' item' + (total === 1 ? '' : 's') + '):\n' + copyLines.join('\n');
+    var copyAttr = encodeURIComponent(copyText);
+
     return (
-      '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:2px">'
-        + '<span style="font-weight:700;color:' + _headColor + '">'
-          + _headline + '</span>'
-        + (memberCount != null ? '<span class="muted" style="font-size:0.9em;white-space:nowrap">' + memberCount + ' member stud' + (memberCount === 1 ? 'y' : 'ies') + ' scanned</span>' : '')
+      '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:4px">'
+        + '<span style="font-weight:700;color:#b45309">⚠ ' + total + ' need' + (total === 1 ? 's' : '') + ' attention</span>'
+        + '<span style="display:flex;align-items:center;gap:10px">'
+          + (memberCount != null ? '<span class="muted" style="font-size:0.9em;white-space:nowrap">' + memberCount + ' member stud' + (memberCount === 1 ? 'y' : 'ies') + ' scanned</span>' : '')
+          + '<button type="button" class="na-copy-btn" data-copy="' + copyAttr + '" onclick="_naCopy(this)" title="Copy the list as plain text — to paste straight to Claude" '
+            + 'style="font-size:0.84em;font-weight:600;color:#2563eb;background:#eff6ff;border:1px solid #dbeafe;border-radius:6px;padding:3px 9px;cursor:pointer;white-space:nowrap">⧉ Copy</button>'
+        + '</span>'
       + '</div>'
-      + '<ul style="margin:4px 0 0;padding:0;list-style:none">' + rows + '</ul>'
+      + sections
+      + (passingCount > 0 ? '<div class="muted" style="font-size:0.86em;margin-top:11px">✓ ' + passingCount + ' other check' + (passingCount === 1 ? '' : 's') + ' clear</div>' : '')
       + '<div style="margin-top:9px;padding-top:7px;border-top:1px solid #f1f5f9">'
         + '<a href="#" onclick="window._aigOpenDecisionsTab&&window._aigOpenDecisionsTab();return false;" '
         + 'style="color:#2563eb;text-decoration:none;font-size:0.92em">What are these checks? Open the Decisions tab →</a>'
       + '</div>'
     );
   }
+
+  // Copy the needs-attention list (plain text, from the button's data-copy) to the
+  // clipboard so the user can paste it straight to Claude. Async clipboard with a
+  // textarea+execCommand fallback (older/insecure contexts); brief "Copied ✓" ack.
+  function _naCopy(btn) {
+    if (!btn) return;
+    var t = btn.getAttribute('data-copy') || '';
+    try { t = decodeURIComponent(t); } catch (e) { /* keep raw */ }
+    var ack = function () {
+      var o = btn.getAttribute('data-label') || btn.textContent;
+      btn.setAttribute('data-label', o);
+      btn.textContent = 'Copied ✓';
+      setTimeout(function () { btn.textContent = btn.getAttribute('data-label') || '⧉ Copy'; }, 1500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(ack).catch(function () { _naCopyFallback(t, ack); });
+    } else {
+      _naCopyFallback(t, ack);
+    }
+  }
+  function _naCopyFallback(t, ack) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = t; ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta);
+      if (ack) ack();
+    } catch (e) { /* no-op */ }
+  }
+  window._naCopy = _naCopy;
 
   // Legacy floating popover around the shared scan body (kept for back-compat).
   function _aigShowAllClearInfo(anchor) {

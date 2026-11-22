@@ -16,21 +16,43 @@ WALK = (ROOT / "vivarium_workbench/static/walkthrough.js").read_text()
 AG = (ROOT / "vivarium_workbench/static/argument-graph.js").read_text()
 
 
-def test_findings_tab_consolidates_verdict_and_narrative():
-    # Verdict + Narrative are one "Findings" tab now; the standalone tabs are gone.
+def test_findings_tab_is_the_narrative_only_no_duplicate_claims_no_badge():
+    # Verdict + Narrative are one "Findings" tab; the standalone tabs are gone.
     assert "id:'findings', label:'Findings'" in WALK
     assert "id:'narrative', label:'Narrative'" not in WALK
-    # the Findings tab carries BOTH async mounts so argument-graph.js still fills them
-    assert "inv-verdict-claims-mount" in WALK
+    # The duplicate claims list was dropped — only the richer narrative mount is
+    # emitted (the claims mount DIV is gone; its renderer stays in argument-graph.js).
+    assert '<div id="inv-verdict-claims-mount"' not in WALK
     assert "inv-narrative-mount" in WALK
-    # both freshness mounts are preserved (tab-freshness.js keys off these)
+    # No tab badge on Findings (the verdict status shows on the headline pill inside).
+    assert "label:'Findings', badge:" not in WALK
+    # The verdict-headline + narrative freshness mounts are both kept.
     assert 'data-fresh-tab="verdict"' in WALK and 'data-fresh-tab="narrative"' in WALK
+
+
+def test_background_tab_comes_before_findings():
+    # Owner's order: context (Background) first, then the answer (Findings).
+    assert WALK.index("tabs.push({ id:'background'") < WALK.index("tabs.push({ id:'findings'")
 
 
 def test_biology_is_folded_into_background_not_its_own_tab():
     assert "id:'biology', label:'Biology'" not in WALK
     # biology renders as a section inside the Background tab body
     assert "inv-brief-biology" in WALK
+
+
+def test_plan_progress_tab_has_no_badge():
+    # "Plan progress" stands on its own; the evaluated/total tally lives in the board.
+    assert "id:'plan', label:'Plan progress', html:'<div id=\"inv-plan-mount\">'" in WALK
+
+
+def test_needs_attention_lists_only_flagged_items_with_fix_links_and_copy():
+    # Only flagged checks render (passing ones roll into one muted line), and the
+    # list is copyable (plain text) to hand straight to Claude.
+    assert "flaggedChecks" in WALK
+    assert "other check" in WALK                      # the "N other checks clear" rollup
+    assert "function _naCopy(" in WALK and "window._naCopy = _naCopy" in WALK
+    assert "Copy the list as plain text" in WALK
 
 
 def test_graph_toggle_and_its_hooks_are_gone():
