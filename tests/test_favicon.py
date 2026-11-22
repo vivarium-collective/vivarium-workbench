@@ -24,3 +24,11 @@ def test_session_status_ready_favicon_reuses_the_template_mark():
     # The ready state captures the server-rendered <link rel=icon>, not a hardcoded V.
     assert "_initialIcon" in js
     assert "ready: _initialIcon ||" in js
+
+
+def test_set_favicon_matches_mime_to_the_data_uri():
+    js = SESSION_JS.read_text(encoding="utf-8")
+    # Must NOT hardcode svg+xml — that clobbers the PNG logo mark so the browser
+    # can't decode it and falls back to a blank/letter icon.
+    assert 'link.type = "image/svg+xml";' not in js
+    assert 'data:image/png' in js  # png branch present in the MIME check
