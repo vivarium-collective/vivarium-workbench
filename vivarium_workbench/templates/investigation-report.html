@@ -1473,9 +1473,9 @@ function renderStudy(s, inv, idx){
       const _meta=[];
       _meta.push(`<span class="fid">${esc((f.id?f.id+' · ':'')+(f.status||'finding'))}</span>${tier?' '+etierBadge(tier):''}`);
       if(ft) _meta.push(`from ${_traceLink('test',ft)}${band?` <span class="pass_if-band mono">${esc((band.op||'')+' '+(band.value!=null?band.value:''))}</span>`:''}${bandCites.length?' '+citeRow(bandCites,'band'):''}`);
-      if(dv!=null) _meta.push(`divergence ${esc(dv)}×`);
+      if(dv!=null) _meta.push(`<span class="finding-divergence">divergence ${esc(dv)}× vs expected</span>`);
       if(runIds.length) _meta.push(`run ${runIds.map(r=>`<code>${esc(r)}</code>`).join(', ')}`);
-      if(f.seeded_study) _meta.push(`seeded ${_traceLink('s',f.seeded_study)}`);
+      if(f.seeded_study) _meta.push(`<span class="finding-seeded">seeded ${_traceLink('s',f.seeded_study)}</span>`);
       return `<div class="finding-traceability">
         <div class="kv rationale">${esc(f.statement||'')}${allCites.length?' '+citeRow(allCites):''}</div>
         <div class="fmeta">${_meta.join(' <span class="sep">·</span> ')}</div></div>`;
