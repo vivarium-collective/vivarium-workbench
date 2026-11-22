@@ -13647,12 +13647,17 @@
   function _aigLoadReveal() { try { return JSON.parse(localStorage.getItem(_aigRevealKey) || '{}') || {}; } catch (e) { return {}; } }
   function _aigSaveReveal(m) { try { localStorage.setItem(_aigRevealKey, JSON.stringify(m)); } catch (e) {} }
   function _aigApplyReveal(node, boost) {
-    // Reveal more of the cut-off Asks/Finds text as the card is dragged taller: raise the line-clamp
-    // of each clamped section by `boost` lines (boost >= 40 → fully revealed). boost 0 = default.
+    // Reveal more of the cut-off Asks/Finds text as the card gets BIGGER: relax each clamped section's
+    // line-clamp by (a) a WIDTH bonus that grows with the global card width (aigWidthScale) — so widening
+    // a card shows more text, not just the same lines reflowed wider — plus (b) the per-card bottom-edge
+    // reveal `boost`. A total >= 40 shows the full text. boost 0 + width 1.0 = the band default.
     if (!node) return;
+    var ws = (typeof aigWidthScale === 'number') ? aigWidthScale : 1;
+    var widthBonus = Math.round(Math.max(0, ws - 1) * 8);   // +8 lines per +1.0 of width scale
     node.querySelectorAll('.aig-clamp[data-clamp]').forEach(function (el) {
       var base = parseInt(el.getAttribute('data-clamp'), 10) || 2;
-      var n = (boost >= 40) ? 999 : Math.max(base, base + (boost | 0));
+      var extra = widthBonus + (boost | 0);
+      var n = (extra >= 40) ? 999 : Math.max(base, base + extra);
       el.style.webkitLineClamp = String(n);
       el.style.lineClamp = String(n);
     });
@@ -13675,7 +13680,9 @@
       var r = _aigLoadReveal();
       if (cur > 0) r[slug] = cur; else delete r[slug];
       _aigSaveReveal(r);
+      var _hA = _aigCaptureAnchor();   // keep the selected (resized) card fixed in place
       if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);  // re-measure heights + re-resolve overlaps around the taller card
+      _aigRestoreAnchor(_hA);
     }
     document.addEventListener('pointermove', mm, true);
     document.addEventListener('pointerup', mu, true);
@@ -13748,7 +13755,9 @@
       var fx = Math.round((parseFloat(node.style.left) || 0) / _AIG_SNAP) * _AIG_SNAP;
       var fy = Math.round((parseFloat(node.style.top) || 0) / _AIG_SNAP) * _AIG_SNAP;
       var m = _aigLoadPos(); m[slug] = { x: fx, y: fy }; _aigSavePos(m);
+      var _dA = _aigCaptureAnchor();   // keep the selected card fixed as the re-render settles
       if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);  // settle at snap + redraw edges
+      _aigRestoreAnchor(_dA);
     }
     document.addEventListener('pointermove', mm, true);
     document.addEventListener('pointerup', mu, true);
@@ -13778,7 +13787,9 @@
       document.removeEventListener('pointerup', mu, true);
       if (raf) cancelAnimationFrame(raf);
       flush();
+      var _cA = _aigCaptureAnchor();   // keep the selected (resized) card fixed in place
       if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
+      _aigRestoreAnchor(_cA);
     }
     document.addEventListener('pointermove', mm, true);
     document.addEventListener('pointerup', mu, true);
@@ -14378,7 +14389,7 @@
       });
       // Separate ANY overlaps so cards never sit on top of each other (large/full-detail cards or
       // manual placement push each other apart), then write the DOM + grow the canvas to fit.
-      _aigResolveOverlaps(pos, studies, CARD_W, GAP, null);
+      _aigResolveOverlaps(pos, studies, CARD_W, GAP, window._aigSelected || null);  // selected card is the fixed anchor; others move around it
       // No left/top wall: if separation (or a drag) pushed the leftmost/topmost card past the padding,
       // shift the WHOLE graph back on-canvas so the leftmost sits at PAD_X and the topmost at PAD_Y,
       // instead of jamming cards against x=0 / y=0 and overlapping there.
@@ -14836,8 +14847,10 @@
     var shell = document.getElementById('investigation-dag-shell');
     if (!shell) return;
     var cw = parseFloat(shell.dataset.canvasW) || 1, ch = parseFloat(shell.dataset.canvasH) || 1;
-    var z = Math.min((shell.clientWidth - 10) / cw, (shell.clientHeight - 10) / ch);
-    aigZoom = Math.max(0.3, Math.min(1.5, z || 1));
+    var z = Math.min((shell.clientWidth - 16) / cw, (shell.clientHeight - 16) / ch);
+    // Floor lowered 0.3 -> 0.08 so "fit to screen" can zoom OUT far enough to show ALL cards even for a
+    // large graph with tall full-detail cards (the old 0.3 floor left big graphs clipped).
+    aigZoom = Math.max(0.08, Math.min(1.5, z || 1));
     _applyAigZoom();
     shell.scrollLeft = 0; shell.scrollTop = 0;
   }
@@ -14997,7 +15010,9 @@
     if (!shell) return;
     var cw = parseFloat(shell.dataset.canvasW) || 1, ch = parseFloat(shell.dataset.canvasH) || 1;
     var z = Math.min((shell.clientWidth - 16) / cw, (shell.clientHeight - 16) / ch);
-    aigZoom = Math.max(0.3, Math.min(2, z || 1));
+    // Floor lowered 0.3 -> 0.08 so Fill-to-screen zooms OUT far enough to show ALL cards even for a large
+    // graph with tall full-detail cards (the 0.3 floor left big graphs clipped / not fully visible).
+    aigZoom = Math.max(0.08, Math.min(2, z || 1));
     _applyAigZoom();
     // Centre the now-fully-visible graph in the viewport.
     shell.scrollLeft = Math.max(0, (cw * aigZoom - shell.clientWidth) / 2);

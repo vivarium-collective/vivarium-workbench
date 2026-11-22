@@ -5219,6 +5219,16 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
   line-height: 1.4;
 }
 .aig-tb-btn:hover { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+/* Small text label under a toolbar button's symbol (symbol + label stack vertically). */
+button:has(> .aig-tb-blabel) {
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0; line-height: 1.02;
+}
+.aig-tb-blabel {
+  display: block; font-size: 8px; font-weight: 600; letter-spacing: 0.2px;
+  color: #64748b; margin-top: 1px; text-transform: none;
+}
+button:hover > .aig-tb-blabel { color: #3730a3; }
 .aig-tb-link {
   border: none;
   background: transparent;
