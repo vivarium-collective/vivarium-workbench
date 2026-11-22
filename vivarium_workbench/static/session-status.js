@@ -55,11 +55,11 @@
       link.rel = "icon";
       (document.head || document.documentElement).appendChild(link);
     }
-    // Match the MIME to the data-URI: the ready mark is a PNG (the Vivarium
-    // logo); the preparing/failed marks are inline SVGs. Forcing svg+xml on a
-    // PNG makes the browser fail to decode it and fall back to a blank/letter
-    // mark — the favicon-not-showing bug.
-    link.type = uri.lastIndexOf("data:image/png", 0) === 0 ? "image/png" : "image/svg+xml";
+    // Match the MIME to the mark: the ready icon is a PNG (the Vivarium logo,
+    // a real static file); only the preparing/failed marks are inline SVGs.
+    // Forcing the wrong type makes the browser fail to decode and fall back to
+    // a blank/letter mark — the favicon-not-showing bug.
+    link.type = uri.lastIndexOf("data:image/svg", 0) === 0 ? "image/svg+xml" : "image/png";
     link.href = uri;
   }
 
