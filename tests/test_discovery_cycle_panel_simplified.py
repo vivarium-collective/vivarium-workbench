@@ -8,7 +8,7 @@ engine can do these") + a Details drawer. It is now ONE screen, three zones:
 - **Next** — the two buckets merged into ONE ranked list, each row carrying a
   line-icon who-badge (user vs processor); generation requests grouped by kind.
 - **Steer** — a free-text goal box that hands the goal to the AI assistant
-  (``/drive-engine``). Details collapses to what-changed · scores · gates, and
+  (``/viva:discover``). Details collapses to what-changed · scores · gates, and
   the tracked non-blocking items are a separate collapsed disclosure.
 
 Static assertions (no browser) — they guard the structure in the source.
@@ -49,7 +49,7 @@ def test_cycle_strip_shows_where_we_are_and_holds_the_trace():
 
 def test_steer_zone_hands_a_goal_to_the_assistant():
     assert "function steerHtml(" in JS and "dcyc-steer" in JS
-    assert "function steerEngine(" in JS and "/drive-engine" in JS
+    assert "function steerEngine(" in JS and "/viva:discover" in JS
     assert "_aiSeedPrompt" in JS
 
 

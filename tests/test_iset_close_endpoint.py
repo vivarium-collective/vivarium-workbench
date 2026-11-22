@@ -4,7 +4,7 @@
 Phase 2.1h (rewire-first): this endpoint wraps
 ``discovery_engine.investigation.close.close_investigation`` unchanged — the
 plugin still renders the report, derives contributors, stamps the YAML, and
-commits/PRs; only the caller (the workbench, on behalf of ``/viva-investigation
+commits/PRs; only the caller (the workbench, on behalf of ``/viva:investigate
 close``) moves. These tests exercise the lib builder directly (the same
 "endpoint test calls the lib fn" idiom as ``test_study_readout_migrate_endpoint``)
 against a git fixture mirroring the plugin's own ``test_investigation_close``.
