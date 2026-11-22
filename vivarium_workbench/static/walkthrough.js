@@ -13634,7 +13634,8 @@
       }
       if (!any) break;
     }
-    if (changed) studies.forEach(function (s) { var p = pos[s.name]; if (p) { if (p.x < 0) p.x = 0; if (p.y < 0) p.y = 0; } });
+    // No clamp to 0 here — a left/top wall would jam cards against the edge instead of letting them
+    // separate. The render pass shifts the whole graph back on-canvas if the min goes past the padding.
     return changed;
   }
   function _aigNodeZoom(node) {
@@ -13675,6 +13676,13 @@
       if (ctx && ctx.pos[slug]) {
         ctx.pos[slug].x = pending.x; ctx.pos[slug].y = pending.y;
         _aigResolveOverlaps(ctx.pos, ctx.studies, ctx.CARD_W, ctx.gap, slug);   // held card fixed; others yield
+        // No wall: if dragging left/up pushed any card past the padding, shift the whole graph back
+        // on-canvas (the held card sticks at the edge, the rest flow the other way) — never clips at 0.
+        var mnX = Infinity, mnY = Infinity;
+        ctx.studies.forEach(function (s) { var p = ctx.pos[s.name]; if (p) { if (p.x < mnX) mnX = p.x; if (p.y < mnY) mnY = p.y; } });
+        var sX = (mnX !== Infinity && mnX < ctx.padX) ? (ctx.padX - mnX) : 0;
+        var sY = (mnY !== Infinity && mnY < ctx.padY) ? (ctx.padY - mnY) : 0;
+        if (sX || sY) ctx.studies.forEach(function (s) { var p = ctx.pos[s.name]; if (p) { p.x += sX; p.y += sY; } });
         ctx.studies.forEach(function (s) { var p = ctx.pos[s.name]; if (p) { p.node.style.left = p.x + 'px'; p.node.style.top = p.y + 'px'; } });
       } else {
         node.style.left = pending.x + 'px'; node.style.top = pending.y + 'px';
@@ -14286,13 +14294,21 @@
       // Separate ANY overlaps so cards never sit on top of each other (large/full-detail cards or
       // manual placement push each other apart), then write the DOM + grow the canvas to fit.
       _aigResolveOverlaps(pos, studies, CARD_W, GAP, null);
+      // No left/top wall: if separation (or a drag) pushed the leftmost/topmost card past the padding,
+      // shift the WHOLE graph back on-canvas so the leftmost sits at PAD_X and the topmost at PAD_Y,
+      // instead of jamming cards against x=0 / y=0 and overlapping there.
+      var minX = Infinity, minY = Infinity;
+      studies.forEach(function (s) { var p = pos[s.name]; if (p) { if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y; } });
+      var shX = (minX !== Infinity && minX < PAD_X) ? (PAD_X - minX) : 0;
+      var shY = (minY !== Infinity && minY < PAD_Y) ? (PAD_Y - minY) : 0;
+      if (shX || shY) studies.forEach(function (s) { var p = pos[s.name]; if (p) { p.x += shX; p.y += shY; } });
       studies.forEach(function (s) {
         var p = pos[s.name]; if (!p) return;
         p.node.style.left = p.x + 'px'; p.node.style.top = p.y + 'px';
         if (p.x + CARD_W + PAD_X > canvasW) canvasW = p.x + CARD_W + PAD_X;
         if (p.y + (p.h || 120) + PAD_Y > canvasH) canvasH = p.y + (p.h || 120) + PAD_Y;
       });
-      _aigRenderCtx = { pos: pos, studies: studies, CARD_W: CARD_W, gap: GAP };  // for live drag collision
+      _aigRenderCtx = { pos: pos, studies: studies, CARD_W: CARD_W, gap: GAP, padX: PAD_X, padY: PAD_Y };  // live drag
     })();
     _aigWireCardManipulation(nodesHost);
 
