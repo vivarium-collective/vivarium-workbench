@@ -6998,6 +6998,9 @@ body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]{
 .mdef-exp-menu{ position:absolute; right:0; top:calc(100% + 4px); z-index:20; min-width:190px;
   background:var(--surface,#fff); border:1px solid var(--border,#e5e7eb); border-radius:8px;
   box-shadow:0 6px 24px rgba(0,0,0,0.12); padding:5px; display:flex; flex-direction:column; }
+/* `display:flex` above would otherwise beat the UA [hidden] rule, leaving the
+   menu permanently open — restore hidden's display:none at matching specificity. */
+.mdef-exp-menu[hidden]{ display:none; }
 .mdef-exp-item{ text-align:left; font-size:0.84em; padding:5px 9px; border:0; border-radius:5px;
   background:transparent; color:var(--text,#1f2937); cursor:pointer; }
 .mdef-exp-item:hover{ background:var(--surface-2,#f1f5f9); }
