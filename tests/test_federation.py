@@ -149,38 +149,59 @@ def test_find_composite_path_unknown_returns_none():
     assert find_composite_path(FIX, "host", "nope.composites.missing") is None
 
 
-# --- dashboard.federation.exclude (host hides a federated investigation) ---
+# --- dashboard.federation.include (opt-in allow-list) + exclude (block-list) ---
 
-def test_federation_exclude_hides_investigation_by_slug(tmp_path, monkeypatch):
+def _host_yaml(federation_block: str = "") -> str:
+    return "name: host\n" + federation_block
+
+
+def test_federation_opt_in_default_hides_imported_studies_and_investigations(tmp_path, monkeypatch):
     donor = linked_workspaces(FIX)
     monkeypatch.setattr(federation_mod, "linked_workspaces", lambda ws_root: donor)
-    # control: no exclude -> donor_inv is federated in
-    (tmp_path / "workspace.yaml").write_text("name: host\n")
-    names = {i["name"] for i in federation_mod.federated_investigation_sets(tmp_path)}
-    assert "donor_inv" in names
-    # exclude by slug -> dropped, while the donor stays a dependency otherwise
+    # No include -> imported module's studies AND investigations are hidden.
+    (tmp_path / "workspace.yaml").write_text(_host_yaml())
+    assert federation_mod.federated_investigation_sets(tmp_path) == []
+    assert federation_mod.federated_studies(tmp_path) == []
+
+
+def test_federation_include_by_repo_surfaces_investigations_and_studies(tmp_path, monkeypatch):
+    donor = linked_workspaces(FIX)
+    monkeypatch.setattr(federation_mod, "linked_workspaces", lambda ws_root: donor)
     (tmp_path / "workspace.yaml").write_text(
-        "name: host\ndashboard:\n  federation:\n    exclude: [donor_inv]\n"
+        _host_yaml("dashboard:\n  federation:\n    include: [donor-repo]\n")
     )
-    names = {i["name"] for i in federation_mod.federated_investigation_sets(tmp_path)}
-    assert "donor_inv" not in names
+    inv = {i["name"] for i in federation_mod.federated_investigation_sets(tmp_path)}
+    studies = {s["name"] for s in federation_mod.federated_studies(tmp_path)}
+    assert "donor_inv" in inv
+    assert "donor_study" in studies
 
 
-def test_federation_exclude_by_repo(tmp_path, monkeypatch):
+def test_federation_include_by_investigation_slug_brings_member_studies(tmp_path, monkeypatch):
     donor = linked_workspaces(FIX)
     monkeypatch.setattr(federation_mod, "linked_workspaces", lambda ws_root: donor)
+    # Allow-list a single investigation by slug -> it AND its member studies show.
     (tmp_path / "workspace.yaml").write_text(
-        "name: host\ndashboard:\n  federation:\n    exclude: [donor-repo]\n"
+        _host_yaml("dashboard:\n  federation:\n    include: [donor_inv]\n")
+    )
+    assert "donor_inv" in {i["name"] for i in federation_mod.federated_investigation_sets(tmp_path)}
+    assert "donor_study" in {s["name"] for s in federation_mod.federated_studies(tmp_path)}
+
+
+def test_federation_exclude_removes_item_from_included_module(tmp_path, monkeypatch):
+    donor = linked_workspaces(FIX)
+    monkeypatch.setattr(federation_mod, "linked_workspaces", lambda ws_root: donor)
+    # Module allow-listed, but one investigation explicitly excluded -> dropped.
+    (tmp_path / "workspace.yaml").write_text(
+        _host_yaml("dashboard:\n  federation:\n    include: [donor-repo]\n    exclude: [donor_inv]\n")
+    )
+    assert "donor_inv" not in {i["name"] for i in federation_mod.federated_investigation_sets(tmp_path)}
+
+
+def test_federation_include_absent_or_malformed_is_opt_in(tmp_path, monkeypatch):
+    donor = linked_workspaces(FIX)
+    monkeypatch.setattr(federation_mod, "linked_workspaces", lambda ws_root: donor)
+    # malformed include (not a list) must not raise and stays opt-in (hidden).
+    (tmp_path / "workspace.yaml").write_text(
+        _host_yaml("dashboard:\n  federation:\n    include: donor-repo\n")
     )
     assert federation_mod.federated_investigation_sets(tmp_path) == []
-
-
-def test_federation_exclude_absent_or_malformed_is_noop(tmp_path, monkeypatch):
-    donor = linked_workspaces(FIX)
-    monkeypatch.setattr(federation_mod, "linked_workspaces", lambda ws_root: donor)
-    # malformed (exclude not a list) must not raise and must not filter
-    (tmp_path / "workspace.yaml").write_text(
-        "name: host\ndashboard:\n  federation:\n    exclude: donor_inv\n"
-    )
-    names = {i["name"] for i in federation_mod.federated_investigation_sets(tmp_path)}
-    assert "donor_inv" in names

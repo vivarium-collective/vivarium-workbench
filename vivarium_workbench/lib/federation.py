@@ -7,10 +7,14 @@ discovered two ways (see :func:`linked_workspaces`):
   * a declared ``workspace.yaml`` import whose installed Python package carries a
     workspace.yaml — a wheel/PyPI install that packages its studies/investigations
     inside the dist, or an editable install pointing at a repo root.
-Its studies, investigation-sets, and composites are surfaced read-only in the
-host workspace, each tagged with its origin repo. All helpers are best-effort: a
-malformed linked workspace is skipped, never raising, so the host workspace's own
-listings always render.
+Its composites are surfaced read-only in the host workspace (so an imported
+module stays usable as a composite/process dependency), each tagged with its
+origin repo. Its **studies and investigations are opt-in**: hidden by default,
+and surfaced only for modules the host adds to the ``dashboard.federation.include``
+allow-list (see :func:`_federation_include`); ``dashboard.federation.exclude``
+then removes specific items from an allowed module. All helpers are best-effort:
+a malformed linked workspace is skipped, never raising, so the host workspace's
+own listings always render.
 """
 from __future__ import annotations
 
@@ -186,7 +190,10 @@ def find_federated_study(ws_root: Path, name: str):
     return None
 
 
-def federated_studies(ws_root: Path) -> list[dict]:
+def all_federated_studies(ws_root: Path) -> list[dict]:
+    """Every imported module's shipped studies, UNGATED by the host's opt-in
+    allow-list — "what the modules contain", used by module-content stats. The
+    host dashboard view is :func:`federated_studies`."""
     out: list[dict] = []
     for lw in linked_workspaces(ws_root):
         try:
@@ -203,30 +210,83 @@ def federated_studies(ws_root: Path) -> list[dict]:
     return out
 
 
-def _federation_exclude(ws_root: Path) -> set[str]:
-    """Host-declared allow-list of federated content to hide, from the host
-    ``workspace.yaml`` ``dashboard.federation.exclude`` (a list of strings).
+def federated_studies(ws_root: Path) -> list[dict]:
+    """Imported modules' studies surfaced in the HOST dashboard: opt-in by the
+    ``dashboard.federation.include`` allow-list. A study is surfaced when its
+    module/id is allow-listed, OR it is a member of an allowed (non-excluded)
+    federated investigation — so allow-listing a module or one of its
+    investigations brings its studies along; ``exclude`` then removes specifics."""
+    include = _federation_include(ws_root)
+    exclude = _federation_exclude(ws_root)
+    allowed_members: set[str] = set()
+    for iset in federated_investigation_sets(ws_root):
+        allowed_members |= set(iset.get("member_studies", []))
+    out: list[dict] = []
+    for s in all_federated_studies(ws_root):
+        repo, name, sid = s["origin_repo"], s["name"], s["id"]
+        if not (_fed_match(include, repo, name) or sid in allowed_members):
+            continue
+        if _fed_match(exclude, repo, name):
+            continue
+        out.append(s)
+    return out
 
-    Each entry matches a federated investigation by its slug/``name``
-    (e.g. ``composite-gallery``), its ``repo::name`` id, or its ``origin_repo``
-    (hiding every federated investigation from that module). This lets a host
-    keep a module as a composite/process dependency while dropping its shipped
-    investigations from the host dashboard. Best-effort: a missing/malformed
-    config yields no exclusions.
-    """
+
+def _federation_list(ws_root: Path, key: str) -> set[str]:
+    """The set of strings under ``dashboard.federation.<key>`` in the host
+    ``workspace.yaml``. Best-effort: a missing/malformed config yields ``set()``."""
     try:
         data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}
     except Exception:
         return set()
     dash = data.get("dashboard")
     fed = dash.get("federation") if isinstance(dash, dict) else None
-    items = fed.get("exclude") if isinstance(fed, dict) else None
+    items = fed.get(key) if isinstance(fed, dict) else None
     return {str(x) for x in items} if isinstance(items, list) else set()
 
 
-def federated_investigation_sets(ws_root: Path) -> list[dict]:
+def _federation_include(ws_root: Path) -> set[str]:
+    """Host-declared ALLOW-LIST gating which imported repos' federated
+    investigations and studies are surfaced, from ``dashboard.federation.include``.
+
+    **Federation of imported repos' studies/investigations is opt-in.** With no
+    ``include`` entry, an imported module's investigations and studies are HIDDEN
+    — the module stays usable as a composite/process dependency, but its shipped
+    research artifacts do not clutter the host dashboard. To surface them, the
+    host adds the module to the allow-list. (Federated *composites* are NOT gated
+    by this — imported modules' composites/processes remain available.)
+
+    Each entry matches by ``origin_repo`` (allowing every investigation + study
+    from that module), a federated investigation/study slug/``name``, or a
+    ``repo::name`` id. Best-effort.
+    """
+    return _federation_list(ws_root, "include")
+
+
+def _federation_exclude(ws_root: Path) -> set[str]:
+    """Host-declared BLOCK-LIST of federated content to hide, from the host
+    ``workspace.yaml`` ``dashboard.federation.exclude`` (a list of strings).
+
+    Applied on top of the opt-in allow-list (:func:`_federation_include`): it
+    removes a specific investigation/study from an otherwise-allowed module. Each
+    entry matches a federated investigation/study by its slug/``name``
+    (e.g. ``composite-gallery``), its ``repo::name`` id, or its ``origin_repo``.
+    Best-effort: a missing/malformed config yields no exclusions.
+    """
+    return _federation_list(ws_root, "exclude")
+
+
+def _fed_match(keys: set[str], repo: str, name: str) -> bool:
+    """Whether an include/exclude list matches a federated item: by origin repo,
+    bare slug/name, or the ``repo::name`` id."""
+    return bool(keys & {name, f"{repo}::{name}", repo})
+
+
+def all_federated_investigation_sets(ws_root: Path) -> list[dict]:
+    """Every imported module's shipped investigations, UNGATED by the host's
+    opt-in allow-list — this is "what the modules contain", used by module-content
+    stats. The host dashboard view is :func:`federated_investigation_sets`."""
     out: list[dict] = []
-    exclude = _federation_exclude(ws_root)
     for lw in linked_workspaces(ws_root):
         try:
             idir = lw.layout.investigations
@@ -241,9 +301,6 @@ def federated_investigation_sets(ws_root: Path) -> list[dict]:
                 except Exception:
                     continue
                 name = spec.get("name") or d.name
-                # Host-declared exclusions: match by slug, repo::name id, or repo.
-                if exclude & {name, f"{lw.repo}::{name}", lw.repo}:
-                    continue
                 members = [f"{lw.repo}::{s}" for s in (spec.get("studies") or [])]
                 out.append({
                     "name": name,
@@ -256,6 +313,19 @@ def federated_investigation_sets(ws_root: Path) -> list[dict]:
         except Exception:
             continue
     return out
+
+
+def federated_investigation_sets(ws_root: Path) -> list[dict]:
+    """Imported modules' investigations surfaced in the HOST dashboard: opt-in by
+    the ``dashboard.federation.include`` allow-list (match by repo, slug, or
+    ``repo::name`` id), minus ``exclude``. Empty allow-list -> nothing surfaced."""
+    include = _federation_include(ws_root)
+    exclude = _federation_exclude(ws_root)
+    return [
+        iset for iset in all_federated_investigation_sets(ws_root)
+        if _fed_match(include, iset["origin_repo"], iset["name"])
+        and not _fed_match(exclude, iset["origin_repo"], iset["name"])
+    ]
 
 
 def federated_composites(ws_root: Path) -> dict[str, dict]:

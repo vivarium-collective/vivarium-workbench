@@ -1,1 +1,5 @@
 name: host_coll
+# Federation is opt-in: allow-list the donor module so its studies/investigations surface.
+dashboard:
+  federation:
+    include: [donor-repo]
