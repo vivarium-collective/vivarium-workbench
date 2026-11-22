@@ -207,6 +207,7 @@ a:hover{text-decoration:underline}
   text-transform:uppercase;color:var(--warn);background:var(--warn-soft);padding:3px 10px;border-radius:999px}
 .claim{font-family:var(--serif);font-size:16.5px;color:var(--ink);margin:8px 0 2px;max-width:none;font-style:italic}
 .biology{color:var(--ink-2);font-size:14px;margin:8px 0 4px;max-width:none}
+.study-thesis{color:var(--ink);font-size:14px;line-height:1.5;margin:8px 0 4px;max-width:none}
 
 /* spine stage */
 .stage{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}
@@ -1307,10 +1308,17 @@ function renderStudy(s, inv, idx){
   // before any model / implementation detail (falls back to purpose.question,
   // then the claim, so a question-less study still leads with something).
   const pq = s.purpose && s.purpose.question, pm = s.purpose && s.purpose.mechanism;
-  const question = s.question || pq || s.claim;
-  const claimLine = question? `<div class="claim">${esc(question)}</div>` : '';
+  const question = s.question || pq;
+  const claimLine = question? `<div class="claim">${esc(question)}</div>` : (s.claim?`<div class="claim">${esc(s.claim)}</div>`:'');
+  // human-readable overview under the question — the study's claim (its thesis)
+  // then any biological background. Mirrors the live study Overview; cd2-style
+  // studies carry `claim` + `experiment` but no `biological_summary`, so without
+  // this the card showed only the question.
   const bioText = s.biological_summary || pm;
-  const overview = bioText?`<div class="biology">${esc(bioText)}</div>`:'';
+  const thesis = (question && s.claim && String(s.claim).trim()) ? s.claim : '';
+  let overview = '';
+  if(thesis) overview += `<div class="study-thesis">${mdLite(thesis)}</div>`;
+  if(bioText) overview += `<div class="biology">${esc(bioText)}</div>`;
 
   // MODEL — a COMPACT model card: the composite id + topology counts
   // (processes · compartments · links) + the sourcing decision. The full
@@ -1810,7 +1818,6 @@ function toc(inv){
   if(inv.spine) front.push('<a href="#spine-presentation">Map</a>');
   if((inv.studies||[]).length) front.push('<a href="#studies">Studies</a>');
   if((syn.quantitative||[]).length||(syn.contradictions||[]).length||(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)) front.push('<a href="#synthesis-gaps">Synthesis &amp; gaps</a>');
-  if(((syn.validation||{}).items||[]).length!==undefined) front.push('<a href="#validation">Validation</a>');
   if((syn.claim_evidence||[]).length) front.push('<a href="#claim-evidence">Claim–evidence</a>');
   if((syn.studies_index||[]).length) front.push('<a href="#evidence-register">Register</a>');
   if(inv.references&&Object.keys(inv.references).length) front.push('<a href="#references">References</a>');
@@ -1825,7 +1832,6 @@ function toc(inv){
     ['#spine-presentation','Investigation map',!!inv.spine],
     ['#studies','Studies',(inv.studies||[]).length],
     ['#synthesis-gaps','Synthesis & gaps',(syn.quantitative||[]).length||(syn.contradictions||[]).length||(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)],
-    ['#validation','Validation & reproducibility',((syn.validation||{}).items||[]).length!==undefined],
     ['#claim-evidence','Claim–evidence map',(syn.claim_evidence||[]).length],
     ['#evidence-register','Evidence register (all studies)',(syn.studies_index||[]).length],
     ['#references','References',inv.references&&Object.keys(inv.references).length],
@@ -1870,7 +1876,7 @@ function spy(){
   const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
     links.forEach(l=>l.classList.remove('active')); const l=map[e.target.id]; if(l)l.classList.add('active');}});},
     {rootMargin:'-30% 0px -60% 0px'});
-  document.querySelectorAll('#exec-summary,#spine-presentation,#studies,#synthesis-gaps,#validation,#claim-evidence,#evidence-register,#references').forEach(el=>{if(el.id)obs.observe(el);});
+  document.querySelectorAll('#exec-summary,#spine-presentation,#studies,#synthesis-gaps,#claim-evidence,#evidence-register,#references').forEach(el=>{if(el.id)obs.observe(el);});
 }
 
 /* ---------- spine presentation: investigation graph (verdict-badged DAG) ---------- */
@@ -3036,7 +3042,6 @@ function render(inv){
     ${renderSpine(inv)}
     ${renderStudies(inv)}
     ${synthesisAndGaps(inv)}
-    ${validationSection(inv)}
     ${claimEvidenceMap(inv)}
     ${evidenceRegister(inv)}
     ${renderReferences(inv)}
