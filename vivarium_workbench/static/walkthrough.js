@@ -413,6 +413,10 @@
     if (o !== 'LR' && o !== 'TB') return;
     _aigManualOrient = o;        // transient manual override — holds until the next dock switch
     _aigUserLayout = true;
+    // The alignment buttons also SNAP moved studies back into place: drop the manual drag positions
+    // so the re-render re-aligns every card by the clean auto-layout in the chosen orientation. Card
+    // size (aigWidthScale) and zoom (aigZoom) are left untouched — only positions reset.
+    try { if (_aigPosKey) localStorage.removeItem(_aigPosKey); } catch (e) { /* ignore */ }
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
   }
   window._setGraphOrientation = _setGraphOrientation;
@@ -421,6 +425,7 @@
   function _resetGraphOrientation() {
     _aigManualOrient = null;
     _aigUserLayout = false;
+    try { if (_aigPosKey) localStorage.removeItem(_aigPosKey); } catch (e) { /* ignore */ }  // snap moved studies back to auto-layout
     if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
   }
   window._resetGraphOrientation = _resetGraphOrientation;
