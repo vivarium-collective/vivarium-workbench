@@ -13638,6 +13638,43 @@
     // separate. The render pass shifts the whole graph back on-canvas if the min goes past the padding.
     return changed;
   }
+  var _aigRevealKey = 'aig-card-reveal:investigation';   // per-investigation reveal (extra clamp lines) store
+  function _aigLoadReveal() { try { return JSON.parse(localStorage.getItem(_aigRevealKey) || '{}') || {}; } catch (e) { return {}; } }
+  function _aigSaveReveal(m) { try { localStorage.setItem(_aigRevealKey, JSON.stringify(m)); } catch (e) {} }
+  function _aigApplyReveal(node, boost) {
+    // Reveal more of the cut-off Asks/Finds text as the card is dragged taller: raise the line-clamp
+    // of each clamped section by `boost` lines (boost >= 40 → fully revealed). boost 0 = default.
+    if (!node) return;
+    node.querySelectorAll('.aig-clamp[data-clamp]').forEach(function (el) {
+      var base = parseInt(el.getAttribute('data-clamp'), 10) || 2;
+      var n = (boost >= 40) ? 999 : Math.max(base, base + (boost | 0));
+      el.style.webkitLineClamp = String(n);
+      el.style.lineClamp = String(n);
+    });
+  }
+  function _aigStartHeightResize(e, node, slug) {
+    e.preventDefault(); e.stopPropagation();
+    var startY = e.clientY, z = _aigNodeZoom(node);
+    var startBoost = (_aigLoadReveal()[slug]) || 0, cur = startBoost, raf = 0;
+    function flush() { raf = 0; _aigApplyReveal(node, cur); }   // reveal grows the card live as the browser reflows
+    function mm(ev) {
+      var dy = (ev.clientY - startY) / (z || 1);
+      cur = Math.max(0, Math.round(startBoost + dy / 18));      // ~18px of drag per extra line revealed
+      if (!raf) raf = requestAnimationFrame(flush);
+    }
+    function mu() {
+      document.removeEventListener('pointermove', mm, true);
+      document.removeEventListener('pointerup', mu, true);
+      if (raf) cancelAnimationFrame(raf);
+      flush();
+      var r = _aigLoadReveal();
+      if (cur > 0) r[slug] = cur; else delete r[slug];
+      _aigSaveReveal(r);
+      if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);  // re-measure heights + re-resolve overlaps around the taller card
+    }
+    document.addEventListener('pointermove', mm, true);
+    document.addEventListener('pointerup', mu, true);
+  }
   function _aigNodeZoom(node) {
     // Effective on-screen scale = rendered width / layout width (the CSS transform:scale zoom),
     // read from the DOM so this doesn't depend on the zoom var's scope.
@@ -13711,6 +13748,36 @@
     document.addEventListener('pointermove', mm, true);
     document.addEventListener('pointerup', mu, true);
   }
+  function _aigStartCornerResize(e, node, slug) {
+    // Bottom-right corner of the SELECTED card → resize BOTH at once: horizontal drag sets the global
+    // width (aigWidthScale), vertical drag reveals more text (per-card boost).
+    e.preventDefault(); e.stopPropagation();
+    var startX = e.clientX, startY = e.clientY, z = _aigNodeZoom(node);
+    var startLayoutW = parseFloat(node.style.width) || _aigBandCardW, base = _aigBandCardW || 150;
+    var startBoost = (_aigLoadReveal()[slug]) || 0, curBoost = startBoost, pendingW = null, raf = 0;
+    function flush() {
+      raf = 0;
+      var r = _aigLoadReveal(); if (curBoost > 0) r[slug] = curBoost; else delete r[slug]; _aigSaveReveal(r);
+      if (pendingW != null) { try { _setAigWidthScale(pendingW); } catch (x) {} }   // global width (re-renders, re-applies reveal)
+      var live = document.querySelector('.iset-dag-node[data-study="' + _aigCssEsc(slug) + '"]');
+      _aigApplyReveal(live || node, curBoost);                                      // live reveal (covers pure-vertical)
+    }
+    function mm(ev) {
+      var dx = (ev.clientX - startX) / (z || 1), dy = (ev.clientY - startY) / (z || 1);
+      pendingW = (startLayoutW + dx) / base;
+      curBoost = Math.max(0, Math.round(startBoost + dy / 18));
+      if (!raf) raf = requestAnimationFrame(flush);
+    }
+    function mu() {
+      document.removeEventListener('pointermove', mm, true);
+      document.removeEventListener('pointerup', mu, true);
+      if (raf) cancelAnimationFrame(raf);
+      flush();
+      if (_lastDagArgs) _renderInvestigationDag(_lastDagArgs[0], _lastDagArgs[1], _lastDagArgs[2]);
+    }
+    document.addEventListener('pointermove', mm, true);
+    document.addEventListener('pointerup', mu, true);
+  }
   function _aigWireCardManipulation(host) {
     if (!host || host._aigManipWired) return;
     host._aigManipWired = true;
@@ -13721,10 +13788,17 @@
       // Leave clicks on interactive sub-elements (buttons, pills, the expand affordance) alone.
       if (e.target.closest('button, a, [onclick], .aig-more-wrap, .aig-progress-pill, .aig-verdict-pill, .dag-followups-btn')) return;
       var rect = node.getBoundingClientRect();
-      if (node.classList.contains('aig-node-selected') && (rect.right - e.clientX) <= _AIG_RESIZE_EDGE) {
-        _aigStartResizeSelected(e, node);          // right edge of the SELECTED card → resize-to-width
+      var sel = node.classList.contains('aig-node-selected');
+      var nearRight = (rect.right - e.clientX) <= _AIG_RESIZE_EDGE;
+      var nearBottom = (rect.bottom - e.clientY) <= _AIG_RESIZE_EDGE;
+      if (sel && nearRight && nearBottom) {
+        _aigStartCornerResize(e, node, node.dataset.study);    // bottom-right corner → width + reveal (diagonal)
+      } else if (sel && nearRight) {
+        _aigStartResizeSelected(e, node);                      // right edge of SELECTED → resize-to-width
+      } else if (sel && nearBottom) {
+        _aigStartHeightResize(e, node, node.dataset.study);    // bottom edge of SELECTED → reveal more text
       } else {
-        _aigStartMove(e, node, node.dataset.study); // anywhere else → drag-to-reposition
+        _aigStartMove(e, node, node.dataset.study);            // anywhere else → drag-to-reposition
       }
     });
     host.addEventListener('pointermove', function (e) {   // cursor hint: resize on the selected card's right edge
@@ -13732,7 +13806,10 @@
       var node = e.target.closest('.iset-dag-node.aig-node-selected');
       if (!node) return;
       var rect = node.getBoundingClientRect();
-      node.style.cursor = (rect.right - e.clientX) <= _AIG_RESIZE_EDGE ? 'ew-resize' : 'grab';
+      var rr = rect.right - e.clientX, rb = rect.bottom - e.clientY;
+      node.style.cursor = (rr <= _AIG_RESIZE_EDGE && rb <= _AIG_RESIZE_EDGE) ? 'nwse-resize'
+                        : (rr <= _AIG_RESIZE_EDGE) ? 'ew-resize'
+                        : (rb <= _AIG_RESIZE_EDGE) ? 'ns-resize' : 'grab';
     });
   }
 
@@ -14224,6 +14301,9 @@
     // only for the first synchronous pass (it alone resets the scroll position).
     function _layoutAndDraw(isInitial) {
     // Measure now that content is in the DOM (container is already visible).
+    // Apply each card's saved reveal (extra clamp lines from a bottom-edge drag) BEFORE measuring, so
+    // the measured height includes the revealed text and overlap-resolution spaces around the taller card.
+    (function () { var rev = _aigLoadReveal(); studies.forEach(function (s) { var p = pos[s.name]; if (p) _aigApplyReveal(p.node, rev[s.name] || 0); }); })();
     studies.forEach(function(s) { pos[s.name].h = pos[s.name].node.offsetHeight || 120; });
 
     // -- Pass 2: position the measured axis, then compute the canvas size --
