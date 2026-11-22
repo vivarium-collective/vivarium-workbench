@@ -923,7 +923,7 @@ def _do_build(
 
     # api/argument-overlay/<inv>.json — the RFC-0005 argument/narrative projection
     # (claims, edges, narrative, gaps, gates, decisions) so the published read-only
-    # bundle's Narrative / Claims / Plan / Decisions tabs match the live app.
+    # bundle's Findings (claims + narrative) / Plan / Decisions tabs match the live app.
     # data-source.loadArgumentOverlay already resolves /api/argument-overlay/<slug>.json
     # in snapshot mode; a graceful empty payload when the derivation layer is absent.
     (api_dir / "argument-overlay").mkdir(parents=True, exist_ok=True)
