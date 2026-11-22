@@ -2716,10 +2716,13 @@ body.pcard-splitting iframe{ pointer-events:none; }
   display: flex;
   align-items: flex-end;
   gap: 20px;
-  overflow-x: auto;
-  /* Keep the sideways scroll (narrow / docked study columns) but hide the bar —
-     a visible horizontal scrollbar under the tab row reads as a stray "extra"
-     scrollbar. Wheel / trackpad still scroll the clusters. */
+  /* Wrap the tab clusters onto a second row on narrow/docked viewports instead
+     of scrolling them sideways behind a hidden scrollbar — the old overflow-x
+     scroll left the right-hand tabs (Simulations/Audit/…) unreachable with no
+     visible scrollbar to hint at it. */
+  flex-wrap: wrap;
+  row-gap: 2px;
+  overflow-x: visible;
   scrollbar-width: none;
   -ms-overflow-style: none;
   border-bottom: 1px solid #e5e7eb;
@@ -7018,7 +7021,7 @@ body.pcard-maximized.viv-code-open .viv-code-rail[data-dock="right"]{
 details[open] > .mdef-cfg-sum::before{ content:'▾ '; }
 .mdef-cfg-note{ color:var(--text-muted,#64748b); font-size:0.9em; }
 .mdef-cfg-json{ margin:0; padding:8px 10px; border-top:1px solid var(--border,#e5e7eb);
-  font-size:0.82em; line-height:1.45; max-height:320px; overflow:auto; white-space:pre;
+  font-size:0.82em; line-height:1.45; overflow-x:auto; white-space:pre;
   font-family:ui-monospace,SFMono-Regular,monospace; }
 .mdef-desc{ margin:8px 0 2px; font-size:0.9em; line-height:1.5; color:var(--text,#1f2937); }
 .mdef-sect{ margin-top:14px; }
