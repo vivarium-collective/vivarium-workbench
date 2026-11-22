@@ -187,13 +187,17 @@ def _build_spine(ws_root, inv_slug: str, studies: list) -> dict:
         "plan_board": detail.get("plan_board") or [],
     }
 
-# inline-image budget: keep the self-contained report a sane size
-_IMG_PER_FILE_MAX = 1_400_000     # skip a single figure larger than this
+# inline-image budget: keep the self-contained report a sane size while still
+# carrying a figure-heavy delivery investigation's full set. A committed result
+# figure is a deliverable, so the cap is generous: a figure-rich investigation
+# (e.g. uc2, ~32 MB of committed PNGs across its studies) must not silently drop
+# its later studies' figures to a per-investigation budget.
+_IMG_PER_FILE_MAX = 3_000_000     # skip a single figure larger than this
 # The model loom is the study's most important figure and a rasterised loom of a
 # large composite legitimately runs past the generic figure cap (e.g. an atlas
 # loom ~1.4-2.5 MB), so it gets its own higher per-file ceiling.
 _LOOM_IMG_PER_FILE_MAX = 3_000_000
-_IMG_TOTAL_MAX = 16_000_000       # stop embedding once the report gets heavy
+_IMG_TOTAL_MAX = 48_000_000       # per-investigation; stop embedding past this
 _IMG_MIME = {".svg": "image/svg+xml", ".png": "image/png", ".gif": "image/gif",
              ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
@@ -423,6 +427,66 @@ def _embed_url_visualizations(ws_root: Path, embed_list, budget: list, skip_name
     return out
 
 
+def _embed_html_addressed(study_dir: Path, viz_list, budget: list) -> "tuple[list, set]":
+    """Embed each ``html:<relpath>`` visualization under its DECLARED name.
+
+    A study may address a committed HTML figure directly
+    (``visualizations[].address: html:viz/foo.html``). Without this, the file is
+    only picked up by the directory glob (:func:`_embed_html_figures`) under a
+    humanized STEM name — the declared name then goes unmatched and the
+    completeness backstop adds a FALSE "not present" placard right beside the
+    figure it actually embedded. Here we embed it under its declared name and
+    return the consumed basenames so the glob does not also embed a stem-named
+    duplicate. Returns ``(figs, consumed_basenames)``. Fully guarded.
+    """
+    out: list = []
+    consumed: set = set()
+    for v in (viz_list or []):
+        if not isinstance(v, dict):
+            continue
+        addr = str(v.get("address") or "")
+        name = v.get("name") or ""
+        if not addr.startswith("html:"):
+            continue
+        rel = addr[len("html:"):]
+        f = (study_dir / rel).resolve()
+        try:
+            f.relative_to(study_dir.resolve())
+        except ValueError:
+            continue  # never read outside the study dir
+        if not f.is_file() or f.suffix.lower() != ".html":
+            continue
+        try:
+            raw_size = f.stat().st_size
+        except OSError:
+            continue
+        consumed.add(f.name)
+        if raw_size > _HTML_RAW_READ_MAX:
+            out.append({"name": name, "skipped": True, "reason": "too large to inline"})
+            continue
+        try:
+            html = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        frag, interactive = html, False
+        try:
+            prepared = _prepare_interactive_figure(html)
+            if prepared is not None:
+                frag, interactive = prepared, True
+        except Exception:  # noqa: BLE001
+            frag, interactive = html, False
+        fsize = len(frag.encode("utf-8"))
+        if fsize > _HTML_PER_FILE_MAX or budget[0] + fsize > _IMG_TOTAL_MAX:
+            out.append({"name": name, "skipped": True, "reason": "too large to inline"})
+            continue
+        budget[0] += fsize
+        rec = {"name": name, "html": frag}
+        if interactive:
+            rec["interactive"] = True
+        out.append(rec)
+    return out, consumed
+
+
 def _embed_native_gallery_panels(ws_root, slug: str, budget: list, skip_names: set) -> list:
     """Inline a study's NATIVE-gallery visualization panels — the declared
     ``visualizations[]`` rendered to the latest completed run's
@@ -464,6 +528,69 @@ def _embed_native_gallery_panels(ws_root, slug: str, budget: list, skip_names: s
             rec["interactive"] = True
         out.append(rec)
     return out
+
+
+_REPORT_CARD_SUBDIR = "report_card"
+
+
+def _report_card_dir(study_dir: Path) -> "Path | None":
+    """The study's committed report-card dir (``viz/report_card`` /
+    ``charts/report_card``), if present."""
+    for sub in _HTML_FIG_DIRS:  # ("viz", "charts")
+        d = study_dir / sub / _REPORT_CARD_SUBDIR
+        if d.is_dir():
+            return d
+    return None
+
+
+def _embed_report_card(study_dir: Path, budget: list) -> "dict | None":
+    """Extract a study's committed SIM-vs-EXPT report card into an inline,
+    print-friendly figure: the structured per-axis verdict (from
+    ``viz/report_card/*.verdict.json``) + the self-contained SVG comparison
+    charts pulled out of ``viz/report_card/*.html``.
+
+    The report-card HTML is a FULL-PAGE document; embedded as an ``<iframe>`` it
+    collapses to its header strip in a static PDF (iframes don't paginate), so
+    the actual charts never reached the reader. Here we inline the SVGs + a clean
+    verdict table into the document flow instead. Emitted as a figure named
+    ``report_card`` with ``display: primary`` so it leads the study AND the
+    declared-visualization completeness backstop counts it as present (no false
+    "not in the report" placard). Returns None when the study has no report card.
+    Fully guarded — any read/parse failure yields None so the report never breaks.
+    """
+    d = _report_card_dir(study_dir)
+    if d is None:
+        return None
+    htmls = sorted(d.glob("*.html"))
+    if not htmls:
+        return None
+    html_f = htmls[0]
+    verdict = None
+    vjson = html_f.with_suffix(".verdict.json")
+    if not vjson.is_file():
+        cands = sorted(d.glob("*.verdict.json"))
+        vjson = cands[0] if cands else None
+    if vjson is not None and vjson.is_file():
+        try:
+            verdict = json.loads(vjson.read_text(encoding="utf-8"))
+        except Exception:
+            verdict = None
+    charts: list = []
+    try:
+        raw = html_f.read_text(encoding="utf-8")
+        for m in re.findall(r"<svg\b.*?</svg\s*>", raw, re.IGNORECASE | re.DOTALL):
+            sz = len(m.encode("utf-8"))
+            if sz > _IMG_PER_FILE_MAX or budget[0] + sz > _IMG_TOTAL_MAX:
+                continue
+            budget[0] += sz
+            charts.append(m)
+    except OSError:
+        pass
+    if not isinstance(verdict, dict) and not charts:
+        return None
+    return {"name": "report_card", "display": "primary",
+            "report_card": {"verdict": verdict if isinstance(verdict, dict) else {},
+                            "charts": charts}}
 
 
 def _placard_unaccounted_viz(viz_list, figs: list) -> list:
@@ -1398,7 +1525,24 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
             for v in (spec.get("visualizations") or [])
             if isinstance(v, dict) and str(v.get("address", "")).startswith("image:")
         }
-        figs.extend(_embed_html_figures(study_dir, img_budget, img_basenames))
+        # html:<relpath> figures embedded under their DECLARED name (so the richer
+        # declared name shows and no false "not present" placard is added); the
+        # consumed basenames are skipped in the directory glob below.
+        _htmla_figs, _htmla_consumed = _embed_html_addressed(
+            study_dir, spec.get("visualizations"), img_budget)
+        figs.extend(_htmla_figs)
+        # Report card (SIM vs EXPT): inline its verdict table + SVG charts, and
+        # skip the raw full-page report-card HTML in _embed_html_figures below (it
+        # otherwise renders as a height-collapsed iframe — only its header strip
+        # shows in a PDF). Emitted as display:primary so it leads the study.
+        _rc_fig = _embed_report_card(study_dir, img_budget)
+        _html_skip = set(img_basenames) | _htmla_consumed
+        if _rc_fig is not None:
+            figs.append(_rc_fig)
+            _rc_dir = _report_card_dir(study_dir)
+            if _rc_dir is not None:
+                _html_skip.update(p.name for p in _rc_dir.glob("*.html"))
+        figs.extend(_embed_html_figures(study_dir, img_budget, _html_skip))
         # embed_visualizations[].url → resolve each workspace-root-absolute HTML file and inline
         # it. These often live in a SHARED figures dir outside the study's own viz/charts (missed
         # by the globs above), so the report dropped them silently though the study tab iframes

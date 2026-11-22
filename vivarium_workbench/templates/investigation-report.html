@@ -275,6 +275,44 @@ figcaption{color:var(--ink-2);font-size:12.5px;margin-top:8px;max-width:none}
    and its (often full-document) CSS can't leak into the report. onload sizes it
    to content; this is the pre-resize default. */
 .viz-frame{width:100%;border:1px solid var(--line);border-radius:12px;background:var(--surface);height:460px;display:block}
+/* report card (SIM vs EXPT): inline verdict table + SVG chart gallery */
+.report-card{margin:8px 0}
+.rc-badge{display:inline-block;margin:4px 0 10px;padding:4px 12px;border-radius:999px;background:var(--surface-2,#eef0f2);font-weight:600;font-size:13px}
+.rc-table{width:100%;border-collapse:collapse;margin:8px 0;font-size:13px}
+.rc-table th{text-align:left;color:var(--ink-3);font-weight:600;border-bottom:1px solid var(--line);padding:4px 8px}
+.rc-table td{padding:5px 8px;border-bottom:1px solid var(--line-2,var(--line));vertical-align:baseline}
+.rc-table tr.rc-grp td{font-weight:700;background:var(--surface-2,#f6f8fa);color:var(--ink);padding-top:8px}
+.rc-table .rc-ax{width:42%}
+.rc-meter{color:var(--ink-2);font-size:12px;margin-left:4px}
+.rc-charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:10px}
+.rc-chart{margin:0;border:1px solid var(--line);border-radius:10px;padding:8px;background:var(--surface,#fff);break-inside:avoid;page-break-inside:avoid}
+.rc-chart svg{width:100%;height:auto;display:block}
+/* overview table-of-contents (replaces the dependency graph) */
+.toc{margin:4px 0}
+.toc-row{display:flex;gap:14px;padding:13px 0;border-top:1px solid var(--line)}
+.toc-row:first-child{border-top:none}
+.toc-num{font-family:var(--mono);font-size:13px;color:var(--ink-3);font-weight:600;text-decoration:none;padding-top:2px;min-width:22px;flex:none}
+.toc-num:hover{color:var(--accent)}
+.toc-body{flex:1;min-width:0}
+.toc-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
+.toc-title{font-weight:650;font-size:15px;color:var(--ink);text-decoration:none}
+.toc-title:hover{color:var(--accent)}
+.toc-status{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600}
+.toc-status .g{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
+.toc-ctrl{font-size:11px;color:var(--warn)}
+.toc-line{display:flex;gap:6px;font-size:13px;line-height:1.45;margin-top:3px;color:var(--ink-2)}
+.toc-find{color:var(--ink)}
+.toc-k{flex:none;min-width:34px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);padding-top:2px}
+/* finding block: narrative forward, markers + provenance code subtle */
+.finding-traceability{margin:11px 0}
+.finding-traceability .rationale{color:var(--ink);font-size:14px;line-height:1.5;margin-top:0}
+.finding-traceability .fmeta{margin-top:4px;font-size:11.5px;color:var(--ink-3);line-height:1.5}
+.finding-traceability .fid{font-weight:600;color:var(--ink-2)}
+.finding-traceability .fmeta .etier{font-size:10px;font-weight:600;padding:1px 6px;opacity:.85}
+.finding-traceability .fmeta code{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);background:none;padding:0}
+.finding-traceability .fmeta .trace-link{color:var(--ink-3);text-decoration:none;border-bottom:1px dotted var(--line-2)}
+.finding-traceability .fmeta .trace-link:hover{color:var(--accent)}
+.finding-traceability .fmeta .sep{color:var(--line-2);margin:0 2px}
 /* embedded REAL bigraph-loom (primary Model view) */
 .loom-real-slot{position:relative;border:1px solid var(--line);border-radius:12px;background:var(--surface);height:560px;overflow:hidden;resize:vertical;min-height:280px}
 .loom-real-slot iframe{width:100%;height:100%;border:0;display:block}
@@ -1112,6 +1150,39 @@ function testsTable(tests, traj){
   return `<table class="ttable">${rows}</table>`;
 }
 function fmt(n){ if(typeof n!=='number') return esc(n); return Number.isInteger(n)?n:(Math.abs(n)<0.01?n.toExponential(1):n.toFixed(2)); }
+// Report card (SIM vs EXPT): render the structured per-axis verdict table +
+// the inlined SVG comparison charts (extracted server-side in
+// investigation_report._embed_report_card). Inline, so it paginates in a PDF —
+// the full-page report-card HTML can't (iframes don't paginate / print).
+function _rcVerdictChip(v){
+  v=String(v||'').toLowerCase(); if(v==='within_tol') v='pass';
+  const glyph={pass:'✓',warn:'≈',fail:'✗',ungraded:'–'}[v]||esc(v||'–');
+  const cls={pass:'pass',warn:'warn',fail:'fail'}[v]||'';
+  return `<span class="chip ${cls}" title="${esc(v)}">${glyph}</span>`;
+}
+function _rcHumanize(s){ return String(s||'').replace(/[_-]+/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
+function reportCardFig(rc){
+  const v=rc.verdict||{}, charts=rc.charts||[], groups=v.groups||{};
+  const ref=v.reference_model?`<div class="texp" style="color:var(--ink-3);margin-bottom:6px">model vs <b>${esc(v.reference_model)}</b></div>`:'';
+  const tally={pass:0,warn:0,fail:0,ungraded:0};
+  Object.values(groups).forEach(g=>((g&&g.axes)||[]).forEach(a=>{ let k=String(a.verdict||'ungraded').toLowerCase(); if(k==='within_tol')k='pass'; if(tally[k]==null)k='ungraded'; tally[k]++; }));
+  const badge=`<div class="rc-badge"><b>${esc(String(v.overall||'').toUpperCase()||'—')}</b> · ${tally.pass}✓ ${tally.warn}≈ ${tally.fail}✗ ${tally.ungraded}–</div>`;
+  let rows='';
+  Object.keys(groups).forEach(gk=>{
+    const axes=((groups[gk]||{}).axes)||[]; if(!axes.length) return;
+    rows+=`<tr class="rc-grp"><td colspan="2">${esc(_rcHumanize(gk))}</td></tr>`;
+    axes.forEach(a=>{
+      // `meter` is the human-readable summary ("R² 0.645 — 3979 genes"); `detail`
+      // is a raw dict, so prefer meter and never stringify an object.
+      const meter=(typeof a.meter==='string')?a.meter:((typeof a.detail==='string')?a.detail:'');
+      rows+=`<tr><td class="rc-ax">${esc(a.label||a.id||'')}</td><td class="rc-vd">${_rcVerdictChip(a.verdict)}${meter?` <span class="rc-meter">${esc(meter)}</span>`:''}</td></tr>`;
+    });
+  });
+  const table=rows?`<table class="rc-table"><thead><tr><th>Axis</th><th>Assessment</th></tr></thead><tbody>${rows}</tbody></table>`:'';
+  const gallery=charts.length?`<div class="rc-charts">${charts.map(svg=>`<figure class="rc-chart">${svg}</figure>`).join('')}</div>`:'';
+  if(!table && !gallery) return '';
+  return `<div class="report-card"><div class="kicker" style="margin-bottom:4px">Report card — SIM vs EXPT</div>${ref}${badge}${table}${gallery}</div>`;
+}
 // provenance may be a plain string OR an object ({kind, note, ...}); render a
 // readable line, never a stringified object ("[object Object]").
 function provText(p){ if(!p) return ''; if(typeof p==='string') return p;
@@ -1241,30 +1312,31 @@ function renderStudy(s, inv, idx){
   const bioText = s.biological_summary || pm;
   const overview = bioText?`<div class="biology">${esc(bioText)}</div>`:'';
 
-  // MODEL — prefer a pre-rendered bigraph-loom image (offline-safe, config
-  // loaded, from `vivarium-workbench render-loom`); else the live loom iframe;
-  // else the re-drawn static topology / viz.
+  // MODEL — a COMPACT model card: the composite id + topology counts
+  // (processes · compartments · links) + the sourcing decision. The full
+  // interactive 46-process bigraph is NOT drawn in the static report/PDF — it
+  // otherwise spanned pages and repeated verbatim for every study that shares
+  // the composite. The whole diagram lives in the live workbench's loom explorer.
   const bl=(s.baseline||[])[0];
   const _mcid=(s.model_topology&&s.model_topology.composite)||(bl&&bl.composite)||'';
-  const loomRendered = s.model_loom
-    ? `<figure class="loom-embed"><div class="loom-frame" style="height:auto;max-height:640px;overflow:auto">
-         <img src="${s.model_loom}" alt="bigraph-loom view of ${esc(_mcid)}" style="width:100%;display:block"/></div>
-       <figcaption><b>bigraph-loom</b> view of <span class="mono">${esc(_mcid)}</span> — the composite's bigraph with its config loaded.</figcaption></figure>`
-    : '';
-  // The report is a self-contained document (often opened from disk / a static
-  // bundle), so the Model section uses only renderings that need no network:
-  // the pre-rendered bigraph-loom PNG (render-loom) when the composite has one,
-  // else the static bigraph topology drawn from model_topology, then a plain viz.
-  // (The live loom iframe and the re-drawn interactive-SVG loom were both removed:
-  // the iframe failed offline, and the interactive SVG kept recurring in place of
-  // a real loom figure.)
-  let modelBody = loomRendered || (s.model_topology ? loomTopoSVG(s.model_topology) : '') || vizModelSVG(s,inv);
+  const _topo=s.model_topology;
+  let modelBody='';
+  if(_mcid) modelBody+=`<div class="kv"><span class="kv-k">Composite</span> <span class="mono">${esc(_mcid)}</span></div>`;
+  if(_topo){
+    // match loomTopoSVG's counting: compartments = distinct wired compartments
+    // (edge.c) plus top-level stores; links = distinct process↔compartment pairs.
+    const np=(_topo.processes||[]).length, _edges=_topo.edges||[];
+    const _comps=new Set(), _links=new Set();
+    _edges.forEach(e=>{ if(e&&e.c!=null){ _comps.add(e.c); if(e.p!=null) _links.add(e.p+'|'+e.c); } });
+    (_topo.stores||[]).forEach(n=>{ if(n&&n.name!=null) _comps.add(n.name); });
+    const nc=_comps.size, nl=_links.size;
+    modelBody+=`<div class="texp" style="margin-top:4px">${np} process${np===1?'':'es'} · ${nc} compartment${nc===1?'':'s'} · ${nl} link${nl===1?'':'s'}</div>`;
+    modelBody+=`<div class="texp model-interactive-hint" style="margin-top:4px;color:var(--ink-3)">▸ full interactive bigraph in the live workbench</div>`;
+  }
   if(s.sourcing){
-    modelBody += `<div class="decision-line" style="margin-top:6px"><span class="chip decision">${esc(s.sourcing.decision)}</span>
+    modelBody += `<div class="decision-line" style="margin-top:8px"><span class="chip decision">${esc(s.sourcing.decision)}</span>
       ${(s.sourcing.modules||[]).map(m=>`<span class="chip mod">${esc(m)}</span>`).join(' ')||'<span class="chip mod">new module</span>'}</div>
       ${s.sourcing.rationale?`<div class="kv rationale">${esc(s.sourcing.rationale)}</div>`:''}`;
-  } else if(bl&&bl.composite){
-    modelBody += `<div class="texp mono" style="margin-top:4px">${esc(bl.composite)}</div>`;
   }
 
   // SIMULATION RUN
@@ -1275,12 +1347,25 @@ function renderStudy(s, inv, idx){
       ${outcomeRows(r.outcomes)}
       ${r.provenance?`<div class="texp mono" style="margin-top:2px">${esc(provText(r.provenance))}</div>`:''}</div>`;
   }).join(''):'';
-  // run-command chips: how to reproduce this study + per-variant commands
+  // run-command chips: show the base reproduce command ONCE, then list the
+  // variants cleanly. The variant's `name` in the data is a long descriptive
+  // string ("iter1-0x - vio_gfp_v0_dose0x (GFP off, negative control)"), so the
+  // old per-row full `--variant <name>` command printed the description twice and
+  // was unreadable. Split "<id> - <description>" and list id — description.
   if(s.run_commands){
     const _base = s.run_commands && s.run_commands.baseline;
     if(_base) runBody += `<div class="reproduce-line texp" style="margin-top:6px">Reproduce: ${_runChip(_base)}</div>`;
     const _rcVariants = (s.run_commands && s.run_commands.variants) || [];
-    _rcVariants.forEach(_vc=>{ runBody += `<div class="texp">${esc(_vc.name)}: ${_runChip(_vc && _vc.cmd)}</div>`; });
+    if(_rcVariants.length){
+      const _vrow=(_vc)=>{
+        const nm=String((_vc&&_vc.name)||'');
+        const _i=nm.indexOf(' - ');
+        const vid=_i>0?nm.slice(0,_i):nm, vdesc=_i>0?nm.slice(_i+3):'';
+        return `<li><code class="mono">${esc(vid)}</code>${vdesc?` — ${esc(vdesc)}`:''}</li>`;
+      };
+      runBody += `<div class="texp" style="margin-top:6px">Variants <span style="color:var(--ink-3)">(append <span class="mono">--variant "&lt;name&gt;"</span>)</span>:</div>
+        <ul class="assumptions" style="margin:4px 0 0">${_rcVariants.map(_vrow).join('')}</ul>`;
+    }
   }
 
   // VISUALIZATIONS — split by the declared `display:` intent (set in the study's
@@ -1296,6 +1381,7 @@ function renderStudy(s, inv, idx){
   // single embedded-figure item → its HTML fragment (image / inline Plotly /
   // iframe HTML / skipped note), the same renderings as before.
   const _figItem=(im)=>{
+    if(im.report_card) return reportCardFig(im.report_card);
     if(im.data_uri) return `<figure><img src="${im.data_uri}" alt="${esc(im.name)}" loading="lazy"><figcaption>${esc(im.name)}</figcaption></figure>`;
     // Interactive figure (Plotly): the generator stripped its own Plotly loader
     // and handed us just the graph <div> + its Plotly.newPlot script. Render it
@@ -1306,7 +1392,7 @@ function renderStudy(s, inv, idx){
     if(im.html && im.interactive) return `<figure class="embedded-viz embedded-plotly" style="margin:12px 0"><figcaption class="kicker" style="margin-bottom:6px">${esc(im.name)}</figcaption><div class="plotly-holder">${im.html}</div></figure>`;
     // Any other committed HTML figure keeps the isolated-iframe path.
     if(im.html) return `<figure class="embedded-viz" style="margin:12px 0"><figcaption class="kicker" style="margin-bottom:6px">${esc(im.name)}</figcaption><iframe class="viz-frame" srcdoc="${esc(im.html)}" loading="lazy" onload="try{this.style.height=(this.contentWindow.document.documentElement.scrollHeight+8)+'px';}catch(e){}"></iframe></figure>`;
-    if(im.skipped) return `<div class="texp" style="color:var(--ink-3)">↪ ${esc(im.name)} — ${esc(im.reason||'not inlined')}</div>`;
+    if(im.skipped) return `<div class="texp" style="color:var(--ink-3);font-size:11.5px;font-style:italic">↪ ${esc(im.name)} — ${esc(im.reason||'not inlined')}</div>`;
     return '';
   };
   (s.figures_embedded||[]).forEach(im=>{
@@ -1353,13 +1439,18 @@ function renderStudy(s, inv, idx){
       const bandCites=(ft&&tcites[ft])||[];
       const allCites=[...new Set([...fcites,...bandCites])];
       const tier=evidenceTier(f,s);
-      return `<div class="finding-traceability" style="margin:8px 0">
-        <span class="chip ${ok?'pass':''}">${esc((f.id?f.id+' · ':'')+(f.status||'finding'))}</span>${tier?' '+etierBadge(tier):''}
+      // Narrative-forward: the statement LEADS; the marker (id + evidence tier)
+      // and the provenance (test, divergence, run ids, seeded study) collapse into
+      // one subtle, de-emphasized meta line below it.
+      const _meta=[];
+      _meta.push(`<span class="fid">${esc((f.id?f.id+' · ':'')+(f.status||'finding'))}</span>${tier?' '+etierBadge(tier):''}`);
+      if(ft) _meta.push(`from ${_traceLink('test',ft)}${band?` <span class="pass_if-band mono">${esc((band.op||'')+' '+(band.value!=null?band.value:''))}</span>`:''}${bandCites.length?' '+citeRow(bandCites,'band'):''}`);
+      if(dv!=null) _meta.push(`divergence ${esc(dv)}×`);
+      if(runIds.length) _meta.push(`run ${runIds.map(r=>`<code>${esc(r)}</code>`).join(', ')}`);
+      if(f.seeded_study) _meta.push(`seeded ${_traceLink('s',f.seeded_study)}`);
+      return `<div class="finding-traceability">
         <div class="kv rationale">${esc(f.statement||'')}${allCites.length?' '+citeRow(allCites):''}</div>
-        ${ft?`<div class="texp">from test: ${_traceLink('test',ft)}${band?` <span class="pass_if-band mono">${esc((band.op||'')+' '+(band.value!=null?band.value:''))}</span>`:''}${bandCites.length?' '+citeRow(bandCites,'band'):''}</div>`:''}
-        ${dv!=null?`<div class="finding-divergence texp">divergence ${esc(dv)}× vs expected</div>`:''}
-        ${runIds.length?`<div class="texp">runs: ${runIds.map(r=>`<code>${esc(r)}</code>`).join(' ')}</div>`:''}
-        ${f.seeded_study?`<div class="finding-seeded texp">seeded study: ${_traceLink('s',f.seeded_study)}</div>`:''}</div>`;
+        <div class="fmeta">${_meta.join(' <span class="sep">·</span> ')}</div></div>`;
     }).join('');
   }
 
@@ -1486,12 +1577,14 @@ function renderStudy(s, inv, idx){
     ${claimLine}${overview}
     <div class="study-summary">${studySummary(s,inv)}</div>
     <div class="study-detail">
-      ${part('Hypothesis & discriminating control', hypoBody, 'study:'+s.slug+'/hypothesis', s.title+' · Hypothesis')}
-      ${part('Model & key assumptions', modelSlot, 'study:'+s.slug+'/model-assumptions', s.title+' · Model & assumptions')}
+      <!-- ANSWER-FORWARD: lead with the verdict + finding + the decisive figure,
+           then the setup (hypothesis/model/assumptions), then the technical record. -->
+      ${part('Verdict', decisionBody, 'study:'+s.slug+'/decision', s.title+' · Verdict')}
       ${anyFigFlagged?part('Decisive figure', decisiveFigBody, 'study:'+s.slug+'/decisive-figure', s.title+' · Decisive figure')
                     :part('Visualizations', techFigHtml, 'study:'+s.slug+'/visualizations', s.title+' · Visualizations')}
       ${part('Finding', findingsBody, 'study:'+s.slug+'/findings', s.title+' · Finding')}
-      ${part('Verdict', decisionBody, 'study:'+s.slug+'/decision', s.title+' · Verdict')}
+      ${part('Hypothesis & discriminating control', hypoBody, 'study:'+s.slug+'/hypothesis', s.title+' · Hypothesis')}
+      ${part('Model & key assumptions', modelSlot, 'study:'+s.slug+'/model-assumptions', s.title+' · Model & assumptions')}
       ${part('Primary limitation', limSlot, 'study:'+s.slug+'/limitation', s.title+' · Primary limitation')}
       ${part('Downstream state-transfer', handoffBody, 'study:'+s.slug+'/handoff', s.title+' · Handoff')}
       ${techRecord}
@@ -1813,16 +1906,29 @@ function _verdictDagHtml(sp){
     <figcaption>Member studies as a dependency DAG (edges from <span class="mono">parent_studies</span>), each badged with its code-computed gate verdict.</figcaption></div>`;
 }
 function renderSpine(inv){
-  // The graph REUSES the workbench's investigation-DAG rendering (ported), so the
-  // report's graph matches the SPA the user drives. Acceptance-criteria gating
-  // (the gating matrix + the authored acceptance-criteria list) was removed from
-  // the report on request — the spine DATA is untouched, only this rendering.
-  const graph=workbenchDag(inv);
-  if(!graph) return '';
-  return `<div id="spine-presentation" class="fbsection">${fbBubble('spine','Investigation graph')}
-    <div class="sec-h"><h2>The investigation graph</h2><span class="rule"></span></div>
-    <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 8px">The campaign as a dependency graph — each study a node badged with its code-computed status, wired to the studies it builds on.</p>
-    ${graph}</div>`;
+  // A human-digestible OVERVIEW in place of the dependency graph: a table of
+  // contents of the member studies, each with its ASK (the question it tests)
+  // and its FIND (the headline result), linking to the full study card below.
+  const studies=inv.studies||[];
+  if(!studies.length) return '';
+  const rows=studies.map((s,i)=>{
+    const sm=studyStatusMeta(s);
+    const ask=s.question||(s.purpose&&s.purpose.question)||s.claim||'';
+    const find=_whatWeLearn(s);
+    const ctrl=isControl(s);
+    return `<div class="toc-row">
+      <a class="toc-num" href="#s-${esc(s.slug)}">${String(i+1).padStart(2,'0')}</a>
+      <div class="toc-body">
+        <div class="toc-h"><a class="toc-title" href="#s-${esc(s.slug)}">${esc(s.title)}</a>${ctrl?'<span class="toc-ctrl">⚑ control</span>':''}<span class="toc-status" style="color:${sm.color}"><span class="g" style="background:${sm.color}"></span>${esc(sm.label)}</span></div>
+        ${ask?`<div class="toc-line toc-ask"><span class="toc-k">Ask</span><span>${esc(ask)}</span></div>`:''}
+        ${find?`<div class="toc-line toc-find"><span class="toc-k">Find</span><span>${esc(find)}</span></div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+  return `<div id="spine-presentation" class="fbsection">${fbBubble('spine','Overview')}
+    <div class="sec-h"><h2>Overview</h2><span class="rule"></span></div>
+    <p class="measure" style="color:var(--ink-2);font-size:13.5px;margin:2px 0 10px">Each member study — the question it asks and what it found. Jump to any study for the full record.</p>
+    <div class="toc">${rows}</div></div>`;
 }
 
 /* ---------- interactive (Plotly) figures — LAZY, visibility-driven ----------

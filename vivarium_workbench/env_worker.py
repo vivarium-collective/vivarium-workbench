@@ -2528,13 +2528,29 @@ def _build_viz_core():
         try:
             import importlib as _importlib
             import pkgutil as _pkgutil
-            _viz_pkg = _importlib.import_module(f"{package_name}.visualizations")
-            for _, _modname, _ in _pkgutil.iter_modules(_viz_pkg.__path__):
+            # Scan the `.visualizations` subpackage of the workspace package, of every
+            # workspace-module package (`_pkgs`), AND of every package that contributed
+            # a registered class. A viz class shipped by a DEPENDENCY package — e.g. the
+            # colony viz classes in `v2ecoli.visualizations`, not
+            # `{package_name}.visualizations` — would otherwise never be imported, so it
+            # never appears in `__subclasses__` below and its `local:` figures silently
+            # drop from the report.
+            _cand = {package_name} | set(_pkgs or ())
+            for _c in registry.values():
+                _mod = getattr(_c, "__module__", "")
+                if _mod:
+                    _cand.add(_mod.split(".")[0])
+            for _pkg in _cand:
                 try:
-                    _importlib.import_module(f"{package_name}.visualizations.{_modname}")
-                except Exception:  # noqa: BLE001 — best-effort, per module
-                    pass
-        except Exception:  # noqa: BLE001 — no .visualizations package is fine
+                    _viz_pkg = _importlib.import_module(f"{_pkg}.visualizations")
+                except Exception:  # noqa: BLE001 — no .visualizations subpackage is fine
+                    continue
+                for _, _modname, _ in _pkgutil.iter_modules(_viz_pkg.__path__):
+                    try:
+                        _importlib.import_module(f"{_pkg}.visualizations.{_modname}")
+                    except Exception:  # noqa: BLE001 — best-effort, per module
+                        pass
+        except Exception:  # noqa: BLE001 — discovery is best-effort
             pass
 
         def _walk(cls):
