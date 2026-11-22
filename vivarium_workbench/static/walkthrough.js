@@ -13682,6 +13682,37 @@
     }
     studies.forEach(function(s) { if (depth[s.name] === undefined) depth[s.name] = 0; });
 
+    // Grid-pack the LOOSE (disconnected) studies. A study with no in-investigation
+    // prerequisite AND no in-investigation dependent is an isolated node — it carries
+    // no directional relationship, so forcing every loose study into one long depth-0
+    // breadth row reads as a misleading single line. Instead reassign the loose nodes
+    // to a compact ~square GRID of depth-levels (a block below the connected subgraph in
+    // TB / beside it in LR), so only genuinely CONNECTED studies keep the directional
+    // depth flow and the loose cards pack tightly for viewing. Loose nodes have no edges,
+    // so no lines are drawn to them — only their placement changes.
+    (function _gridPackLooseNodes() {
+      var loose = [];
+      studies.forEach(function(s) {
+        var hasParent = dagEdgesFor(s).some(function(p) { return byName[p.study]; });
+        var hasChild = (children[s.name] || []).length > 0;
+        if (!hasParent && !hasChild) loose.push(s);
+      });
+      if (loose.length < 3) return;   // 0–2 loose nodes already read fine as a short row
+      loose.sort(function(a, b) { return a.name.localeCompare(b.name); });
+      var looseSet = {};
+      loose.forEach(function(s) { looseSet[s.name] = true; });
+      // Deepest level occupied by a CONNECTED study — the loose grid starts just past it
+      // (base 0 when every study is loose, so the grid fills from the top).
+      var connMax = -1;
+      studies.forEach(function(s) {
+        if (!looseSet[s.name] && depth[s.name] > connMax) connMax = depth[s.name];
+      });
+      var base = connMax + 1;
+      // ~Square grid: perLevel cards per depth-level (row in TB / column in LR).
+      var perLevel = Math.max(2, Math.ceil(Math.sqrt(loose.length)));
+      loose.forEach(function(s, i) { depth[s.name] = base + Math.floor(i / perLevel); });
+    })();
+
     // Bin by depth.
     var byDepth = {};
     studies.forEach(function(s) {
