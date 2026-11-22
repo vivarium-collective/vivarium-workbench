@@ -290,3 +290,68 @@ def test_placard_unaccounted_viz_empty_and_malformed():
     import vivarium_workbench.lib.investigation_report as mod
     assert mod._placard_unaccounted_viz(None, []) == []
     assert mod._placard_unaccounted_viz([{"address": "local:V"}, "nope", {}], []) == []
+
+
+# --- _embed_url_visualizations: embed_visualizations[].url into the report ----
+# A study that renders figures to a SHARED dir and references them via
+# embed_visualizations:[{url: /reports/figures/.../x.html}] had them iframed in its
+# own tab but SILENTLY DROPPED from the investigation report (the globs only see the
+# study's own viz/charts). This resolves + inlines those url embeds.
+
+from vivarium_workbench.lib.investigation_report import _embed_url_visualizations
+
+
+def _shared_fig(ws, rel, body):
+    f = ws / rel
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(body, encoding="utf-8")
+    return f
+
+
+def test_embed_url_inlines_a_shared_dir_figure(tmp_path):
+    _shared_fig(tmp_path, "reports/figures/grp/growth.html", "<div>GROWTH</div>")
+    embeds = [{"name": "Growth", "url": "/reports/figures/grp/growth.html"}]
+    out = _embed_url_visualizations(tmp_path, embeds, [0], set())
+    assert len(out) == 1 and out[0]["name"] == "Growth"
+    assert "GROWTH" in out[0]["html"] and not out[0].get("skipped")
+
+
+def test_embed_url_inlines_interactive_plotly_sharing_one_lib(tmp_path):
+    # a self-contained Plotly figure is reduced to its body fragment + marked interactive,
+    # and its own <script src=…plotly…> loader is stripped (the report supplies one).
+    body = ('<html><head><script src="https://cdn.plot.ly/plotly-2.min.js"></script></head>'
+            '<body><div id="g"></div><script>Plotly.newPlot("g",[])</script></body></html>')
+    _shared_fig(tmp_path, "reports/figures/grp/ts.html", body)
+    out = _embed_url_visualizations(tmp_path, [{"url": "/reports/figures/grp/ts.html"}], [0], set())
+    assert len(out) == 1 and out[0].get("interactive") is True
+    assert "Plotly.newPlot" in out[0]["html"] and "cdn.plot.ly" not in out[0]["html"]
+    assert out[0]["name"] == "Ts"   # name derived from the url stem when none declared
+
+
+def test_embed_url_missing_source_is_a_placard_not_a_silent_drop(tmp_path):
+    out = _embed_url_visualizations(
+        tmp_path, [{"name": "Gone", "url": "/reports/figures/grp/missing.html"}], [0], set())
+    assert len(out) == 1 and out[0]["skipped"] is True
+    assert out[0]["name"] == "Gone" and "not found" in out[0]["reason"]
+
+
+def test_embed_url_skips_external_and_api_embeds_silently(tmp_path):
+    embeds = [{"url": "https://example.com/fig.html"},
+              {"url": "/api/study/x/viz"},
+              {"url": "//cdn/fig.html"}]
+    assert _embed_url_visualizations(tmp_path, embeds, [0], set()) == []
+
+
+def test_embed_url_never_escapes_the_workspace(tmp_path):
+    # a traversal url cannot read outside ws_root — it resolves to nothing → placard, never a read
+    outside = tmp_path.parent / "secret.html"
+    outside.write_text("<div>SECRET</div>", encoding="utf-8")
+    out = _embed_url_visualizations(tmp_path, [{"url": "/../secret.html"}], [0], set())
+    assert all("SECRET" not in (f.get("html") or "") for f in out)
+
+
+def test_embed_url_dedups_against_already_embedded_names(tmp_path):
+    _shared_fig(tmp_path, "reports/figures/grp/growth.html", "<div>G</div>")
+    out = _embed_url_visualizations(
+        tmp_path, [{"name": "Growth", "url": "/reports/figures/grp/growth.html"}], [0], {"Growth"})
+    assert out == []

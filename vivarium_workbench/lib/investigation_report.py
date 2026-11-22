@@ -22,7 +22,7 @@ from vivarium_workbench.lib.html_render import esc as _h
 
 import yaml
 
-from vivarium_workbench.lib.path_safety import is_plain_name
+from vivarium_workbench.lib.path_safety import is_plain_name, resolve_inside
 from vivarium_workbench.lib.investigation_members import (
     investigation_member_slugs,
     member_slug,
@@ -298,6 +298,46 @@ def _humanize_stem(stem: str) -> str:
     return re.sub(r"[-_]+", " ", stem).strip().capitalize()
 
 
+def _inline_html_file(f: Path, budget: list, display_name: str) -> "dict | None":
+    """Read one on-disk HTML figure and return a report figure record. A self-contained Plotly
+    figure is reduced to its body fragment (sharing the report's single Plotly.js); any other
+    HTML stays raw to render in an isolated iframe. Returns a skip placard when the file is too
+    large (so it is never silently dropped) and ``None`` when it cannot be read. Respects the
+    shared inline-size budget (``budget[0]``). Shared by :func:`_embed_html_figures` (study-dir
+    globs) and :func:`_embed_url_visualizations` (``embed_visualizations[].url``)."""
+    try:
+        raw_size = f.stat().st_size
+    except OSError:
+        return None
+    if raw_size > _HTML_RAW_READ_MAX:  # don't even read an enormous file
+        return {"name": display_name, "skipped": True, "reason": "too large to inline"}
+    try:
+        html = f.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    # An interactive Plotly figure is inlined in the main document sharing the report's single
+    # Plotly.js — strip its own loader, keep the graph <div> + newPlot. Any other HTML stays raw.
+    # Guarded: a malformed figure falls back to raw HTML, never fatal.
+    interactive = False
+    frag = html
+    try:
+        prepared = _prepare_interactive_figure(html)
+        if prepared is not None:
+            frag, interactive = prepared, True
+    except Exception:
+        frag, interactive = html, False
+    # budget against the POST-processing size (a stripped interactive figure is tiny even if its
+    # on-disk file bundled a 4.6 MB Plotly.js)
+    fsize = len(frag.encode("utf-8"))
+    if fsize > _HTML_PER_FILE_MAX or budget[0] + fsize > _IMG_TOTAL_MAX:
+        return {"name": display_name, "skipped": True, "reason": "too large to inline"}
+    budget[0] += fsize
+    rec = {"name": display_name, "html": frag}
+    if interactive:
+        rec["interactive"] = True
+    return rec
+
+
 def _embed_html_figures(study_dir: Path, budget: list, skip_names: set) -> list:
     """Inline a study's on-disk HTML figures (``viz/*.html`` / ``charts/*.html``)
     as raw HTML so the self-contained report shows them.
@@ -331,42 +371,54 @@ def _embed_html_figures(study_dir: Path, budget: list, skip_names: set) -> list:
             if base in _HTML_FIG_SKIP or base in skip_names or rel in seen:
                 continue
             seen.add(rel)
-            try:
-                raw_size = f.stat().st_size
-            except OSError:
-                continue
-            if raw_size > _HTML_RAW_READ_MAX:  # don't even read an enormous file
-                out.append({"name": _humanize_stem(f.stem), "skipped": True,
-                            "reason": "too large to inline"})
-                continue
-            try:
-                html = f.read_text(encoding="utf-8")
-            except OSError:
-                continue
-            # An interactive Plotly figure is inlined in the main document sharing
-            # the report's single Plotly.js — so strip its own Plotly loader and
-            # keep just the graph <div> + newPlot script. Any other HTML stays raw
-            # and renders in its own isolated iframe. Guarded: a malformed figure
-            # falls back to raw HTML, never fatal.
-            interactive = False
-            frag = html
-            try:
-                prepared = _prepare_interactive_figure(html)
-                if prepared is not None:
-                    frag, interactive = prepared, True
-            except Exception:
-                frag, interactive = html, False
-            # budget against the POST-processing size (a stripped interactive
-            # figure is tiny even if its on-disk file bundled a 4.6 MB Plotly.js)
-            fsize = len(frag.encode("utf-8"))
-            if fsize > _HTML_PER_FILE_MAX or budget[0] + fsize > _IMG_TOTAL_MAX:
-                out.append({"name": _humanize_stem(f.stem), "skipped": True,
-                            "reason": "too large to inline"})
-                continue
-            budget[0] += fsize
-            rec = {"name": _humanize_stem(f.stem), "html": frag}
-            if interactive:
-                rec["interactive"] = True
+            rec = _inline_html_file(f, budget, _humanize_stem(f.stem))
+            if rec is not None:
+                out.append(rec)
+    return out
+
+
+def _embed_url_visualizations(ws_root: Path, embed_list, budget: list, skip_names: set) -> list:
+    """Inline a study's ``embed_visualizations[].url`` figures into the self-contained report.
+
+    An embed references a workspace-root-absolute HTML file (e.g. ``/reports/figures/<group>/
+    fig.html``) — frequently a SHARED figures dir OUTSIDE the study's own ``viz/``/``charts/``
+    dirs, so neither :func:`_embed_html_figures` (study-dir globs) nor :func:`_embed_visualizations`
+    (``image:`` addresses) reaches it. The per-study Visualizations tab iframes the url live, but
+    the investigation report inlines HTML at generation time and so dropped these figures
+    silently. Here we resolve each url UNDER the workspace root (never escaping it, HTML only),
+    inline it through the shared :func:`_inline_html_file`, and respect the inline-size budget.
+
+    ``skip_names`` dedups against figures already embedded via another path. A declared embed whose
+    source file is missing earns a skip placard rather than vanishing; an external / ``api:``-served
+    embed (not an inlinable workspace file) is left to the live dashboard.
+    """
+    out: list = []
+    seen: set = set()
+    for e in (embed_list or []):
+        if not isinstance(e, dict):
+            continue
+        url = str(e.get("url") or "")
+        # Only a local, workspace-root-absolute HTML file can be inlined into a self-contained
+        # report; an external / api-served embed is left to the live dashboard (skipped silently).
+        if not url.startswith("/") or url.startswith(("/api/", "//")):
+            continue
+        name = e.get("name") or _humanize_stem(Path(url).stem)
+        if name in skip_names:
+            continue
+        try:
+            f = resolve_inside(ws_root, url.lstrip("/"), what="embed url", suffixes=(".html",))
+        except Exception:  # escapes the workspace / wrong type → skip, never fatal
+            f = None
+        if f is None or not f.is_file():
+            # declared but not found — surface a placard rather than silently drop it
+            out.append({"name": name, "skipped": True, "reason": "declared embed source not found"})
+            continue
+        key = f.as_posix()
+        if key in seen:
+            continue
+        seen.add(key)
+        rec = _inline_html_file(f, budget, name)
+        if rec is not None:
             out.append(rec)
     return out
 
@@ -1347,6 +1399,13 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
             if isinstance(v, dict) and str(v.get("address", "")).startswith("image:")
         }
         figs.extend(_embed_html_figures(study_dir, img_budget, img_basenames))
+        # embed_visualizations[].url → resolve each workspace-root-absolute HTML file and inline
+        # it. These often live in a SHARED figures dir outside the study's own viz/charts (missed
+        # by the globs above), so the report dropped them silently though the study tab iframes
+        # them. Deduped against figures already embedded by name.
+        figs.extend(_embed_url_visualizations(
+            ws_root, spec.get("embed_visualizations"), img_budget,
+            {f.get("name") for f in figs if isinstance(f, dict)}))
         # Native Visualizations gallery — the declared visualizations[] rendered to
         # the latest run's .pbg/runs/<run>/viz.json (in-memory HTML, not committed
         # on disk). Modern studies render their RESULT figures here, so without this
