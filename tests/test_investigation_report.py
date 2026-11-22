@@ -318,15 +318,18 @@ def test_model_topology_is_fully_guarded():
     assert _model_topology("/no/such/ws", {"baseline": [{"name": "x"}]}) is None
 
 
-def test_template_renders_loom_view_and_light_markdown():
-    """The Model section prefers the resolved loom view, and authored conclusions
-    are rendered through the light-markdown helper (no raw ## headers)."""
+def test_template_renders_compact_model_card_and_light_markdown():
+    """The Model section renders a COMPACT model card (composite id + topology
+    counts) rather than the full per-study bigraph, and authored conclusions are
+    rendered through the light-markdown helper (no raw ## headers)."""
     from pathlib import Path
     import vivarium_workbench
     tpl = (Path(vivarium_workbench.__file__).parent
            / "templates" / "investigation-report.html").read_text(encoding="utf-8")
-    assert "function loomTopoSVG(" in tpl
-    assert "s.model_topology ? loomTopoSVG(s.model_topology)" in tpl
+    # the compact card reads the resolved topology and renders process/compartment/
+    # link COUNTS (the full interactive bigraph lives only in the live workbench)
+    assert "const _topo=s.model_topology" in tpl
+    assert "compartment" in tpl and "link" in tpl
     assert "function mdLite(" in tpl
     assert "mdLite(conclusion)" in tpl
 

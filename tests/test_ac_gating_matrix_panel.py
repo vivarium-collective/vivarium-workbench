@@ -33,7 +33,9 @@ def test_authored_acceptance_criteria_list_not_rendered():
     assert "Acceptance criteria (authored)" not in _TPL
 
 
-def test_spine_graph_still_rendered():
-    # Removing the matrix must not take the investigation graph with it.
+def test_spine_overview_still_rendered():
+    # Removing the matrix must not take the per-study Overview with it. The
+    # dependency graph was replaced by an Ask/Find table-of-contents.
     assert "function renderSpine" in _TPL
-    assert "The investigation graph" in _TPL
+    assert "<h2>Overview</h2>" in _TPL
+    assert "toc-row" in _TPL
