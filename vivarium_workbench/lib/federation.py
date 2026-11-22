@@ -186,14 +186,67 @@ def find_federated_study(ws_root: Path, name: str):
     return None
 
 
-def federated_studies(ws_root: Path) -> list[dict]:
-    out: list[dict] = []
+def _federated_study_membership(
+    ws_root: Path, exclude: set[str]
+) -> tuple[set[str], set[str]]:
+    """Partition federated study ids (``repo::study``) by whether a *surviving*
+    (non-excluded) federated investigation still references them.
+
+    Returns ``(surviving, excluded_only)`` where ``surviving`` is every
+    ``repo::study`` id a non-excluded investigation lists, and ``excluded_only``
+    is every id referenced by an excluded investigation. A study in both is kept
+    (still reachable via the surviving investigation). Used so that excluding an
+    investigation (or its whole repo) also drops its member studies, not just the
+    investigation card. Best-effort: malformed linked workspaces are skipped.
+    """
+    surviving: set[str] = set()
+    excluded_only: set[str] = set()
     for lw in linked_workspaces(ws_root):
         try:
+            idir = lw.layout.investigations
+            if not idir.is_dir():
+                continue
+            for d in sorted(p for p in idir.iterdir() if p.is_dir()):
+                f = d / "investigation.yaml"
+                if not f.is_file():
+                    continue
+                try:
+                    spec = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+                except Exception:
+                    continue
+                iname = spec.get("name") or d.name
+                members = {f"{lw.repo}::{s}" for s in (spec.get("studies") or [])}
+                if exclude & {iname, f"{lw.repo}::{iname}", lw.repo}:
+                    excluded_only |= members
+                else:
+                    surviving |= members
+        except Exception:
+            continue
+    return surviving, excluded_only
+
+
+def federated_studies(ws_root: Path) -> list[dict]:
+    exclude = _federation_exclude(ws_root)
+    surviving, excluded_only = (
+        _federated_study_membership(ws_root, exclude) if exclude else (set(), set())
+    )
+    out: list[dict] = []
+    for lw in linked_workspaces(ws_root):
+        # Repo-level exclusion hides every study the module ships.
+        if lw.repo in exclude:
+            continue
+        try:
             for name, spec in _iter_study_specs(lw):
+                sid = f"{lw.repo}::{name}"
+                # Study-level exclusion (repo::study id), and studies reachable
+                # ONLY through an excluded investigation, are hidden too.
+                if sid in exclude:
+                    continue
+                if sid in excluded_only and sid not in surviving:
+                    continue
                 out.append({
                     "name": name,
-                    "id": f"{lw.repo}::{name}",
+                    "id": sid,
                     "origin_repo": lw.repo,
                     "read_only": True,
                     "spec": spec,
@@ -207,12 +260,14 @@ def _federation_exclude(ws_root: Path) -> set[str]:
     """Host-declared allow-list of federated content to hide, from the host
     ``workspace.yaml`` ``dashboard.federation.exclude`` (a list of strings).
 
-    Each entry matches a federated investigation by its slug/``name``
-    (e.g. ``composite-gallery``), its ``repo::name`` id, or its ``origin_repo``
-    (hiding every federated investigation from that module). This lets a host
-    keep a module as a composite/process dependency while dropping its shipped
-    investigations from the host dashboard. Best-effort: a missing/malformed
-    config yields no exclusions.
+    Each entry matches by a federated investigation's slug/``name``
+    (e.g. ``composite-gallery``), a ``repo::name`` id (investigation OR study),
+    or an ``origin_repo`` (hiding every federated investigation AND study from
+    that module). Excluding an investigation also drops the member studies it
+    alone contributes (see :func:`federated_studies`). This lets a host keep a
+    module as a composite/process dependency while dropping its shipped
+    investigations and studies from the host dashboard. Best-effort: a
+    missing/malformed config yields no exclusions.
     """
     try:
         data = yaml.safe_load((ws_root / "workspace.yaml").read_text(encoding="utf-8")) or {}

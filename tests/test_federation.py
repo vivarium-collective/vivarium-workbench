@@ -184,3 +184,44 @@ def test_federation_exclude_absent_or_malformed_is_noop(tmp_path, monkeypatch):
     )
     names = {i["name"] for i in federation_mod.federated_investigation_sets(tmp_path)}
     assert "donor_inv" in names
+
+
+# --- exclude also hides federated STUDIES, not just the investigation card ---
+
+def test_federation_exclude_by_repo_hides_studies(tmp_path, monkeypatch):
+    donor = linked_workspaces(FIX)
+    monkeypatch.setattr(federation_mod, "linked_workspaces", lambda ws_root: donor)
+    # control: no exclude -> donor_study is federated in
+    (tmp_path / "workspace.yaml").write_text("name: host\n")
+    assert "donor_study" in {s["name"] for s in federation_mod.federated_studies(tmp_path)}
+    # exclude the whole donor repo -> its studies vanish too
+    (tmp_path / "workspace.yaml").write_text(
+        "name: host\ndashboard:\n  federation:\n    exclude: [donor-repo]\n"
+    )
+    assert federation_mod.federated_studies(tmp_path) == []
+
+
+def test_federation_exclude_investigation_slug_hides_member_studies(tmp_path, monkeypatch):
+    donor = linked_workspaces(FIX)
+    monkeypatch.setattr(federation_mod, "linked_workspaces", lambda ws_root: donor)
+    # Excluding the investigation by slug drops the study it alone contributes.
+    (tmp_path / "workspace.yaml").write_text(
+        "name: host\ndashboard:\n  federation:\n    exclude: [donor_inv]\n"
+    )
+    assert "donor_study" not in {s["name"] for s in federation_mod.federated_studies(tmp_path)}
+
+
+def test_federation_exclude_by_study_id(tmp_path, monkeypatch):
+    donor = linked_workspaces(FIX)
+    monkeypatch.setattr(federation_mod, "linked_workspaces", lambda ws_root: donor)
+    (tmp_path / "workspace.yaml").write_text(
+        "name: host\ndashboard:\n  federation:\n    exclude: [donor-repo::donor_study]\n"
+    )
+    assert "donor_study" not in {s["name"] for s in federation_mod.federated_studies(tmp_path)}
+
+
+def test_federation_exclude_studies_absent_is_noop(tmp_path, monkeypatch):
+    donor = linked_workspaces(FIX)
+    monkeypatch.setattr(federation_mod, "linked_workspaces", lambda ws_root: donor)
+    (tmp_path / "workspace.yaml").write_text("name: host\n")
+    assert "donor_study" in {s["name"] for s in federation_mod.federated_studies(tmp_path)}
