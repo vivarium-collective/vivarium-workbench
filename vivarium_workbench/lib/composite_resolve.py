@@ -423,9 +423,29 @@ def resolve_composite(
                         state["_declared_emit_paths"] = declared
                 except Exception:
                     pass
+        # Resolve a `blueprint` parameter to its source content, so the dashboard's
+        # model-definition "Export JSON → Blueprint" option can download the
+        # backend-neutral source (the common case: `default` is a workspace file
+        # path; an inline dict/list is passed through). Path-guarded to the
+        # workspace; best-effort (None on any miss).
+        _blueprint = None
+        try:
+            _bp = (spec.parameters or {}).get("blueprint")
+            _bpd = _bp.get("default") if isinstance(_bp, dict) else None
+            if isinstance(_bpd, (dict, list)):
+                _blueprint = _bpd
+            elif isinstance(_bpd, str) and _bpd.strip():
+                _p = (Path(_bpd) if Path(_bpd).is_absolute() else ws_root / _bpd).resolve()
+                _root = ws_root.resolve()
+                if (_p == _root or _root in _p.parents) and _p.is_file() \
+                        and _p.suffix.lower() in (".yaml", ".yml", ".json"):
+                    _blueprint = yaml.safe_load(_p.read_text(encoding="utf-8"))
+        except Exception:
+            _blueprint = None
         return {
             "id": spec_id, "name": spec.name, "description": spec.description,
             "parameters": spec.parameters, "state": state, "schema": spec.schema,
+            "blueprint": _blueprint,
             # Echo the caller's overrides so a study viewer opening its composite
             # with the study's real config (conditions.baseline.params) can show
             # them in the Configure panel — the panel merges these onto the
