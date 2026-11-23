@@ -3,8 +3,10 @@
 Goal: `vivarium-workbench serve --backend-base-url https://compose.cam.uchc.edu/` runs a workspace's studies on
 [compose-api](https://github.com/biosimulations/compose-api), in the environment compose-api has registered for the
 workspace. The UI and VivaChat stay local; only dispatch, status, results, traces and cancel cross the wire.
-compose-api replaces viva-api, which is being archived. The viva-api routes ([backend-viva-v1.md](backend-viva-v1.md))
-stay in place and are reached only when the named backend advertises `/viva/v1`.
+viva-api is not retired: the Stanford workbenches still run on it, and its removal waits on Jim
+([compose-api #345](https://github.com/biosimulations/compose-api/pull/345#issuecomment-6802333949), 2026-11-11). The
+viva-api routes ([backend-viva-v1.md](backend-viva-v1.md)) stay in place and are reached only when the named backend
+advertises `/viva/v1`.
 
 ## Provenance (read, not recalled)
 
