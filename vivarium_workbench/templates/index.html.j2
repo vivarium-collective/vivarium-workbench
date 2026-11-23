@@ -1542,8 +1542,8 @@ a.viv-bs-commit:hover { text-decoration: underline; }
        toggles, + Study, and the Export/Run actions in #ws-actions). Row 2: the
        investigation title. The Details + Graph toggles collapse the two detail
        panels below so this top stays small. #}
-    <div class="inv-header-bar" style="display:flex;flex-direction:column;align-items:stretch;gap:6px;margin:0 0 10px">
-      <div class="inv-header-top" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px">
+    <div class="inv-header-bar" style="display:flex;flex-direction:column;align-items:stretch;gap:6px;margin:0 0 10px;min-width:0;max-width:100%">
+      <div class="inv-header-top" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;max-width:100%">
         <button id="ws-back" class="btn-mini" onclick="_showExplore()"
                 title="Back to all investigations" aria-label="Back to Investigations"><span aria-hidden="true">←</span> Back to Investigations</button>
         <span class="inv-header-nav" style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;margin-left:auto">
@@ -1559,8 +1559,8 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           <span id="ws-actions"></span>
         </span>
       </div>
-      <div id="ws-title-wrap" style="display:flex;align-items:center;gap:8px;min-width:0;line-height:1.15">
-        <strong id="ws-title" style="font-size:1.35em;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></strong>
+      <div id="ws-title-wrap" style="display:flex;align-items:baseline;gap:8px;min-width:0;max-width:100%;flex-wrap:wrap;line-height:1.2">
+        <strong id="ws-title" style="font-size:1.35em;font-weight:700;color:#0f172a;min-width:0;overflow-wrap:anywhere;word-break:break-word"></strong>
         <span id="ws-status"></span>
       </div>
     </div>
