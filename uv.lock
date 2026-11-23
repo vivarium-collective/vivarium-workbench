@@ -3726,6 +3726,7 @@ version = "0.5.8"
 source = { editable = "." }
 dependencies = [
     { name = "bigraph-schema" },
+    { name = "boto3" },
     { name = "compose-api-client" },
     { name = "fastapi" },
     { name = "investigation-contracts" },
@@ -3788,6 +3789,7 @@ viz = [
 [package.metadata]
 requires-dist = [
     { name = "bigraph-schema", specifier = ">=1.8.1" },
+    { name = "boto3", specifier = ">=1.34" },
     { name = "boto3", marker = "extra == 'remote'", specifier = ">=1.34" },
     { name = "compose-api-client", specifier = ">=0.7.72" },
     { name = "fastapi", specifier = ">=0.110" },

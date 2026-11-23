@@ -13,10 +13,12 @@ dependencies = [
     # related to os.kill. As before, psutil is being imported to manage process checks
     # across systems.
     "psutil>=5.9",
-    # boto3 moved to the optional [remote] extra: it is only used by the remote
-    # analysis figures (vivarium_workbench_sms/remote_analysis_figures.py), whose
-    # _s3_client() already degrades gracefully when boto3 is absent. Keeping it out
-    # of the default install trims ~30 MB (boto3 + botocore) for local users.
+    # boto3: the remote analysis figures read S3 directly (vivarium_workbench_sms/remote_analysis_figures.py,
+    # #1072/#1078); without it that path silently reports s3-unavailable, and prod's dataset registry does not
+    # cover most runs yet. A default dependency again UNTIL step P4b (docs/backend-adapters.md): the plugin then
+    # ships as its own distribution (vivarium-workbench-vivaapi), which declares boto3 itself, and this line goes
+    # (the core keeps the lean install #1755 wanted). [remote] below stays as the forward-compatible spelling.
+    "boto3>=1.34",
     "jinja2",
     "pyyaml",
     # Server-side LaTeX -> MathML for the Model view's governing equations
@@ -158,8 +160,8 @@ dependencies = [
 [project.optional-dependencies]
 # Remote analysis figures read S3 directly (vivarium_workbench_sms/
 # remote_analysis_figures.py, #1072/#1078). boto3 is imported lazily there and
-# _s3_client() returns None when it is absent, so it is optional: install
-# `vivarium-workbench[remote]` for the GovCloud / remote-run S3 figures path.
+# _s3_client() returns None when it is absent. Until P4b boto3 is also a default
+# dependency (above); afterwards the plugin distribution declares it.
 remote = ["boto3>=1.34"]
 viz = ["matplotlib", "imageio", "numpy"]
 # `vivarium-workbench render-loom` drives the loom in a headless browser to save
