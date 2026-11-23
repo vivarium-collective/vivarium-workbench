@@ -316,11 +316,11 @@ _GALLERY_CSS = (
 # the current URL's served bytes; falls back to serializing the live DOM.
 _GALLERY_DL_BTN = r"""<button id="dl-zip-btn" onclick="__dlFiguresZip(this)" title="Download every figure in this gallery as a .zip (one file per figure, grouped by study)" style="position:fixed;top:14px;right:16px;z-index:50;font:inherit;font-size:12.5px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--soft);border-radius:8px;padding:7px 11px;box-shadow:0 2px 8px rgba(0,0,0,0.08);white-space:nowrap">&#8595; figures (zip)</button><script>
 (function(){
-  // This gallery inlines every figure as a data: URI, so the zip is built in the
-  // browser from the page itself — no server, works live / in a snapshot / offline.
-  // In the zip's OWN extracted index.html the figures are relative files (no data:
-  // URIs), so there is nothing to re-zip there: the button hides itself.
-  function _hasInlined(){ return !!document.querySelector('main .card img[src^="data:"], main .card iframe[src^="data:"]'); }
+  // Build a .zip of every figure IN THE BROWSER, by FETCHING each figure's src. This works
+  // whether the figures are inlined as data: URIs (the live standalone gallery) OR published as
+  // relative files alongside this page (the read-only snapshot) — fetch() resolves both a data:
+  // URI and a same-origin relative URL. A browsable index.html (this page, minus the download
+  // control) is included so the zip opens as a gallery with each figure next to it.
   function _ensureJSZip(){
     if(window.JSZip) return Promise.resolve(window.JSZip);
     return new Promise(function(res,rej){ var s=document.createElement('script');
@@ -328,24 +328,35 @@ _GALLERY_DL_BTN = r"""<button id="dl-zip-btn" onclick="__dlFiguresZip(this)" tit
       s.onload=function(){ window.JSZip?res(window.JSZip):rej(new Error('JSZip missing')); };
       s.onerror=function(){ rej(new Error('JSZip failed to load')); }; document.head.appendChild(s); });
   }
-  var _EXT={'image/svg+xml':'svg','image/png':'png','image/gif':'gif','image/jpeg':'jpg','image/jpg':'jpg','image/webp':'webp','text/html':'html'};
+  var _EXT={'image/svg+xml':'svg','image/png':'png','image/gif':'gif','image/jpeg':'jpg','image/webp':'webp','text/html':'html'};
   function _slug(t){ return String(t==null?'':t).trim().replace(/[^\w.-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80)||'figure'; }
-  function _bytes(uri){ var m=/^data:([^;,]+)(;base64)?,([\s\S]*)$/.exec(uri||''); if(!m) return null;
-    var mime=m[1]; if(m[2]){ var bin=atob(m[3]); var a=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i); return {mime:mime,bytes:a}; }
-    return {mime:mime,bytes:new TextEncoder().encode(decodeURIComponent(m[3]))}; }
+  // The in-zip path: a relative snapshot src is already "<study>/<file>.<ext>" — keep it so the
+  // bundled index.html's links resolve; a data: URI has no name, so derive it from study + label.
+  function _arc(src, study, label, mime){
+    if(src.indexOf('data:')===0){ return study+'/'+label+'.'+(_EXT[(mime||'').split(';')[0]]||'bin'); }
+    var p=src.split('?')[0].split('#')[0]; try{ p=decodeURIComponent(p); }catch(e){}
+    if(/^(https?:)?\/\//.test(p)||p.charAt(0)==='/'){ var parts=p.replace(/^.*?:\/\/[^/]+/,'').split('/').filter(Boolean); p=parts.slice(-2).join('/'); }
+    return p.replace(/^\.?\/+/,'')||(study+'/'+label); }
+  function _indexHtml(){ var d=document.documentElement.cloneNode(true);
+    try{ var b=d.querySelector('#dl-zip-btn'); if(b){ var nx=b.nextElementSibling; b.parentNode.removeChild(b); if(nx&&nx.tagName==='SCRIPT') nx.parentNode.removeChild(nx); } }catch(e){}
+    return '<!doctype html>\n'+d.outerHTML; }
   window.__dlFiguresZip=function(btn){ var old=btn?btn.textContent:''; if(btn){btn.disabled=true;btn.textContent='zipping…';}
-    _ensureJSZip().then(function(JSZip){ var zip=new JSZip(), used={}, n=0;
+    _ensureJSZip().then(function(JSZip){ var zip=new JSZip(), used={}, items=[];
       document.querySelectorAll('main section.grp').forEach(function(sec){ var h=sec.querySelector('h2'); var study=_slug(h?h.textContent:'study');
-        sec.querySelectorAll('.card').forEach(function(card){ var media=card.querySelector('img[src^="data:"],iframe[src^="data:"]'); if(!media) return;
-          var d=_bytes(media.getAttribute('src')); if(!d) return; var nm=card.querySelector('.name'); var label=_slug(nm?nm.textContent:'figure');
-          var ext=_EXT[d.mime]||'bin', path=study+'/'+label+'.'+ext, k=2; while(used[path]) path=study+'/'+label+'-'+(k++)+'.'+ext;
-          used[path]=1; zip.file(path,d.bytes); n++; }); });
-      if(!n){ if(btn){btn.disabled=false;btn.textContent=old;} alert('No inlined figures found to zip.'); return; }
-      return zip.generateAsync({type:'blob'}).then(function(blob){ var name=(document.title||'figures').replace(/[^\w.-]+/g,'_')||'figures';
+        sec.querySelectorAll('.card').forEach(function(card){ var m=card.querySelector('img[src],iframe[src]'); if(!m) return;
+          var src=m.getAttribute('src'); if(!src) return; var nm=card.querySelector('.name');
+          items.push({src:src, study:study, label:_slug(nm?nm.textContent:'figure')}); }); });
+      if(!items.length){ if(btn){btn.disabled=false;btn.textContent=old;} alert('No figures found in this gallery.'); return; }
+      try{ zip.file('index.html', _indexHtml()); }catch(e){}
+      return Promise.all(items.map(function(it){
+        return fetch(it.src).then(function(r){ if(!r.ok) throw 0; return r.blob(); }).then(function(blob){
+          return blob.arrayBuffer().then(function(buf){ var arc=_arc(it.src, it.study, it.label, blob.type), base=arc, k=2;
+            while(used[arc]){ var dot=base.lastIndexOf('.'); arc=dot>0?base.slice(0,dot)+'-'+k+base.slice(dot):base+'-'+k; k++; }
+            used[arc]=1; zip.file(arc, buf); }); }).catch(function(){ /* unreachable figure — skip */ }); }))
+      .then(function(){ return zip.generateAsync({type:'blob'}); }).then(function(blob){ var name=(document.title||'figures').replace(/[^\w.-]+/g,'_')||'figures';
         var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name+'.zip'; document.body.appendChild(a); a.click();
         setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},4000); if(btn){btn.disabled=false;btn.textContent=old;} });
     }).catch(function(e){ if(btn){btn.disabled=false;btn.textContent=old;} alert('Could not build the zip: '+((e&&e.message)||e)); }); };
-  try{ if(!_hasInlined()){ var b=document.getElementById('dl-zip-btn'); if(b) b.style.display='none'; } }catch(e){}
 })();
 </script>"""
 
