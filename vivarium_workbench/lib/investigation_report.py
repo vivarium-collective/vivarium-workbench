@@ -15,6 +15,8 @@ types, which is exported (never fabricated).
 from __future__ import annotations
 
 import base64
+import hashlib
+import itertools
 import json
 import re
 from pathlib import Path
@@ -282,20 +284,53 @@ def _strip_inline_plotly_bundle(frag: str) -> str:
     return _INLINE_SCRIPT_RE.sub(_repl, frag)
 
 
+_NEWPLOT_TARGET_RE = re.compile(r"""Plotly\.newPlot\(\s*(['"])(?P<id>[^'"]+)\1""")
+_PFIG_SEQ = itertools.count(1)
+
+
+def _uniquify_graph_div_id(frag: str) -> str:
+    """Rewrite the figure's Plotly graph-div id to one unique to this occurrence.
+
+    Every self-contained Plotly figure we emit uses the same literal id (e.g.
+    ``id="viz"`` with ``Plotly.newPlot("viz", …)``). The report inlines each
+    prepared fragment into ONE shared document, so N figures sharing that id all
+    collide — ``Plotly.newPlot``/``getElementById`` resolve against the first
+    matching node and only the first figure draws (the rest are blank boxes). The
+    same figure can also be inlined in two sections, so a content hash alone still
+    collides; the id must be unique per OCCURRENCE. Combine a content hash with a
+    process-monotonic counter, and rewrite the div id plus the id token in
+    ``newPlot(...)`` / ``getElementById(...)`` / a ``#id`` selector. Guarded: with
+    no resolvable target id the fragment is returned unchanged."""
+    m = _NEWPLOT_TARGET_RE.search(frag)
+    if not m:
+        return frag
+    old = m.group("id")
+    uid = "pfig-%s-%d" % (hashlib.md5(frag.encode("utf-8")).hexdigest()[:8], next(_PFIG_SEQ))
+    o = re.escape(old)
+    frag = re.sub(r"""(id\s*=\s*['"])""" + o + r"""(['"])""", r"\g<1>" + uid + r"\g<2>", frag)
+    frag = re.sub(r"""(Plotly\.newPlot\(\s*['"])""" + o + r"""(['"])""", r"\g<1>" + uid + r"\g<2>", frag)
+    frag = re.sub(r"""(getElementById\(\s*['"])""" + o + r"""(['"])""", r"\g<1>" + uid + r"\g<2>", frag)
+    frag = re.sub(r"""(querySelector\(\s*['"]#)""" + o + r"""(['"])""", r"\g<1>" + uid + r"\g<2>", frag)
+    return frag
+
+
 def _prepare_interactive_figure(html: str) -> "str | None":
     """If ``html`` is a self-contained Plotly figure, return just its body
     fragment — the graph ``<div>`` plus its ``Plotly.newPlot`` script — with any
     per-figure Plotly.js loader (external ``<script src=…plotly…>`` or an inline
-    library bundle) removed. The report supplies one shared Plotly.js and renders
-    this fragment inline in the main document, so every figure uses that single
-    copy. Returns None when the HTML is not a Plotly figure (the caller then keeps
-    the isolated-iframe path for arbitrary HTML). Fully guarded by the caller."""
+    library bundle) removed, and its graph-div id made unique to this occurrence.
+    The report supplies one shared Plotly.js and renders this fragment inline in
+    the main document, so every figure uses that single copy AND its own id (N
+    figures would otherwise collide on a shared ``id="viz"`` and only the first
+    draw). Returns None when the HTML is not a Plotly figure (the caller then
+    keeps the isolated-iframe path for arbitrary HTML). Fully guarded by caller."""
     if "Plotly.newPlot" not in html:
         return None
     m = _BODY_RE.search(html)
     frag = m.group(1) if m else html
     frag = _PLOTLY_SRC_LOADER_RE.sub("", frag)
     frag = _strip_inline_plotly_bundle(frag)
+    frag = _uniquify_graph_div_id(frag)
     return frag.strip()
 
 
