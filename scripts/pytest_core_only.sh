@@ -8,7 +8,8 @@
 # processes (a meta-path finder), but subprocesses the tests spawn -- the `dashboard_client` server, the CLI, env
 # workers -- still import the plugin. The CI job deletes the package instead and is authoritative; to reproduce it
 # exactly, copy the checkout, `uv sync` there, `rm -rf vivarium_workbench_sms`, and run scripts/pytest_gate.sh with
-# `uv run --no-sync`.
+# `uv run --no-sync`. In both, the installed metadata still names the plugin's `vivarium_workbench.backends` entry
+# point (step P4a); loading it fails with ModuleNotFoundError naming the package, which the registry treats as absent.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export VIVARIUM_WORKBENCH_TEST_NO_PLUGIN=1

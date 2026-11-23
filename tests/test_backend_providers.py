@@ -90,18 +90,21 @@ def test_the_registry_hands_out_the_same_objects_even_under_concurrent_first_use
 
 def test_a_missing_dependency_inside_the_plugin_is_not_mistaken_for_no_plugin(monkeypatch):
     """Core: the loader tells a broken plugin from an absent one (runs core-only too: the stub raises before any real
-    plugin import). Providers must be on for the loader to try (``PROVIDERS=none`` is the local "off" mode)."""
-    import builtins
+    plugin import). Providers must be on for the loader to try (``PROVIDERS=none`` is the local "off" mode). The
+    registry loads the plugin through its entry point (step P4a), whose metadata stays installed in every mode."""
+    import sys
 
     monkeypatch.delenv(provider_mod.PROVIDERS_ENV, raising=False)
-    real_import = builtins.__import__
 
-    def boom(name, *a, **k):
-        if name == "vivarium_workbench_sms" and a and a[2] and "provider" in a[2]:
-            raise ModuleNotFoundError("No module named 'some_dep_of_the_plugin'", name="some_dep_of_the_plugin")
-        return real_import(name, *a, **k)
+    class _Broken:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError("No module named 'some_dep_of_the_plugin'", name="some_dep_of_the_plugin")
+            return None
 
-    monkeypatch.setattr(builtins, "__import__", boom)
+    for name in [n for n in sys.modules if n == "vivarium_workbench_sms" or n.startswith("vivarium_workbench_sms.")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setattr(sys, "meta_path", [_Broken(), *sys.meta_path])
     provider_mod.reset()
     with pytest.raises(ModuleNotFoundError):
         provider_mod.providers()
@@ -384,7 +387,7 @@ def test_two_backends_declaring_the_unrouted_facet_are_refused(monkeypatch):
 
     monkeypatch.setattr(provider_mod, "providers", lambda: (Two(),))
     backends.reset_registry()
-    with pytest.raises(RuntimeError, match="unrouted"):
+    with pytest.raises(provider_mod.ProviderConflictError, match="unrouted"):
         backends.unrouted()
 
 

@@ -198,6 +198,12 @@ vivarium-dashboard = "vivarium_workbench.cli:main"
 vdash = "vivarium_workbench.cli:main"
 vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 
+# docs/backend-adapters.md step P4a: backend providers are found through this group
+# (lib/backends/provider.py), never by importing a plugin. The in-tree SMS plugin registers here
+# until step P4b moves it into its own distribution (vivarium-workbench-vivaapi).
+[project.entry-points."vivarium_workbench.backends"]
+sms = "vivarium_workbench_sms.provider:PROVIDER"
+
 # Git source for the bare viva-basic-processes dependency (not on PyPI). uv reads
 # this when vivarium-dashboard is the root project; consumers that depend on it
 # transitively supply the same URL via their own [tool.uv.sources]. This keeps
@@ -290,16 +296,12 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-# docs/backend-adapters.md §2.4: the core does not import the SMS plugin. Since step P2 closed (Routes Rt3) the
-# only edge is the registry's (lib.backends.provider finds the provider by importing it); step P4's entry point
-# removes it and the list is empty. Nothing may be added (an entry that matches no import fails the check).
-name = "the core does not import the SMS plugin (vivarium_workbench_sms), except the listed edges"
+# docs/backend-adapters.md §2.4: the core does not import the SMS plugin. Since step P4a the registry finds
+# providers through the `vivarium_workbench.backends` entry point, so there is no exception: no edge may be added.
+name = "the core does not import the SMS plugin (vivarium_workbench_sms)"
 type = "forbidden"
 source_modules = ["vivarium_workbench"]
 forbidden_modules = ["vivarium_workbench_sms"]
-ignore_imports = [
-    "vivarium_workbench.lib.backends.provider -> vivarium_workbench_sms.provider",  # the registry (P4: entry point)
-]
 
 [[tool.importlinter.contracts]]
 # docs/backend-adapters.md §2.4, step P2 (Runs a1): the SMS plugin no longer reads its seams back through

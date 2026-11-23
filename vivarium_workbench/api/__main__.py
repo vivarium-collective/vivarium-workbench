@@ -58,7 +58,7 @@ def main() -> None:
         raise SystemExit(f"ERROR: {e}") from e
     except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
         raise SystemExit(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}") from e
-    for var in backend_cfg.stray_backend_env():  # ignored with providers off (step P3 C1; P4 refuses it)
+    for var in backend_cfg.stray_backend_env():  # ignored with providers off (step P3 C1; P4b refuses it)
         print(f"warning: {var} is set but no backend provider is active; it is ignored", file=sys.stderr)
     # Import string (not the app object) so --reload works.
     uvicorn.run("vivarium_workbench.api.app:app", host=args.host, port=args.port, reload=args.reload)

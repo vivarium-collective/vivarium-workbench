@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 
 class SmsProvider:
     name = "sms"
+    api_version = 1  # the provider interface it targets: a literal, never the core's constant
 
     def __init__(self) -> None:
         self._lock = threading.Lock()

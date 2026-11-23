@@ -118,7 +118,7 @@ jobs:
     # tests marked `plugin` (a pass is a failure: the mark is stale). See tests/test_plugin_test_marking.py.
     #
     # BLOCKING since step P3 Z (K3): continue-on-error is gone, so a failing shard fails the `core-only` check below
-    # (Jim, 2026-11-20: it becomes a required check in branch protection).
+    # (it is a required check on main: branch protection set 2026-11-23).
     name: core-only ${{ matrix.group }}/4
     runs-on: ubuntu-latest
     strategy:
@@ -140,6 +140,11 @@ jobs:
         run: |
           rm -rf vivarium_workbench_sms
           .venv/bin/python -c "import importlib.util, sys; spec = importlib.util.find_spec('vivarium_workbench_sms'); print('vivarium_workbench_sms ->', spec); sys.exit(spec is not None)"
+      - name: The entry point outlives the package (so the job exercises the provider-absent path)
+        # docs/backend-adapters.md step P4a: the installed metadata still names the `sms` provider; the registry must
+        # skip it as absent, not report a broken plugin or a stale install.
+        run: |
+          .venv/bin/python -c "import importlib.metadata as m, sys; eps = m.entry_points(group='vivarium_workbench.backends'); print(list(eps)); sys.exit('sms' not in eps.names)"
       - name: Smoke (the app and the CLI start without the plugin)
         run: |
           set -euo pipefail

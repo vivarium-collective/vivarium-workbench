@@ -7,7 +7,7 @@
 here, never through ``backend_config`` directly.
 
 With providers off, or the plugin absent, only the named URL counts: a provider alias that is set is ignored, and
-:func:`stray_backend_env` names it for the start-up warning (step P4 refuses it).
+:func:`stray_backend_env` names it for the start-up warning (step P4b refuses it).
 
 Everything reads the environment and the provider registry only: no network call. A provider that is installed but
 broken raises (``ImportError``) as the registry does; the process entry points catch it.
@@ -32,12 +32,17 @@ def check_config(named: Optional[str] = None) -> None:
     """The one-backend rule, at process entry: the named URL (``named``, the flag's value before it reaches the
     environment, else ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL``) is valid (``backend_config.named_backend``), and every
     active provider's own settings agree with it (``Provider.check_config``). Raises
-    ``backend_config.BackendConfigError``; a broken provider raises ``ImportError``."""
+    ``backend_config.BackendConfigError``; a broken provider raises ``ImportError``. Also builds the backend registry
+    (cheap: no network call), so conflicting providers (``ProviderConflictError``, an ``ImportError``: two backends
+    of one kind, one named ``compose-api``) refuse at start-up rather than on the first request."""
     from vivarium_workbench.lib import backend_config
 
     want = backend_config.named_backend(named)
     for p in _providers():
         p.check_config(want)
+    from vivarium_workbench.lib import backends
+
+    backends._registry()
 
 
 def configured_base_url() -> Optional[str]:
@@ -94,7 +99,7 @@ def deployment_names_now() -> set[str]:
 
 def stray_backend_env() -> list[str]:
     """The provider alias env vars that are set while no provider is active to read them: ignored, and named in the
-    start-up warning (step P4 refuses them). Empty whenever a provider is active."""
+    start-up warning (step P4b refuses them). Empty whenever a provider is active."""
     from vivarium_workbench.lib import backend_config
 
     if _providers():

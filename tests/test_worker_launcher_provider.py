@@ -46,21 +46,22 @@ def providers_off(monkeypatch):
 
 @pytest.fixture
 def plugin_absent(monkeypatch):
-    """The SMS plugin is not installed: its provider module cannot be imported (as test_backend_providers does)."""
-    import builtins
+    """The SMS plugin is not installed: its package cannot be imported (as test_backend_providers does). The registry
+    loads it through the entry point (step P4a), so the plugin is hidden from the import system, not from
+    ``builtins.__import__``."""
+    import sys
 
-    real_import = builtins.__import__
+    class _Absent:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "vivarium_workbench_sms" or fullname.startswith("vivarium_workbench_sms."):
+                raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+            return None
 
-    def absent(name, *a, **k):
-        if name == "vivarium_workbench_sms" and a and a[2] and "provider" in a[2]:
-            raise ModuleNotFoundError("No module named 'vivarium_workbench_sms.provider'",
-                                      name="vivarium_workbench_sms.provider")
-        return real_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", absent)
+    for name in [n for n in sys.modules if n == "vivarium_workbench_sms" or n.startswith("vivarium_workbench_sms.")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setattr(sys, "meta_path", [_Absent(), *sys.meta_path])
     provider_mod.reset()
     yield
-    monkeypatch.setattr(builtins, "__import__", real_import)
     provider_mod.reset()
 
 
