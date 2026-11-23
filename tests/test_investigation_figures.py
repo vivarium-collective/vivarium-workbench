@@ -346,8 +346,11 @@ def test_gallery_has_download_zip_button(tmp_path):
     html = figs.build_figures_gallery_page(_make_ws(tmp_path), "inv")
     assert html is not None
     assert 'id="dl-zip-btn"' in html and "__dlFiguresZip" in html and "JSZip" in html
-    # the inlining the zip relies on: figures are embedded as data: URIs
-    assert "data:" in html
+    # it FETCHES each figure's src (so it works for both inlined data: URIs in the live
+    # standalone gallery AND relative files in the read-only snapshot), and bundles a
+    # browsable index.html — not a figure-less DOM dump.
+    assert "fetch(it.src)" in html and "index.html" in html
+    assert "__dlPageHtml" not in html  # the old figure-less "download HTML" is gone
 
 def test_gallery_page_includes_native_gallery_html_not_only_declared(tmp_path):
     """Regression: an investigation whose figures are committed interactive HTML
