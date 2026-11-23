@@ -22,3 +22,10 @@ def test_every_top_level_package_is_in_the_wheel():
     assert on_disk <= packages, f"top-level packages missing from [tool.hatch.build.targets.wheel].packages: " \
                                 f"{sorted(on_disk - packages)}"
     assert "vivarium_workbench_sms" in packages
+
+
+def test_the_wheel_declares_the_backend_entry_point():
+    """The wheel's ``entry_points.txt`` is generated from ``[project.entry-points]`` (docs/backend-adapters.md step
+    P4a): the in-tree plugin registers its provider there until step P4b moves it into its own distribution."""
+    eps = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["entry-points"]
+    assert eps["vivarium_workbench.backends"] == {"sms": "vivarium_workbench_sms.provider:PROVIDER"}

@@ -284,7 +284,15 @@ def _registry() -> "dict[str, Backend]":
             found: "dict[str, Backend]" = {}
             for p in _provider.providers():
                 for backend in p.backends():
-                    found.setdefault(backend.name, backend)
+                    # compose-api is the core's own kind (by_kind answers it first, so a provider's would be hidden);
+                    # a kind two backends claim would be decided by load order. Both are refused, never dropped.
+                    if backend.name == COMPOSE.name:
+                        raise RuntimeError(f"provider {p.name!r} declares a backend named {COMPOSE.name!r}, "
+                                           "which is the core's own")
+                    if backend.name in found:
+                        raise RuntimeError(f"more than one backend is named {backend.name!r} "
+                                           f"(provider {p.name!r} declares it again)")
+                    found[backend.name] = backend
             declaring = sorted(b.name for b in found.values() if b.unrouted is not None)
             if len(declaring) > 1:
                 raise RuntimeError(f"more than one backend declares the unrouted facet: {declaring}")
