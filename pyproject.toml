@@ -13,9 +13,10 @@ dependencies = [
     # related to os.kill. As before, psutil is being imported to manage process checks
     # across systems.
     "psutil>=5.9",
-    # boto3: the remote analysis figures read S3 directly (vivarium_workbench_sms/remote_analysis_figures.py,
-    # #1072/#1078). Without it that path reports s3-unavailable in the image.
-    "boto3>=1.34",
+    # boto3 moved to the optional [remote] extra: it is only used by the remote
+    # analysis figures (vivarium_workbench_sms/remote_analysis_figures.py), whose
+    # _s3_client() already degrades gracefully when boto3 is absent. Keeping it out
+    # of the default install trims ~30 MB (boto3 + botocore) for local users.
     "jinja2",
     "pyyaml",
     # Server-side LaTeX -> MathML for the Model view's governing equations
@@ -155,6 +156,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Remote analysis figures read S3 directly (vivarium_workbench_sms/
+# remote_analysis_figures.py, #1072/#1078). boto3 is imported lazily there and
+# _s3_client() returns None when it is absent, so it is optional: install
+# `vivarium-workbench[remote]` for the GovCloud / remote-run S3 figures path.
+remote = ["boto3>=1.34"]
 viz = ["matplotlib", "imageio", "numpy"]
 # `vivarium-workbench render-loom` drives the loom in a headless browser to save
 # each study's composite loom as a PNG. After installing, fetch the browser once:

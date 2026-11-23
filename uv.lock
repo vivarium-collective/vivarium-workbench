@@ -3726,7 +3726,6 @@ version = "0.5.8"
 source = { editable = "." }
 dependencies = [
     { name = "bigraph-schema" },
-    { name = "boto3" },
     { name = "compose-api-client" },
     { name = "fastapi" },
     { name = "investigation-contracts" },
@@ -3771,6 +3770,9 @@ dev = [
 loom-render = [
     { name = "playwright" },
 ]
+remote = [
+    { name = "boto3" },
+]
 test = [
     { name = "polars" },
     { name = "pyarrow" },
@@ -3786,7 +3788,7 @@ viz = [
 [package.metadata]
 requires-dist = [
     { name = "bigraph-schema", specifier = ">=1.8.1" },
-    { name = "boto3", specifier = ">=1.34" },
+    { name = "boto3", marker = "extra == 'remote'", specifier = ">=1.34" },
     { name = "compose-api-client", specifier = ">=0.7.72" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'chat'", specifier = ">=0.27" },
@@ -3830,7 +3832,7 @@ requires-dist = [
     { name = "zarr", specifier = ">=3.1.6" },
     { name = "zarr", marker = "extra == 'test'" },
 ]
-provides-extras = ["viz", "loom-render", "chat", "dev", "test"]
+provides-extras = ["remote", "viz", "loom-render", "chat", "dev", "test"]
 
 [[package]]
 name = "webcolors"
