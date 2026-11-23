@@ -118,7 +118,7 @@ jobs:
     # tests marked `plugin` (a pass is a failure: the mark is stale). See tests/test_plugin_test_marking.py.
     #
     # BLOCKING since step P3 Z (K3): continue-on-error is gone, so a failing shard fails the `core-only` check below
-    # (it is a required check on main: branch protection set 2026-11-24).
+    # (it is a required check on main: branch protection set 2026-11-23).
     name: core-only ${{ matrix.group }}/4
     runs-on: ubuntu-latest
     strategy:

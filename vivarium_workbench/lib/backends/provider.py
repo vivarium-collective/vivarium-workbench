@@ -8,12 +8,15 @@ Providers are found through the ``vivarium_workbench.backends`` entry-point grou
 a provider object whose ``name`` equals the entry point's name and whose ``api_version`` equals
 :data:`PROVIDER_API_VERSION`. The core never imports a plugin by name (the import-linter contract has no exceptions).
 
-* An entry point whose module is not installed (``ModuleNotFoundError`` naming the module or a parent package: the
-  metadata outlived the code, as in the core-only CI job) is skipped: the plugin is absent.
+* An entry point whose top-level package is not installed (``ModuleNotFoundError`` naming it, or only a namespace
+  left by a ``__pycache__`` directory: the metadata outlived the code, as in the core-only CI job) is skipped: the
+  plugin is absent. A missing submodule of a present package is a broken plugin.
 * Anything else that fails to load raises: an ``ImportError`` (a missing dependency inside the plugin, a missing
-  object), a :class:`ProviderVersionError`, a name mismatch, two entry points with one name. Other exceptions from
-  the plugin's import (``SyntaxError``, ``RuntimeError``) propagate unchanged. An installed plugin must never look
-  absent; the CLI and the server report these as "the backend plugin failed to load" and exit.
+  object), a :class:`ProviderVersionError`, a name mismatch, two entry points with one name; and, when the
+  registry is built (``backends.config.check_config`` does it at every process entry), a
+  :class:`ProviderConflictError`. Other exceptions from the plugin's import (``SyntaxError``, ``RuntimeError``)
+  propagate unchanged. An installed plugin must never look absent; the CLI and the server report these as "the
+  backend plugin failed to load" and exit.
 * The in-tree plugin's package present with no entry point naming it is a stale install (an editable install made
   before P4a) and raises (until step P4b, which splits the plugin into its own distribution).
 
@@ -55,6 +58,12 @@ _PLUGIN = "vivarium_workbench_sms"
 class ProviderVersionError(ImportError):
     """A provider targets another provider-interface version than this workbench offers. An ``ImportError``, so the
     existing "the backend plugin failed to load" reporters print it and exit."""
+
+
+class ProviderConflictError(ImportError):
+    """The active providers' backends conflict (two of one kind, one named like the core's compose-api, two unrouted
+    facets). Raised when the registry is built, which ``backends.config.check_config`` does at every process entry; an
+    ``ImportError``, so the same reporters print it and exit."""
 
 
 @dataclass(frozen=True)
@@ -235,21 +244,32 @@ def _entry_points() -> "list[importlib.metadata.EntryPoint]":
     return sorted(importlib.metadata.entry_points(group=ENTRY_POINT_GROUP), key=lambda ep: (ep.name, ep.value))
 
 
-def _plugin_installed() -> bool:
-    """Whether the in-tree plugin's package is importable as a real package (not a namespace left behind by a stray
-    ``__pycache__`` directory). A seam for tests."""
+def _real_package(name: str) -> bool:
+    """Whether ``name`` is importable as a real package (not a namespace left behind by a stray ``__pycache__``
+    directory, not hidden by a finder)."""
     try:
-        spec = importlib.util.find_spec(_PLUGIN)
+        spec = importlib.util.find_spec(name)
     except (ImportError, ValueError):
         return False
     return spec is not None and spec.origin not in (None, "namespace") and spec.submodule_search_locations is not None
 
 
+def _plugin_installed() -> bool:
+    """Whether the in-tree plugin's package is installed (a real package). A seam for tests."""
+    return _real_package(_PLUGIN)
+
+
 def _absent(e: ModuleNotFoundError, module: str) -> bool:
-    """``e`` says ``module`` itself (or one of its parent packages) is not installed."""
+    """``e`` says the entry point's distribution is not installed: its TOP-LEVEL package cannot be found (or is only
+    a namespace, e.g. a leftover ``__pycache__`` directory). A missing submodule of a real, present package is a
+    broken plugin, not an absent one."""
     if not e.name:
         return False
-    return module == e.name or module.startswith(e.name + ".")
+    top = module.split(".", 1)[0]
+    if e.name == top:
+        return True
+    within = module == e.name or module.startswith(e.name + ".")
+    return within and e.name.startswith(top + ".") and not _real_package(top)
 
 
 def _dist_name(ep: "importlib.metadata.EntryPoint") -> str:

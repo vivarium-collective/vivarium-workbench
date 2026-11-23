@@ -81,7 +81,7 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
         print(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
     # A provider alias set while no provider is active to read it (providers off, or the plugin absent) is ignored;
-    # say so (step P3 C1; step P4 refuses it).
+    # say so (step P3 C1; step P4b refuses it).
     for var in backend_cfg.stray_backend_env():
         print(f"warning: {var} is set but no backend provider is active; it is ignored", file=sys.stderr)
 

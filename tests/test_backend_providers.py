@@ -387,7 +387,7 @@ def test_two_backends_declaring_the_unrouted_facet_are_refused(monkeypatch):
 
     monkeypatch.setattr(provider_mod, "providers", lambda: (Two(),))
     backends.reset_registry()
-    with pytest.raises(RuntimeError, match="unrouted"):
+    with pytest.raises(provider_mod.ProviderConflictError, match="unrouted"):
         backends.unrouted()
 
 

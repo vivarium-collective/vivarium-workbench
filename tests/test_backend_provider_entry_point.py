@@ -99,6 +99,27 @@ def test_a_missing_provider_object_is_broken(monkeypatch, mods):
         provider_mod.providers()
 
 
+def test_a_missing_submodule_of_a_present_package_is_broken(monkeypatch, tmp_path):
+    """The package is installed but its provider module is missing: broken, never mistaken for an absent plugin."""
+    pkg = tmp_path / "half_installed_pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    _use(monkeypatch, ("half", "half_installed_pkg.provider:PROVIDER"))
+    with pytest.raises(ModuleNotFoundError, match="half_installed_pkg.provider"):
+        provider_mod.providers()
+    sys.modules.pop("half_installed_pkg", None)
+
+
+def test_a_namespace_leftover_of_the_package_is_absent(monkeypatch, tmp_path):
+    """Only a ``__pycache__`` directory is left where the package was (a namespace package): absent."""
+    (tmp_path / "leftover_pkg" / "__pycache__").mkdir(parents=True)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    _use(monkeypatch, ("left", "leftover_pkg.provider:PROVIDER"))
+    assert provider_mod.providers() == ()
+    sys.modules.pop("leftover_pkg", None)
+
+
 def test_a_provider_that_loads_is_active(monkeypatch, mods):
     mods(good_provider=_GOOD.format(name="good", version=provider_mod.PROVIDER_API_VERSION))
     _use(monkeypatch, ("good", "good_provider:PROVIDER"))
@@ -167,17 +188,35 @@ class _Prov:
     def backends(self):
         return self._b
 
+    def check_config(self, named):
+        return None
+
 
 def test_two_backends_of_one_kind_are_refused(monkeypatch):
     monkeypatch.setattr(provider_mod, "providers", lambda: (_Prov("a", "k"), _Prov("b", "k")))
-    with pytest.raises(RuntimeError, match="more than one backend is named 'k'"):
+    with pytest.raises(provider_mod.ProviderConflictError, match="more than one backend is named 'k'"):
         backends.by_kind("k")
 
 
 def test_a_provider_backend_named_compose_api_is_refused(monkeypatch):
     monkeypatch.setattr(provider_mod, "providers", lambda: (_Prov("a", backends.COMPOSE.name),))
-    with pytest.raises(RuntimeError, match="core's own"):
+    with pytest.raises(provider_mod.ProviderConflictError, match="core's own"):
         backends.unrouted()
+
+
+def test_conflicting_providers_refuse_at_start_up(monkeypatch, capsys, tmp_path):
+    """The registry is built by ``check_config`` at every process entry, so a conflict refuses at start-up (exit 2,
+    the broken-plugin report), not as a 500 on the first request."""
+    from vivarium_workbench.lib import startup
+    from vivarium_workbench.lib.backends import config as backend_cfg
+
+    assert issubclass(provider_mod.ProviderConflictError, ImportError)
+    monkeypatch.setattr(provider_mod, "providers", lambda: (_Prov("a", "k"), _Prov("b", "k")))
+    with pytest.raises(provider_mod.ProviderConflictError):
+        backend_cfg.check_config()
+    backends.reset_registry()
+    assert startup.serve_fastapi(tmp_path, port=0) == 2
+    assert "the backend plugin failed to load: ProviderConflictError" in capsys.readouterr().err
 
 
 # --- a stale install ------------------------------------------------------------------------------------------------
