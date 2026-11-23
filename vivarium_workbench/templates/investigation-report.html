@@ -380,13 +380,6 @@ details.exp .body{font-size:13.5px;color:var(--ink-2);margin-top:8px;max-width:n
 .tech-record>.body .kicker{font-size:10.5px;color:var(--ink-3)}
 .tech-record>.body .texp,.tech-record>.body .mono{font-size:11.5px;color:var(--ink-3)}
 .tech-record>.body .kv .rationale{font-size:12px;color:var(--ink-2)}
-/* inline technical record (no dropdown) — same compact/muted supporting-material look */
-.tech-record-inline{margin-top:14px;padding-top:10px;border-top:1px dashed var(--line-2)}
-.tech-record-inline>.sec-sub{font-size:11.5px;font-weight:600;color:var(--ink-3);letter-spacing:.02em;text-transform:uppercase}
-.tech-record-inline>.body{margin-top:10px;font-size:12.5px;color:var(--ink-2)}
-.tech-record-inline>.body .kicker{font-size:10.5px;color:var(--ink-3)}
-.tech-record-inline>.body .texp,.tech-record-inline>.body .mono{font-size:11.5px;color:var(--ink-3)}
-.tech-record-inline>.body .kv .rationale{font-size:12px;color:var(--ink-2)}
 
 /* appendix */
 .appendix{margin:52px 0 24px}
@@ -1570,14 +1563,6 @@ function renderStudy(s, inv, idx){
   let modelSlot=methodsSimsBlock(s);
   if(has(s.key_assumptions)) modelSlot+=`<div class="kicker" style="margin:12px 0 4px">Key assumptions</div><ul class="assumptions">${s.key_assumptions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`;
 
-  // Background — the study's conceptual context (study.yaml `concept`), surfaced inline
-  // as its own always-present section so the reader has the framing before the result.
-  const bgBody = (s.concept && String(s.concept).trim()) ? `<div class="sp-v">${mdLite(s.concept)}</div>` : '';
-  // Model & approach — the model (composite + key assumptions) AND how the study tests it
-  // (hypothesis + model experiment + observable + discriminating control), consolidated into
-  // one section instead of two separate slots. Model first, then how it is exercised.
-  const modelApproachBody = modelSlot + hypoBody;
-
   // slot 7 — primary limitation (realized study), else the scaffold's honest caveat
   const limText = s.primary_limitation || s.honest_caveat || '';
   const limSlot = limText?`<div class="card-limitation">${mdLite(limText)}</div>`:'';
@@ -1602,10 +1587,8 @@ function renderStudy(s, inv, idx){
     + part('Tests', testsBody, 'study:'+s.slug+'/tests', s.title+' · Tests')
     + part('Provenance & anchors', anchorsBody, 'study:'+s.slug+'/provenance', s.title+' · Provenance')
     + part('Limitations & follow-ups', debtsBody, 'study:'+s.slug+'/debts', s.title+' · Limitations');
-  // Shown inline as part of the study (no collapsible dropdown) — the supporting
-  // record stays visible rather than hidden behind a "Technical record" expander.
   const techRecord = techInner.trim()
-    ? `<div class="tech-record-inline"><div class="sec-sub">Technical record</div><div class="body">${techInner}</div></div>`
+    ? `<details class="exp tech-record"><summary>Technical record</summary><div class="body">${techInner}</div></details>`
     : '';
 
   // card badge uses the SAME status derivation as the graph + ladder (workbench
@@ -1624,12 +1607,12 @@ function renderStudy(s, inv, idx){
     <div class="study-detail">
       <!-- ANSWER-FORWARD: lead with the verdict + finding + the decisive figure,
            then the setup (hypothesis/model/assumptions), then the technical record. -->
-      ${part('Background', bgBody, 'study:'+s.slug+'/background', s.title+' · Background')}
       ${part('Verdict', decisionBody, 'study:'+s.slug+'/decision', s.title+' · Verdict')}
       ${anyFigFlagged?part('Decisive figure', decisiveFigBody, 'study:'+s.slug+'/decisive-figure', s.title+' · Decisive figure')
                     :part('Visualizations', techFigHtml, 'study:'+s.slug+'/visualizations', s.title+' · Visualizations')}
       ${part('Finding', findingsBody, 'study:'+s.slug+'/findings', s.title+' · Finding')}
-      ${part('Model & approach', modelApproachBody, 'study:'+s.slug+'/model-approach', s.title+' · Model & approach')}
+      ${part('Hypothesis & discriminating control', hypoBody, 'study:'+s.slug+'/hypothesis', s.title+' · Hypothesis')}
+      ${part('Model & key assumptions', modelSlot, 'study:'+s.slug+'/model-assumptions', s.title+' · Model & assumptions')}
       ${part('Primary limitation', limSlot, 'study:'+s.slug+'/limitation', s.title+' · Primary limitation')}
       ${part('Downstream state-transfer', handoffBody, 'study:'+s.slug+'/handoff', s.title+' · Handoff')}
       ${techRecord}
@@ -1865,6 +1848,7 @@ function toc(inv){
   const _ndl=(href,label)=>`<a class="nd-link" href="${href}">${label}</a>`;
   const mainLinks=[
     ['#exec-summary','Summary',true],
+    ['#discovery','Discovery — what to do next',!!inv.discovery],
     ['#spine-presentation','Investigation map',!!inv.spine],
     ['#studies','Studies',(inv.studies||[]).length],
     ['#synthesis-gaps','Synthesis & gaps',(syn.quantitative||[]).length||(syn.contradictions||[]).length||(syn.roadmap||[]).length||(Array.isArray(exv.decisions_needed)&&exv.decisions_needed.length)],
@@ -1876,7 +1860,6 @@ function toc(inv){
     ['#inv-viz','Investigation visualizations',!!renderInvViz(inv)],
     ['#glossary','Glossary',has(inv.glossary)],
     ['#appendix','Appendix',!!inv.catalog],
-    ['#discovery','Discovery — what to do next',!!inv.discovery],
   ].filter(x=>x[2]).map(x=>_ndl(x[0],x[1])).join('');
   const nStudies=(inv.studies||[]).length;
   const studyLinks=(inv.studies||[]).map(s=>_ndl('#s-'+esc(s.slug), esc(s.title||s.slug))).join('');
@@ -3108,6 +3091,7 @@ function render(inv){
     toc(inv)+
     `<div class="wrap">
     ${execSummary(inv)}
+    ${renderDiscovery(inv)}
     ${renderSpine(inv)}
     ${renderStudies(inv)}
     ${synthesisAndGaps(inv)}
@@ -3116,8 +3100,7 @@ function render(inv){
     ${renderReferences(inv)}
     ${renderInvViz(inv)}
     ${renderGlossary(inv)}
-    ${renderAppendix(inv)}
-    ${renderDiscovery(inv)}</div>`+
+    ${renderAppendix(inv)}</div>`+
     `<div class="wrap">
       <div class="sec-h" id="report-feedback"><h2>Report feedback</h2><span class="rule"></span></div>
       <p style="color:var(--ink-2);font-size:14px;max-width:none">Leave an overall note, and per-study notes on each study card. Then <b>Review &amp; export</b> assembles them into a YAML feedback report.</p>
