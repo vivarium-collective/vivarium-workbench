@@ -571,29 +571,34 @@ def test_report_studies_are_cards_in_main_no_supplement():
 
 
 def test_card_template_wires_figure_first_section7_slots():
-    """Each study card renders the §7 figure-first narrative: question (the serif
-    lead) → hypothesis + discriminating control → model + key assumptions →
-    decisive figure → finding → verdict → primary limitation → downstream
-    state-transfer, with the supporting material in a collapsed Technical record.
-    Guards the slot order + the graceful degrade (no display flag → plain
-    Visualizations section, not an empty decisive-figure slot)."""
+    """Each study card renders the figure-first narrative with the full study text
+    INLINE (no hidden dropdowns): background → verdict → decisive figure → finding →
+    model & approach (model + hypothesis/experiment + key assumptions) → primary
+    limitation → downstream state-transfer → technical record (inline, not collapsed).
+    Guards the slot set + the graceful degrade (no display flag → plain Visualizations
+    section, not an empty decisive-figure slot)."""
     from pathlib import Path as _P
     import vivarium_workbench as _vw
     tpl = (_P(_vw.__file__).parent / "templates" / "investigation-report.html").read_text(encoding="utf-8")
     i = tpl.index("function renderStudy(")
     card = tpl[i:tpl.index("function reportMode(", i)]
-    # the eight §7 slot labels are wired into the card
-    for slot in ("Hypothesis & discriminating control", "Model & key assumptions",
+    # the slot labels wired into the card — Background is new; Hypothesis + Model are
+    # consolidated into "Model & approach".
+    for slot in ("Background", "Model & approach",
                  "Decisive figure", "Finding", "Verdict", "Primary limitation",
                  "Downstream state-transfer"):
         assert slot in card, slot
+    # the study's conceptual background + the consolidated model/approach are built
+    assert "bgBody" in card and "s.concept" in card
+    assert "modelApproachBody" in card
     # figures are split by the declared display intent, not all dumped inline
     assert "anyFigFlagged" in card
     assert "im.display==='primary'" in card and "im.display==='mechanism'" in card
     # graceful degrade: no flag anywhere → a plain Visualizations section
     assert "'Visualizations'" in card
-    # supporting material collapses into one Technical record expander
-    assert 'details class="exp tech-record"' in card
+    # supporting material is shown INLINE as part of the study — no collapsed dropdown
+    assert 'details class="exp tech-record"' not in card
+    assert 'tech-record-inline' in card
     # the §7 data fields are consumed
     assert "s.primary_limitation" in card and "s.handoff" in card
     assert "s.honest_caveat" in card and "s.proposed_controls" in card

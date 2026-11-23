@@ -338,12 +338,16 @@ def test_build_figures_gallery_page_none_without_figures(tmp_path):
     assert figs.build_figures_gallery_page(tmp_path, "empty") is None
 
 
-def test_gallery_has_download_html_button(tmp_path):
-    """The standalone gallery carries a top download-HTML control, so the page
-    can be saved without hunting for an Export menu."""
+def test_gallery_has_download_zip_button(tmp_path):
+    """The standalone gallery carries a top 'download figures (zip)' control that
+    builds a .zip of every figure client-side from the inlined data: URIs — so the
+    download actually contains the figures (the old 'download HTML' serialized the
+    DOM and shipped a figure-less page)."""
     html = figs.build_figures_gallery_page(_make_ws(tmp_path), "inv")
     assert html is not None
-    assert 'id="dl-html-btn"' in html and "__dlPageHtml" in html
+    assert 'id="dl-zip-btn"' in html and "__dlFiguresZip" in html and "JSZip" in html
+    # the inlining the zip relies on: figures are embedded as data: URIs
+    assert "data:" in html
 
 def test_gallery_page_includes_native_gallery_html_not_only_declared(tmp_path):
     """Regression: an investigation whose figures are committed interactive HTML
