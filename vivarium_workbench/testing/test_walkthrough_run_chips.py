@@ -30,10 +30,14 @@ def test_baseline_chip_wired():
 
 
 def test_variant_chip_wired():
-    # real wiring: per-variant commands are looked up off s.run_commands.variants
+    # real wiring: the per-variant entries are looked up off s.run_commands.variants
     assert "s.run_commands && s.run_commands.variants" in JS
-    # matched by variant name, then the chip renders the resolved cmd
-    assert "_runChip(_vc && _vc.cmd)" in JS
+    # variants are listed cleanly as "<id> — <description>" via _vrow, with the base
+    # reproduce command shown ONCE (_runChip(_base)). The old per-variant command chip
+    # (_runChip(_vc && _vc.cmd)) was dropped: the variant name already carries the
+    # description, so the per-row command repeated it and read as unreadable noise.
+    assert "_rcVariants.map(_vrow)" in JS
+    assert "--variant" in JS
 
 
 def test_reproduce_line_present():

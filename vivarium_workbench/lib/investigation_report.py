@@ -45,6 +45,7 @@ _STUDY_KEEP = (
     # the report leads with: the model experiment, the measured observable, and the
     # study's lifecycle/phase + maturity. Additive — each is optional per study.
     "objective", "experiment", "hypothesis", "result", "phase", "kind", "design_status",
+    "concept",  # study background / context prose — rendered as the card's Background block
     "readouts", "discovery_implications", "status",
     # §7 figure-first card: the single discriminating limitation, the cross-study
     # state transfer (handoff.emits/receives), and the planned-scaffold analogs
