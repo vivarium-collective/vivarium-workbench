@@ -2005,6 +2005,18 @@ def _attach_matched_tools(rows: list[dict], ws_root: Path) -> None:
     if not tools:
         return
 
+    # A contributed viewer may list the runs it can open (its ``runs``: run ids,
+    # optionally scoped to a study) — for runs whose output carries no capability
+    # tags, e.g. a format the store reader does not read. Index them once.
+    listed_runs: dict = {}
+    for tool in tools:
+        pairs = set()
+        for r in tool.get("runs") or []:
+            if isinstance(r, dict) and r.get("run"):
+                pairs.add((str(r["run"]), r.get("study") or None))
+        if pairs:
+            listed_runs[id(tool)] = pairs
+
     for row in rows:
         caps = set(row.get("capabilities") or [])
         study_slug = row.get("study_slug")
@@ -2029,7 +2041,15 @@ def _attach_matched_tools(rows: list[dict], ws_root: Path) -> None:
                     and any(c.get("ref") == study_slug
                             for c in (tool.get("matched") or []))
                 )
-                if not (caps_ok or study_3d_ok):
+                # A run the viewer itself lists (see ``listed_runs`` above): the
+                # same button a capability match gives, scoped to the run's study
+                # when the viewer named one.
+                pairs = listed_runs.get(id(tool))
+                run_id = row.get("run_id")
+                listed_ok = bool(pairs) and run_id is not None and (
+                    (str(run_id), None) in pairs
+                    or (str(run_id), study_slug or None) in pairs)
+                if not (caps_ok or study_3d_ok or listed_ok):
                     continue
                 entry = _matched_tool_entry(tool, row)
                 if entry is not None:

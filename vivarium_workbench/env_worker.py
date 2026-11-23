@@ -3044,6 +3044,31 @@ def _av_resolve_targets(viewer: dict, ws_root) -> list:
     return out
 
 
+def _av_resolve_runs(viewer: dict, ws_root) -> list:
+    """The runs a launcher viewer can open, from its optional ``runs`` (a list or a
+    ``(ws_root) -> list`` callable, resolved here like ``targets``). Each item is a
+    run id, or ``{"run": id, "study": slug}`` to scope the id to one study. The
+    Simulations table gives each of these runs the viewer's button, the way a
+    capability match does: for a viewer whose runs carry no capability tags (an
+    output format the workbench's store reader does not read)."""
+    r = viewer.get("runs")
+    if callable(r):
+        try:
+            r = r(ws_root)
+        except Exception:  # noqa: BLE001 — a broken runs callable lists no runs
+            return []
+    if not isinstance(r, (list, tuple)):
+        return []
+    out: list = []
+    for item in r:
+        if isinstance(item, str) and item:
+            out.append({"run": item, "study": None})
+        elif isinstance(item, dict) and item.get("run"):
+            study = item.get("study")
+            out.append({"run": str(item["run"]), "study": str(study) if study else None})
+    return out
+
+
 def _av_public_spec(viewer: dict, ws_root) -> dict:
     assets = viewer.get("assets") or {}
     return {
@@ -3060,6 +3085,7 @@ def _av_public_spec(viewer: dict, ws_root) -> dict:
         # viewers and they can never match a run.
         "requires": list(viewer.get("requires") or []),
         "targets": _av_resolve_targets(viewer, ws_root),
+        "runs": _av_resolve_runs(viewer, ws_root),
         # An ``embed-3d`` (or any bundled) viewer declares the distribution that
         # carries its webapp bundle; the workbench serves it generically at
         # ``/contributed-viewer/<bundle_package>/`` with no package-specific core

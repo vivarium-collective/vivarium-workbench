@@ -1772,7 +1772,63 @@ def create_app() -> FastAPI:
         ctx = {"public_base": f"http://{host}"}
         result = _analysis_viewers.resolve_launch(ws, uid, study=study, run=run, ctx=ctx)
         status = int(result.pop("status", 200)) if "error" in result else 200
+        # A viewer that serves its own page on a loopback port and opts in with
+        # "proxy": true is hosted under the workbench's own address instead.
+        if result.pop("proxy", False) and isinstance(result.get("url"), str):
+            from vivarium_workbench.lib import viewer_proxy as _viewer_proxy
+            base = (request.scope.get("root_path") or "") if request else ""
+            hosted = _viewer_proxy.host_url(ws, uid, result["url"], base)
+            if hosted:
+                result["url"] = hosted
         return JSONResponse(status_code=status, content=result)
+
+    @app.get("/api/analysis-viewer/{uid}/app/{key}", include_in_schema=False)
+    def analysis_viewer_app_root(uid: str, key: str, request: Request) -> Response:
+        """The hosted viewer's root without its trailing slash: redirect, so the
+        page's relative requests resolve under the hosted path."""
+        from vivarium_workbench.lib import viewer_proxy as _viewer_proxy
+        url = _viewer_proxy.prefix(uid, key, request.scope.get("root_path") or "")
+        if request.url.query:
+            url += "?" + request.url.query
+        return RedirectResponse(url=url, status_code=307)
+
+    @app.api_route(
+        "/api/analysis-viewer/{uid}/app/{key}/{subpath:path}",
+        methods=["GET", "HEAD", "POST"],
+        include_in_schema=False,
+    )
+    async def analysis_viewer_app(uid: str, key: str, subpath: str, request: Request) -> Response:
+        """Forward a hosted viewer's page and API to the viewer's own loopback
+        server (``lib.viewer_proxy``). The address comes from a launch: an unknown
+        one answers with a page saying to open the viewer again."""
+        from starlette.concurrency import run_in_threadpool
+
+        from vivarium_workbench.lib import viewer_proxy as _viewer_proxy
+        hosted = _viewer_proxy.lookup(uid, key)
+        if hosted is None:
+            return Response(_viewer_proxy.GONE_PAGE.format(
+                why="This link was made before the workbench last restarted."),
+                status_code=404, media_type="text/html")
+        body = await request.body() if request.method == "POST" else None
+        args = (subpath, request.url.query, request.method, dict(request.headers), body)
+        try:
+            up = await run_in_threadpool(_viewer_proxy.forward, hosted.origin, *args)
+        except ConnectionError:
+            hosted = await run_in_threadpool(_viewer_proxy.relaunch, hosted, key)
+            if hosted is None:
+                return Response(_viewer_proxy.GONE_PAGE.format(
+                    why="The viewer's own server has stopped, and starting it again failed."),
+                    status_code=502, media_type="text/html")
+            try:
+                up = await run_in_threadpool(_viewer_proxy.forward, hosted.origin, *args)
+            except ConnectionError as e:
+                return Response(_viewer_proxy.GONE_PAGE.format(
+                    why=f"The viewer's own server is not answering ({e})."),
+                    status_code=502, media_type="text/html")
+        if request.method == "HEAD":
+            up.body.close()       # a generator: closing it closes the upstream response
+            return Response(status_code=up.status, headers=up.headers)
+        return StreamingResponse(up.body, status_code=up.status, headers=up.headers)
 
     @app.get(
         "/api/study/{study}/3d/models.json",
