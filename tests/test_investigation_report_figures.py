@@ -328,6 +328,26 @@ def test_embed_url_inlines_interactive_plotly_sharing_one_lib(tmp_path):
     assert out[0]["name"] == "Ts"   # name derived from the url stem when none declared
 
 
+def test_prepared_figures_get_unique_div_ids_per_occurrence():
+    # Regression: N interactive figures inlined into one report document must not
+    # collide on a shared div id (every figure we emit uses id="viz"). Each
+    # prepared occurrence gets its own id — and the div id and its Plotly.newPlot
+    # target stay in agreement — so newPlot/getElementById resolve to the right
+    # node and every figure draws instead of only the first.
+    import re
+    from vivarium_workbench.lib.investigation_report import _prepare_interactive_figure
+    fig = ('<html><body><div id="viz"></div>'
+           '<script>Plotly.newPlot("viz",[{"x":[1],"y":[1]}],{})</script></body></html>')
+    a = _prepare_interactive_figure(fig)
+    b = _prepare_interactive_figure(fig)   # identical content, a second occurrence
+    assert a and b and a != b              # unique per occurrence, not per content
+    assert 'id="viz"' not in a and '"viz"' not in a
+    ida = re.search(r'id="([^"]+)"', a).group(1)
+    idb = re.search(r'id="([^"]+)"', b).group(1)
+    assert ida != idb
+    assert f'Plotly.newPlot("{ida}"' in a and f'Plotly.newPlot("{idb}"' in b
+
+
 def test_embed_url_missing_source_is_a_placard_not_a_silent_drop(tmp_path):
     out = _embed_url_visualizations(
         tmp_path, [{"name": "Gone", "url": "/reports/figures/grp/missing.html"}], [0], set())
