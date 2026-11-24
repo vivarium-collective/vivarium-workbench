@@ -10,6 +10,9 @@ build-backend = "hatchling.build"
 name = "vivarium-workbench-vivaapi"
 version = "0.5.8"
 description = "viva-api (SMS / viva-core) backend provider for vivarium-workbench"
+readme = "README.md"
+# The repository's LICENSE (Apache-2.0). The root project declares none in its metadata.
+license = "Apache-2.0"
 authors = [{name = "Vivarium Collective", email = "team@vivarium-collective.org"}]
 requires-python = ">=3.11"
 dependencies = [
@@ -24,6 +27,11 @@ dependencies = [
     "fastapi>=0.110",
     "pyyaml",
 ]
+
+[project.urls]
+Homepage = "https://github.com/vivarium-collective/vivarium-workbench"
+Source = "https://github.com/vivarium-collective/vivarium-workbench/tree/main/packages/vivarium-workbench-vivaapi"
+Issues = "https://github.com/vivarium-collective/vivarium-workbench/issues"
 
 # docs/backend-adapters.md step P4a: the core finds providers through this group (lib/backends/provider.py),
 # never by importing a plugin.

@@ -72,3 +72,41 @@ def test_boto3_is_the_plugins_dependency_and_remote_is_gone():
 
 def test_the_core_sdist_excludes_the_member():
     assert "/packages" in _root()["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"]
+
+
+#: Core modules allowed a GUARDED (inside ``try``) boto3/botocore import: the chat's AWS-credentials probe, whose boto3
+#: comes from the ``[chat]`` extra (pydantic-ai-slim[bedrock]).
+_BOTO_GUARDED_OK = {"lib/ai_auth.py"}
+
+
+def test_the_core_imports_boto3_only_guarded():
+    """boto3 is not a core dependency since step P4b (the plugin declares it). The core-only CI job installs
+    ``--extra chat``, which brings boto3 back, so it never exercises "core without boto3"; this scan does instead: an
+    unguarded ``import boto3`` / ``botocore`` anywhere in the core would crash a plain install."""
+    import ast
+
+    pkg = ROOT / "vivarium_workbench"
+    unguarded: list[str] = []
+    guarded: set[str] = set()
+    for f in sorted(pkg.rglob("*.py")):
+        tree = ast.parse(f.read_text(encoding="utf-8"))
+        in_try: set[int] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Try):
+                for stmt in node.body:
+                    in_try.update(id(n) for n in ast.walk(stmt))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                mods = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                mods = [node.module or ""]
+            else:
+                continue
+            if any(m.split(".")[0] in ("boto3", "botocore") for m in mods):
+                rel = f.relative_to(pkg).as_posix()
+                if id(node) in in_try:
+                    guarded.add(rel)
+                else:
+                    unguarded.append(f"{rel}:{node.lineno}")
+    assert not unguarded, f"unguarded boto3/botocore imports in the core: {unguarded}"
+    assert guarded <= _BOTO_GUARDED_OK, f"new guarded boto3/botocore imports: {sorted(guarded - _BOTO_GUARDED_OK)}"

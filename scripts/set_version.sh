@@ -19,6 +19,11 @@ fi
 root="${repo_root}/pyproject.toml"
 member="${repo_root}/packages/vivarium-workbench-vivaapi/pyproject.toml"
 
+# The checker needs tomllib (Python 3.11+): run it through uv's interpreter, never a bare system python3 (macOS ships
+# 3.9). Pre-check before any edit: the tree must already be in lockstep, so a failure below is this script's.
+check() { (cd "${repo_root}" && uv run --no-project python scripts/check_release.py "$@"); }
+check >/dev/null || { echo "ERROR: not in lockstep before the bump; fix that first (see above)" >&2; exit 1; }
+
 # Each substitution must hit exactly one line, or the file's shape changed and this script is out of date.
 replace() {  # file, extended regex (a whole line), replacement
   local file="$1" pattern="$2" new="$3" n
@@ -37,4 +42,4 @@ replace "${member}" '^version = "[^"]*"$'                                   "ver
 replace "${member}" '^    "vivarium-workbench==[^"]*",$'                     "    \"vivarium-workbench==${VERSION}\","
 
 (cd "${repo_root}" && uv lock)
-python3 "${repo_root}/scripts/check_release.py" "${VERSION}"
+check "${VERSION}"

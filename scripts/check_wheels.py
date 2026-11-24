@@ -10,7 +10,8 @@ Each directory must hold exactly one wheel and one sdist. Checks:
 * the core wheel ships no ``vivarium_workbench_sms/``, declares no ``vivarium_workbench.backends`` entry point,
   requires boto3 under no condition except through the plugin, and provides the ``vivaapi`` extra, which requires
   exactly the plugin at the core's version;
-* the plugin wheel ships ``vivarium_workbench_sms/provider.py`` and the ``sms`` entry point, and requires exactly the
+* the plugin wheel and sdist carry exactly the member's tracked ``vivarium_workbench_sms/**/*.py`` (``git ls-files``,
+  else a glob of the member tree), and the wheel ships the ``sms`` entry point, and requires exactly the
   core at its own version and boto3;
 * the core sdist carries neither the plugin (``packages/``) nor any build output (``*.whl``, ``*.tar.gz``); the
   plugin sdist carries ``vivarium_workbench_sms/provider.py``.
@@ -21,6 +22,7 @@ Standard library only. Exit 0 when everything holds, 1 with one line per problem
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import tarfile
 import zipfile
@@ -29,6 +31,28 @@ from pathlib import Path
 
 GROUP = "vivarium_workbench.backends"
 PLUGIN_PKG = "vivarium_workbench_sms"
+REPO = Path(__file__).resolve().parent.parent
+MEMBER = Path("packages") / "vivarium-workbench-vivaapi"
+
+
+def _plugin_sources() -> set[str]:
+    """The plugin's tracked ``.py`` files, relative to the member (``vivarium_workbench_sms/...``): ``git ls-files``,
+    or a glob of the member tree when git is unavailable. A build that drops any of them (e.g. a root ``.gitignore``
+    pattern that hatchling applies inside the member) must fail the check."""
+    pkg = MEMBER / PLUGIN_PKG
+    try:
+        out = subprocess.run(["git", "-C", str(REPO), "ls-files", "--", str(pkg)], capture_output=True, text=True,
+                             check=True).stdout.split()
+        files = {str(Path(f).relative_to(MEMBER)) for f in out if f.endswith(".py")}
+    except (OSError, subprocess.CalledProcessError):
+        files = set()
+    if not files:
+        files = {str(f.relative_to(REPO / MEMBER)) for f in (REPO / pkg).rglob("*.py") if "__pycache__" not in f.parts}
+    return files
+
+
+def _py_under_pkg(names: list[str]) -> set[str]:
+    return {n for n in names if n.startswith(f"{PLUGIN_PKG}/") and n.endswith(".py")}
 
 
 def _one(directory: Path, pattern: str, problems: list[str]) -> Path | None:
@@ -100,8 +124,15 @@ def check(core_dir: Path, plugin_dir: Path) -> list[str]:
     p_names, p_meta, p_eps = _wheel(plugin_whl)
     if p_meta["Version"] != version:
         problems.append(f"{plugin_whl.name} is {p_meta['Version']}, the core wheel is {version}")
+    expected = _plugin_sources()
+    if not expected:
+        problems.append(f"found no tracked {PLUGIN_PKG}/*.py under {MEMBER}")
     if f"{PLUGIN_PKG}/provider.py" not in p_names:
         problems.append(f"{plugin_whl.name} does not ship {PLUGIN_PKG}/provider.py")
+    shipped = _py_under_pkg(p_names)
+    if shipped != expected:
+        problems.append(f"{plugin_whl.name}: {PLUGIN_PKG} modules differ from the member's source; missing "
+                        f"{sorted(expected - shipped)}, extra {sorted(shipped - expected)}")
     if _group(p_eps, GROUP) != {"sms": f"{PLUGIN_PKG}.provider:PROVIDER"}:
         problems.append(f"{plugin_whl.name}: {GROUP} entry points are {_group(p_eps, GROUP)}")
     p_reqs = _requires(p_meta)
@@ -122,6 +153,10 @@ def check(core_dir: Path, plugin_dir: Path) -> list[str]:
         p_members = [m.split("/", 1)[1] if "/" in m else m for m in tf.getnames()]
     if f"{PLUGIN_PKG}/provider.py" not in p_members:
         problems.append(f"{plugin_sdist.name} does not carry {PLUGIN_PKG}/provider.py")
+    carried = _py_under_pkg(p_members)
+    if carried != expected:
+        problems.append(f"{plugin_sdist.name}: {PLUGIN_PKG} modules differ from the member's source; missing "
+                        f"{sorted(expected - carried)}, extra {sorted(carried - expected)}")
     return problems
 
 
