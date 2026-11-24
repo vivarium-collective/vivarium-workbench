@@ -36,6 +36,7 @@ const rail = el('div');
 const head = el('head');
 globalThis.document = {
   head, documentElement: el('html'), readyState: 'complete', createElement: el,
+  getElementById() { return null; },
   querySelector(sel) {
     if (sel === '.viv-layout') return layout;
     if (sel === '.viv-main') return el('div');

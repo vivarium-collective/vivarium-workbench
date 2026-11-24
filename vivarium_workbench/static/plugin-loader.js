@@ -53,18 +53,59 @@
     }
   }
 
-  function makeLauncher(spec) {
-    var rail = document.querySelector('.viv-rail');
+  // Lucide-style rail icons (viewBox 0 0 24 24), matching core's rail links.
+  var ICONS = {
+    graph: '<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M7 7.2l3.6 8.6M17 7.2l-3.6 8.6"/>',
+    doc: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+    board: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>',
+    database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>',
+  };
+
+  function iconSvg(name) {
+    var inner = ICONS[name] || '<circle cx="12" cy="12" r="9"/>';
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+      + ' stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">'
+      + inner + '</svg>';
+  }
+
+  // One dockable-panel group (its own rail well) per plugin panel group, styled like
+  // core's Studies/Chat/Code group so plugin launchers read as native rail items.
+  function railGroup(group) {
+    var rail = document.querySelector('.viv-rail') || document.getElementById('viv-rail');
     if (!rail || !rail.appendChild) return null;
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'viv-rail-item viv-plugin-rail-item';
-    btn.dataset.pluginPanel = spec.id;
-    btn.dataset.pluginGroup = spec.group || '';
-    btn.title = spec.title;
-    btn.textContent = spec.title;
-    rail.appendChild(btn);
-    return btn;
+    var id = 'viv-plugin-dockgroup-' + String(group || 'plugins').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    var nav = document.getElementById(id);
+    if (!nav) {
+      nav = document.createElement('nav');
+      nav.id = id;
+      nav.className = 'viv-rail-dock-group viv-plugin-dock-group';
+      nav.setAttribute('role', 'group');
+      if (group) nav.setAttribute('aria-label', group);
+      rail.appendChild(nav);
+    }
+    return nav;
+  }
+
+  function makeLauncher(spec) {
+    var group = railGroup(spec.group);
+    if (!group) return null;
+    var a = document.createElement('a');
+    a.href = '#';
+    a.className = 'viv-rail-link';
+    a.setAttribute('role', 'button');
+    a.setAttribute('aria-pressed', 'false');
+    a.title = spec.title;
+    a.dataset.pluginPanel = spec.id;
+    var icon = document.createElement('span');
+    icon.className = 'viv-rail-link-icon';
+    icon.innerHTML = iconSvg(spec.icon);        // icon markup is from our own ICONS map
+    var label = document.createElement('span');
+    label.className = 'viv-rail-link-label';
+    label.textContent = spec.title || '';       // plugin-supplied text → textContent
+    a.appendChild(icon);
+    a.appendChild(label);
+    group.appendChild(a);
+    return a;
   }
 
   function makePanel(plugin, spec) {
@@ -84,7 +125,10 @@
     var ctx = panelContext(plugin.name, bodyEl);
     var launcher = makeLauncher(spec);
     if (launcher && launcher.addEventListener) {
-      launcher.addEventListener('click', function () { if (ctl && ctl.open) ctl.open(); });
+      launcher.addEventListener('click', function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        if (ctl && ctl.toggle) ctl.toggle();      // make() keeps the launcher's active state
+      });
     }
 
     var ctl = dock.make({

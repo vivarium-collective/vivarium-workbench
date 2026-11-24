@@ -33,6 +33,7 @@ globalThis.document = {
   documentElement: el('html'),
   readyState: 'complete',
   createElement: el,
+  getElementById: function () { return null; },
   querySelector(sel) {
     if (sel === '.viv-layout') return layout;
     if (sel === '.viv-main') return el('div');
