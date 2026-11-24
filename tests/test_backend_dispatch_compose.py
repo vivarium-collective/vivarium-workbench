@@ -307,6 +307,7 @@ def test_a_named_compose_api_is_detected_and_reported(ws, stub, backend_env, das
     assert cfg["backend"]["version"] == "0.7.72"
 
 
+@pytest.mark.plugin  # the alias needs a provider to claim it: with none installed, serve refuses it (step P4b2)
 def test_without_a_named_backend_compose_api_is_never_asked(ws, stub, backend_env, dashboard_client):
     backend_env.setenv("VIVA_API_BASE", stub.url)  # an alias, which never moves a run
     c = dashboard_client(ws)

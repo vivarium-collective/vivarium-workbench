@@ -159,6 +159,7 @@ def test_serve_fastapi_refuses_two_backends_set_directly_in_the_environment(monk
     assert "two remote backends" in capsys.readouterr().err
 
 
+@pytest.mark.plugin  # the alias needs a provider to claim it: with none installed, serve refuses it (step P4b2)
 def test_serves_flag_replaces_a_stale_named_env_var(monkeypatch, tmp_path):
     """``serve --backend-base-url B`` with a stale ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL=A`` and an alias of B is
     one backend: the flag is what that process uses."""
