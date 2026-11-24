@@ -1,1 +1,1 @@
-window.ExampleHelloPanel = function (el) { el.textContent = "hello from example plugin"; };
+window.ExampleHelloPanel = function (ctx) { ctx.el.textContent = "hello from example plugin (" + ctx.name + ")"; };

@@ -26,10 +26,30 @@
     });
   }
 
-  function renderInto(el, entryName) {
+  // The context a plugin's panel entry is called with — the one clean surface a
+  // plugin renders through, so it never hardcodes its own namespace:
+  //   el       the panel body element to render into
+  //   name     the plugin name
+  //   base     static asset base  ("/plugins/<name>/")
+  //   apiBase  API base           ("/api/plugins/<name>")
+  //   api(path, opts) -> Promise<json>  fetch under apiBase
+  function panelContext(name, el) {
+    var apiBase = '/api/plugins/' + name;
+    return {
+      el: el, name: name, base: '/plugins/' + name + '/', apiBase: apiBase,
+      api: function (path, opts) {
+        return fetch(apiBase + path, opts).then(function (r) {
+          if (!r.ok) throw new Error('plugin api ' + path + ' -> ' + r.status);
+          return r.json();
+        });
+      },
+    };
+  }
+
+  function renderInto(ctx, entryName) {
     var fn = global[entryName];
     if (typeof fn === 'function') {
-      try { fn(el); } catch (e) { /* a plugin panel's render must not break the page */ }
+      try { fn(ctx); } catch (e) { /* a plugin panel's render must not break the page */ }
     }
   }
 
@@ -47,7 +67,7 @@
     return btn;
   }
 
-  function makePanel(spec) {
+  function makePanel(plugin, spec) {
     var dock = global.VivPanelDock;
     if (!dock || typeof dock.make !== 'function') return null;
     var layout = document.querySelector('.viv-layout');
@@ -61,6 +81,7 @@
     panel.appendChild(bodyEl);
     if (layout && layout.appendChild) layout.appendChild(panel);
 
+    var ctx = panelContext(plugin.name, bodyEl);
     var launcher = makeLauncher(spec);
     if (launcher && launcher.addEventListener) {
       launcher.addEventListener('click', function () { if (ctl && ctl.open) ctl.open(); });
@@ -71,9 +92,9 @@
       key: spec.id, label: spec.title, launcher: launcher,
       docks: ['left', 'right', 'bottom', 'top'],
       defaultDock: spec.side || 'left',
-      onOpen: function () { renderInto(bodyEl, spec.entry); },
+      onOpen: function () { renderInto(ctx, spec.entry); },
     });
-    renderInto(bodyEl, spec.entry);
+    renderInto(ctx, spec.entry);
     return ctl;
   }
 
@@ -86,7 +107,7 @@
       return c.then(function () { return injectJs(src); });
     }, Promise.resolve()).then(function () {
       (p.panels || []).forEach(function (spec) {
-        try { makePanel(spec); } catch (e) { /* one panel must not break the rest */ }
+        try { makePanel(p, spec); } catch (e) { /* one panel must not break the rest */ }
       });
     });
   }

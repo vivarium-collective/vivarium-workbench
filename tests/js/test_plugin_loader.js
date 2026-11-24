@@ -22,7 +22,8 @@ function el(tag) {
 const made = [];
 const injected = [];
 globalThis.VivPanelDock = { make(opts) { made.push(opts); return { open() {}, close() {} }; } };
-globalThis.ExampleHelloPanel = function () {};
+let gotCtx = null;
+globalThis.ExampleHelloPanel = function (ctx) { gotCtx = ctx; };
 
 const layout = el('div');
 const rail = el('div');
@@ -66,5 +67,10 @@ const { loadPlugins } = require('../../vivarium_workbench/static/plugin-loader.j
   assert.strictEqual(made.length, 1, 'one panel registered via VivPanelDock.make');
   assert.strictEqual(made[0].key, 'example-hello', 'panel key is the spec id');
   assert.strictEqual(made[0].label, 'Hello', 'panel label is the spec title');
+  // the clean panel contract: the entry is called with a context, not a bare element
+  assert.ok(gotCtx && gotCtx.el, 'entry receives ctx.el (the panel body)');
+  assert.strictEqual(gotCtx.name, 'example', 'ctx.name is the plugin name');
+  assert.strictEqual(gotCtx.apiBase, '/api/plugins/example', 'ctx.apiBase is namespaced');
+  assert.strictEqual(typeof gotCtx.api, 'function', 'ctx.api is a fetch helper');
   console.log('ok test_plugin_loader');
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -56,10 +56,23 @@ Declares the CSS/JS to load (relative to the static dir, served under
 ```
 
 `entry` is the name of a global function the plugin's JS defines; the loader calls
-`window[entry](panelBodyElement)` to render the panel body (looked up lazily, so
-script-load order doesn't matter). Panels dock/drag/resize via the shared
-`VivPanelDock`, exactly like core panels. A missing or invalid manifest disables the
-plugin's **UI only** — its API still loads.
+it with a **panel context** (looked up lazily, so script-load order doesn't matter):
+
+```js
+window.KnowledgeGraphPanel = function (ctx) {
+  // ctx.el      the panel body element to render into
+  // ctx.name    the plugin name ("knowledge-layer")
+  // ctx.base    static asset base  ("/plugins/knowledge-layer/")
+  // ctx.apiBase API base           ("/api/plugins/knowledge-layer")
+  // ctx.api(path, opts) -> Promise<json>   fetch under apiBase
+  ctx.api('/knowledge/graph').then(function (d) { ctx.el.innerHTML = render(d); });
+};
+```
+
+So a plugin never hardcodes its own namespace — `ctx.api('/knowledge/graph')` resolves
+to `/api/plugins/knowledge-layer/knowledge/graph`. Panels dock/drag/resize via the
+shared `VivPanelDock`, exactly like core panels. A missing or invalid manifest disables
+the plugin's **UI only** — its API still loads.
 
 ## Enabling a plugin (opt-in, default off)
 
