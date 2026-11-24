@@ -50,7 +50,7 @@ const MANIFEST = [{
 }];
 globalThis.fetch = async function (url) {
   assert.strictEqual(url, '/api/plugins/manifest', 'loader fetches the manifest');
-  return { json: async () => MANIFEST };
+  return { ok: true, json: async () => MANIFEST };
 };
 
 const { loadPlugins } = require('../../vivarium_workbench/static/plugin-loader.js');

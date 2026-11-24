@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Mapping, Optional
 
@@ -29,6 +30,9 @@ from vivarium_workbench.plugins.discovery import (
 log = logging.getLogger(__name__)
 
 _MANIFEST_ROUTE = "/api/plugins/manifest"
+#: a plugin name namespaces its routes (/api/plugins/<name>) and assets (/plugins/<name>),
+#: so it must be url-safe — lowercase alnum with - or _, no slashes or dots.
+_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
 def _manifest_entry(c: PluginContributions) -> dict:
@@ -91,6 +95,11 @@ def load_plugins(
     contribs: list[PluginContributions] = list(getattr(app.state, "plugin_contribs", []))
     for p in enabled:
         try:
+            if not _NAME_RE.match(p.name or ""):
+                log.warning(
+                    "plugin name %r is not url-safe ([a-z0-9][a-z0-9_-]*); skipping", p.name
+                )
+                continue
             if p.api_version != WORKBENCH_PLUGIN_API_VERSION:
                 log.warning(
                     "plugin %r targets API v%s (core v%s); skipping",

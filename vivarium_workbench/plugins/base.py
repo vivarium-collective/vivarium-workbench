@@ -67,24 +67,34 @@ class PluginRegistry:
 
     def __init__(self, plugin: WorkbenchPlugin) -> None:
         self._plugin = plugin
-        self._base = plugin.package_dir()
+        self._base = plugin.package_dir().resolve()
         self._c = PluginContributions(name=plugin.name)
+
+    def _resolve(self, path: str) -> Path:
+        """Resolve a registered path against the plugin package dir, refusing one that
+        escapes it (so a plugin can only serve files it ships)."""
+        p = (self._base / path).resolve()
+        if p != self._base and not p.is_relative_to(self._base):
+            raise ValueError(
+                f"plugin {self._plugin.name!r}: path {path!r} escapes the package directory"
+            )
+        return p
 
     def api_router(self, router: Any) -> None:
         self._c.routers.append(router)
 
     def static_dir(self, path: str) -> None:
-        self._c.static_dir = self._base / path
+        self._c.static_dir = self._resolve(path)
 
     def ui(self, manifest: str) -> None:
-        self._c.ui_manifest = self._base / manifest
+        self._c.ui_manifest = self._resolve(manifest)
 
     def workspace_store(self, folder: str, *, reader: Optional[Callable[..., Any]] = None) -> None:
         self._c.workspace_folder = folder
         self._c.workspace_reader = reader
 
     def skills(self, dir: str) -> None:
-        self._c.skills_dir = self._base / dir
+        self._c.skills_dir = self._resolve(dir)
 
     def contributions(self) -> PluginContributions:
         return self._c

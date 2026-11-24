@@ -77,22 +77,31 @@
     return ctl;
   }
 
+  // Load one plugin's assets + panels. Each panel is isolated so one bad panel does
+  // not stop the plugin's others; the caller isolates one plugin from the next.
+  function loadOne(p) {
+    (p.css || []).forEach(function (href) { try { injectCss(href); } catch (e) { /* skip */ } });
+    // sequential so a plugin's window[entry] globals exist before its panels render
+    return (p.js || []).reduce(function (c, src) {
+      return c.then(function () { return injectJs(src); });
+    }, Promise.resolve()).then(function () {
+      (p.panels || []).forEach(function (spec) {
+        try { makePanel(spec); } catch (e) { /* one panel must not break the rest */ }
+      });
+    });
+  }
+
   function loadPlugins() {
     if (typeof fetch !== 'function') return Promise.resolve();
     return fetch('/api/plugins/manifest')
-      .then(function (res) { return res.json(); })
+      .then(function (res) { return (res && res.ok) ? res.json() : []; })
       .then(function (manifest) {
         if (!Array.isArray(manifest)) return;
+        // Sequential + per-plugin isolation: one plugin failing never aborts the others.
         return manifest.reduce(function (chain, p) {
-          return chain.then(function () {
-            (p.css || []).forEach(injectCss);
-            // sequential so a plugin's window[entry] globals exist before its panels render
-            return (p.js || []).reduce(function (c, src) {
-              return c.then(function () { return injectJs(src); });
-            }, Promise.resolve()).then(function () {
-              (p.panels || []).forEach(makePanel);
-            });
-          });
+          return chain
+            .then(function () { return loadOne(p); })
+            .catch(function () { /* isolate this plugin's failure from the next */ });
         }, Promise.resolve());
       })
       .catch(function () { /* manifest unreachable (e.g. static bundle) → no-op */ });

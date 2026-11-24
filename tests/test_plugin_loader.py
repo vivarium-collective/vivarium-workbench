@@ -58,6 +58,34 @@ def test_failsoft_one_plugin_raises_others_survive():
     assert [p["name"] for p in c.get("/api/plugins/manifest").json()] == ["good"]
 
 
+def test_non_url_safe_name_is_skipped():
+    r = _router()
+
+    class Bad(WorkbenchPlugin):
+        name = "a/b"  # would escape /api/plugins/<name> if wired raw
+
+        def register(self, reg):
+            reg.api_router(r)
+
+    c = TestClient(_app_with([Bad()], enabled=("a/b",)))
+    assert c.get("/api/plugins/manifest").json() == []
+    assert c.get("/api/plugins/a/b/ping").status_code == 404
+
+
+def test_static_dir_escaping_package_skips_plugin():
+    r = _router()
+
+    class Bad(WorkbenchPlugin):
+        name = "esc"
+
+        def register(self, reg):
+            reg.api_router(r)
+            reg.static_dir("../../../../etc")  # escapes the plugin package dir
+
+    c = TestClient(_app_with([Bad()], enabled=("esc",)))
+    assert c.get("/api/plugins/manifest").json() == []
+
+
 def test_missing_ui_manifest_isolated_api_still_loads():
     r = _router()
 
