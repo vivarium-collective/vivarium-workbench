@@ -2984,6 +2984,8 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
      (session-per-tab): ready / ⏳ preparing / ⚠️ failed. -->
 <script src="assets/session-status.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
 <script src="assets/workspace-picker.js{% if asset_version %}?v={{ asset_version }}{% endif %}"></script>
+<!-- Plugin loader: registers enabled plugins' panels/assets from /api/plugins/manifest. Generic; never edited per-plugin. -->
+<script src="assets/plugin-loader.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* plugins unavailable */"></script>
 <!-- Inline expert-feedback for the SPA investigation view: the shared engine
      (static/study-feedback.js) decorates the investigation brief's tab panels
      (Overview/Verdict/Background/Narrative/Decisions…) with a hover-corner 💬.
