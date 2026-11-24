@@ -27,11 +27,12 @@ def test_env_id_is_16_hex_chars():
 def test_compute_env_never_raises_and_has_documented_shape(tmp_path):
     # No ws_root, no cache_fingerprint: every field best-effort None, but the
     # full key set is always present so consumers can rely on it rather than
-    # probing.
+    # probing. This is the CANONICAL env shape — it MUST stay identical to
+    # discovery_engine.study.run_registry.capture_environment (the two writers are
+    # kept in sync by hand; changing one key set without the other is a drift bug).
     env = compute_env()
-    for k in ("workspace_commit", "sim_packages", "lockfile_hash", "python",
-              "platform", "cache_fingerprint"):
-        assert k in env
+    assert set(env) == {"workspace_commit", "dirty", "branch", "sim_packages",
+                        "lockfile_hash", "python", "platform", "cache_fingerprint"}
     assert env["cache_fingerprint"] is None
 
 
