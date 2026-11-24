@@ -153,8 +153,11 @@ dependencies = [
 
 [project.optional-dependencies]
 # The viva-api backend provider (docs/backend-adapters.md §2.4, step P4b): its own distribution, built from
-# packages/vivarium-workbench-vivaapi/ in this repo and released in lockstep (identical versions, `==` both ways;
-# scripts/set_version.sh). It declares boto3 itself (the S3 figures fallback), so the core does not.
+# packages/vivarium-workbench-vivaapi/ in this repo, with an identical version and `==` pins both ways
+# (scripts/set_version.sh). It declares boto3 itself (the S3 figures fallback), so the core does not. The plugin is
+# NOT published to PyPI (Jim, 2026-11-24; only the core is), so from PyPI this extra does not resolve: it serves the
+# image (`uv sync --extra vivaapi`), the dev setup, and uv installs from git, where uv takes the plugin from the same
+# commit (README "Install").
 vivaapi = ["vivarium-workbench-vivaapi==0.5.8"]
 viz = ["matplotlib", "imageio", "numpy"]
 # `vivarium-workbench render-loom` drives the loom in a headless browser to save

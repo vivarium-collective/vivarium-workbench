@@ -3,7 +3,8 @@
 For each environment of the matrix and each mode (providers on, providers off): the one-backend check (outcome and
 message), the configured URL, the deployment name, the ``/api/source/remote-health`` body (and the URL it pinged),
 and what ``serve`` prints at start-up (and the URL its breaker probe watches). Providers on must not change at all;
-the providers-off changes are declared below, row by row.
+the providers-off changes are declared below, row by row. A third mode for ``serve``, ``absent`` (no provider installed,
+providers not turned off; step P4b2), declares the SMS-alias refusal.
 
 No network: ``backend_config.ping``, the capability probe and the breaker probe are faked. The plugin is reached only
 through the provider registry (no module-level plugin import), so the providers-off rows also hold without it.
@@ -18,7 +19,8 @@ from vivarium_workbench.lib.backends import provider as provider_mod
 NAMED, VIVA, SMS = "VIVARIUM_WORKBENCH_BACKEND_BASE_URL", "VIVA_API_BASE", "SMS_API_BASE"
 DEPLOY = "VIVARIUM_WORKBENCH_REMOTE_DEPLOYMENT"
 OLD_NAMED, OLD_DEPLOY = "VIVARIUM_DASHBOARD_BACKEND_BASE_URL", "VIVARIUM_DASHBOARD_REMOTE_DEPLOYMENT"
-_ALL = (NAMED, VIVA, SMS, DEPLOY, OLD_NAMED, OLD_DEPLOY)
+PIN, OLD_PIN = "VIVARIUM_WORKBENCH_REMOTE_PINNED", "VIVARIUM_DASHBOARD_REMOTE_PINNED"
+_ALL = (NAMED, VIVA, SMS, DEPLOY, OLD_NAMED, OLD_DEPLOY, PIN, OLD_PIN)
 
 ENVS = {
     "nothing": {},
@@ -33,14 +35,22 @@ ENVS = {
     "deployment+alias": {DEPLOY: "smscdk", SMS: "http://api:8000"},
     "dashboard-named": {OLD_NAMED: "http://dash.test"},  # the old prefix never named a backend
     "dashboard-deployment": {OLD_DEPLOY: "olddep"},      # ... but it does name the deployment (env_compat)
+    # The provider's pinned-run switch (step P4b2; only the `absent` serve goldens use these): refused when truthy only.
+    "pinned": {PIN: "1"},
+    "pinned-0": {PIN: "0"},
+    "pinned-legacy": {OLD_PIN: " Yes "},
 }
 
 
-def _matrix(on: dict, off: dict) -> list:
+def _matrix(on: dict, off: dict, absent: "dict | None" = None) -> list:
     """Each case in both modes, case-major ids (``named-on``). An ``on`` case needs the plugin (``plugin`` mark: strict
-    xfail when it is absent) unless its golden is the same as with providers off -- the plugin then changes nothing."""
+    xfail when it is absent) unless its golden is the same as with providers off -- the plugin then changes nothing --
+    and, when ``absent`` (the goldens with no provider installed) is given, the same as that too."""
+    def needs_plugin(case: str) -> bool:
+        return on[case] != off[case] or (absent is not None and on[case] != absent[case])
+
     return [pytest.param(case, mode, id=f"{case}-{mode}",
-                         marks=pytest.mark.plugin if mode == "on" and on[case] != off[case] else ())
+                         marks=pytest.mark.plugin if mode == "on" and needs_plugin(case) else ())
             for case in on for mode in ("on", "off")]
 
 
@@ -56,6 +66,8 @@ def env(monkeypatch):
             monkeypatch.setenv(k, v)
         if mode == "off":
             monkeypatch.setenv(provider_mod.PROVIDERS_ENV, "none")
+        if mode == "absent":  # no provider installed (providers not turned off): what a core-only install sees
+            monkeypatch.setattr(provider_mod, "_entry_points", lambda: [])
         backends.reset_registry()
 
     yield apply
@@ -253,10 +265,63 @@ SERVE_OFF = {
 }
 
 
-@pytest.mark.parametrize(("case", "mode"), _matrix(SERVE_ON, SERVE_OFF))
+# DECLARED (P4b2), no provider installed and providers not turned off (`absent`; runs in both jobs, the entry points
+# are patched away): a provider alias, or the truthy pinned-run switch, refuses start-up with exit 2 (an install built
+# without the plugin); everything else serves as with providers off, after one neutral line (D4).
+_NOTE = "backend providers: none installed\n"
+
+
+def _unclaimed(*names):
+    one = len(names) == 1
+    joined = ", ".join(names)
+    return (2, "", f"ERROR: {joined} {'is' if one else 'are'} set, but no backend provider is installed to read "
+                   f"{'it' if one else 'them'}; install vivarium-workbench[vivaapi], or unset {joined} (or set "
+                   f"{provider_mod.PROVIDERS_ENV}=none to run without providers)\n", [])
+
+
+def _noted(row):
+    return (row[0], _NOTE + row[1]) + row[2:]
+
+
+SERVE_ABSENT = {
+    "nothing": _noted(SERVE_OFF["nothing"]),
+    "named": _noted(SERVE_OFF["named"]),
+    "sms-alias": _unclaimed(SMS),
+    "viva-alias": _unclaimed(VIVA),
+    "both-aliases": _unclaimed(VIVA, SMS),
+    "named+same-alias": _unclaimed(SMS),
+    "named+other-alias": _unclaimed(SMS),
+    "named+bad-alias": _unclaimed(VIVA),
+    "bad-named": SERVE_OFF["bad-named"],  # the named URL is checked first
+    "deployment+alias": _unclaimed(SMS),
+    "dashboard-named": _noted(SERVE_OFF["dashboard-named"]),
+    "dashboard-deployment": _noted(SERVE_OFF["dashboard-deployment"]),
+    "pinned": _unclaimed(PIN),
+    "pinned-0": _noted(SERVE_OFF["nothing"]),
+    "pinned-legacy": _unclaimed(OLD_PIN),
+}
+
+
+# An `on` row needs the plugin when it differs from the `absent` row too: without the plugin, serve refuses the alias
+# or prints the no-provider line.
+@pytest.mark.parametrize(("case", "mode"), _matrix(SERVE_ON, SERVE_OFF, absent=SERVE_ABSENT))
 def test_serve_startup_lines(env, case, mode, monkeypatch, tmp_path, capsys):
     env(case, mode)
     assert _serve(monkeypatch, tmp_path, capsys) == (SERVE_ON if mode == "on" else SERVE_OFF)[case]
+
+
+@pytest.mark.parametrize("case", list(SERVE_ABSENT))
+def test_serve_startup_lines_with_no_provider_installed(env, case, monkeypatch, tmp_path, capsys):
+    env(case, "absent")
+    assert _serve(monkeypatch, tmp_path, capsys) == SERVE_ABSENT[case]
+
+
+@pytest.mark.parametrize("case", ["sms-alias", "both-aliases", "pinned", "named+other-alias"])
+def test_no_provider_installed_refuses_only_at_server_start_up(env, case):
+    """``check_config`` (what every BACKEND_COMMAND runs: the ``run`` / ``rerun`` / ``run-composite`` children too)
+    does not refuse an unclaimed alias; only the server entries do (step P4b2, review fix 1)."""
+    env(case, "absent")
+    assert _check() == "ok"
 
 
 # --- the deployment names a pre-record row may carry (records' legacy guard) ----------------------------------------

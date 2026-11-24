@@ -67,8 +67,10 @@ beside it** — no sibling checkouts. It is a uv workspace: `uv sync` installs t
 `plugins` default group), both editable; `uv sync --no-group plugins` installs the
 core alone, and `scripts/pytest_core_only.sh` runs the suite that way (in
 `.venv-core`, as CI's `core-only` job does). With `uv pip install -e .` instead, add
-`-e packages/vivarium-workbench-vivaapi` to get the plugin. The two are released in
-lockstep (identical versions, `==` pins both ways): change versions only with
+`-e packages/vivarium-workbench-vivaapi` to get the plugin. The two have identical
+versions and `==` pins both ways; both are built and checked on every release tag,
+but only the core is published to PyPI (the plugin is installed from git or comes in
+the image, from the same commit). Change versions only with
 `scripts/set_version.sh X.Y.Z`. CI's `standalone` workflow enforces that
 (`uv sync --locked`, then `vwb smoke`); run the same check locally with
 `scripts/standalone_smoke.sh`. Do not add `path = "../<sibling>"` sources to the

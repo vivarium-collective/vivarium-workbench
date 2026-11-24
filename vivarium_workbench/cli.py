@@ -76,6 +76,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from vivarium_workbench.lib.env_worker_launcher import check_worker_config
     try:
         backend_cfg.check_config(getattr(args, "backend_base_url", None))
+        # A provider alias set while no provider is installed to read it (step P4b2): refuse before detaching too.
+        # Only here and in the other server entries: run children inherit the aliases on a workspace interpreter.
+        backend_cfg.check_unclaimed_backend_env()
         # Hosted env workers asked for but no provider supplies them: refuse BEFORE the render, the server-info
         # write and detaching, so the operator sees why and nothing is left behind. serve_fastapi checks again
         # (direct callers; the "env workers: PROXY ..." log line once logging is configured). No network call.
@@ -1297,6 +1300,18 @@ def cmd_server_open(args: argparse.Namespace) -> int:
 
 def cmd_server_restart(args: argparse.Namespace) -> int:
     """Stop the dashboard server (if running) then start it detached."""
+    # Refuse an unclaimed provider alias BEFORE stopping the running server (step P4b2): cmd_serve would refuse it
+    # anyway, and the operator would be left with no server at all.
+    from vivarium_workbench.lib.backend_config import BackendConfigError
+    from vivarium_workbench.lib.backends import config as backend_cfg
+    try:
+        backend_cfg.check_unclaimed_backend_env()
+    except BackendConfigError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
+        print(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
     cmd_server_stop(args)
     args.detach = True
     return cmd_serve(args)

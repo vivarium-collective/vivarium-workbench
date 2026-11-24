@@ -307,8 +307,12 @@ def test_a_named_compose_api_is_detected_and_reported(ws, stub, backend_env, das
     assert cfg["backend"]["version"] == "0.7.72"
 
 
-def test_without_a_named_backend_compose_api_is_never_asked(ws, stub, backend_env, dashboard_client):
-    backend_env.setenv("VIVA_API_BASE", stub.url)  # an alias, which never moves a run
+# The alias variant needs a provider to claim the alias: with none installed, serve refuses it (step P4b2).
+@pytest.mark.parametrize("alias", [pytest.param(True, marks=pytest.mark.plugin, id="alias"),
+                                   pytest.param(False, id="nothing")])
+def test_without_a_named_backend_compose_api_is_never_asked(ws, stub, backend_env, dashboard_client, alias):
+    if alias:
+        backend_env.setenv("VIVA_API_BASE", stub.url)  # an alias, which never moves a run
     c = dashboard_client(ws)
     assert "backend" not in c.get("/api/remote-run-config").json()
     assert stub.calls_to("run-simulation") == []

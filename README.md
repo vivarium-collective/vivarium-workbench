@@ -34,12 +34,23 @@ pip install vivarium-workbench         # or: uv pip install vivarium-workbench
 ```
 
 For the viva-api (SMS / viva-core) backend — remote runs, builds and figures against
-a viva-api deployment — add the `vivaapi` extra, which installs the backend plugin
-`vivarium-workbench-vivaapi` (its own distribution, released in lockstep):
+a viva-api deployment — you also need the backend plugin `vivarium-workbench-vivaapi`.
+It is its own distribution with the same version as the core, but it is **not on PyPI**
+(only the core is published), so install it from git. With uv, the `vivaapi` extra
+pulls the plugin from the same commit:
 
 ```bash
-pip install 'vivarium-workbench[vivaapi]'
+uv add 'vivarium-workbench[vivaapi] @ git+https://github.com/vivarium-collective/vivarium-workbench.git'
 ```
+
+With pip, name the plugin's subdirectory as well:
+
+```bash
+pip install 'vivarium-workbench[vivaapi] @ git+https://github.com/vivarium-collective/vivarium-workbench.git' \
+  'vivarium-workbench-vivaapi @ git+https://github.com/vivarium-collective/vivarium-workbench.git#subdirectory=packages/vivarium-workbench-vivaapi'
+```
+
+(`pip install 'vivarium-workbench[vivaapi]'` from PyPI does not resolve: the plugin is not there.)
 
 > **Renamed:** the tool was `vivarium-dashboard`; it is now `vivarium-workbench`
 > (it authors, runs, evaluates, and publishes across the whole lifecycle — a
