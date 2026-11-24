@@ -1258,6 +1258,18 @@ def cmd_server_open(args: argparse.Namespace) -> int:
 
 def cmd_server_restart(args: argparse.Namespace) -> int:
     """Stop the dashboard server (if running) then start it detached."""
+    # Refuse an unclaimed provider alias BEFORE stopping the running server (step P4b2): cmd_serve would refuse it
+    # anyway, and the operator would be left with no server at all.
+    from vivarium_workbench.lib.backend_config import BackendConfigError
+    from vivarium_workbench.lib.backends import config as backend_cfg
+    try:
+        backend_cfg.check_unclaimed_backend_env()
+    except BackendConfigError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
+        print(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
     cmd_server_stop(args)
     args.detach = True
     return cmd_serve(args)

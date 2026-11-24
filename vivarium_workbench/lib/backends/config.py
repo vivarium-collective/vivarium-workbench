@@ -113,8 +113,11 @@ def _set_provider_env() -> list[str]:
     from vivarium_workbench.lib import backend_config
     from vivarium_workbench.lib.env_compat import NEW_PREFIX, OLD_PREFIX, get_env
 
-    found = [v for v in backend_config.BACKEND_BASE_ENV_VARS[1:] if os.environ.get(v)]
+    # A whitespace-only alias counts as unset.
+    found = [v for v in backend_config.BACKEND_BASE_ENV_VARS[1:] if (os.environ.get(v) or "").strip()]
     pin = backend_config.PROVIDER_PIN_ENV
+    # A truthy pin counts on its own, even without the provider's REMOTE_REPO_URL (which the provider also needs to
+    # actually pin runs): it says the operator meant this deployment to pin runs on a provider.
     if (get_env(pin, "") or "").strip().lower() in backend_config.PROVIDER_PIN_TRUTHY:
         found.append(NEW_PREFIX + pin if NEW_PREFIX + pin in os.environ else OLD_PREFIX + pin)
     return found

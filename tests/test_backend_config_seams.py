@@ -152,7 +152,7 @@ def test_the_typed_api_entry_reports_a_broken_plugin():
     """``python -m vivarium_workbench.api`` with a plugin that fails to import: the message, not a traceback (the
     module no longer builds the app at import, which asked the providers before the check could)."""
     proc = subprocess.run([sys.executable, "-c", _BROKEN_API_PROBE], capture_output=True, text=True, timeout=300)
-    assert proc.returncode != 0 and "@@SERVED@@" not in proc.stdout
+    assert proc.returncode == 2 and "@@SERVED@@" not in proc.stdout  # exits 2, as cmd_serve (step P4b2)
     assert "ERROR: the backend plugin failed to load: ImportError: No module named 'some_dependency'" in proc.stderr
     assert "Traceback" not in proc.stderr, proc.stderr[-2000:]
 
@@ -337,6 +337,25 @@ def test_cmd_serve_refuses_an_unclaimed_alias_itself(no_provider, monkeypatch, c
     assert capsys.readouterr().err == _refusal(PIN)
 
 
+def test_server_restart_refuses_before_stopping_the_running_server(no_provider, monkeypatch, capsys, tmp_path):
+    """Refusing after the stop would leave the operator with no server at all (review of wb#1767)."""
+    from vivarium_workbench import cli
+
+    (tmp_path / "workspace.yaml").write_text("name: x\n")
+    monkeypatch.setenv(SMS, "http://api:8000")
+    monkeypatch.setattr(cli, "cmd_server_stop", lambda args: pytest.fail("the running server was stopped"))
+    monkeypatch.setattr(cli, "_serve_detached", lambda ws, args: pytest.fail("detached"))
+    assert cli.main(["server-restart", "--workspace", str(tmp_path)]) == 2
+    assert capsys.readouterr().err == _refusal(SMS)
+
+
+def test_a_whitespace_only_alias_counts_as_unset(no_provider, monkeypatch):
+    monkeypatch.setenv(SMS, "   ")
+    monkeypatch.setenv(VIVA, "")
+    assert backend_cfg.unclaimed_backend_env() == []
+    backend_cfg.check_unclaimed_backend_env()
+
+
 def test_cli_serve_with_providers_off_goes_on(providers_off, monkeypatch, capsys, tmp_path):
     monkeypatch.setenv(SMS, "http://api:8000")
     assert _cli_serve(tmp_path, monkeypatch) == (0, [tmp_path.resolve()])
@@ -432,5 +451,5 @@ def test_only_the_server_entries_refuse_an_unclaimed_alias():
     root = Path(backend_cfg.__file__).resolve().parents[2]
     callers = sorted(p.relative_to(root).as_posix() for p in root.rglob("*.py")
                      if "check_unclaimed_backend_env(" in p.read_text(encoding="utf-8")
-                     and p.name != "config.py")
+                     and p.relative_to(root).as_posix() != "lib/backends/config.py")
     assert callers == ["api/__main__.py", "cli.py", "lib/startup.py"]

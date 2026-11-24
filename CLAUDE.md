@@ -90,11 +90,14 @@ packages/vivarium-workbench-vivaapi/vivarium_workbench_sms vivarium_dashboard`, 
 and `uv run mypy`.
 Dependencies are managed with `uv` (`uv.lock`). The repo is a **uv workspace**: the root is the core
 (`vivarium-workbench`) and `packages/vivarium-workbench-vivaapi/` is the viva-api (SMS) backend plugin, its own
-distribution (import package `vivarium_workbench_sms`; docs/backend-adapters.md step P4b), released in lockstep
-(`scripts/set_version.sh`). A plain `uv sync` / `uv run` installs both (the `plugins` default group);
+distribution (import package `vivarium_workbench_sms`; docs/backend-adapters.md step P4b) with an identical version
+and `==` pins both ways (`scripts/set_version.sh`). Both are built and checked on every tag; only the core is published
+to PyPI (Jim, 2026-11-24). A plain `uv sync` / `uv run` installs both (the `plugins` default group);
 `--no-group plugins` installs the core alone (`scripts/pytest_core_only.sh` runs the suite that way). With pip,
 install both editable into the venv that will run it: `pip install -e . -e packages/vivarium-workbench-vivaapi`
-(`pip install -e .` alone gets no SMS features). Published: `pip install 'vivarium-workbench[vivaapi]'`.
+(`pip install -e .` alone gets no SMS features). The plugin is not on PyPI, so
+`pip install 'vivarium-workbench[vivaapi]'` from PyPI does not resolve; from git, `uv add 'vivarium-workbench[vivaapi] @
+git+https://github.com/vivarium-collective/vivarium-workbench.git'` installs both (README "Install").
 Note `bigraph-loom`, `viva-superpowers` (formerly pbg-superpowers) and
 `discovery-engine` are direct git/path deps.
 
