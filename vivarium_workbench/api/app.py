@@ -1276,6 +1276,60 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": str(e)}, status_code=404)
 
     @app.get(
+        "/api/needs-attention-requests/{slug}",
+        tags=["Investigations"],
+        summary="Needs-attention items bridged to typed discovery-cycle fix-requests",
+    )
+    def needs_attention_requests_route(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        """The deterministic needs-attention scan projected into typed
+        GenerationRequests the discovery cycle can fix (verdict_divergence ->
+        interpret_finding, uncovered_ac -> propose_study, viz_* -> visualize, ...),
+        each with a gate (safe kinds auto, structural review). Deterministic-only
+        signals (param_drift / env_stale / nondeterministic / phantom_observable)
+        come back under ``reruns`` as re-run descriptors, not agent work. Read-only
+        projection. Backed by ``lib.needs_attention_requests.build_requests_payload``."""
+        from vivarium_workbench.lib.needs_attention_requests import build_requests_payload
+        name = _path_safety.plain_name(slug, "investigation")
+        try:
+            return build_requests_payload(ws, name)
+        except Exception:  # noqa: BLE001 — the panel must never break on this
+            return {"investigation": name, "total": 0, "auto_fixable": 0,
+                    "by_kind": {}, "by_gate": {"auto": 0, "review": 0},
+                    "requests": [], "reruns": [], "unmapped": []}
+
+    @app.post(
+        "/api/needs-attention/{slug}/autofix",
+        tags=["Investigations"],
+        summary="Dispatch the safe (auto-gated) needs-attention fixes to the cycle filler",
+    )
+    def needs_attention_autofix_route(slug: str, ws: Path = Depends(get_workspace)) -> dict:
+        """The 'Run auto-fixes' action: dispatch the auto-gated bridged requests
+        (the safe kinds — interpret_finding / explain / author_tests / visualize) to
+        the discovery cycle's filler / auditing agent, which authors and applies the
+        fix. Structural branch-points stay queued for review. MUTATES the workspace.
+        A safe no-op when ``$VIVA_FILLER_CMD`` is unset (everything queues). Backed
+        by ``lib.needs_attention_requests.run_autofix``."""
+        from vivarium_workbench.lib.needs_attention_requests import run_autofix
+        name = _path_safety.plain_name(slug, "investigation")
+        return run_autofix(ws, name, only_auto=True)
+
+    @app.post(
+        "/api/needs-attention/{slug}/fix",
+        tags=["Investigations"],
+        summary="Dispatch ONE needs-attention item to the cycle filler (user-triggered)",
+    )
+    def needs_attention_fix_route(slug: str, payload: dict = Body(default={}),
+                                  ws: Path = Depends(get_workspace)) -> dict:
+        """The per-item 'Fix with agent' action. ``payload`` = ``{scan_kind, ref}``.
+        The explicit click is the gate, so the one request fills even if its kind is
+        normally review-gated. MUTATES the workspace. Backed by
+        ``lib.needs_attention_requests.run_fix``."""
+        from vivarium_workbench.lib.needs_attention_requests import run_fix
+        name = _path_safety.plain_name(slug, "investigation")
+        p = payload or {}
+        return run_fix(ws, name, str(p.get("scan_kind") or ""), str(p.get("ref") or ""))
+
+    @app.get(
         "/api/discovery-cycle-steps",
         tags=["Investigations"],
         summary="Discovery-engine cycle step graph (static metadata)",

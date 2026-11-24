@@ -12569,10 +12569,30 @@
           var link = ref
             ? '<a href="#" onclick="_openStudyInsideInvestigation(\'' + _esc(ref) + '\',\'conclusions\');return false;" style="color:#2563eb;text-decoration:none">' + label + ' →</a>'
             : '<a href="#" onclick="window._aigOpenDecisionsTab&&window._aigOpenDecisionsTab();return false;" style="color:#2563eb;text-decoration:none">' + label + ' →</a>';
+          // Bridged discovery-cycle fix (if this item maps to a GenerationRequest):
+          // a gate badge + a "Fix with agent" dispatch button. Absent in a
+          // snapshot (no fix backend) or for deterministic re-run-only kinds.
+          var fx = (window._naFixMap || {})[(it.kind || '') + '|' + ref];
+          var fixHtml = '';
+          if (fx) {
+            var auto = fx.gate === 'auto';
+            var badge = '<span title="discovery-cycle fix: ' + _esc(fx.kind)
+              + (fx.skill ? ' (skill ' + _esc(fx.skill) + ')' : '') + '" '
+              + 'style="font-size:0.78em;font-weight:600;border-radius:5px;padding:1px 6px;margin-right:6px;'
+              + (auto ? 'color:#166534;background:#dcfce7;border:1px solid #bbf7d0'
+                      : 'color:#92400e;background:#fef3c7;border:1px solid #fde68a') + '">'
+              + (auto ? '⚡ auto-fix' : '✋ review') + ' · ' + _esc(fx.kind) + '</span>';
+            var fixBtn = '<button type="button" class="na-fix-btn" data-sk="' + _esc(it.kind || '')
+              + '" data-ref="' + _esc(ref) + '" onclick="_naFixItem(this)" '
+              + 'style="font-size:0.78em;font-weight:600;color:#2563eb;background:#eff6ff;'
+              + 'border:1px solid #dbeafe;border-radius:5px;padding:1px 7px;cursor:pointer">🔧 Fix with agent</button>';
+            fixHtml = '<div style="margin-top:3px">' + badge + fixBtn + '</div>';
+          }
           return '<li style="margin-top:4px;font-size:0.92em;line-height:1.3">'
             + link + studyTag
             + (detail ? '<span style="color:#475569;word-break:break-word"> — ' + detail + '</span>' : '')
             + (hint ? '<span style="color:#aab4c0;font-size:0.92em"> · ' + hint + '</span>' : '')
+            + fixHtml
             + '</li>';
         }).join('');
       } else {
@@ -12616,6 +12636,11 @@
         + '<span style="font-weight:700;color:#b45309">⚠ ' + total + ' need' + (total === 1 ? 's' : '') + ' attention</span>'
         + '<span style="display:flex;align-items:center;gap:10px">'
           + (memberCount != null ? '<span class="muted" style="font-size:0.9em;white-space:nowrap">' + memberCount + ' member stud' + (memberCount === 1 ? 'y' : 'ies') + ' scanned</span>' : '')
+          + ((window._naFixSummary && window._naFixSummary.auto_fixable > 0)
+              ? '<button type="button" class="na-autofix-btn" onclick="_naRunAutoFix(this)" '
+                + 'title="Dispatch the safe (auto-gated) fixes to the discovery-cycle auditing agent" '
+                + 'style="font-size:0.84em;font-weight:600;color:#166534;background:#dcfce7;border:1px solid #bbf7d0;border-radius:6px;padding:3px 9px;cursor:pointer;white-space:nowrap">⚡ Run auto-fixes (' + window._naFixSummary.auto_fixable + ')</button>'
+              : '')
           + '<button type="button" class="na-copy-btn" data-copy="' + copyAttr + '" onclick="_naCopy(this)" title="Copy the list as plain text — to paste straight to Claude" '
             + 'style="font-size:0.84em;font-weight:600;color:#2563eb;background:#eff6ff;border:1px solid #dbeafe;border-radius:6px;padding:3px 9px;cursor:pointer;white-space:nowrap">⧉ Copy</button>'
         + '</span>'
@@ -12733,8 +12758,13 @@
         // something was actually evaluated — otherwise "No studies yet" / "No runs
         // yet", a neutral state, not a validated pass. Drives the tab's tooltip.
         var _q = _naQuietState(d.summary);
-        var m = document.getElementById('inv-attention-mount');
-        if (m) m.innerHTML = _aigScanBodyHtml(d);
+        // Best-effort: load the bridged fix-requests (live only; a published
+        // snapshot 404s → no fix UI, which is correct) so each item can show its
+        // mapped discovery-cycle fix + gate, then render.
+        _naLoadFixRequests(name).then(function () {
+          var m = document.getElementById('inv-attention-mount');
+          if (m) m.innerHTML = _aigScanBodyHtml(d);
+        });
         // Reflect the flagged count on the tab button (amber badge when > 0),
         // and never let a quiet/never-run investigation read as a validated pass.
         var tb = document.querySelector('.inv-brief-tab[onclick*="attention"]');
@@ -12756,6 +12786,106 @@
       }).catch(function () { _clear('Needs-attention scan unavailable.'); });
   }
   window._renderInvNeedsAttention = _renderInvNeedsAttention;
+
+  // Load the needs-attention items bridged to typed discovery-cycle fix-requests
+  // (GET /api/needs-attention-requests/<slug>) and index them by scan_kind|ref so
+  // _aigScanBodyHtml can annotate each item with its mapped fix + gate. Live-only
+  // and best-effort: a published snapshot has no fix backend, so a 404 just leaves
+  // the map empty and no fix affordances render. Always resolves.
+  function _naLoadFixRequests(name) {
+    window._naFixMap = {}; window._naFixSummary = null; window._naFixName = name;
+    return fetch('/api/needs-attention-requests/' + encodeURIComponent(name),
+                 {headers: {Accept: 'application/json'}})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (rq) {
+        if (!rq) return;
+        window._naFixSummary = {name: name, auto_fixable: rq.auto_fixable || 0,
+                                total: rq.total || 0};
+        var map = {};
+        (rq.requests || []).forEach(function (req) {
+          var pv = req.provenance || {};
+          map[(pv.scan_kind || '') + '|' + (pv.ref || '')] =
+            {kind: req.kind, gate: req.gate, skill: req.skill || ''};
+        });
+        window._naFixMap = map;
+      })
+      .catch(function () { /* best-effort */ });
+  }
+
+  // A brief bottom-right toast for fix-dispatch outcomes.
+  function _naToast(msg, warn) {
+    try {
+      var t = document.createElement('div');
+      t.textContent = msg;
+      t.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:9999;max-width:360px;'
+        + 'padding:10px 14px;border-radius:8px;font-size:0.9em;line-height:1.35;'
+        + 'box-shadow:0 2px 10px rgba(0,0,0,0.18);color:#fff;background:'
+        + (warn ? '#b45309' : '#166534');
+      document.body.appendChild(t);
+      setTimeout(function () { t.style.transition = 'opacity .4s'; t.style.opacity = '0'; }, 3600);
+      setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 4200);
+    } catch (e) { /* no-op */ }
+  }
+
+  // Summarize a /autofix or /fix outcome payload into a one-line toast.
+  function _naFixOutcomeMsg(j) {
+    if (!j) return {msg: 'No response from the fix agent.', warn: true};
+    if (j.filler_configured === false) {
+      return {msg: 'No auto-fix agent is configured ($VIVA_FILLER_CMD). '
+        + 'The fixes are queued for review in the discovery cycle.', warn: true};
+    }
+    var outs = j.outcomes || (j.outcome ? [j.outcome] : []);
+    var applied = outs.filter(function (o) { return o && o.outcome === 'applied'; }).length;
+    var queued = outs.filter(function (o) { return o && o.outcome === 'queued_for_review'; }).length;
+    var errs = outs.filter(function (o) { return o && o.outcome === 'error'; }).length;
+    if (!outs.length && j.found === false) return {msg: 'That item is no longer flagged.', warn: true};
+    return {msg: 'Auto-fix: ' + applied + ' applied, ' + queued + ' queued, ' + errs + ' error(s).',
+            warn: errs > 0 && applied === 0};
+  }
+
+  // "Run auto-fixes" — dispatch the safe (auto-gated) bridged fixes to the
+  // discovery-cycle filler / auditing agent, then re-scan so cleared items drop.
+  function _naRunAutoFix(btn) {
+    var name = (window._naFixSummary && window._naFixSummary.name) || window._currentIset;
+    if (!name) return;
+    var label = btn && btn.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = '… running'; }
+    apiFetch('POST', '/api/needs-attention/' + encodeURIComponent(name) + '/autofix', {})
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var o = _naFixOutcomeMsg(j); _naToast(o.msg, o.warn);
+        _renderInvNeedsAttention(name);
+      })
+      .catch(function () {
+        _naToast('Auto-fix failed to dispatch.', true);
+        if (btn) { btn.disabled = false; btn.textContent = label || '⚡ Run auto-fixes'; }
+      });
+  }
+  window._naRunAutoFix = _naRunAutoFix;
+
+  // Per-item "Fix with agent" — dispatch ONE needs-attention item (the click is
+  // the gate, so it fills even a normally review-gated kind), then re-scan.
+  function _naFixItem(btn) {
+    if (!btn) return;
+    var name = window._naFixName || window._currentIset;
+    var sk = btn.getAttribute('data-sk') || '';
+    var ref = btn.getAttribute('data-ref') || '';
+    if (!name) return;
+    var label = btn.textContent;
+    btn.disabled = true; btn.textContent = '… fixing';
+    apiFetch('POST', '/api/needs-attention/' + encodeURIComponent(name) + '/fix',
+             {scan_kind: sk, ref: ref})
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var o = _naFixOutcomeMsg(j); _naToast(o.msg, o.warn);
+        _renderInvNeedsAttention(name);
+      })
+      .catch(function () {
+        _naToast('Fix failed to dispatch.', true);
+        btn.disabled = false; btn.textContent = label || '🔧 Fix with agent';
+      });
+  }
+  window._naFixItem = _naFixItem;
 
   // "Run unblocked" — kick off every variant in the current investigation
   // whose required-before-run gates are satisfied. POSTs to start a
