@@ -5,6 +5,22 @@ panel/page, a workspace-data folder, and skills — **without editing core**. Pl
 are in-process Python packages, discovered via an entry-point, and run only when
 **opted in**. Design: [`docs/superpowers/specs/2026-11-23-workbench-plugin-system-design.md`](superpowers/specs/2026-11-23-workbench-plugin-system-design.md).
 
+## Quick start
+
+Scaffold a runnable plugin — router, a dockable panel, a test, and a README — in one
+command, then iterate:
+
+```bash
+vwb new-plugin my-feature            # writes ./viva-my-feature/
+cd viva-my-feature
+pip install -e ".[dev]" && pytest    # the generated plugin already passes its own test
+```
+
+Enable it for a workspace (add `plugins: [my-feature]` to its `workspace.yaml`),
+serve, and the **My Feature** panel appears in the left rail calling its `/ping`
+route. Then edit `viva_my_feature/api.py` (routes) and `static/panel.js` (panel).
+The sections below explain each part the scaffold generated.
+
 ## Anatomy
 
 A plugin is its own pip-installable package that declares one entry-point:

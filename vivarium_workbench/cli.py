@@ -1005,6 +1005,24 @@ def cmd_scaffold_workspace(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_new_plugin(args: argparse.Namespace) -> int:
+    """Scaffold a runnable workbench-plugin skeleton (a new repo's worth of files)."""
+    from vivarium_workbench.plugins.scaffold import scaffold_plugin
+
+    dest = Path(args.dest) if args.dest else Path.cwd() / f"viva-{args.name}"
+    try:
+        root = scaffold_plugin(dest, args.name)
+    except (ValueError, FileExistsError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    pkg = "viva_" + args.name.replace("-", "_")
+    print(f"scaffolded plugin {args.name!r} at {root}")
+    print(f"  cd {root} && pip install -e \".[dev]\" && pytest")
+    print(f"  then add `plugins: [{args.name}]` to a workspace's workspace.yaml")
+    print(f"  edit {pkg}/api.py (routes) and {pkg}/static/panel.js (panel); see docs/plugins.md")
+    return 0
+
+
 def cmd_catalog_add(args: argparse.Namespace) -> int:
     """Register a workspace in ``~/.pbg/workspaces.json`` so it appears in the
     dashboard's workspace switcher (idempotent). Wraps
@@ -1797,6 +1815,15 @@ def _build_parser(commands: "Sequence[Command] | None" = None) -> argparse.Argum
                                "(needs --registry); exit 1 on an error")
     p_centry.add_argument("--json", action="store_true", help="emit the entry and findings as JSON")
     p_centry.set_defaults(func=cmd_compose_entry)
+
+    p_newplug = sub.add_parser(
+        "new-plugin",
+        help="Scaffold a runnable workbench-plugin skeleton (router + panel + test + README)",
+    )
+    p_newplug.add_argument("name", help="url-safe plugin name, e.g. my-feature")
+    p_newplug.add_argument("--dest", default=None, metavar="DIR",
+                           help="target directory (default: ./viva-<name>)")
+    p_newplug.set_defaults(func=cmd_new_plugin)
 
     p_audit = sub.add_parser(
         "audit",
