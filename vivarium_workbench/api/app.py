@@ -700,6 +700,9 @@ def _add_route_like(app: FastAPI, route: object, provider: str) -> None:
     )
 
 
+from vivarium_workbench.plugins import load_plugins as _load_plugins
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="vivarium-workbench API",
@@ -732,14 +735,23 @@ def create_app() -> FastAPI:
     # Claude Code (Ask / Agent mode) reaches the workbench's tools through an MCP server mounted here, on the app's
     # own event loop (lib/claude_mcp.py). Mounted BEFORE the `/{rel:path}` catch-all so it is routed first; its
     # session manager must run for the lifetime of the app. Absent when the optional `mcp` package is not installed.
+    _inner_lifespan = app.router.lifespan_context
     _mcp = _claude_mcp.build()
     if _mcp is not None:
         app.mount(_claude_mcp.MOUNT, _mcp.asgi)
-        _inner_lifespan = app.router.lifespan_context
 
-        @contextlib.asynccontextmanager
-        async def _lifespan(a):
-            async with _inner_lifespan(a):
+    @contextlib.asynccontextmanager
+    async def _lifespan(a):
+        async with _inner_lifespan(a):
+            # Load enabled plugins at startup — now that the workspace root is set, so
+            # per-workspace `plugins:` opt-in is visible. Fail-soft inside load_plugins.
+            try:
+                from vivarium_workbench.lib import _root
+
+                _load_plugins(a, _root.get_workspace_root())
+            except Exception as exc:  # noqa: BLE001 - never let plugin loading break startup
+                logging.getLogger(__name__).warning("plugin loading failed: %s", exc)
+            if _mcp is not None:
                 async with _mcp.server.session_manager.run():
                     try:
                         yield
@@ -748,8 +760,10 @@ def create_app() -> FastAPI:
                         # a graceful stop waits for them.
                         _claude_mcp.shutdown()
                         await _claude_cli.shutdown()
+            else:
+                yield
 
-        app.router.lifespan_context = _lifespan
+    app.router.lifespan_context = _lifespan
 
     @app.middleware("http")
     async def _csrf_mw(request: Request, call_next):
