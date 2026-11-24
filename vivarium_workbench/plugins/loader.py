@@ -116,5 +116,12 @@ def load_plugins(
             log.warning("plugin %r failed to load: %s", getattr(p, "name", p), exc)
 
     app.state.plugin_contribs = contribs
+    # Union of plugin-declared AI exclusions, namespaced to each plugin's API base, for
+    # ai_tools.excluded_paths to honor (so a plugin can hide its own sensitive routes).
+    plugin_excl: set[str] = set()
+    for c in contribs:
+        for rel in getattr(c, "ai_excluded", None) or []:
+            plugin_excl.add(f"/api/plugins/{c.name}" + rel)
+    app.state.plugin_ai_excluded = frozenset(plugin_excl)
     _ensure_manifest_route(app)
     return contribs

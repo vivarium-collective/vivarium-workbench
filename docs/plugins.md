@@ -4,6 +4,23 @@ A plugin adds namespaced extensions to the workbench — a backend router, a rai
 panel/page, a workspace-data folder, and skills — **without editing core**. Plugins
 are in-process Python packages, discovered via an entry-point, and run only when
 **opted in**. Design: [`docs/superpowers/specs/2026-11-23-workbench-plugin-system-design.md`](superpowers/specs/2026-11-23-workbench-plugin-system-design.md).
+Where plugins live, naming, and the known-plugins list: [plugins-registry.md](plugins-registry.md).
+
+## Quick start
+
+Scaffold a runnable plugin — router, a dockable panel, a test, and a README — in one
+command, then iterate:
+
+```bash
+vwb new-plugin my-feature            # writes ./viva-my-feature/
+cd viva-my-feature
+pip install -e ".[dev]" && pytest    # the generated plugin already passes its own test
+```
+
+Enable it for a workspace (add `plugins: [my-feature]` to its `workspace.yaml`),
+serve, and the **My Feature** panel appears in the left rail calling its `/ping`
+route. Then edit `viva_my_feature/api.py` (routes) and `static/panel.js` (panel).
+The sections below explain each part the scaffold generated.
 
 ## Anatomy
 
@@ -65,6 +82,10 @@ window.KnowledgeGraphPanel = function (ctx) {
   // ctx.base    static asset base  ("/plugins/knowledge-layer/")
   // ctx.apiBase API base           ("/api/plugins/knowledge-layer")
   // ctx.api(path, opts) -> Promise<json>   fetch under apiBase
+  // ctx.host    stable host hooks (never reach for window globals):
+  //   ctx.host.dock               the shared VivPanelDock engine
+  //   ctx.host.refreshViews(slug) ask the workbench to refresh its views after
+  //                               your plugin changed workspace data
   ctx.api('/knowledge/graph').then(function (d) { ctx.el.innerHTML = render(d); });
 };
 ```

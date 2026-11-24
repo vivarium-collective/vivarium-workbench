@@ -33,6 +33,10 @@
   //   base     static asset base  ("/plugins/<name>/")
   //   apiBase  API base           ("/api/plugins/<name>")
   //   api(path, opts) -> Promise<json>  fetch under apiBase
+  //   host     stable host hooks, so a panel never reaches for window globals:
+  //     host.dock              the shared VivPanelDock engine
+  //     host.refreshViews(slug) ask the workbench to refresh its views after the
+  //                            plugin changed workspace data (no-op if unavailable)
   function panelContext(name, el) {
     var apiBase = '/api/plugins/' + name;
     return {
@@ -42,6 +46,14 @@
           if (!r.ok) throw new Error('plugin api ' + path + ' -> ' + r.status);
           return r.json();
         });
+      },
+      host: {
+        dock: global.VivPanelDock,
+        refreshViews: function (slug) {
+          if (typeof global._vivRefreshDiscoveryViews === 'function') {
+            try { global._vivRefreshDiscoveryViews(slug); } catch (e) { /* host refresh is best-effort */ }
+          }
+        },
       },
     };
   }

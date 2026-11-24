@@ -22,6 +22,8 @@ function el(tag) {
 const made = [];
 const injected = [];
 globalThis.VivPanelDock = { make(opts) { made.push(opts); return { open() {}, close() {} }; } };
+let refreshedWith = null;
+globalThis._vivRefreshDiscoveryViews = function (slug) { refreshedWith = slug; };
 let gotCtx = null;
 globalThis.ExampleHelloPanel = function (ctx) { gotCtx = ctx; };
 
@@ -73,5 +75,11 @@ const { loadPlugins } = require('../../vivarium_workbench/static/plugin-loader.j
   assert.strictEqual(gotCtx.name, 'example', 'ctx.name is the plugin name');
   assert.strictEqual(gotCtx.apiBase, '/api/plugins/example', 'ctx.apiBase is namespaced');
   assert.strictEqual(typeof gotCtx.api, 'function', 'ctx.api is a fetch helper');
+  // ctx.host: stable host hooks a panel can call without reaching for window globals
+  assert.ok(gotCtx.host && typeof gotCtx.host === 'object', 'ctx.host is provided');
+  assert.strictEqual(gotCtx.host.dock, globalThis.VivPanelDock, 'ctx.host.dock is the dock engine');
+  assert.strictEqual(typeof gotCtx.host.refreshViews, 'function', 'ctx.host.refreshViews is a function');
+  gotCtx.host.refreshViews('inv-1');
+  assert.strictEqual(refreshedWith, 'inv-1', 'refreshViews forwards to the host refresh hook');
   console.log('ok test_plugin_loader');
 })().catch((e) => { console.error(e); process.exit(1); });

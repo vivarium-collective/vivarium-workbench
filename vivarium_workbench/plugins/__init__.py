@@ -24,13 +24,14 @@ __all__ = [
     "discover_plugins",
     "enabled_plugin_names",
     "select_enabled",
+    "plugin_status",
     "load_plugins",
     "build_manifest",
 ]
 
 
 def __getattr__(name: str):  # pragma: no cover - thin lazy facade
-    if name in ("discover_plugins", "enabled_plugin_names", "select_enabled"):
+    if name in ("discover_plugins", "enabled_plugin_names", "select_enabled", "plugin_status"):
         from vivarium_workbench.plugins import discovery
 
         return getattr(discovery, name)
