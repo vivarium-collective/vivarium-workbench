@@ -3728,7 +3728,7 @@ dependencies = [
 
 [[package]]
 name = "vivarium-workbench"
-version = "0.5.8"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "bigraph-schema" },
@@ -3850,7 +3850,7 @@ plugins = [{ name = "vivarium-workbench-vivaapi", editable = "packages/vivarium-
 
 [[package]]
 name = "vivarium-workbench-vivaapi"
-version = "0.5.8"
+version = "0.6.0"
 source = { editable = "packages/vivarium-workbench-vivaapi" }
 dependencies = [
     { name = "boto3" },
