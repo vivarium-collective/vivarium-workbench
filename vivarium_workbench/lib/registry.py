@@ -307,20 +307,39 @@ def _annotate_use_counts(data: dict, ws_root: "Path") -> None:
     except Exception:
         pass
 
+    # Pre-tokenize each text ONCE into a word set. A process name can only match
+    # (as a \b-bounded word, or as the tail component of its dotted address) if it
+    # appears as a token in the text — so gate the expensive substring/regex scan
+    # on a cheap set-membership test. Turns O(procs x files x filesize) into
+    # O(files x filesize) tokenize + O(procs x files) lookups, with identical
+    # counts. On a large registry (v2ecoli: hundreds of procs x hundreds of files)
+    # this is the difference between the catalog build finishing in seconds vs
+    # pinning a CPU for minutes on every load.
+    _wsets_comp = [set(_re.findall(r"\w+", t)) for t in composite_texts]
+    _wsets_study = [set(_re.findall(r"\w+", t)) for t in study_texts]
     for p in procs:
         addr = (p.get("address") or "")
         cname = addr.rsplit(".", 1)[-1] if addr else (p.get("name") or "")
         namere = _re.compile(r"\b" + _re.escape(cname) + r"\b") if cname else None
+        # The gate is only valid when cname is a single word token (it would then
+        # tokenize identically to how it appears in the text). A multi-word name
+        # splits into several tokens, so fall back to the full scan for it.
+        cgate = bool(cname) and _re.fullmatch(r"\w+", cname) is not None
 
-        def _count(texts):
+        def _count(texts, wsets):
             n = 0
-            for txt in texts:
+            for txt, ws in zip(texts, wsets):
+                # cname is the tail of the dotted address and the \b-word we search
+                # for; if it is not even a token here, neither the regex nor the
+                # addr substring can match — skip the scan.
+                if cgate and cname not in ws:
+                    continue
                 if (addr and addr in txt) or (namere and namere.search(txt)):
                     n += 1
             return n
 
-        comp_uses = _count(composite_texts)
-        study_uses = _count(study_texts)
+        comp_uses = _count(composite_texts, _wsets_comp)
+        study_uses = _count(study_texts, _wsets_study)
         p["composite_uses"] = comp_uses
         p["study_uses"] = study_uses
         p["use_count"] = comp_uses + study_uses

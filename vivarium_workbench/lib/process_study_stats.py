@@ -82,7 +82,11 @@ def process_study_stats(ws_root, procs) -> "dict[str, dict]":
     for p in procs:
         addr = p.get("address") or ""
         cname = addr.rsplit(".", 1)[-1] if addr else (p.get("name") or "")
-        matchers.append((addr, re.compile(r"\b" + re.escape(cname) + r"\b") if cname else None))
+        # cgate: only gate the scan when cname is a single word token (so it
+        # tokenizes identically to its appearance in the text); a multi-word name
+        # falls back to the full scan.
+        cgate = bool(cname) and re.fullmatch(r"\w+", cname) is not None
+        matchers.append((addr, re.compile(r"\b" + re.escape(cname) + r"\b") if cname else None, cname, cgate))
 
     # Which processes a given composite-file text references (memoized by text id).
     _cache: dict[int, "set[str]"] = {}
@@ -92,8 +96,15 @@ def process_study_stats(ws_root, procs) -> "dict[str, dict]":
         hit = _cache.get(key)
         if hit is not None:
             return hit
+        # Gate the per-process scan on a one-time tokenization of this text: a
+        # process can match only if its class name is a token here (it is both the
+        # \b-word searched for and the tail of the dotted address), so the cheap
+        # set lookup rules out almost every (process, text) pair without a scan.
+        words = set(re.findall(r"\w+", txt))
         found: set[str] = set()
-        for addr, namere in matchers:
+        for addr, namere, cname, cgate in matchers:
+            if cgate and cname not in words:
+                continue
             if (addr and addr in txt) or (namere and namere.search(txt)):
                 if addr:
                     found.add(addr)
