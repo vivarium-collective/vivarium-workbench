@@ -427,6 +427,8 @@ class _FakeComposeSession:
     entries, or ``environments()`` raising ``fail``. Both sides run the real compose environment check against it,
     so nothing is asked over the network."""
 
+    tokens = None  # anonymous, as ComposeSession is with no credential source
+
     def __init__(self, fail=None):
         self.fail = fail
 

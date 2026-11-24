@@ -7,7 +7,7 @@ Two kinds of evidence, kept apart:
   production run's results, and the environment's real interface manifest. Address form, the manifest check and
   landing are tested against these, so they check the workbench against what compose-api and its runners produce.
 * **Transport** over a real workbench server, against ``VivaV1Stub`` generated from compose-api's OpenAPI
-  (``tests/_contracts/compose_api_openapi_0.7.72.json``, the spec shipped in the locked client). These prove the
+  (``tests/_contracts/compose_api_openapi_0.7.100.json``, the spec shipped in the locked client). These prove the
   requests the workbench sends are ones the contract accepts and that the UI routes wire through. They do NOT
   prove a deployment runs the document: only a real run does (the PR's live run against compose.cam.uchc.edu).
 """
@@ -19,6 +19,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -31,7 +32,7 @@ from vivarium_workbench.lib.remote_run_landing import land_composite_results
 
 HERE = Path(__file__).parent
 FIX = HERE / "_fixtures" / "compose_api"
-SPEC_PATH = HERE / "_contracts" / "compose_api_openapi_0.7.72.json"
+SPEC_PATH = HERE / "_contracts" / "compose_api_openapi_0.7.100.json"
 FIXTURE_WS = HERE / "_fixtures" / "ws_increase_demo"
 COMPOSITE = "pbg_ws_increase_demo.composites.increase-demo"
 SIM_ID = 4706
@@ -250,7 +251,10 @@ def test_the_import_form_keeps_writing_what_it_always_wrote_for_a_value_json_has
 def _no_ambient_logins(tmp_path, monkeypatch):
     home = tmp_path / "no-login-home"
     home.mkdir()
-    for k in ("GH_TOKEN", "GITHUB_TOKEN", rc.TOKEN_ENV_VAR):
+    # The compose-api CLI's profile settings and config/state directories too (they derive from HOME once the XDG
+    # overrides are gone): a developer's own profile or login must not decide what these tests send.
+    for k in ("GH_TOKEN", "GITHUB_TOKEN", rc.TOKEN_ENV_VAR, "XDG_CONFIG_HOME", "XDG_STATE_HOME",
+              *[k for k in os.environ if k.startswith("COMPOSE_API_CLI_")]):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.fail.Keyring")
@@ -304,7 +308,7 @@ def test_a_named_compose_api_is_detected_and_reported(ws, stub, backend_env, das
     _name(backend_env, stub.url)
     cfg = dashboard_client(ws).get("/api/remote-run-config").json()
     assert cfg["backend"]["dispatch"] == "compose-api"
-    assert cfg["backend"]["version"] == "0.7.72"
+    assert cfg["backend"]["version"] == "0.7.100"
 
 
 def test_without_a_named_backend_compose_api_is_never_asked(ws, stub, backend_env, dashboard_client):
@@ -550,7 +554,7 @@ def _summary(simulation_id: int) -> dict:
 def test_the_trace_of_a_compose_run_is_served_whichever_id_the_ui_sends(ws, stub, backend_env, dashboard_client,
                                                                        key):
     """The run panel sends ``simulation_id=compose-N`` (perfetto-open.js); both ids reach compose-api's trace."""
-    # The shape production serves (checked on simulation 5337): the 0.7.72 contract requires all three keys.
+    # The shape production serves (checked on simulation 5337): the 0.7.100 contract requires all three keys.
     trace = {"traceEvents": [{"name": "job", "ph": "X", "ts": 0, "dur": 5, "pid": 1, "tid": 1}],
              "displayTimeUnit": "ms", "otherData": {"source": "compose-api", "simulation_id": str(SIM_ID)}}
     stub.respond("GET", "/results/simulation/trace/chrome", 200, trace)
@@ -1132,7 +1136,11 @@ def test_the_401_names_the_token_without_the_clients_own_cli_advice(ws, stub, ba
     stub.respond_error("POST", "/simulation/run", 401, {"detail": "Creating an environment needs a signed-in caller"})
     anonymous = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
     assert anonymous.status_code == 401
-    assert anonymous.json()["error"] == f"compose-api needs a signed-in caller: set {rc.TOKEN_ENV_VAR}"
+    # the workbench's own advice and none of the client's words, which would speak of credentials never sent (no
+    # login can be: the CLI's default profile, production, is not this backend); the advice: the signing-in tests below
+    error = anonymous.json()["error"]
+    assert error.startswith("compose-api needs a signed-in caller: ") and rc.TOKEN_ENV_VAR in error, error
+    assert "credentials" not in error, error
 
     backend_env.setenv(rc.TOKEN_ENV_VAR, "token-for-test")
     rejected = dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}})
@@ -1261,3 +1269,293 @@ def test_a_run_that_names_no_workspace_file_is_still_sent_as_the_document_alone(
     assert dashboard_client(ws).post("/api/study-run-baseline", json={"study": "demo", "overrides": {}}).status_code == 202
     (call,) = stub.calls_to("run-simulation")
     assert isinstance(json.loads(call.body["uploaded_file"]), dict), "a .pbg, as before"
+
+
+# --- signing in as the person who ran `compose-api auth login` (docs/backend-compose-api.md, "Signing in") ---------
+#
+# The profile is a real `[profiles.<name>]` table in the compose-api CLI's own config file (under the test's HOME),
+# resolved by the client's own `load_profile`. The login is a real `SessionRecord`, committed through the client's
+# journaled `AuthSession` as `compose-api auth login` commits one. Only the OS keychain is replaced: the client's
+# `storage.open_persistent_store` returns `_Keychain`, whole records by binding as the keychain holds them. It is not
+# the client's `MemoryCredentialStore`, so the client keeps its session state on disk (under the test's HOME) as it
+# does beside the real keychain. Everything between runs for real: the routes (in-process, so the replacement reaches
+# them), `signed_in_session`, the profile-to-backend match, the stored session and its on-disk state, and the HTTP
+# call to the contract stub, which records the Authorization header it received.
+# The profiles' Auth0 domain cannot resolve, so any call to Auth0 would fail the test: a valid login needs none.
+
+AUTH0_NOWHERE = "auth0.workbench-test.invalid"
+CANCELLED = {"simulation_id": SIM_ID, "withdrawn": False, "slurm_job_id": 4286252}
+
+
+@pytest.fixture
+def cli_auth():
+    return pytest.importorskip("compose_api_client.auth", reason="needs the compose-api-signin extra (in [dev])")
+
+
+def _cli_profile(name: str, api_base_url: str):
+    """``[profiles.<name>]`` in the compose-api CLI's config file, read back through the client's profile resolution."""
+    from compose_api_client.profiles import default_config_path, load_profile
+
+    path = default_config_path()
+    assert Path(os.environ["HOME"]) in path.parents, f"{path} is not under the test's HOME"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(f'[profiles.{name}]\napi_base_url = "{api_base_url}"\nauth0_domain = "{AUTH0_NOWHERE}"\n'
+                f'auth0_audience = "https://{name}.workbench-test.invalid"\nauth0_client_id = "workbench-{name}"\n')
+    path.chmod(0o600)  # the CLI refuses a config file others can write
+    return load_profile(name).settings
+
+
+def _login(profile, store, *, renewable: bool = True) -> str:
+    """What `compose-api auth login` leaves for ``profile`` in ``store``: a grant committed through the client's
+    journaled ``AuthSession``. Returns its access token."""
+    import asyncio
+    import secrets
+    from datetime import UTC, datetime, timedelta
+
+    from compose_api_client.auth import AuthSession, Identity, TokenGrant
+    from compose_api_client.profiles import requested_scopes
+    from pydantic import SecretStr
+
+    now = datetime.now(UTC)
+    token = f"access-{profile.profile}-{secrets.token_hex(8)}"
+    grant = TokenGrant(identity=Identity(issuer=profile.issuer, subject=f"auth0|{profile.profile}-tester"),
+                       access_token=SecretStr(token), access_token_expires_at=now + timedelta(hours=1),
+                       refresh_token=SecretStr(secrets.token_hex(8)) if renewable else None,
+                       scopes=requested_scopes(persistent=True),
+                       received_at=now)
+
+    async def commit() -> None:
+        session = AuthSession(profile, store)
+        async with session.login_transaction() as snapshot:
+            await session.commit(grant, snapshot)
+
+    asyncio.run(commit())
+    return token
+
+
+class _Keychain:
+    """The OS keychain, stood in for: one whole record per binding, checked on save as the client's keychain store
+    checks it."""
+
+    def __init__(self):
+        self.records: dict = {}
+
+    def load(self, binding_key):
+        return self.records.get(binding_key)
+
+    def save(self, binding_key, record):
+        from compose_api_client.auth.storage import validate_record
+
+        validate_record(binding_key, record)
+        self.records[binding_key] = record
+
+    def delete(self, binding_key):
+        return self.records.pop(binding_key, None) is not None
+
+
+def _replace_keychain(monkeypatch, store) -> list:
+    """The OS credential store, replaced by ``store``. Returns the profile it is opened for, each time."""
+    from compose_api_client.auth import storage
+
+    opened: list = []
+
+    def open_persistent_store(settings, *, check=True, writable=True):
+        opened.append(settings.profile)
+        return store
+
+    monkeypatch.setattr(storage, "open_persistent_store", open_persistent_store)
+    return opened
+
+
+def _bearer(call) -> "str | None":
+    return {k.lower(): v for k, v in (call.headers or {}).items()}.get("authorization")
+
+
+def _signed_in_backend(stub, backend_env, ws) -> None:
+    """compose-api named, with a workspace whose environment compose-api infers (so the preflight says signed_in)."""
+    _live_registry(stub)
+    _with_origin(ws, BASIC_REMOTE)
+    _name(backend_env, stub.url, environment=None)
+
+
+def test_a_cli_login_signs_the_workbench_in_when_its_profile_is_the_named_backend(ws, stub, backend_env,
+                                                                                  inproc_client, cli_auth):
+    """Falsifies: the workbench calls anonymously, or with another credential, when the person signed in with the
+    compose-api CLI on the profile COMPOSE_API_CLI_PROFILE selects and that profile's API is the named backend.
+    Without the change no request carries an Authorization header."""
+    store = _Keychain()
+    token = _login(_cli_profile("lab", stub.url), store)
+    opened = _replace_keychain(backend_env, store)
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    _signed_in_backend(stub, backend_env, ws)
+    stub.respond("DELETE", "/simulations/{simulation_id}", 202, CANCELLED)
+    c = inproc_client(ws)
+
+    res = c.post("/api/remote-run-cancel", json={"simulation_id": RUN_ID})
+    assert res.status_code == 200, res.text
+    (call,) = stub.calls_to("cancel-simulation")
+    assert _bearer(call) == f"Bearer {token}"
+
+    pre = c.get("/api/remote-dispatch-preflight").json()
+    assert (pre["ok"], pre["reason"], pre["signed_in"]) == (True, "inferred", True), pre
+    assert "auth login" not in pre["message"] and rc.TOKEN_ENV_VAR not in pre["message"]
+    # the registry reads are signed in too (compose-api lists a private repository's entries only to its role)
+    assert {_bearer(x) for x in stub.calls_to("list-registry-entries")} == {f"Bearer {token}"}
+    assert opened and set(opened) == {"lab"}, "the store of the profile COMPOSE_API_CLI_PROFILE names, and no other"
+    from compose_api_client.auth.state import user_state_path
+
+    sessions = user_state_path("compose-api") / "sessions"  # the client's on-disk session state, beside the keychain
+    assert Path(os.environ["HOME"]) in sessions.parents and any(sessions.iterdir()), sessions
+
+
+def test_compose_api_token_comes_before_a_cli_login_and_the_store_is_not_opened(ws, stub, backend_env,
+                                                                               inproc_client, cli_auth):
+    """Falsifies: a stored CLI login overrides COMPOSE_API_TOKEN, or is even read while the token is set."""
+    store = _Keychain()
+    _login(_cli_profile("lab", stub.url), store)
+    opened = _replace_keychain(backend_env, store)
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    backend_env.setenv(rc.TOKEN_ENV_VAR, "token-from-the-environment")
+    _signed_in_backend(stub, backend_env, ws)
+    stub.respond("DELETE", "/simulations/{simulation_id}", 202, CANCELLED)
+
+    res = inproc_client(ws).post("/api/remote-run-cancel", json={"simulation_id": RUN_ID})
+    assert res.status_code == 200, res.text
+    (call,) = stub.calls_to("cancel-simulation")
+    assert _bearer(call) == "Bearer token-from-the-environment"
+    assert opened == []
+
+
+def test_a_login_goes_only_to_its_profiles_api_and_the_401_says_which_profile(ws, stub, backend_env, inproc_client,
+                                                                              cli_auth):
+    """Falsifies: the workbench sends a profile's login to a backend that is not that profile's API; it picks a
+    profile by URL (a signed-in `lab` profile for this backend exists, but the CLI's default profile is
+    `production`); and its 401 does not say why the call was anonymous or how to change that."""
+    store = _Keychain()
+    production = cli_auth.load_profile().settings
+    assert production.profile == "production" and not production.matches_url(stub.url)
+    _login(production, store)
+    _login(_cli_profile("lab", stub.url), store)
+    opened = _replace_keychain(backend_env, store)
+    _signed_in_backend(stub, backend_env, ws)
+    stub.respond("DELETE", "/simulations/{simulation_id}", 401, {"detail": "Cancelling a simulation needs a signed-in caller"})
+
+    res = inproc_client(ws).post("/api/remote-run-cancel", json={"simulation_id": RUN_ID})
+    assert res.status_code == 401, res.text
+    (call,) = stub.calls_to("cancel-simulation")
+    assert _bearer(call) is None
+    assert opened == [], "another API's profile: its store is not even opened"
+    error = res.json()["error"]
+    assert error.startswith("compose-api needs a signed-in caller: the compose-api CLI's profile 'production' is for "
+                            f"{production.api_base_url}, not this backend ({stub.url})"), error
+    assert "COMPOSE_API_CLI_PROFILE" in error and rc.TOKEN_ENV_VAR in error
+
+
+class _LockedKeychain:
+    """A credential store that cannot be read: what the client's keychain store raises for a locked keychain."""
+
+    def load(self, binding_key):
+        from compose_api_client.ext import StorageError
+
+        raise StorageError("OS credential store is unavailable or locked; unlock it and retry")
+
+    def save(self, binding_key, record):
+        raise AssertionError("not reached: load fails first")
+
+    def delete(self, binding_key):
+        raise AssertionError("not reached: load fails first")
+
+
+@pytest.mark.parametrize("problem, says", [
+    ("no such profile", "profile 'nosuch' (env COMPOSE_API_CLI_PROFILE) is not built in"),
+    ("blank token", f"{rc.TOKEN_ENV_VAR} must not be empty"),
+    ("locked keychain", "OS credential store is unavailable or locked"),
+])
+def test_a_sign_in_this_host_cannot_set_up_is_a_409_and_never_an_anonymous_call(ws, stub, backend_env,
+                                                                               inproc_client, cli_auth, problem, says):
+    """Falsifies: a sign-in the host cannot set up (a profile that does not exist; a set but blank COMPOSE_API_TOKEN
+    where the CLI's profile is this backend's, with or without a stored login: none is stored here; a credential store
+    that cannot be read) is sent anonymously, or reported as compose-api's own error (502)."""
+    _cli_profile("lab", stub.url)
+    _replace_keychain(backend_env, _LockedKeychain() if problem == "locked keychain" else _Keychain())
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "nosuch" if problem == "no such profile" else "lab")
+    if problem == "blank token":
+        backend_env.setenv(rc.TOKEN_ENV_VAR, "")
+    _signed_in_backend(stub, backend_env, ws)
+
+    res = inproc_client(ws).post("/api/remote-run-cancel", json={"simulation_id": RUN_ID})
+    assert res.status_code == 409, res.text
+    assert res.json()["reason"] == "sign-in-setup"
+    assert res.json()["error"].startswith("the workbench cannot sign in to compose-api: ") and says in res.json()["error"]
+    assert stub.calls_to("cancel-simulation") == []
+
+
+def test_without_the_extra_only_compose_api_token_signs_a_call_in(ws, stub, backend_env, inproc_client, cli_auth):
+    """Falsifies: without the compose-api-signin extra (its import blocked here, as an install without the client's
+    [auth] dependencies fails it) the workbench reads a CLI login, fails, or stops sending COMPOSE_API_TOKEN; and its
+    401 does not name the extra."""
+    store = _Keychain()
+    _login(_cli_profile("lab", stub.url), store)
+    opened = _replace_keychain(backend_env, store)
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    backend_env.setitem(sys.modules, "compose_api_client.auth", None)
+    with pytest.raises(ImportError):
+        import compose_api_client.auth  # noqa: F401
+    _signed_in_backend(stub, backend_env, ws)
+    stub.respond("DELETE", "/simulations/{simulation_id}", 401, {"detail": "Cancelling a simulation needs a signed-in caller"})
+    c = inproc_client(ws)
+
+    anonymous = c.post("/api/remote-run-cancel", json={"simulation_id": RUN_ID})
+    assert anonymous.status_code == 401, anonymous.text
+    assert anonymous.json()["error"] == (f"compose-api needs a signed-in caller: set {rc.TOKEN_ENV_VAR}, or install "
+                                         "vivarium-workbench[compose-api-signin] and sign in with `compose-api auth login`")
+    assert c.get("/api/remote-dispatch-preflight").json()["signed_in"] is False
+
+    backend_env.setenv(rc.TOKEN_ENV_VAR, "token-for-test")
+    stub.respond("DELETE", "/simulations/{simulation_id}", 202, CANCELLED)
+    assert c.post("/api/remote-run-cancel", json={"simulation_id": RUN_ID}).status_code == 200
+    assert [_bearer(x) for x in stub.calls_to("cancel-simulation")] == [None, "Bearer token-for-test"]
+    assert opened == []
+
+
+def test_with_no_login_for_this_backends_profile_a_call_is_anonymous_and_says_how_to_sign_in(ws, stub, backend_env,
+                                                                                             inproc_client, cli_auth):
+    """Falsifies: with the extra and a CLI profile for this backend but no login stored, the workbench sends a
+    credential, fails, or reports itself signed in; or its 401 and preflight do not say how to sign in."""
+    _cli_profile("lab", stub.url)
+    opened = _replace_keychain(backend_env, _Keychain())
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    _signed_in_backend(stub, backend_env, ws)
+    stub.respond("DELETE", "/simulations/{simulation_id}", 401, {"detail": "Cancelling a simulation needs a signed-in caller"})
+    c = inproc_client(ws)
+
+    res = c.post("/api/remote-run-cancel", json={"simulation_id": RUN_ID})
+    assert res.status_code == 401, res.text
+    (call,) = stub.calls_to("cancel-simulation")
+    assert _bearer(call) is None
+    advice = (f"sign in, or sign in again, with `compose-api --profile lab auth login` (CLI profile 'lab', {stub.url}), "
+              f"or set {rc.TOKEN_ENV_VAR}")
+    assert res.json()["error"] == f"compose-api needs a signed-in caller: {advice}"
+    pre = c.get("/api/remote-dispatch-preflight").json()
+    assert pre["signed_in"] is False and f"({advice})" in pre["message"], pre
+    assert opened and set(opened) == {"lab"}
+
+
+def test_a_cli_login_compose_api_refuses_is_sent_and_the_401_says_to_sign_in_again(ws, stub, backend_env,
+                                                                                    inproc_client, cli_auth):
+    """Falsifies: the workbench does not send the CLI login it found, or answers a refused one with anything but a 401
+    that says to sign in again (here a login with no refresh token, so the client cannot renew it: no Auth0 call)."""
+    store = _Keychain()
+    token = _login(_cli_profile("lab", stub.url), store, renewable=False)
+    _replace_keychain(backend_env, store)
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    _signed_in_backend(stub, backend_env, ws)
+    stub.respond("DELETE", "/simulations/{simulation_id}", 401, {"detail": "Invalid bearer token"})
+
+    res = inproc_client(ws).post("/api/remote-run-cancel", json={"simulation_id": RUN_ID})
+    assert res.status_code == 401, res.text
+    assert [_bearer(x) for x in stub.calls_to("cancel-simulation")] == [f"Bearer {token}"], "sent once, not renewed"
+    assert res.json()["error"] == ("compose-api needs a signed-in caller: sign in, or sign in again, with "
+                                   f"`compose-api --profile lab auth login` (CLI profile 'lab', {stub.url}), or set "
+                                   f"{rc.TOKEN_ENV_VAR}")

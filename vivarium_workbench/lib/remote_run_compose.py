@@ -36,6 +36,8 @@ from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib.investigations import load_spec
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from compose_api_client.ext import ComposeSession
 
 RUN_ID_PREFIX = "compose-"
@@ -46,8 +48,11 @@ ENGINE_MODULE_ROOT = "process_bigraph"
 #: The emitter the compose mode adds to record the study (composite_runs.inject_emitter_for_declared_paths names
 #: it so); landing takes it by name when the composite has emitters of its own.
 STUDY_EMITTER = "user_emitter"
-#: compose-api's bearer token for calls that need a signed-in caller (cancel), as its own CLI reads it.
+#: compose-api's bearer token for calls that need a signed-in caller (cancel), as its own CLI reads it. When set, it
+#: signs every call in, ahead of a CLI sign-in (:func:`_session`).
 TOKEN_ENV_VAR = "COMPOSE_API_TOKEN"
+#: The workbench extra that signs calls in as the person who ran ``compose-api auth login`` (:func:`_session`).
+SIGNIN_EXTRA = "compose-api-signin"
 #: compose-api's bound on ``interval_time`` (``POST /simulation/run`` answers 400 above it).
 MAX_STEPS = 1000
 #: The prefix of the tag that names one dispatch, so a submission whose answer was lost can be found again.
@@ -112,8 +117,16 @@ def _text(value: object) -> "str | None":
 
 
 def _session(timeout: float = SESSION_TIMEOUT) -> "ComposeSession":
-    """A session on the named backend, signed in when ``COMPOSE_API_TOKEN`` is set (anonymous otherwise), each
-    request bounded by ``timeout`` seconds."""
+    """A session on the named backend, each request bounded by ``timeout`` seconds, carrying the first credential
+    that applies (docs/backend-compose-api.md, "Signing in"):
+
+    1. ``COMPOSE_API_TOKEN`` when it is set and not blank, sent to the named backend as it always was;
+    2. with the ``compose-api-signin`` extra, the login ``compose-api auth login`` stored for the CLI's profile
+       (``COMPOSE_API_CLI_PROFILE``, else ``production``), and only when that profile's ``api_base_url`` is the named
+       backend: the client's ``signed_in_session`` reads it from the OS credential store and renews it as the CLI
+       does. It reads the login on an event loop of its own, which the sync routes and the detached runner allow;
+    3. none (anonymous), which compose-api allows for everything but cancelling a run and building an environment.
+    """
     from compose_api_client.ext import ComposeSession, EnvironmentToken
 
     from vivarium_workbench.lib.backend_config import explicit_backend_base_url
@@ -122,8 +135,58 @@ def _session(timeout: float = SESSION_TIMEOUT) -> "ComposeSession":
     if base is None:
         raise ComposeDispatchError({"error": "this is a compose-api run, but no backend was named "
                                              "(serve --backend-base-url) to ask about it", "reason": "no-backend"}, 409)
-    tokens = EnvironmentToken() if os.environ.get(TOKEN_ENV_VAR, "").strip() else None
-    return ComposeSession(base, tokens=tokens, timeout=timeout)
+    if os.environ.get(TOKEN_ENV_VAR, "").strip():
+        return ComposeSession(base, tokens=EnvironmentToken(), timeout=timeout)
+    signed_in_session = _signed_in_session()
+    if signed_in_session is None:
+        return ComposeSession(base, tokens=None, timeout=timeout)
+    # The client's rules apply from here (_backend_error answers each): a CLI configuration it refuses is a ConfigError
+    # whichever backend is named (the profile is loaded before it is matched); a profile for another API gets no
+    # credential (an anonymous session); for this backend's profile, an unreadable credential store is a
+    # StorageError, and a set but blank COMPOSE_API_TOKEN a UsageError (the CLI's rule; without the extra, or for
+    # another API's profile, a blank token is still ignored).
+    return signed_in_session(url=base, timeout=timeout)
+
+
+def _signed_in_session() -> "Callable[..., ComposeSession] | None":
+    """``compose_api_client.auth.signed_in_session``, or None without the ``compose-api-signin`` extra: the client's
+    ``auth`` package imports its ``[auth]`` dependencies, and releases before 0.7.100 have no such function."""
+    try:
+        from compose_api_client.auth import signed_in_session
+    except ImportError:
+        return None
+    return signed_in_session
+
+
+def _carries_credential(session: "ComposeSession") -> bool:
+    """Whether the session's next request is signed in: what its credential source answers for it (the client's
+    ``TokenSource.current``, which each request asks first). For a stored login that reads the credential store, and
+    renews the login with Auth0 when it is about to expire, as the next request would."""
+    return session.tokens is not None and session.tokens.current() is not None
+
+
+def _sign_in_advice() -> str:
+    """How to sign this workbench's compose-api calls in, for an answer that says they are not
+    (docs/backend-compose-api.md, "Signing in"). It names the credential that applies: none without the extra, the
+    CLI profile's login (none stored, expired, or refused: all fixed by signing in) or another API's profile."""
+    if _signed_in_session() is None:
+        return (f"set {TOKEN_ENV_VAR}, or install vivarium-workbench[{SIGNIN_EXTRA}] and sign in with "
+                "`compose-api auth login`")
+    from compose_api_client.auth import load_profile
+    from compose_api_client.ext import ConfigError
+    from compose_api_client.profiles import PROFILE_ENV
+
+    try:
+        profile = load_profile().settings
+    except ConfigError as e:
+        return f"set {TOKEN_ENV_VAR}, or fix the compose-api CLI's configuration ({e})"
+    base = _named_base()
+    if profile.matches_url(base):
+        return (f"sign in, or sign in again, with `compose-api --profile {profile.profile} auth login` (CLI profile "
+                f"{profile.profile!r}, {profile.api_base_url}), or set {TOKEN_ENV_VAR}")
+    return (f"the compose-api CLI's profile {profile.profile!r} is for {profile.api_base_url}, not this backend "
+            f"({base}), so its login is not sent here; set {PROFILE_ENV} to a profile whose api_base_url is {base} and "
+            f"sign in with `compose-api --profile <that profile> auth login`, or set {TOKEN_ENV_VAR}")
 
 
 # -- which environment runs the workspace --------------------------------------------------------------------------
@@ -395,8 +458,18 @@ def workspace_files(document: dict, ws_root: Path) -> "tuple[dict, dict[str, Pat
 
 def _backend_error(e: Exception) -> tuple[dict, int]:
     """A route's answer for a compose-api call that failed. Only a network failure is "unreachable"; a signed-out
-    or refused caller is told so, and any other answer is compose-api's own error (still being polled)."""
-    from compose_api_client.ext import ApiError, AuthError, ForbiddenError, NetworkError, RateLimitedError
+    or refused caller is told so, a sign-in this host cannot set up is a 409 (``sign-in-setup``), and any other
+    answer is compose-api's own error (still being polled)."""
+    from compose_api_client.ext import (
+        ApiError,
+        AuthError,
+        ConfigError,
+        ForbiddenError,
+        NetworkError,
+        RateLimitedError,
+        StorageError,
+        UsageError,
+    )
 
     # An answer is checked before NetworkError: ServiceUnavailableError (502/503/504) and RateLimitedError (429) are
     # both NetworkErrors in the client's hierarchy, yet compose-api (or its proxy) did answer.
@@ -407,12 +480,19 @@ def _backend_error(e: Exception) -> tuple[dict, int]:
     if isinstance(e, NetworkError):
         return {"phase": "unreachable", "reachable": False, "reason": "backend unreachable", "error": str(e)}, 502
     if isinstance(e, AuthError):
-        # The client's own advice ("sign in again", auth0 settings) is for its CLI; a token here comes from the environment.
+        # The workbench's own advice, not the client's: which credential applies here, and how to give it one
+        # (_session). The client cannot say whether a CLI login was sent; when none was, its words ("rejected this
+        # session's credentials") would describe credentials that never left the machine.
         why = (f"compose-api rejected the token in {TOKEN_ENV_VAR} ({e})" if os.environ.get(TOKEN_ENV_VAR, "").strip()
-               else f"compose-api needs a signed-in caller: set {TOKEN_ENV_VAR}")
+               else f"compose-api needs a signed-in caller: {_sign_in_advice()}")
         return {"phase": "error", "reachable": True, "reason": "unauthenticated", "error": why}, 401
     if isinstance(e, ForbiddenError):
         return {"phase": "error", "reachable": True, "reason": "forbidden", "error": str(e)}, 403
+    if isinstance(e, (ConfigError, StorageError, UsageError)):
+        # Only signing in raises these here: the CLI's profile or config file, the OS credential store (a locked
+        # keychain is never read as "signed out"), or a blank COMPOSE_API_TOKEN. Nothing was sent.
+        return {"phase": "error", "reason": "sign-in-setup",
+                "error": f"the workbench cannot sign in to compose-api: {e}"}, 409
     return {"phase": "backend_error", "reachable": True, "reason": "backend error", "error": str(e)}, 502
 
 
@@ -548,10 +628,11 @@ def check_environment(ws_root: Path, *, timeout: float = SESSION_TIMEOUT) -> dic
     """The environment that runs this workspace (:func:`resolve_environment`), asked of compose-api in a session of its
     own whose requests wait at most ``timeout`` seconds. The readiness check (:func:`dispatch_preflight`) and the
     composite card's launch (``ComposeApiRuns.dispatch_composite``) both ask it, so they refuse the same workspaces.
+    ``signed_in`` says whether the session's calls carry a credential (:func:`_session`).
     Raises :class:`ComposeDispatchError` (409: a named environment compose-api lacks, or no backend named) and the
     client's ``CliError`` for a call that failed (:func:`_backend_error` reads it)."""
     with _session(timeout=timeout) as session:
-        return resolve_environment(session, Path(ws_root))
+        return {**resolve_environment(session, Path(ws_root)), "signed_in": _carries_credential(session)}
 
 
 def dispatch_preflight(ws_root: Path) -> dict:
@@ -570,7 +651,7 @@ def dispatch_preflight(ws_root: Path) -> dict:
         body, _ = _backend_error(e)
         return {**out, **body, "ok": False, "message": body["error"]}
     if env["name"] is None:
-        entry, signed_in = env["entry"], bool(os.environ.get(TOKEN_ENV_VAR, "").strip())
+        entry, signed_in = env["entry"], env["signed_in"]
         level = getattr(entry.level, "value", entry.level) if entry else None
         which = (f"compose-api has no prebuilt environment for this workspace (registry entry {entry.id!r}, "
                  f"level {level})" if entry else
@@ -581,7 +662,7 @@ def dispatch_preflight(ws_root: Path) -> dict:
                 "registry_entry": entry.id if entry else None, "registry_level": level, "signed_in": signed_in,
                 "message": f"{which}. It runs the composite in an environment that covers its classes, or builds "
                            "one from their registry entries' pinned commits: a build needs a signed-in caller"
-                           + ("" if signed_in else f" (set {TOKEN_ENV_VAR})")
+                           + ("" if signed_in else f" ({_sign_in_advice()})")
                            + ", and later runs reuse it. The checkout is not shipped, so nothing needs pushing."}
     return {**out, "ok": True, "reason": "environment", "environment": env["name"],
             "message": f"compose-api runs this workspace in environment {env['name']!r} ({env['image']}): "
@@ -920,7 +1001,7 @@ def progress(run_id: str) -> tuple[dict, int]:
 
 
 def cancel(run_id: str) -> tuple[dict, int]:
-    """``DELETE /simulations/{id}``: needs a signed-in caller (``COMPOSE_API_TOKEN``). 401/403/404/409 pass
+    """``DELETE /simulations/{id}``: needs a signed-in caller (:func:`_session`). 401/403/404/409 pass
     through; 502 only when compose-api is unreachable or failed."""
     from compose_api_client.ext import ApiError, CliError, NotFoundError
 

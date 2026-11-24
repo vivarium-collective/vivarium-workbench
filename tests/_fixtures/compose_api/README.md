@@ -12,8 +12,8 @@ workbench against what compose-api and its runners actually produce.
 | `environments.json`, `entries.json` | the registry's environments and entries | `GET /registry/environments`, `GET /registry/entries` on the same deployment |
 | `environments_0.7.76.json`, `entries_0.7.76.json` | the same two lists as production served them on 2026-10-30 (0.7.76): 62 entries, 4 environments (two of them mash-ups), and `viva-basic-processes`, an entry at level `tested`, pinned by commit (its `source` links `…/tree/<commit>`), that no environment bundles | `GET https://compose.cam.uchc.edu/registry/environments`, `GET https://compose.cam.uchc.edu/registry/entries`, saved byte for byte. The inferred-environment tests read these; the older pair is kept for the tests written against it |
 
-`../../_contracts/compose_api_openapi_0.7.72.json` is the `openapi.json` shipped in the locked `compose-api-client`
-(PyPI `compose-api-client` 0.7.72; production's 0.7.76 serves the same spec apart from `info.version` and compose-api's
+`../../_contracts/compose_api_openapi_0.7.100.json` is the `openapi.json` shipped in the locked `compose-api-client`
+(PyPI `compose-api-client` 0.7.100; production, at 0.7.100 on 2026-11-24, serves the same spec apart from compose-api's
 `format: binary` rewrite of its upload fields); `test_backend_dispatch_compose.py` fails when the two differ.
 
 The registry files above are the 2026-10-22 captures, kept as they are. On 2026-10-29 the live registry (0.7.76) had moved:

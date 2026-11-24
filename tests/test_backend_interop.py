@@ -38,7 +38,7 @@ from vivarium_workbench.lib import backend_config as bc
 HERE = Path(__file__).parent
 FIXTURE_WS = HERE / "_fixtures" / "ws_increase_demo"
 COMPOSITE = "pbg_ws_increase_demo.composites.increase-demo"
-COMPOSE_SPEC = json.loads((HERE / "_contracts" / "compose_api_openapi_0.7.72.json").read_text(encoding="utf-8"))
+COMPOSE_SPEC = json.loads((HERE / "_contracts" / "compose_api_openapi_0.7.100.json").read_text(encoding="utf-8"))
 CAPS_DOC = ["viva-v1-composites", "viva-v1-composites-documents", "viva-v1-jobs", "viva-v1-surface"]
 SMS_ECOLI = "https://github.com/CovertLabEcoli/sms-ecoli"
 SIM_ID = 4242

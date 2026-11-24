@@ -143,9 +143,11 @@ uv run vivarium-workbench serve --backend-base-url https://compose.cam.uchc.edu/
 Startup prints `backend dispatch: compose-api`. A study's runs then execute in the prebuilt image compose-api has
 registered for the workspace's repository, checked against that image's interface manifest before submission, or,
 with no such image, in an environment compose-api infers from the classes the composite names. They land back as
-study runs, and the Composites tab's remote run takes the same route. Cancelling needs `COMPOSE_API_TOKEN`. The
-contract, onboarding a new workspace, and what is not on compose-api yet are in
-[docs/backend-compose-api.md](docs/backend-compose-api.md).
+study runs, and the Composites tab's remote run takes the same route. Cancelling a run, and the first run that builds
+an environment, need a signed-in caller: install `vivarium-workbench[compose-api-signin]` and sign in once with
+`compose-api auth login` (compose-api's CLI), or set `COMPOSE_API_TOKEN`
+([Signing in](docs/backend-compose-api.md#signing-in)). The contract, onboarding a new workspace, and what is not on
+compose-api yet are in [docs/backend-compose-api.md](docs/backend-compose-api.md).
 
 ### Remote compute — viva-api backend
 
