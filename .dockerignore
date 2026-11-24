@@ -33,3 +33,9 @@ build
 # be stale/platform-mismatched.
 vivarium_workbench/loom/node_modules
 vivarium_workbench/loom/_dist
+
+# docs/backend-adapters.md step P4b: release build output (dist/core, dist/vivaapi, any dist-*) and the core-only
+# test venv (scripts/pytest_core_only.sh) never belong in the image. packages/ (the viva-api plugin) DOES: the image
+# installs it from this build context.
+dist*
+.venv-core

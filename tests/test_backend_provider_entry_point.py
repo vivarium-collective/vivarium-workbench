@@ -48,11 +48,21 @@ def mods(tmp_path, monkeypatch):
         sys.modules.pop(name, None)
 
 
-def _use(monkeypatch, *pairs: tuple[str, str], plugin_installed: bool = False) -> None:
+def _use(monkeypatch, *pairs: tuple[str, str]) -> None:
     eps = sorted((importlib.metadata.EntryPoint(name, value, GROUP) for name, value in pairs),
                  key=lambda ep: (ep.name, ep.value))
     monkeypatch.setattr(provider_mod, "_entry_points", lambda: eps)
-    monkeypatch.setattr(provider_mod, "_plugin_installed", lambda: plugin_installed)
+
+
+def _dist_eps(tmp_path: Path, dist_name: str, *pairs: tuple[str, str]) -> "list[importlib.metadata.EntryPoint]":
+    """Entry points declared by a throwaway installed distribution named ``dist_name`` (so ``ep.dist`` is set, as
+    for real installed metadata)."""
+    info = tmp_path / f"{dist_name.replace('-', '_')}-0.0.0.dist-info"
+    info.mkdir()
+    (info / "METADATA").write_text(f"Metadata-Version: 2.1\nName: {dist_name}\nVersion: 0.0.0\n")
+    (info / "entry_points.txt").write_text(f"[{GROUP}]\n" + "".join(f"{n} = {v}\n" for n, v in pairs))
+    dist = importlib.metadata.PathDistribution(info)
+    return sorted(dist.entry_points.select(group=GROUP), key=lambda ep: (ep.name, ep.value))
 
 
 _GOOD = """
@@ -69,13 +79,31 @@ _GOOD = """
 
 # --- the declaration ------------------------------------------------------------------------------------------------
 
-def test_pyproject_declares_the_group_and_the_installed_metadata_matches():
-    declared = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["entry-points"][GROUP]
-    assert declared == {"sms": "vivarium_workbench_sms.provider:PROVIDER"}
-    assert all(v.startswith(provider_mod._PLUGIN + ".") for v in declared.values())
-    installed = {ep.name: ep.value for ep in importlib.metadata.entry_points(group=GROUP)}
-    assert installed == declared, ("the installed metadata does not match pyproject.toml: a stale dev install; "
-                                   "re-run `uv sync`")
+MEMBER_PYPROJECT = ROOT / "packages" / "vivarium-workbench-vivaapi" / "pyproject.toml"
+
+
+def _member_declared() -> dict:
+    return tomllib.loads(MEMBER_PYPROJECT.read_text())["project"]["entry-points"][GROUP]
+
+
+def test_the_plugin_distribution_declares_the_group():
+    """Step P4b: the plugin's own pyproject declares the ``sms`` provider; the core's declares none."""
+    assert _member_declared() == {"sms": "vivarium_workbench_sms.provider:PROVIDER"}
+    assert GROUP not in tomllib.loads((ROOT / "pyproject.toml").read_text())["project"].get("entry-points", {})
+
+
+def test_the_installed_core_declares_no_provider():
+    """Catches a stale dev venv (core metadata from before P4b, not re-synced) in the suite itself."""
+    assert list(importlib.metadata.distribution("vivarium-workbench").entry_points.select(group=GROUP)) == [], (
+        "the installed vivarium-workbench metadata declares a backend provider: a stale install; re-run `uv sync`")
+
+
+@pytest.mark.plugin
+def test_the_installed_plugin_metadata_matches_its_pyproject():
+    installed = {ep.name: ep.value
+                 for ep in importlib.metadata.distribution("vivarium-workbench-vivaapi").entry_points.select(group=GROUP)}
+    assert installed == _member_declared(), ("the installed plugin metadata does not match its pyproject.toml: a "
+                                             "stale dev install; re-run `uv sync`")
 
 
 # --- absent and broken ----------------------------------------------------------------------------------------------
@@ -221,53 +249,69 @@ def test_conflicting_providers_refuse_at_start_up(monkeypatch, capsys, tmp_path)
 
 # --- a stale install ------------------------------------------------------------------------------------------------
 
-def test_the_plugin_package_with_no_entry_point_is_a_stale_install(monkeypatch):
-    _use(monkeypatch, plugin_installed=True)
-    with pytest.raises(ImportError, match="stale install"):
+@pytest.mark.parametrize("core_name", ["vivarium-workbench", "vivarium_workbench", "Vivarium.Workbench"])
+def test_an_entry_point_declared_by_the_core_distribution_is_a_stale_install(tmp_path, monkeypatch, mods, core_name):
+    """Step P4b: the core declares no provider, so core metadata that does predates the split (a dev venv not
+    re-synced, a ``pip install -e .`` made before it). Refused even though the named module still loads."""
+    mods(core_era_provider=_GOOD.format(name="sms", version=provider_mod.PROVIDER_API_VERSION))
+    eps = _dist_eps(tmp_path, core_name, ("sms", "core_era_provider:PROVIDER"))
+    monkeypatch.setattr(provider_mod, "_entry_points", lambda: eps)
+    with pytest.raises(ImportError, match="stale install") as exc:
         provider_mod.providers()
+    assert "vivarium-workbench[vivaapi]" in str(exc.value)
 
 
-def test_no_entry_point_and_no_plugin_is_no_provider(monkeypatch):
-    _use(monkeypatch, plugin_installed=False)
+def test_an_absent_plugin_distributions_entry_point_is_no_provider(tmp_path, monkeypatch):
+    """The plugin's own metadata naming a package that is not there (a hand-deleted plugin) is absent, not stale."""
+    eps = _dist_eps(tmp_path, "vivarium-workbench-vivaapi", ("sms", "no_such_plugin_pkg_xyz.provider:PROVIDER"))
+    monkeypatch.setattr(provider_mod, "_entry_points", lambda: eps)
     assert provider_mod.providers() == ()
 
 
-def _hides_the_plugin(finder) -> bool:
-    """A finder that makes the plugin unimportable (conftest's core-only finder, a sitecustomize one)."""
-    try:
-        finder.find_spec(provider_mod._PLUGIN, None)
-    except ImportError:
-        return True
-    except Exception:  # noqa: BLE001 -- not ours to judge
-        return False
-    return False
+def test_a_hand_built_entry_point_has_no_dist_and_is_not_stale(monkeypatch, mods):
+    mods(plain_provider=_GOOD.format(name="plain", version=provider_mod.PROVIDER_API_VERSION))
+    _use(monkeypatch, ("plain", "plain_provider:PROVIDER"))
+    assert [p.name for p in provider_mod.providers()] == ["plain"]
 
 
-def test_a_leftover_pycache_directory_is_not_the_plugin(tmp_path, monkeypatch):
-    """The core-only job (and a hand-deleted plugin) can leave ``vivarium_workbench_sms/__pycache__`` behind: a
-    namespace package, which must not count as a stale install."""
-    for name in [n for n in sys.modules if n == provider_mod._PLUGIN or n.startswith(provider_mod._PLUGIN + ".")]:
-        monkeypatch.delitem(sys.modules, name)
-    (tmp_path / provider_mod._PLUGIN / "__pycache__").mkdir(parents=True)
-    monkeypatch.setattr(sys, "meta_path", [f for f in sys.meta_path if not _hides_the_plugin(f)])
-    monkeypatch.setattr(sys, "path", [str(tmp_path)] + [p for p in sys.path if Path(p or ".").resolve() != ROOT])
+def test_no_entry_point_is_no_provider(monkeypatch):
+    _use(monkeypatch)
+    assert provider_mod.providers() == ()
+
+
+_LEFTOVER = "leftover_plugin_pkg_xyz"
+
+
+def test_a_leftover_pycache_directory_is_absent_not_broken(tmp_path, monkeypatch):
+    """A hand-deleted plugin can leave ``<package>/__pycache__`` behind: a namespace package, so loading
+    ``<package>.provider`` fails naming the submodule. It is absent (the package is not real), not broken."""
+    (tmp_path / _LEFTOVER / "__pycache__").mkdir(parents=True)
+    monkeypatch.syspath_prepend(str(tmp_path))
     importlib.invalidate_caches()
-    spec = importlib.util.find_spec(provider_mod._PLUGIN)
-    if spec is not None and spec.origin not in (None, "namespace"):
-        pytest.skip(f"the real plugin still resolves outside the repo root ({spec.origin})")
-    assert provider_mod._plugin_installed() is False
+    try:
+        assert provider_mod._real_package(_LEFTOVER) is False
+        e = ModuleNotFoundError(f"No module named '{_LEFTOVER}.provider'", name=f"{_LEFTOVER}.provider")
+        assert provider_mod._absent(e, f"{_LEFTOVER}.provider") is True
+        _use(monkeypatch, ("ghost", f"{_LEFTOVER}.provider:PROVIDER"))
+        assert provider_mod.providers() == ()
+    finally:
+        for name in [n for n in sys.modules if n == _LEFTOVER or n.startswith(_LEFTOVER + ".")]:
+            del sys.modules[name]
 
 
-def test_a_real_package_counts_as_the_plugin(tmp_path, monkeypatch):
-    for name in [n for n in sys.modules if n == provider_mod._PLUGIN or n.startswith(provider_mod._PLUGIN + ".")]:
-        monkeypatch.delitem(sys.modules, name)
-    pkg = tmp_path / provider_mod._PLUGIN
+def test_a_missing_submodule_of_a_real_package_is_broken(tmp_path, monkeypatch):
+    pkg = tmp_path / (_LEFTOVER + "_real")
     pkg.mkdir()
     (pkg / "__init__.py").write_text("")
-    monkeypatch.setattr(sys, "meta_path", [f for f in sys.meta_path if not _hides_the_plugin(f)])
-    monkeypatch.setattr(sys, "path", [str(tmp_path)] + sys.path)
+    monkeypatch.syspath_prepend(str(tmp_path))
     importlib.invalidate_caches()
-    assert provider_mod._plugin_installed() is True
+    try:
+        assert provider_mod._real_package(pkg.name) is True
+        e = ModuleNotFoundError(f"No module named '{pkg.name}.provider'", name=f"{pkg.name}.provider")
+        assert provider_mod._absent(e, f"{pkg.name}.provider") is False
+    finally:
+        for name in [n for n in sys.modules if n == pkg.name or n.startswith(pkg.name + ".")]:
+            del sys.modules[name]
 
 
 # --- the real thing -------------------------------------------------------------------------------------------------

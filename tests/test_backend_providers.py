@@ -91,10 +91,14 @@ def test_the_registry_hands_out_the_same_objects_even_under_concurrent_first_use
 def test_a_missing_dependency_inside_the_plugin_is_not_mistaken_for_no_plugin(monkeypatch):
     """Core: the loader tells a broken plugin from an absent one (runs core-only too: the stub raises before any real
     plugin import). Providers must be on for the loader to try (``PROVIDERS=none`` is the local "off" mode). The
-    registry loads the plugin through its entry point (step P4a), whose metadata stays installed in every mode."""
+    registry loads the plugin through its entry point (step P4a); since step P4b that metadata belongs to the plugin's
+    own distribution, absent from a core-only install, so the test supplies the entry point itself."""
+    import importlib.metadata
     import sys
 
     monkeypatch.delenv(provider_mod.PROVIDERS_ENV, raising=False)
+    ep = importlib.metadata.EntryPoint("sms", "vivarium_workbench_sms.provider:PROVIDER", provider_mod.ENTRY_POINT_GROUP)
+    monkeypatch.setattr(provider_mod, "_entry_points", lambda: [ep])
 
     class _Broken:
         def find_spec(self, fullname, path=None, target=None):

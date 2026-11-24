@@ -150,7 +150,7 @@ def test_the_refusal_through_the_route(ws, asked, inproc_client):
 # --- P3 I1 plugin pin ------------------------------------------------------------------------------------------------
 
 def test_the_plugins_cloud_dispatch_uses_the_core_prefix():
-    from pathlib import Path
+    from _plugin_paths import PLUGIN_DIR
 
-    src = (Path(__file__).resolve().parent.parent / "vivarium_workbench_sms" / "cloud_dispatch.py").read_text()
+    src = (PLUGIN_DIR / "cloud_dispatch.py").read_text()
     assert '"remote-sim-' not in src and "remote_run_id(sim_db_id)" in src

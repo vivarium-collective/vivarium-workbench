@@ -21,9 +21,31 @@ jobs:
           python-version: "3.11"
       - name: Install uv
         run: pip install uv
-      - name: Build (loom bundle required)
+      # docs/backend-adapters.md step P4b: two distributions, released in lockstep -- the core (vivarium-workbench)
+      # and the viva-api backend plugin (vivarium-workbench-vivaapi, packages/vivarium-workbench-vivaapi). Identical
+      # versions and `==` pins both ways; uv does not check those pins, so scripts/check_release.py does (the same
+      # checker as tests/test_lockstep_versions.py), against the tag, before anything is built.
+      - name: Lockstep guard (tag == both versions == both pins == uv.lock)
+        run: python scripts/check_release.py "${GITHUB_REF_NAME#v}"
+      # Into dist/core and dist/vivaapi (gitignored; the core sdist excludes /dist), never the repo root: the core
+      # sdist would otherwise swallow the plugin's build output. check_wheels.py asserts it did not.
+      - name: Build both (loom bundle required)
         env:
           VIVARIUM_WORKBENCH_REQUIRE_LOOM: "1"
-        run: uv build
-      - name: Publish to PyPI
+        run: |
+          uv build --package vivarium-workbench-vivaapi -o dist/vivaapi
+          uv build --package vivarium-workbench -o dist/core
+          python scripts/check_wheels.py dist/core dist/vivaapi
+      # The plugin FIRST: if its publish fails (e.g. no trusted publisher for vivarium-workbench-vivaapi yet), the
+      # core is never published, so a core whose [vivaapi] extra points at nothing cannot ship. skip-existing makes
+      # a re-run idempotent after a partial publish.
+      - name: Publish the plugin to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/vivaapi
+          skip-existing: true
+      - name: Publish the core to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/core
+          skip-existing: true

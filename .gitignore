@@ -52,8 +52,8 @@ tests/_fixtures/ws_increase_demo/.pbg/composite-state-cache/
 tests/_fixtures/ws_increase_demo/.pbg/registry-catalog/
 vivarium_workbench/loom/_dist_single
 
-# docs/backend-adapters.md step P4b: the SMS plugin lives in packages/vivarium-workbench-vivaapi/. A root copy
-# (even a leftover __pycache__) would import through the core's editable .pth and defeat the core-only install.
-/vivarium_workbench_sms/
-# scripts/pytest_core_only.sh's core-only venv.
+# scripts/pytest_core_only.sh's core-only venv (docs/backend-adapters.md step P4b).
 /.venv-core/
+# NOT ignored on purpose: /vivarium_workbench_sms/ (the plugin's pre-P4b root path). hatchling applies this file's
+# anchored patterns relative to the workspace member too, so it would empty the plugin's own wheel; a stray root
+# package is caught by tests/test_wheel_packages.py instead.

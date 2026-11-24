@@ -84,11 +84,18 @@ vivarium-workbench compose-entry --workspace /path/to/ws [--registry URL|FILE] [
 
 There is no separate build step (pure Python + static assets). Linting/typing is
 enforced in CI (`.github/workflows/types.yml`): `ruff check vivarium_workbench
-vivarium_workbench_sms vivarium_dashboard`, `mypy` on the typed modules, and `lint-imports` (import-linter)
-for the package-boundary allowlist — run them the same way locally, e.g.
-`uv run ruff check vivarium_workbench vivarium_workbench_sms vivarium_dashboard` and `uv run mypy`.
-Dependencies are managed with `uv` (`uv.lock`); install editable with
-`pip install -e .` (or `uv pip install -e .`) into the venv that will run it. Note `bigraph-loom`, `viva-superpowers` (formerly pbg-superpowers) and
+packages/vivarium-workbench-vivaapi/vivarium_workbench_sms vivarium_dashboard`, `mypy` on the typed modules, and
+`lint-imports` (import-linter) for the package-boundary allowlist — run them the same way locally, e.g.
+`uv run ruff check vivarium_workbench packages/vivarium-workbench-vivaapi/vivarium_workbench_sms vivarium_dashboard`
+and `uv run mypy`.
+Dependencies are managed with `uv` (`uv.lock`). The repo is a **uv workspace**: the root is the core
+(`vivarium-workbench`) and `packages/vivarium-workbench-vivaapi/` is the viva-api (SMS) backend plugin, its own
+distribution (import package `vivarium_workbench_sms`; docs/backend-adapters.md step P4b), released in lockstep
+(`scripts/set_version.sh`). A plain `uv sync` / `uv run` installs both (the `plugins` default group);
+`--no-group plugins` installs the core alone (`scripts/pytest_core_only.sh` runs the suite that way). With pip,
+install both editable into the venv that will run it: `pip install -e . -e packages/vivarium-workbench-vivaapi`
+(`pip install -e .` alone gets no SMS features). Published: `pip install 'vivarium-workbench[vivaapi]'`.
+Note `bigraph-loom`, `viva-superpowers` (formerly pbg-superpowers) and
 `discovery-engine` are direct git/path deps.
 
 ## Architecture

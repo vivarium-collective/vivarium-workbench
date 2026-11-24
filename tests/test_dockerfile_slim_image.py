@@ -135,3 +135,40 @@ def test_hosted_image_does_not_install_the_chat_extra() -> None:
             "Chat stays out of hosted images until the chat hardening (#1238, #1247) "
             "is merged, released and deployed."
         )
+
+
+def test_hosted_image_installs_the_viva_api_plugin_from_this_commit() -> None:
+    """The image keeps the viva-api (SMS) backend provider (docs/backend-adapters.md step P4b, decision D1).
+
+    Since P4b the plugin is its own distribution, vivarium-workbench-vivaapi, built from this repo's uv workspace
+    member. The image installs it from the same commit and lock with ``--extra vivaapi`` (not from PyPI, which would
+    race the release publish), so a hosted deployment never silently loses its SMS features.
+    """
+    joined = re.sub(r"\\\n", " ", "\n".join(_instructions()))
+    sync_line = next(ln for ln in joined.splitlines() if re.search(r"uv\s+sync\b", ln))
+    assert re.search(r"--extra[\s=]+vivaapi\b", sync_line), (
+        f"the image's `uv sync` must name `--extra vivaapi` (the viva-api backend plugin): {sync_line.strip()!r}"
+    )
+    assert not re.search(r"pip\s+install[^\n]*vivarium-workbench-vivaapi", joined), (
+        "the image must install the plugin from this commit's workspace, not from an index (D1)"
+    )
+
+
+def test_sanity_check_loads_exactly_the_sms_provider_at_the_core_version() -> None:
+    """The build fails if the plugin is missing, does not load, or is not the core's own (lockstep) version."""
+    body = _dockerfile()
+    assert "provider.providers()" in body and "assert [p.name for p in ps] == ['sms']" in body, (
+        "the build-time sanity check must assert the `sms` provider loads through the entry point"
+    )
+    assert "m.version('vivarium-workbench-vivaapi') == m.version('vivarium-workbench')" in body, (
+        "the build-time sanity check must assert the plugin and the core have the same version"
+    )
+
+
+def test_build_info_records_the_plugin_version() -> None:
+    """``/app/BUILD_INFO.json`` names the installed plugin version, read from its metadata in the same RUN."""
+    joined = re.sub(r"\\\n", " ", "\n".join(_instructions()))
+    writes = [ln for ln in joined.splitlines() if "> /app/BUILD_INFO.json" in ln]
+    assert len(writes) == 1, writes
+    assert '"plugins":{"vivarium-workbench-vivaapi":' in writes[0], writes[0]
+    assert "m.version('vivarium-workbench-vivaapi')" in writes[0], writes[0]

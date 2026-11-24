@@ -11,6 +11,11 @@
       "matchPackageNames": ["discovery-engine"],
       "groupName": "discovery-engine",
       "schedule": ["at any time"]
+    },
+    {
+      "description": "The core and the viva-api backend plugin are released in lockstep with == pins both ways (docs/backend-adapters.md step P4b; scripts/set_version.sh moves them). Never propose bumping those pins.",
+      "matchPackageNames": ["vivarium-workbench", "vivarium-workbench-vivaapi"],
+      "enabled": false
     }
   ]
 }

@@ -103,6 +103,10 @@ jobs:
             echo "pyproject.toml says ${PYPROJECT_VERSION}, dispatch asked for ${VERSION} -- these must match exactly" >&2
             exit 1
           fi
+          # docs/backend-adapters.md step P4b: the image installs the viva-api backend plugin from this same commit
+          # (packages/vivarium-workbench-vivaapi), released in lockstep with the core: both versions and both `==`
+          # pins must say VERSION, and uv.lock must agree.
+          python3 scripts/check_release.py "${VERSION}"
 
           TAG_SHA="$(git rev-list -n1 "v${VERSION}" 2>/dev/null || true)"
           if [[ -z "${TAG_SHA}" ]]; then

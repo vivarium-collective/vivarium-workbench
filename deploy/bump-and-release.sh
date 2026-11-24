@@ -23,7 +23,9 @@
 #   - the tag `v<version>` does not already exist on the remote
 #   - the ghcr tag `<version>` does not already exist
 #
-# On success: rewrites pyproject.toml, commits `chore: bump version to
+# On success: rewrites both pyprojects (the core and the viva-api backend
+# plugin, packages/vivarium-workbench-vivaapi -- lockstep versions and `==` pins,
+# via scripts/set_version.sh) and uv.lock, commits `chore: bump version to
 # <version>`, creates an ANNOTATED tag `v<version>`, pushes commit + tag, then
 # dispatches build-and-push.yml against that exact tag (not a branch, so the
 # image is provably built from the commit the tag points at) and prints the
@@ -92,9 +94,10 @@ fi
 echo "all guards passed: ${CURRENT_VERSION} -> ${VERSION}, clean main in sync with origin, tag and image both unused"
 
 # ─── bump, commit, tag, push ─────────────────────────────────────────────────
-sed -i.bak -E "s/^version = \"${CURRENT_VERSION}\"\$/version = \"${VERSION}\"/" "${PYPROJECT}"
-rm -f "${PYPROJECT}.bak"
-git -C "${ROOT_DIR}" add "${PYPROJECT}"
+# docs/backend-adapters.md step P4b: the core and the viva-api backend plugin are released in lockstep.
+# set_version.sh moves both versions and both `==` pins, re-locks, and runs scripts/check_release.py.
+"${ROOT_DIR}/scripts/set_version.sh" "${VERSION}"
+git -C "${ROOT_DIR}" add "${PYPROJECT}" "${ROOT_DIR}/packages/vivarium-workbench-vivaapi/pyproject.toml" "${ROOT_DIR}/uv.lock"
 git -C "${ROOT_DIR}" commit -m "chore: bump version to ${VERSION}"
 git -C "${ROOT_DIR}" tag -a "v${VERSION}" -m "v${VERSION}"
 git -C "${ROOT_DIR}" push origin main

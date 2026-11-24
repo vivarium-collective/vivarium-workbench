@@ -33,7 +33,10 @@ description = "Local dev environment: vivarium-workbench + v2ecoli + pbg-ptools 
 # this environment. The root project is not bound by it (>=3.11).
 requires-python = "==3.12.12"
 dependencies = [
-    "vivarium-workbench",
+    # [vivaapi]: the viva-api (SMS) backend provider, its own distribution since step P4b
+    # (docs/backend-adapters.md), so this environment keeps the SMS features (the smsvpctest tunnel workflow).
+    # The path source below is the repo's uv workspace root, so uv takes the plugin from the same checkout.
+    "vivarium-workbench[vivaapi]",
     "v2ecoli",
     "pbg-ptools",
 ]

@@ -35,3 +35,32 @@ jobs:
           fi
       - name: uv sync (locked, NOT frozen) + vwb smoke
         run: bash scripts/standalone_smoke.sh --in-place
+
+  wheels:
+    # docs/backend-adapters.md step P4b: build both distributions exactly as release.yml does and check what each
+    # ships (scripts/check_wheels.py), so a packaging regression fails here and not at tag time. It does not install
+    # the wheels: the core's bare git-only dependencies (viva-basic-processes etc.) are not on PyPI.
+    name: wheels (core + vivaapi plugin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12.12"
+    steps:
+      - uses: actions/checkout@v4
+      # The core's build hook (hatch_build.py) builds the vendored loom bundle; VIVARIUM_WORKBENCH_REQUIRE_LOOM=1
+      # makes a missing one an error, as on the publish path.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Lockstep versions
+        run: uv run --no-project python scripts/check_release.py
+      - name: Build both and check them
+        env:
+          VIVARIUM_WORKBENCH_REQUIRE_LOOM: "1"
+        run: |
+          uv build --package vivarium-workbench-vivaapi -o dist/vivaapi
+          uv build --package vivarium-workbench -o dist/core
+          uv run --no-project python scripts/check_wheels.py dist/core dist/vivaapi

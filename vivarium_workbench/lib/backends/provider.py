@@ -9,7 +9,7 @@ a provider object whose ``name`` equals the entry point's name and whose ``api_v
 :data:`PROVIDER_API_VERSION`. The core never imports a plugin by name (the import-linter contract has no exceptions).
 
 * An entry point whose top-level package is not installed (``ModuleNotFoundError`` naming it, or only a namespace
-  left by a ``__pycache__`` directory: the metadata outlived the code, as in the core-only CI job) is skipped: the
+  left by a ``__pycache__`` directory: the metadata outlived the code, e.g. a hand-deleted plugin) is skipped: the
   plugin is absent. A missing submodule of a present package is a broken plugin.
 * Anything else that fails to load raises: an ``ImportError`` (a missing dependency inside the plugin, a missing
   object), a :class:`ProviderVersionError`, a name mismatch, two entry points with one name; and, when the
@@ -17,8 +17,9 @@ a provider object whose ``name`` equals the entry point's name and whose ``api_v
   :class:`ProviderConflictError`. Other exceptions from the plugin's import (``SyntaxError``, ``RuntimeError``)
   propagate unchanged. An installed plugin must never look absent; the CLI and the server report these as "the
   backend plugin failed to load" and exit.
-* The in-tree plugin's package present with no entry point naming it is a stale install (an editable install made
-  before P4a) and raises (until step P4b, which splits the plugin into its own distribution).
+* An entry point declared by the ``vivarium-workbench`` distribution itself is a stale install and raises: since
+  step P4b the core declares none (the SMS plugin is its own distribution, ``vivarium-workbench-vivaapi``), so core
+  metadata that still does predates the split (a dev venv not re-synced, a ``pip install -e .`` made before it).
 
 ``VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none`` turns providers off -- the core then ignores every provider when
 selecting, probing and routing (step P3's core-only CI job uses it), whether or not one is installed.
@@ -29,6 +30,7 @@ from __future__ import annotations
 import importlib.metadata
 import importlib.util
 import os
+import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,8 +53,8 @@ ENTRY_POINT_GROUP = "vivarium_workbench.backends"
 #: The provider interface's major version. Bump it only when the Protocol changes incompatibly; a provider declares
 #: the version it targets as a literal ``api_version`` and is refused at start-up when the two differ.
 PROVIDER_API_VERSION = 1
-#: The in-tree plugin's package, named only by the stale-install check (removed at step P4b).
-_PLUGIN = "vivarium_workbench_sms"
+#: The core's own distribution. Since step P4b it declares no provider: if its metadata does, the install is stale.
+_CORE_DIST = "vivarium-workbench"
 
 
 class ProviderVersionError(ImportError):
@@ -254,11 +256,6 @@ def _real_package(name: str) -> bool:
     return spec is not None and spec.origin not in (None, "namespace") and spec.submodule_search_locations is not None
 
 
-def _plugin_installed() -> bool:
-    """Whether the in-tree plugin's package is installed (a real package). A seam for tests."""
-    return _real_package(_PLUGIN)
-
-
 def _absent(e: ModuleNotFoundError, module: str) -> bool:
     """``e`` says the entry point's distribution is not installed: its TOP-LEVEL package cannot be found (or is only
     a namespace, e.g. a leftover ``__pycache__`` directory). A missing submodule of a real, present package is a
@@ -276,6 +273,17 @@ def _dist_name(ep: "importlib.metadata.EntryPoint") -> str:
     return getattr(ep.dist, "name", None) or ep.value
 
 
+def _normalise(name: str) -> str:
+    """A distribution name normalised as in PEP 503 (``vivarium_workbench`` and ``Vivarium.Workbench`` match)."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _from_core(ep: "importlib.metadata.EntryPoint") -> bool:
+    """Whether the core distribution itself declares ``ep`` (a hand-built ``EntryPoint`` has no ``dist``)."""
+    name = getattr(ep.dist, "name", None)
+    return isinstance(name, str) and _normalise(name) == _CORE_DIST
+
+
 def _load() -> "tuple[Provider, ...]":
     if (os.environ.get(PROVIDERS_ENV) or "").strip().lower() == "none":
         return ()
@@ -289,10 +297,12 @@ def _load() -> "tuple[Provider, ...]":
     if clashing:
         detail = "; ".join(f"{n}: {sorted(values[n])}" for n in clashing)
         raise ImportError(f"more than one {ENTRY_POINT_GROUP} entry point has the same name ({detail})")
-    if not eps and _plugin_installed():
-        raise ImportError(
-            f"{_PLUGIN} is installed but no {ENTRY_POINT_GROUP} entry point names it: a stale install; "
-            "re-run `uv sync` (or `pip install -e .`)")
+    for ep in eps:
+        if _from_core(ep):
+            raise ImportError(
+                f"the {_CORE_DIST} distribution itself declares the {ENTRY_POINT_GROUP} entry point {ep.name!r}: its "
+                "installed metadata predates the backend plugin's own distribution (a stale install); re-run "
+                "`uv sync`, or reinstall (`pip install -U 'vivarium-workbench[vivaapi]'`)")
     found: "list[Provider]" = []
     seen: "set[tuple[str, str]]" = set()
     for ep in eps:

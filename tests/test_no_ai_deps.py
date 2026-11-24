@@ -16,6 +16,7 @@ import ast
 from pathlib import Path
 
 import pytest
+from _plugin_paths import plugin_files
 
 # Top-level import roots that would pull an LLM/AI provider into the dashboard.
 # Matched against the FIRST dotted component of every import (plus a prefix
@@ -42,7 +43,7 @@ _PKG_ROOT = Path(__file__).resolve().parent.parent / "vivarium_workbench"
 
 def _module_files() -> list[Path]:
     # step P1b (deliberate change): the SMS plugin package ships in the same distribution; check it too.
-    return sorted([*_PKG_ROOT.rglob("*.py"), *(_PKG_ROOT.parent / "vivarium_workbench_sms").rglob("*.py")])
+    return sorted([*_PKG_ROOT.rglob("*.py"), *plugin_files("*.py", recursive=True)])
 
 
 def _imported_names(tree: ast.AST) -> set[str]:

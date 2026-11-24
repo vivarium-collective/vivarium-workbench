@@ -39,7 +39,7 @@ This file provides essential, high-signal guidance for AI agents working in the 
 
 ## Development Setup & Environment
 
-- **Dependencies:** Managed with `uv`. Install with `uv pip install -e ".[dev,test]"`.
+- **Dependencies:** Managed with `uv`. Install with `uv sync --extra dev --extra test` (the core and the viva-api backend plugin, `packages/vivarium-workbench-vivaapi`; add `--no-group plugins` for the core alone), or `uv pip install -e ".[dev,test]" -e packages/vivarium-workbench-vivaapi`.
 - **Execution Context:** The workbench **must** be run from within a workspace's virtual environment. This is because it needs to import the workspace's own Python package (to build composites) and its specific `pbg-*` dependencies.
 - **Local Development Workflow:**
   1. Clone this `vivarium-workbench` repository.

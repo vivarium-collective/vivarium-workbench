@@ -10,7 +10,7 @@ absent.
 
 ```bash
 uv venv
-uv pip install -e ".[dev]"
+uv pip install -e ".[dev]" -e packages/vivarium-workbench-vivaapi   # the core + the viva-api backend plugin
 uv run pytest
 ```
 
@@ -62,7 +62,14 @@ uv run pytest
 ## Installing from a bare clone, and the v2ecoli environment
 
 The root project installs with a plain `uv sync` from a clone that has **nothing
-beside it** — no sibling checkouts. CI's `standalone` workflow enforces that
+beside it** — no sibling checkouts. It is a uv workspace: `uv sync` installs the core
+*and* the viva-api backend plugin (`packages/vivarium-workbench-vivaapi/`, the
+`plugins` default group), both editable; `uv sync --no-group plugins` installs the
+core alone, and `scripts/pytest_core_only.sh` runs the suite that way (in
+`.venv-core`, as CI's `core-only` job does). With `uv pip install -e .` instead, add
+`-e packages/vivarium-workbench-vivaapi` to get the plugin. The two are released in
+lockstep (identical versions, `==` pins both ways): change versions only with
+`scripts/set_version.sh X.Y.Z`. CI's `standalone` workflow enforces that
 (`uv sync --locked`, then `vwb smoke`); run the same check locally with
 `scripts/standalone_smoke.sh`. Do not add `path = "../<sibling>"` sources to the
 root `pyproject.toml`.

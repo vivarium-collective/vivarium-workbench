@@ -108,8 +108,10 @@ def test_every_module_that_can_push_is_accounted_for():
     # path (step P2 Routes Rt2; the /api/source/* build routes by ai_tools' core /api/source/ prefix)
     skip = {"models.py", "generate_ts.py", "ai_chat.py", "ai_tools.py", "compose_entry.py", "routes.py"}
     # step P1b (deliberate change): the SMS plugin's modules moved out of lib/; scan them too, or this tripwire
-    # would pass without looking at them.
-    scanned = [*(REPO / "vivarium_workbench" / "lib").glob("*.py"), *(REPO / "vivarium_workbench_sms").glob("*.py")]
+    # would pass without looking at them. tests/_plugin_paths.py (step P4b) finds them and refuses an empty glob.
+    from _plugin_paths import plugin_files
+
+    scanned = [*(REPO / "vivarium_workbench" / "lib").glob("*.py"), *plugin_files("*.py")]
     found = {f.name for f in scanned if f.name not in skip and pat.search(f.read_text())}
     expected = {"git_status.py", "git_commit_views.py", "work_mutations.py", "work_pr_views.py",
                 "remote_pipeline_views.py", "remote_run_jobs.py", "github_auth.py", "study_spec.py",

@@ -85,7 +85,7 @@ So an arbitrary workspace composite cannot be dispatched by id. The general rout
   * `environment`: `{"name": "runtime"}` (default; the **only** name `NAMED_ENVIRONMENTS` accepts in
     viva-core — `deployment-default` is merely the label a legacy compose submission is *recorded*
     under), or `{"id": "<env id>"}` via `VIVARIUM_WORKBENCH_BACKEND_ENVIRONMENT=id:<env id>`.
-    This reading of the variable is the SMS plugin's (`vivarium_workbench_sms/remote_run_viva_v1.backend_environment`,
+    This reading of the variable is the SMS plugin's (`packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/remote_run_viva_v1.backend_environment`,
     moved out of the core's `remote_run` in step P2 Builds B2); its readers are the study page's submit, the
     composite card's `VivaCoreRuns.dispatch_composite` (the git preflight runs only for a named environment) and the
     detached run (`deployment_run`). compose-api reads the same variable in its own `name:` form
@@ -174,7 +174,7 @@ Listing/registering simulators and branch builds (`/core/v1/simulator/*`, partly
 `/api/v1/simulations/{id}/data` downloads, trace (`/viva/v1/composites/{id}/trace` is used where advertised).
 These stay on the legacy `SmsApiClient` methods.
 
-The trace lives in the plugin since P2 Runs b2 (`vivarium_workbench_sms/sms_trace.py`): a recorded viva-core run
+The trace lives in the plugin since P2 Runs b2 (`packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/sms_trace.py`): a recorded viva-core run
 (the Runs tab sends its id as `simulation_id`) goes to `VivaCoreRuns.trace` -> `GET /viva/v1/composites/{id}/trace`
 after the `viva-v1-trace` capability check, and a recorded sms-legacy simulation to `SmsLegacyRuns.trace` ->
 `GET /api/v1/simulations/{id}/trace`; anything no record routes goes to the SMS `unrouted` facet, unchanged.
