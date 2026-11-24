@@ -5705,22 +5705,22 @@ button:hover > .aig-tb-blabel { color: #3730a3; }
    substring with !important; colored status pills are left as readable badges. */
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --bg:#0b1220;          /* page background (darkest) */
-  --rail:#0f1728;        /* rail, header, STUDIES head */
-  --surface:#18233c;     /* cards / panels — a bit brighter so they stand out */
-  --field:#0d1526;       /* inputs / config+port fields — darker, recede below the card */
-  --surface-2:#12203a;   /* subtle sections: code, config bar, outputs, toolbars */
-  --surface-3:#1c2946;   /* small buttons, chips */
-  --border:#26324c;
-  --border-2:#2c3a58;    /* input borders */
-  --border-faint:#1e2b44;/* table rows, rail dividers */
-  --hover:#182339;
-  --active:#20304f;
-  --text:#d3ddeb;
-  --text-muted:#93a3b6;
-  --heading:#eef2f8;
-  --link:#8ab4ff;
-  --accent:#6366f1;
+  --bg:#0a1020;          /* page background (darkest) */
+  --rail:#0e1527;        /* rail, header, STUDIES head */
+  --surface:#1b2742;     /* cards / panels — brighter so they clearly lift off the bg */
+  --field:#0c1322;       /* inputs / config+port fields — darker, recede below the card */
+  --surface-2:#15223c;   /* subtle sections: code, config bar, outputs, toolbars */
+  --surface-3:#233153;   /* small buttons, chips */
+  --border:#324465;      /* visible definition between panels */
+  --border-2:#3c4e74;    /* input borders */
+  --border-faint:#243357;/* table rows, rail dividers */
+  --hover:#1e2c49;
+  --active:#294066;
+  --text:#e6eef8;        /* primary text — high contrast */
+  --text-muted:#a6b6cd;  /* secondary text — legible, not muddy */
+  --heading:#f3f7fc;
+  --link:#9cc0ff;
+  --accent:#7c84ff;      /* indigo — brighter so active nav/links pop */
   /* map the light-mode var names so existing var(--panel)/var(--gray) rules follow */
   --panel:var(--surface); --gray:var(--text-muted);
   /* Semantic tokens for report panels rendered with inline styles. Call sites pass
@@ -5756,6 +5756,11 @@ button:hover > .aig-tb-blabel { color: #3730a3; }
 :root[data-theme="dark"] .viv-rail-ungrouped-section .viv-rail-sublink,
 :root[data-theme="dark"] .viv-rail-pinned-section{ background:var(--surface-2) !important; border-bottom-color:var(--border) !important; }
 :root[data-theme="dark"] .viv-rail-pinned-section .viv-rail-sublink-pinned{ color:#c6d1e0; }
+/* Ungrouped study rows ship a light-mode slate (#475569) with no dark override →
+   illegible dim-on-navy. Lift them to the legible muted token in dark mode. */
+:root[data-theme="dark"] .viv-rail-ungrouped-section .viv-rail-sublink{ color:var(--text-muted); }
+:root[data-theme="dark"] .viv-rail-ungrouped-section .viv-rail-sublink:hover,
+:root[data-theme="dark"] .viv-rail-ungrouped-section .viv-rail-sublink.rail-study-active{ color:var(--heading); }
 :root[data-theme="dark"] .viv-rail-link:hover,
 :root[data-theme="dark"] .viv-rail-investigations-group-header:hover,
 :root[data-theme="dark"] .viv-rail-sublink:hover{ background:var(--hover); }
