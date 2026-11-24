@@ -352,6 +352,28 @@ def test_gallery_has_download_zip_button(tmp_path):
     assert "fetch(it.src)" in html and "index.html" in html
     assert "__dlPageHtml" not in html  # the old figure-less "download HTML" is gone
 
+
+def test_gallery_svg_figures_offer_png_download(tmp_path):
+    """Every SVG figure card carries a client-side '↓ PNG' button (canvas raster)
+    next to its native '↓ download', so SVG-only figures can be saved as PNG in
+    both the live standalone gallery and the read-only snapshot. The converter
+    FETCHes the SVG text (works for data: URIs and relative files) and exports
+    via canvas toBlob('image/png')."""
+    html = figs.build_figures_gallery_page(_make_ws(tmp_path), "inv")
+    assert html is not None
+    # A PNG button is rendered and wired to the converter.
+    assert 'onclick="__dlFigPng(this)"' in html
+    assert "&#8595; PNG" in html
+    # The converter is present and does a client-side raster → PNG.
+    assert "window.__dlFigPng" in html
+    assert "toBlob(" in html and "image/png" in html
+    # One PNG button per SVG figure card, and none on the raster PNG composite.
+    import re as _re
+    n_svg_imgs = len(_re.findall(r'<img[^>]+src="[^"]*(?:image/svg|\.svg)[^"]*"', html))
+    assert n_svg_imgs >= 3  # panel-a, only.svg, figure_7 composite (at least)
+    assert html.count('onclick="__dlFigPng(this)"') == n_svg_imgs
+
+
 def test_gallery_page_includes_native_gallery_html_not_only_declared(tmp_path):
     """Regression: an investigation whose figures are committed interactive HTML
     under a study's ``viz/`` (NOT declared as ``visualizations:``) previously
