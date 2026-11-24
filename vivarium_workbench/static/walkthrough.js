@@ -308,9 +308,17 @@
       _closeAxisPop();
     }, true);
     document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') _closeAxisPop(); });
-    // The canvas scrolls; a viewport-fixed popover would detach from its pill.
-    window.addEventListener('scroll', function () {
-      if (_aigAxisPopoverPill) _closeAxisPop();
+    // The canvas scrolls; a viewport-fixed popover would detach from its pill, so
+    // close it when the underlying canvas scrolls. BUT the popover is itself a
+    // scroll container (overflow:auto) for long finding lists — scrolling INSIDE
+    // it (wheel OR dragging its scrollbar) must NOT dismiss it. Capture-phase
+    // scroll listeners on window also receive scrolls from descendants, so guard
+    // on the event target: ignore scrolls originating in the popover.
+    window.addEventListener('scroll', function (ev) {
+      if (!_aigAxisPopoverPill) return;
+      var el = document.getElementById('aig-axis-popover');
+      if (el && ev.target && (ev.target === el || (el.contains && el.contains(ev.target)))) return;
+      _closeAxisPop();
     }, true);
   }
 
@@ -3675,8 +3683,14 @@
     var w = pop.getBoundingClientRect().width || 300;
     pop.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - w - 12)) + window.scrollX) + 'px';
     pop.style.top = Math.round(r.bottom + 6 + window.scrollY) + 'px';
-    var close = function (ev) { if (pop.contains(ev.target)) return; pop.remove(); document.removeEventListener('mousedown', close); window.removeEventListener('scroll', close, true); };
-    setTimeout(function () { document.addEventListener('mousedown', close); window.addEventListener('scroll', close, true); }, 0);
+    // The popover is position:absolute (anchored to the document), so a page
+    // scroll moves it WITH its anchor — no need to dismiss on scroll, and doing
+    // so broke reading a tall popover (the user scrolls the page to see more and
+    // it vanishes). Close only on an outside mousedown or Escape; a tall popover
+    // scrolls internally (max-height in .reg-infopop CSS).
+    var close = function (ev) { if (ev && ev.target && pop.contains(ev.target)) return; pop.remove(); document.removeEventListener('mousedown', close); document.removeEventListener('keydown', onKey); };
+    function onKey(ev) { if (ev.key === 'Escape') close(); }
+    setTimeout(function () { document.addEventListener('mousedown', close); document.addEventListener('keydown', onKey); }, 0);
   }
   window._regInfoPop = _regInfoPop;
 
@@ -11359,13 +11373,26 @@
       mountEl.innerHTML = '<p class="empty-state">No investigations declared. Author one at <code>investigations/&lt;name&gt;/investigation.yaml</code>.</p>';
       return;
     }
+    window._invTableIndex = {};
+    var _invSavedW = (window._invColWidths ? window._invColWidths() : {});
+    var _invDefW = { 0: '300px', 1: '140px', 2: '82px', 4: '130px' }; // col 3 (Question) flexes
+    var _invCols = '';
+    for (var _ci = 0; _ci < 5; _ci++) {
+      var _cw = _invSavedW[_ci] ? (_invSavedW[_ci] + 'px') : (_invDefW[_ci] || '');
+      _invCols += '<col' + (_cw ? ' style="width:' + _cw + '"' : '') + '>';
+    }
     var th = [['Name', 'left'], ['Status', 'left'], ['Studies', 'right'], ['Question', 'left'], ['Shortcuts', 'left']]
-      .map(function (c) {
+      .map(function (c, i) {
+        var resizer = (i < 4)
+          ? '<span class="inv-col-resizer" data-col="' + i + '" title="Drag to resize column" ' +
+            'style="position:absolute;top:0;right:0;width:8px;height:100%;cursor:col-resize;z-index:3"></span>'
+          : '';
         return '<th style="text-align:' + c[1] + ';position:sticky;top:0;background:#f8fafc;padding:7px 10px;' +
           'font-size:0.78em;text-transform:uppercase;letter-spacing:0.03em;color:#475569;' +
-          'border-bottom:1px solid #e5e7eb;white-space:nowrap">' + c[0] + '</th>';
+          'border-bottom:1px solid #e5e7eb;white-space:nowrap">' + c[0] + resizer + '</th>';
       }).join('');
     var rows = items.map(function (iset) {
+      window._invTableIndex[iset.name] = iset;
       var closed = (iset.status === 'archived' || iset.status === 'closed' || iset.closed === true);
       var derivedClosed = closed && iset.closure_source === 'derived';
       var archived = iset.status === 'archived';
@@ -11388,20 +11415,227 @@
       return '<tr data-row-text="' + _esc(rowText) + '" onclick="_showInvestigationWorkspace(\'' + _esc(iset.name) + '\')" ' +
         'style="cursor:pointer;border-bottom:1px solid #f1f5f9' + (archived ? ';opacity:0.72' : '') + '" ' +
         'onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'\'">' +
-        '<td style="padding:7px 10px;font-weight:600;color:#1e293b">' + _esc(iset.title || iset.name) + '</td>' +
-        '<td style="padding:7px 10px;white-space:nowrap">' + statusPill + '</td>' +
-        '<td style="padding:7px 10px;text-align:right;color:' + (iset.n_studies ? '#1e293b' : '#cbd5e1') + '">' + (iset.n_studies || 0) + '</td>' +
-        '<td style="padding:7px 10px;color:#64748b">' + (q ? _esc(q) : '<span style="color:#cbd5e1">—</span>') + '</td>' +
+        '<td title="' + _esc(iset.title || iset.name) + '" style="padding:7px 10px;font-weight:600;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + _esc(iset.title || iset.name) + '</td>' +
+        '<td style="padding:7px 10px;white-space:nowrap">' +
+          '<span onclick="window._invShowStatusExplain(event,\'' + _esc(iset.name) + '\')" style="cursor:pointer" title="Why this status? — click to explain">' + statusPill + '</span>' +
+        '</td>' +
+        '<td style="padding:7px 10px;text-align:right">' +
+          (iset.n_studies
+            ? '<span onclick="window._invShowStudies(event,\'' + _esc(iset.name) + '\')" title="List the studies" style="cursor:pointer;color:#1e293b;border-bottom:1px dotted #94a3b8">' + iset.n_studies + '</span>'
+            : '<span style="color:#cbd5e1">0</span>') +
+        '</td>' +
+        '<td title="' + _esc(String(iset.question || '').split('\n')[0]) + '" style="padding:7px 10px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (q ? _esc(q) : '<span style="color:#cbd5e1">—</span>') + '</td>' +
         '<td style="padding:7px 10px;white-space:nowrap;font-size:0.85em">' +
           window._vivInvLinksHtml(iset) +
         '</td>' +
         '</tr>';
     }).join('');
-    mountEl.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.9em;' +
+    mountEl.innerHTML = '<div style="overflow-x:auto"><table class="inv-table" style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:0.9em;' +
       'background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">' +
+      '<colgroup>' + _invCols + '</colgroup>' +
       '<thead><tr>' + th + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    var _invTbl = mountEl.querySelector('table.inv-table');
+    if (_invTbl && window._invColResizeInit) window._invColResizeInit(_invTbl);
   }
   window._renderInvestigationTable = _renderInvestigationTable;
+
+  // ── Investigations-table interactions ────────────────────────────────────
+  // Status-badge → explanation, studies-count → numbered list, row delete,
+  // and draggable column widths. The two popovers reuse the guarded
+  // _regInfoPop (closes on outside click / canvas scroll, but NOT when you
+  // scroll inside it). _invTableIndex caches the rendered rows for lookup.
+  window._invTableIndex = window._invTableIndex || {};
+  function _invStatusColor(s) {
+    s = String(s || '').toLowerCase();
+    if (['passed', 'complete', 'completed', 'closed', 'supported', 'accepted', 'decided', 'evaluated'].indexOf(s) >= 0) return '#16a34a';
+    if (s === 'qualified') return '#0d9488';
+    if (['in_progress', 'running', 'analyzing', 'investigating'].indexOf(s) >= 0) return '#ca8a04';
+    if (['failed', 'refuted', 'invalid', 'blocked'].indexOf(s) >= 0) return '#dc2626';
+    if (s === 'parked') return '#7c3aed';
+    if (['planning', 'planned', 'proposed'].indexOf(s) >= 0) return '#64748b';
+    return '#94a3b8';
+  }
+  window._invStatusColor = _invStatusColor;
+  function _invStatusMeaning(s) {
+    var m = {
+      passed: 'Acceptance criteria met — a concluded, supported result.',
+      complete: 'Work finished.', completed: 'Work finished.',
+      closed: 'Completed and closed.',
+      in_progress: 'Active work — studies are running or being evaluated.',
+      running: 'Simulations are running now.',
+      planning: 'Designed, not yet run.', planned: 'Designed, not yet run.',
+      proposed: 'Proposed, not yet designed.',
+      failed: 'A gate or a simulation failed.',
+      blocked: 'Blocked on a prerequisite.',
+      archived: 'Retired — not an active line of work.',
+      parked: 'Deliberately deferred — a future direction.'
+    };
+    return m[String(s || '').toLowerCase()] || '';
+  }
+  window._invShowStatusExplain = function (ev, name) {
+    if (ev && ev.stopPropagation) ev.stopPropagation();
+    var it = window._invTableIndex[name]; if (!it) return;
+    var eff = it.effective_status || it.status || '—';
+    var e2 = String(eff).toLowerCase();
+    var color = _invStatusColor(eff);
+    var meta = _ISET_TABLE_STATUS_META[eff];
+    var label = (meta && meta.label) || String(eff).replace(/_/g, ' ');
+    function sec(h) { return '<div style="margin-top:8px;padding-top:6px;border-top:1px solid #eef2f7">' + h + '</div>'; }
+    function row(k, v) {
+      if (v == null || v === '') return '';
+      return '<div style="display:flex;gap:10px;justify-content:space-between;margin-top:3px">' +
+        '<span style="color:#64748b">' + _esc(k) + '</span>' +
+        '<span style="font-family:ui-monospace,monospace;text-align:right">' + _esc(String(v)) + '</span></div>';
+    }
+    // The investigation status AGGREGATES its member studies — derive the breakdown.
+    var iset = _isetByName()[name] || {};
+    var slugs = iset.studies || [];
+    var byName = _studyByName();
+    function bucket(s) {
+      var v = String(s.verdict || '').toLowerCase();
+      var e = String(s.effective_status || s.execution_status || s.gate_status || s.status || '').toLowerCase();
+      if (v === 'refuted' || ['failed', 'invalid', 'blocked'].indexOf(e) >= 0) return 'failed';
+      if (['supported', 'qualified'].indexOf(v) >= 0 || ['passed', 'complete', 'completed', 'closed', 'decided', 'evaluated'].indexOf(e) >= 0) return 'done';
+      if (['running', 'analyzing', 'in_progress', 'investigating'].indexOf(e) >= 0) return 'running';
+      if (['planned', 'planning', 'proposed'].indexOf(e) >= 0 || !e) return 'planned';
+      return 'running';
+    }
+    var bcolor = { done: '#16a34a', running: '#ca8a04', planned: '#64748b', failed: '#dc2626' };
+    var tally = { done: 0, running: 0, planned: 0, failed: 0 }, open = [];
+    slugs.forEach(function (sl) {
+      var s = byName[sl] || { name: sl }, b = bucket(s); tally[b]++;
+      if (b !== 'done') open.push({ title: s.title || s.name || sl, b: b });
+    });
+    var parts = [];
+    ['done', 'running', 'planned', 'failed'].forEach(function (k) { if (tally[k]) parts.push(tally[k] + ' ' + k); });
+    var nstud = slugs.length || it.n_studies || 0;
+    var breakdown = nstud
+      ? '<div style="color:#334155;margin:1px 0"><b style="font-weight:600">' + nstud + ' stud' + (nstud === 1 ? 'y' : 'ies') + '</b>'
+        + (parts.length ? ' — ' + _esc(parts.join(' · ')) : '') + '</div>'
+      : '';
+    // WHY this status, in terms of the derivation.
+    var deriv;
+    if (['closed', 'complete', 'completed', 'passed'].indexOf(e2) >= 0)
+      deriv = 'All studies concluded' + ((it.closure_source === 'derived' || it.gate_status_source === 'derived') ? ' — closed by the discovery engine once acceptance was met.' : '.');
+    else if (['planning', 'planned'].indexOf(e2) >= 0)
+      deriv = 'Designed, not yet run.';
+    else if (tally.failed)
+      deriv = tally.failed + ' stud' + (tally.failed === 1 ? 'y' : 'ies') + ' failed/blocked — status reflects the worst member state.';
+    else if (open.length)
+      deriv = 'Stays "' + _esc(label) + '" until the ' + open.length + ' open stud' + (open.length === 1 ? 'y' : 'ies') + ' conclude.';
+    else deriv = '';
+    var derivLine = deriv ? '<div style="color:#475569;margin:0 0 4px;white-space:normal">' + deriv + '</div>' : '';
+    // The open/not-concluded studies = the concrete root cause of a non-terminal status.
+    var openHtml = open.length
+      ? sec('<span style="color:#64748b">' + (tally.failed ? 'Not concluded' : 'Open studies') + '</span>'
+        + open.slice(0, 10).map(function (o) {
+            return '<div style="display:flex;gap:7px;align-items:center;margin-top:2px;white-space:normal">'
+              + '<span style="flex:none;width:8px;height:8px;border-radius:50%;background:' + bcolor[o.b] + '"></span>'
+              + '<span style="color:#334155">' + _esc(o.title) + '</span>'
+              + '<span style="color:#94a3b8">' + o.b + '</span></div>';
+          }).join('')
+        + (open.length > 10 ? '<div style="color:#94a3b8;margin-top:2px">+' + (open.length - 10) + ' more</div>' : ''))
+      : '';
+    // Engine signals WITH provenance — how the gate/verdict were actually set.
+    var verdict = it.verdict ? (it.verdict + (it.verdict_source ? ' (' + it.verdict_source + ')' : '')) : '';
+    var gate = it.gate_status ? (it.gate_status + (it.gate_status_source ? ' (' + it.gate_status_source + ')' : '')) : '';
+    var signals = row('gate', gate) + row('verdict', verdict)
+      + row('evaluation', it.evaluation_status) + row('simulation', it.simulation_status)
+      + row('confidence', it.confidence) + row('blocked by', it.blocked_by);
+    var phaseLine = (it.phase || it.last_run)
+      ? '<div style="color:#64748b;margin:1px 0">'
+        + (it.phase ? 'phase <b style="color:#334155;font-weight:600">' + _esc(it.phase) + '</b>' : '')
+        + (it.phase && it.last_run ? ' · ' : '')
+        + (it.last_run ? 'last run ' + _esc(String(it.last_run)) : '') + '</div>'
+      : '';
+    var excerpt = it.conclusions_excerpt
+      ? sec('<span style="color:#64748b">Conclusions so far</span>'
+        + '<div style="color:#475569;margin-top:2px;white-space:normal">' + _esc(String(it.conclusions_excerpt).slice(0, 360)) + '</div>')
+      : '';
+    var html = '<div class="reg-infopop-title" style="color:' + color + ';margin-bottom:2px">● ' + _esc(label) + '</div>' +
+      derivLine + breakdown + phaseLine + openHtml +
+      (signals ? sec(signals) : '') + excerpt;
+    window._regInfoPop(ev, html);
+  };
+  window._invCloseStudyPop = function () { var p = document.querySelector('.reg-infopop'); if (p) p.remove(); };
+  window._invShowStudies = function (ev, name) {
+    if (ev && ev.stopPropagation) ev.stopPropagation();
+    var iset = _isetByName()[name] || window._invTableIndex[name] || {};
+    var slugs = iset.studies || [];
+    var byName = _studyByName();
+    var title = iset.title || iset.name || name;
+    var items = slugs.map(function (slug, i) {
+      var s = byName[slug] || { name: slug };
+      var st = s.effective_status || s.verdict || s.execution_status || s.gate_status || s.status || '';
+      var col = _invStatusColor(st);
+      var lbl = _esc(s.title || s.name || slug);
+      return '<li style="margin:2px 0"><a href="#" title="Open study" ' +
+        'onclick="window._invCloseStudyPop();window._openStudyEmbeddedNewTab(\'' + _esc(slug) + '\');return false;" ' +
+        'style="display:flex;gap:7px;align-items:center;text-decoration:none;color:#1e293b;padding:2px 0">' +
+        '<span style="color:#94a3b8;min-width:16px;text-align:right">' + (i + 1) + '.</span>' +
+        '<span style="flex:none;width:8px;height:8px;border-radius:50%;background:' + col + '" title="' + _esc(st || 'status unknown') + '"></span>' +
+        '<span style="white-space:normal">' + lbl + '</span></a></li>';
+    }).join('');
+    var html = '<div class="reg-infopop-title">' + slugs.length + ' stud' + (slugs.length === 1 ? 'y' : 'ies') +
+      ' · ' + _esc(title) + '</div>' +
+      (slugs.length ? '<ul class="reg-infopop-list">' + items + '</ul>'
+        : '<div style="color:#94a3b8">No studies declared.</div>');
+    window._regInfoPop(ev, html);
+  };
+  window._invDelete = function (ev, name, title) {
+    if (ev && ev.stopPropagation) ev.stopPropagation();
+    if (window._closeRowShortcuts) window._closeRowShortcuts();
+    title = title || (window._invTableIndex[name] || {}).title || name;
+    var msg = 'Delete investigation "' + title + '"?\n\nThis removes investigations/' + name +
+      '/ from the workspace and cannot be undone.';
+    var doDelete = function () {
+      apiFetch('POST', '/api/investigation-delete', { name: name })
+        .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, b: b }; }); })
+        .then(function (res) {
+          if (!res.ok) throw new Error((res.b && res.b.error) || 'request failed');
+          if (window._showToast) window._showToast('Deleted investigation "' + name + '"');
+          if (typeof window._loadInvestigationSets === 'function') window._loadInvestigationSets();
+          else if (typeof window._loadInvestigations === 'function') window._loadInvestigations();
+        })
+        .catch(function (e) {
+          if (window._showToast) window._showToast('Delete failed: ' + e.message); else window.alert('Delete failed: ' + e.message);
+        });
+    };
+    if (window._confirmModal) window._confirmModal(msg).then(function (ok) { if (ok) doDelete(); });
+    else if (window.confirm(msg)) doDelete();
+  };
+  // Column resize: drag the divider at a header's right edge; widths persist in
+  // localStorage (keyed by column index) and are restored on each render.
+  var _INV_COL_LS = 'vivInvColWidths';
+  function _invColWidths() {
+    try { return JSON.parse(localStorage.getItem(_INV_COL_LS) || '{}') || {}; } catch (_) { return {}; }
+  }
+  window._invColWidths = _invColWidths;
+  function _invColResizeInit(table) {
+    if (!table) return;
+    var cols = table.querySelectorAll('colgroup > col');
+    table.querySelectorAll('th .inv-col-resizer').forEach(function (h) {
+      h.addEventListener('mousedown', function (ev) {
+        ev.preventDefault(); ev.stopPropagation();
+        var idx = parseInt(h.getAttribute('data-col'), 10);
+        var col = cols[idx]; if (!col) return;
+        var th = h.closest('th');
+        var startX = ev.clientX, startW = th.getBoundingClientRect().width;
+        document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
+        function onMove(e) { col.style.width = Math.max(60, startW + (e.clientX - startX)) + 'px'; }
+        function onUp() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          document.body.style.cursor = ''; document.body.style.userSelect = '';
+          var w = _invColWidths(); w[idx] = Math.round(parseFloat(col.style.width) || th.getBoundingClientRect().width);
+          try { localStorage.setItem(_INV_COL_LS, JSON.stringify(w)); } catch (_) {}
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+  }
+  window._invColResizeInit = _invColResizeInit;
 
   // Client-side filter for the Investigations landing list. UNIFIED with the
   // side-rail studies search (same _tokensMatch engine, same AND-first/OR-
@@ -16095,6 +16329,9 @@
           '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivFiguresOpen(event,\'' + nm + '\')">Open in browser</button>' +
           '<button ' + _mi + ' onclick="window._closeRowShortcuts();window._vivFiguresFromCard(event,\'' + nm + '\')">Download (zip)</button>';
     }
+    items +=
+      _sec('Manage') +
+        '<button ' + _mi + ' onclick="window._invDelete(event,\'' + nm + '\')"><span style="color:#dc2626">Delete investigation…</span></button>';
     return '<span class="inv-row-shortcuts" style="position:relative;display:inline-flex">' +
       '<button type="button" class="btn-mini" aria-haspopup="true" aria-expanded="false" ' +
         'title="Shortcuts — open in the browser or download (report, notebook, figures)" ' +
