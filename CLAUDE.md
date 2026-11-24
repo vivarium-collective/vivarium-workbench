@@ -169,6 +169,17 @@ Vanilla JS (no bundler/build). `index.html.j2` is rendered once at serve time
 (`lib/report.render_dashboard`). `client.js` is the SPA driver; `data-source.js`
 abstracts whether data comes from the live server or a published static bundle.
 
+### Plugins (`vivarium_workbench/plugins/`)
+External features opt in via in-process plugins instead of editing core. A plugin is
+a pip-installable package declaring a `vivarium_workbench.plugins` entry-point; at
+startup `plugins.load_plugins(app, ws_root)` (called from the app lifespan) wires each
+*enabled* plugin's `APIRouter` under `/api/plugins/<name>`, mounts its static dir under
+`/plugins/<name>`, and records a UI manifest served at `/api/plugins/manifest` that
+`static/plugin-loader.js` reads to register panels via `VivPanelDock`. Enabled =
+installed AND listed in the workspace's `workspace.yaml` `plugins:` or env
+`VIVARIUM_WORKBENCH_PLUGINS`. Each plugin's load is fail-soft. Authoring guide:
+[docs/plugins.md](docs/plugins.md).
+
 ### Publish / read-only bundle (`publish.py`)
 Exports a workspace to a self-contained static bundle (`api/*.json` + per-study
 HTML shells + assets). The same frontend JS runs against `api/*.json` files
