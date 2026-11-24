@@ -303,9 +303,10 @@ _GALLERY_CSS = (
     ".card{background:#fff;border:1px solid var(--line);border-radius:12px;margin:14px 0;overflow:hidden;scroll-margin-top:14px}"
     ".card .bar{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);background:#fcfdfe}"
     ".card .bar .name{font-weight:600;font-size:13px}"
-    ".card .bar .dl{margin-left:auto;font-size:12px;text-decoration:none;color:var(--teal);"
+    ".card .bar .dl{margin-left:auto;font:inherit;font-size:12px;cursor:pointer;background:#fff;text-decoration:none;color:var(--teal);"
     "border:1px solid var(--teal);border-radius:999px;padding:3px 11px;white-space:nowrap}"
-    ".card .bar .dl:hover{background:var(--teal);color:#fff}"
+    ".card .bar .dl+.dl{margin-left:0}"
+    ".card .bar .dl:hover{background:var(--teal);color:#fff}.card .bar .dl[disabled]{opacity:.6;cursor:default}"
     ".card iframe,.card img{width:100%;border:0;display:block}.card img{padding:14px;background:#fff}"
     ".hdr{padding:24px 26px 0}.hdr h1{font-size:22px;margin:0 0 4px}.hdr p{color:var(--soft);font-size:13.5px;max-width:860px;margin:0}"
 )
@@ -361,6 +362,43 @@ _GALLERY_DL_BTN = r"""<button id="dl-zip-btn" onclick="__dlFiguresZip(this)" tit
 </script>"""
 
 
+# Client-side "↓ PNG" for a single SVG figure card: fetch the figure's SVG text
+# (resolves both a data: URI and a same-origin relative file), rasterize it onto a
+# 2× canvas, and save a PNG. No server round-trip and no stored PNGs — so it works
+# identically in the live standalone gallery and the published read-only snapshot.
+_GALLERY_PNG_JS = r"""<script>
+(function(){
+  function _slug(t){ return String(t==null?'':t).trim().replace(/[^\w.-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80)||'figure'; }
+  // Best-effort intrinsic size from an <svg> string: width/height (pt→px) else viewBox.
+  function _dims(txt){ var w=0,h=0,m;
+    m=/<svg[^>]*\bwidth="([\d.]+)(pt|px)?"/i.exec(txt); if(m) w=parseFloat(m[1])*(m[2]==='pt'?4/3:1);
+    m=/<svg[^>]*\bheight="([\d.]+)(pt|px)?"/i.exec(txt); if(m) h=parseFloat(m[1])*(m[2]==='pt'?4/3:1);
+    if(!(w>0&&h>0)){ var vb=/viewBox="\s*[\d.\-]+[ ,]+[\d.\-]+[ ,]+([\d.]+)[ ,]+([\d.]+)/i.exec(txt); if(vb){ w=w||parseFloat(vb[1]); h=h||parseFloat(vb[2]); } }
+    return [w,h]; }
+  window.__dlFigPng=function(btn){
+    var card=btn.closest('.card'); if(!card) return;
+    var img=card.querySelector('img[src]'); if(!img){ alert('This figure cannot be converted to PNG.'); return; }
+    var nm=card.querySelector('.name'); var fname=_slug(nm?nm.textContent:'figure')+'.png';
+    var src=img.getAttribute('src'); var old=btn.textContent; btn.disabled=true; btn.textContent='rendering…';
+    function fail(msg){ btn.disabled=false; btn.textContent=old; alert(msg||'Could not render this figure to PNG.'); }
+    fetch(src).then(function(r){ if(!r.ok) throw 0; return r.text(); }).then(function(svgTxt){
+      var d=_dims(svgTxt), w=d[0]||img.naturalWidth||img.clientWidth||1200, h=d[1]||img.naturalHeight||img.clientHeight||800, scale=2;
+      var im=new Image();
+      im.onload=function(){ try{
+        var c=document.createElement('canvas'); c.width=Math.round(w*scale); c.height=Math.round(h*scale);
+        var ctx=c.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height); ctx.drawImage(im,0,0,c.width,c.height);
+        c.toBlob(function(blob){ if(!blob){ fail(); return; }
+          var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fname; document.body.appendChild(a); a.click();
+          setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },4000); btn.disabled=false; btn.textContent=old;
+        },'image/png'); }catch(e){ fail(); } };
+      im.onerror=function(){ fail(); };
+      im.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svgTxt);
+    }).catch(function(){ fail('Could not load this figure to convert.'); });
+  };
+})();
+</script>"""
+
+
 def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[str], list[tuple[str, str, bool]]]]) -> str:
     """One navigable ``index.html`` for a figures export. ``groups`` is an ordered
     list of ``(heading, subtitle_or_None, [(arcname, label, is_html), …])``. Each
@@ -382,8 +420,15 @@ def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[s
                 media = f'<iframe loading="lazy" src="{_escape(arc)}" height="{900 if tall else 640}"></iframe>'
             else:
                 media = f'<img loading="lazy" src="{_escape(arc)}" alt="{_escape(label)}">'
+            # Offer a rasterized ↓ PNG next to the native download for SVG figures
+            # (client-side canvas conversion, so it works for both the inline-data:
+            # standalone gallery and the relative-file snapshot).
+            lo = arc.lower().split("?")[0]
+            is_svg = (not is_html) and ("image/svg" in lo or lo.endswith(".svg"))
+            png_btn = ('<button class="dl png" type="button" onclick="__dlFigPng(this)" '
+                       'title="Download this figure as a PNG raster">&#8595; PNG</button>') if is_svg else ""
             body.append(f'<div class="card" id="{aid}"><div class="bar"><span class="name">{_escape(label)}</span>'
-                        f'<a class="dl" href="{_escape(arc)}" download>&#8595; download</a></div>{media}</div>')
+                        f'{png_btn}<a class="dl" href="{_escape(arc)}" download>&#8595; download</a></div>{media}</div>')
         body.append("</section>")
     hdr = (f'<div class="hdr"><h1>{_escape(inv_name)} &mdash; figure gallery</h1>'
            f'<p>{n_fig} figures across {len(groups)} studies. Use the list on the left to jump to any '
@@ -396,7 +441,7 @@ def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[s
             f'<style>{_GALLERY_CSS}</style></head><body><div class="wrap">'
             f'<nav><h1>Figures</h1><p class="sub">{n_fig} figures &middot; {len(groups)} studies</p>'
             + "".join(nav) + '</nav><main>' + hdr + "".join(body) + '</main></div>'
-            + _GALLERY_DL_BTN + '</body></html>')
+            + _GALLERY_DL_BTN + _GALLERY_PNG_JS + '</body></html>')
 
 
 def build_figures_gallery_page(ws_root, name: str) -> Optional[str]:
