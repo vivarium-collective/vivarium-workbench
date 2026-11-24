@@ -1480,9 +1480,9 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
 BACKEND_COMMANDS = frozenset({"serve", "server-restart", "run", "rerun", "run-composite"})
 NO_BACKEND_COMMANDS = frozenset({
     "add-dashboard", "audit", "catalog-add", "compose-entry", "doctor", "gen-readme", "logs", "migrate-artifacts",
-    "migrate-fields", "migrate-investigations", "migrate-studies", "prepare-investigation", "render-loom",
-    "render-viz", "runs", "scaffold-investigation", "scaffold-workspace", "server-open", "server-status",
-    "server-stop", "smoke", "status", "sync", "warm-catalog", "workspace-trust",
+    "migrate-fields", "migrate-investigations", "migrate-studies", "new-plugin", "plugins", "prepare-investigation",
+    "render-loom", "render-viz", "runs", "scaffold-investigation", "scaffold-workspace", "server-open",
+    "server-status", "server-stop", "smoke", "status", "sync", "warm-catalog", "workspace-trust",
 })
 
 
