@@ -29,6 +29,7 @@ MUST_EXCLUDE = [
     ("post", "/api/workspaces/add"), ("post", "/api/branch/push"),
     ("post", "/api/work-push"), ("get", "/api/events"), ("get", "/api/events/log"),
     ("post", "/api/auth/github/start"), ("post", "/api/ai/credentials"),
+    ("post", "/api/remote-run-visibility"),   # publishes a run under the user's compose-api identity
 ]
 
 

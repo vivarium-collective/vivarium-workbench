@@ -8076,6 +8076,17 @@ def create_app() -> FastAPI:
         body, status = _remote_run_views.remote_run_cancel(req or {}, ws_root=ws)
         return JSONResponse(status_code=status, content=body)
 
+    @app.post("/api/remote-run-visibility", tags=["Runs"],
+              summary="Make a remote run public or private (its backend's owner-only change; compose-api)")
+    def remote_run_visibility(req: Union[dict, None] = Body(default=None),
+                              ws: Path = Depends(get_workspace)) -> JSONResponse:
+        """The Runs table's "Make public": the run's backend changes who may read it, when it offers that (the
+        optional ``runs.change_visibility``; 409 ``not-offered`` otherwise). Body: ``{simulation_id, visibility}``
+        with ``visibility`` ``public`` or ``private``. Not in the read-only allow-list, and excluded from the chat's
+        tools: sharing a run is its owner's own action. See ``lib.remote_run_views.remote_run_visibility``."""
+        body, status = _remote_run_views.remote_run_visibility(req or {}, ws_root=ws)
+        return JSONResponse(status_code=status, content=body)
+
     @app.get("/api/remote-run-trace-support", tags=["Runs"],
              summary="Whether viva-api serves run traces (viva-v1-trace), and which Perfetto UI to open")
     def remote_run_trace_support() -> JSONResponse:

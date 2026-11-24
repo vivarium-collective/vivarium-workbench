@@ -459,6 +459,7 @@ _REFUSED = (409, "backend-not-installed", "backend-not-installed", True)
     ("get", "/api/remote-run-poll", {}, (400, "simulator_id, simulation_id or analysis_id required")),
     ("get", "/api/remote-run-chain-progress", {"run_id": "0"}, (400, "simulation_id required")),
     ("post", "/api/remote-run-cancel", {}, (400, "simulation_id required")),
+    ("post", "/api/remote-run-visibility", {"visibility": "public"}, (400, "simulation_id required")),
     # an id no active backend owns, or a build / analysis id: refused, terminal
     ("post", "/api/remote-run-land", {"study": "s", "simulation_id": 12}, _REFUSED),
     ("get", "/api/remote-run-poll", {"simulation_id": 12}, _REFUSED),
@@ -466,6 +467,7 @@ _REFUSED = (409, "backend-not-installed", "backend-not-installed", True)
     ("get", "/api/remote-run-poll", {"analysis_id": 5}, _REFUSED),
     ("get", "/api/remote-run-chain-progress", {"simulation_id": 12}, _REFUSED),
     ("post", "/api/remote-run-cancel", {"simulation_id": 12}, _REFUSED),
+    ("post", "/api/remote-run-visibility", {"simulation_id": 12, "visibility": "public"}, _REFUSED),
     ("post", "/api/remote-run-submit", {"study": "s", "simulator_id": 3}, _REFUSED),
     # nothing named at all
     ("post", "/api/remote-run-submit", {"study": "s"}, (409, "no-backend")),

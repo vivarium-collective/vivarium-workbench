@@ -7,6 +7,8 @@ With providers on, the operations the AI tool index leaves out (so, the OpenAPI 
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -32,7 +34,7 @@ EXCLUDED_OPERATIONS = [
     ("POST", "/api/ai/ollama-models"), ("POST", "/api/ai/select"), ("POST", "/api/auth/github/logout"),
     ("POST", "/api/auth/github/start"), ("POST", "/api/auth/github/token"), ("POST", "/api/branch/push"),
     ("POST", "/api/chat/turn"), ("POST", "/api/expert-doc"), ("POST", "/api/remote-run-build"),
-    ("POST", "/api/remote-run-start"), ("POST", "/api/source/build-remote"), ("POST", "/api/source/materialize-repo"),
+    ("POST", "/api/remote-run-start"), ("POST", "/api/remote-run-visibility"), ("POST", "/api/source/build-remote"), ("POST", "/api/source/materialize-repo"),
     ("POST", "/api/source/switch"), ("POST", "/api/source/switch-build"), ("POST", "/api/work-create-pr"),
     ("POST", "/api/work-link-branch"), ("POST", "/api/work-push"), ("POST", "/api/workspaces/add"),
     ("POST", "/api/workspaces/cleanup-stale"), ("POST", "/api/workspaces/forget"), ("POST", "/api/workspaces/start"),
@@ -43,7 +45,7 @@ EXCLUDED_OPERATIONS = [
 CAPABILITIES_EXCLUDED = [
     "tag: AI", "tag: Auth", "tag: Downloads (reads)", "/api/ai/", "/api/chat/", "/api/events", "/api/source/",
     "/api/workspaces", "/api/branch/push", "/api/composite-run/{run_id}/download", "/api/expert-doc",
-    "/api/remote-run-build", "/api/remote-run-start", "/api/simulation-run-download", "/api/study-analysis-zip",
+    "/api/remote-run-build", "/api/remote-run-start", "/api/remote-run-visibility", "/api/simulation-run-download", "/api/study-analysis-zip",
     "/api/work-create-pr", "/api/work-link-branch", "/api/work-push",
 ]
 
@@ -106,7 +108,9 @@ def test_ai_tools_names_no_plugin_route():
     from vivarium_workbench_sms import routes
 
     text = inspect.getsource(ai_tools)
-    assert "/api/remote-run-" not in text
+    # The only remote-run route ai_tools names is the core's own Make public (it publishes under the user's compose-api
+    # identity); every plugin route is the plugin's declaration, checked path by path below.
+    assert set(re.findall(r'"(/api/remote-run-[^"]*)"', text)) == {"/api/remote-run-visibility"}
     plugin_paths = {r.path for r in routes.build_router().routes}
     assert plugin_paths >= routes.AI_EXCLUDED
     for path in plugin_paths:

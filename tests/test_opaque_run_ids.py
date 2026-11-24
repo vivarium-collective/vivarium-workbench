@@ -173,3 +173,14 @@ def test_composite_status_for_a_non_ascii_digit_id_is_not_a_500(tmp_path):
     except Exception as e:  # noqa: BLE001
         pytest.fail(f"raised {type(e).__name__}: {e}")
     assert status != 500
+
+
+@pytest.mark.plugin
+@pytest.mark.parametrize("rid, kind", [("simulation-V", "viva-core"), ("12", "sms-legacy")])
+def test_make_public_is_refused_for_a_run_whose_backend_does_not_offer_it(ws, asked, inproc_client, rid, kind):
+    """Only a backend whose runs facet has ``change_visibility`` (compose-api) answers; another's run is refused by
+    its record, 409 ``not-offered``, and its backend is never asked."""
+    _record(ws, rid, kind, HERE)
+    res = inproc_client(ws).post("/api/remote-run-visibility", json={"simulation_id": rid, "visibility": "public"})
+    assert res.status_code == 409, res.text
+    assert res.json()["reason"] == "not-offered" and asked == []

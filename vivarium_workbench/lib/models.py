@@ -38,7 +38,8 @@ class RemoteOrigin(BaseModel):
     backend: Optional[str] = None       # e.g. "ray"
     s3_uri: Optional[str] = None
     # The run's own features (step P3 F0): the optional facets of the backend that ran it, among "artifacts" and
-    # "analyses" (``lib/backends/features.run_features``). They only hide optional controls on the row.
+    # "analyses", and its optional run methods ("visibility") (``lib/backends/features.run_features``). They only
+    # hide optional controls on the row.
     features: list[str] = []
 
 

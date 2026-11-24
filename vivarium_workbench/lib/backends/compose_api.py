@@ -39,6 +39,10 @@ class ComposeApiRuns:
     def trace(self, run_id: str) -> "tuple[Union[bytes, dict], int, str]":
         return remote_run_compose.trace(run_id)
 
+    def change_visibility(self, run_id: str, visibility: str) -> tuple[dict, int]:
+        """The optional :class:`backends.Visibility` method: compose-api's owner-only ``PATCH /simulations/{id}``."""
+        return remote_run_compose.change_visibility(run_id, visibility)
+
     def run_composite(self, ws_root: Path, composite_id: str, *, dest: Path, n_steps: float,
                       overrides: "dict | None", emit_paths: "list[str] | None",
                       analysis_options: "dict | None", build_ref: "dict | None",
