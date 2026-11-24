@@ -61,6 +61,27 @@ def test_real_app_serves_enabled_plugin(_example_on_path, monkeypatch, tmp_path)
             _root.set_workspace_root(saved)
 
 
+def test_plugin_routes_bypass_core_identifier_guard(_example_on_path, monkeypatch, tmp_path):
+    """Core's app-wide `_plain_identifiers` guard (which requires `study`/`run`/… to be
+    plain workspace names) must NOT apply to plugin routes — a plugin's field may be a
+    reference like a MIRA @id. Plugins own their own param safety (docs/plugins.md)."""
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_BACKEND_PROVIDERS", "none")
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_PLUGIN_MODULES", "exampleplugin:ExamplePlugin")
+    monkeypatch.setenv("VIVARIUM_WORKBENCH_PLUGINS", "example")
+    from vivarium_workbench.api import app as app_mod
+    from vivarium_workbench.lib import _root
+
+    saved = _root.get_workspace_root()
+    _root.set_workspace_root(tmp_path)
+    try:
+        with TestClient(app_mod.create_app(), base_url="http://127.0.0.1") as c:
+            r = c.post("/api/plugins/example/echo", json={"study": "wb:study/s1"})
+            assert r.status_code == 200 and r.json()["study"] == "wb:study/s1"
+    finally:
+        if saved is not None:
+            _root.set_workspace_root(saved)
+
+
 def test_core_unaffected_when_disabled():
     from vivarium_workbench.plugins import load_plugins
 

@@ -453,7 +453,13 @@ WORKSPACE_ENV = "VIVARIUM_WORKBENCH_WORKSPACE"
 async def _plain_identifiers(request: Request) -> None:
     """App-wide guard: every request field that names one directory entry (study, investigation, run id ...)
     must be a plain name, whichever route it reaches — path, query or top-level JSON body. See
-    ``lib.path_safety.IDENTIFIER_FIELDS``. FastAPI caches the request body, so this does not consume it."""
+    ``lib.path_safety.IDENTIFIER_FIELDS``. FastAPI caches the request body, so this does not consume it.
+
+    Plugin routes (``/api/plugins/<name>/*``) are exempt: a plugin's fields have the plugin's own
+    meaning (e.g. a ``study`` may be a MIRA reference, not a workspace slug), and a plugin owns its
+    own param safety (``docs/plugins.md``)."""
+    if request.url.path.startswith("/api/plugins/") or request.url.path.startswith("/plugins/"):
+        return
     _path_safety.check_identifiers(request.path_params)
     _path_safety.check_identifiers(request.query_params.multi_items())
     if request.method in ("POST", "PUT", "PATCH", "DELETE") and "json" in request.headers.get("content-type", ""):
