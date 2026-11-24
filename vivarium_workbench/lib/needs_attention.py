@@ -280,8 +280,8 @@ def _stale_finding_items(slug: str, spec: dict) -> list[dict]:
         action_hint = nat if nat else "seed a study from this finding"
         it = _item(
             "stale_finding", "low", slug, fid,
-            f"Finding '{fid}' declared a next_action but no study was seeded",
-            f"next_action set ('{na}') but no seeded_study.",
+            f"{fid} — follow-up not seeded",
+            f"next_action “{na}” has no study yet.",
             action_hint,
         )
         it["next_action_type"] = nat
@@ -816,6 +816,48 @@ _CHECK_CATALOG = [
 ]
 
 
+# Issue-framed header for each check (what's WRONG when it flags), so the tab
+# reads as a worklist ("Findings awaiting a study · 14") not a negated
+# desired-state ("No stale findings · 14", which parses backwards). The desired
+# -state ``label`` above is still used for the passing-checks rollup.
+_CHECK_ISSUE_LABEL = {
+    "uncovered_ac":              "Acceptance criteria without a gating study",
+    "unresolved_composite":      "Composites that don't resolve",
+    "verdict_divergence":        "Verdicts that don't match the authored gate",
+    "hard_gate":                 "Failing hard gates",
+    "test_regression":           "Behavior-test regressions",
+    "diagnostic_branch_needed":  "Failed verdicts missing a diagnostic study",
+    "invariant_regression":      "Invariant regressions",
+    "open_feedback":             "Open expert feedback",
+    "param_drift":               "Parameter drift",
+    "unregistered_confirmatory": "Unregistered confirmatory studies",
+    "stale_finding":             "Findings awaiting a study",
+    "env_stale":                 "Stale run environments",
+    "nondeterministic":          "Non-reproducible runs",
+    "phantom_observable":        "Observables missing from the structure",
+}
+
+# Fallback severity per check — used only to rank/cap a check that flagged a
+# count but produced no per-item detail. Per-item severity (authoritative) still
+# wins when items are present. Mirrors the severities the item builders emit.
+_CHECK_SEVERITY = {
+    "uncovered_ac":              "high",
+    "unresolved_composite":      "high",
+    "verdict_divergence":        "high",
+    "hard_gate":                 "high",
+    "test_regression":           "high",
+    "diagnostic_branch_needed":  "medium",
+    "invariant_regression":      "high",
+    "open_feedback":             "medium",
+    "param_drift":               "medium",
+    "unregistered_confirmatory": "medium",
+    "stale_finding":             "low",
+    "env_stale":                 "low",
+    "nondeterministic":          "medium",
+    "phantom_observable":        "high",
+}
+
+
 def _checks(summary: dict, member_count: int, ac_total: int, ac_covered: int,
             *, include_phantom: bool, evaluated_count: int | None = None) -> list[dict]:
     """Per-check live rollup: {kind, label, mode, flagged, examined, passing}.
@@ -844,6 +886,8 @@ def _checks(summary: dict, member_count: int, ac_total: int, ac_covered: int,
             examined, passing = denom, max(0, denom - flagged)
         out.append({
             "kind": kind, "label": label, "mode": mode,
+            "issue_label": _CHECK_ISSUE_LABEL.get(kind, label),
+            "severity": _CHECK_SEVERITY.get(kind, "medium"),
             "flagged": flagged, "examined": examined, "passing": passing,
         })
     return out
