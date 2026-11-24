@@ -13,12 +13,6 @@ dependencies = [
     # related to os.kill. As before, psutil is being imported to manage process checks
     # across systems.
     "psutil>=5.9",
-    # boto3: the remote analysis figures read S3 directly (vivarium_workbench_sms/remote_analysis_figures.py,
-    # #1072/#1078); without it that path silently reports s3-unavailable, and prod's dataset registry does not
-    # cover most runs yet. A default dependency again UNTIL step P4b (docs/backend-adapters.md): the plugin then
-    # ships as its own distribution (vivarium-workbench-vivaapi), which declares boto3 itself, and this line goes
-    # (the core keeps the lean install #1755 wanted). [remote] below stays as the forward-compatible spelling.
-    "boto3>=1.34",
     "jinja2",
     "pyyaml",
     # Server-side LaTeX -> MathML for the Model view's governing equations
@@ -158,11 +152,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Remote analysis figures read S3 directly (vivarium_workbench_sms/
-# remote_analysis_figures.py, #1072/#1078). boto3 is imported lazily there and
-# _s3_client() returns None when it is absent. Until P4b boto3 is also a default
-# dependency (above); afterwards the plugin distribution declares it.
-remote = ["boto3>=1.34"]
+# The viva-api backend provider (docs/backend-adapters.md §2.4, step P4b): its own distribution, built from
+# packages/vivarium-workbench-vivaapi/ in this repo and released in lockstep (identical versions, `==` both ways;
+# scripts/set_version.sh). It declares boto3 itself (the S3 figures fallback), so the core does not.
+vivaapi = ["vivarium-workbench-vivaapi==0.5.8"]
 viz = ["matplotlib", "imageio", "numpy"]
 # `vivarium-workbench render-loom` drives the loom in a headless browser to save
 # each study's composite loom as a PNG. After installing, fetch the browser once:
@@ -198,11 +191,25 @@ vivarium-dashboard = "vivarium_workbench.cli:main"
 vdash = "vivarium_workbench.cli:main"
 vivarium-dashboard-publish = "vivarium_workbench.publish:main"
 
-# docs/backend-adapters.md step P4a: backend providers are found through this group
-# (lib/backends/provider.py), never by importing a plugin. The in-tree SMS plugin registers here
-# until step P4b moves it into its own distribution (vivarium-workbench-vivaapi).
-[project.entry-points."vivarium_workbench.backends"]
-sms = "vivarium_workbench_sms.provider:PROVIDER"
+# docs/backend-adapters.md step P4b: the core declares no `vivarium_workbench.backends` entry point. The SMS
+# provider's lives in packages/vivarium-workbench-vivaapi/pyproject.toml; core metadata that still declares one is
+# a stale install (lib/backends/provider.py refuses it).
+
+# docs/backend-adapters.md step P4b: the repo is a uv workspace. Its one member, packages/vivarium-workbench-vivaapi,
+# is the viva-api backend provider. The `plugins` dependency group (a default group) installs it editable with a plain
+# `uv sync` / `uv run`; `--no-group plugins` installs the core alone (the core-only CI job,
+# scripts/pytest_core_only.sh). A dependency group stays out of the published metadata: the `vivaapi` extra is the
+# published spelling.
+[tool.uv.workspace]
+members = ["packages/*"]
+# demos/v2ecoli is its own project (a path dependency on ../..), not a member.
+exclude = ["demos/*"]
+
+[dependency-groups]
+plugins = ["vivarium-workbench-vivaapi"]
+
+[tool.uv]
+default-groups = ["plugins"]
 
 # Git source for the bare viva-basic-processes dependency (not on PyPI). uv reads
 # this when vivarium-dashboard is the root project; consumers that depend on it
@@ -210,6 +217,8 @@ sms = "vivarium_workbench_sms.provider:PROVIDER"
 # the URL OUT of the published metadata so it never conflicts with the bare
 # requirement from pbg-superpowers.
 [tool.uv.sources]
+# The backend plugin, from this workspace (see [tool.uv.workspace] above).
+vivarium-workbench-vivaapi = { workspace = true }
 # viva-discovery-engine: resolves from PyPI (>=0.3,<0.8 -> 0.7.x). Ceiling raised
 # 0.7->0.8 so the workbench resolves alongside viva-superpowers>=0.27 (which floors
 # DE at >=0.7); DE 0.7 is purely additive over 0.6 for every API the workbench
@@ -486,23 +495,23 @@ files = [
     "vivarium_workbench/lib/csrf.py",
     "vivarium_workbench/lib/path_safety.py",
     "vivarium_workbench/lib/source_switch_views.py",
-    "vivarium_workbench_sms/source_build_views.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/source_build_views.py",
     "vivarium_workbench/lib/remote_run_views.py",
     "vivarium_workbench/lib/backends/__init__.py",
     "vivarium_workbench/lib/backends/compose_api.py",
     "vivarium_workbench/lib/remote_study_map.py",
-    "vivarium_workbench_sms/viva_core.py",
-    "vivarium_workbench_sms/provider.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/viva_core.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/provider.py",
     "vivarium_workbench/lib/backends/provider.py",
     "vivarium_workbench/lib/backends/config.py",
     "vivarium_workbench/lib/backends/features.py",
     "vivarium_workbench/lib/backends/ids.py",
-    "vivarium_workbench_sms/sms_legacy.py",
-    "vivarium_workbench_sms/sms_landing.py",
-    "vivarium_workbench_sms/analyses.py",
-    "vivarium_workbench_sms/routes.py",
-    "vivarium_workbench_sms/models.py",
-    "vivarium_workbench_sms/remote_pipeline_views.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/sms_legacy.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/sms_landing.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/analyses.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/routes.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/models.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/remote_pipeline_views.py",
     "vivarium_workbench/lib/auth_views.py",
     "vivarium_workbench/lib/git_commit_views.py",
     "vivarium_workbench/lib/work_mutations.py",
@@ -520,11 +529,11 @@ files = [
     "vivarium_workbench/lib/server_capabilities.py",
     "vivarium_workbench/lib/remote_trace.py",
     "vivarium_workbench/lib/perfetto_ui.py",
-    "vivarium_workbench_sms/remote_link.py",
-    "vivarium_workbench_sms/cli.py",
-    "vivarium_workbench_sms/deployment_run.py",
-    "vivarium_workbench_sms/cloud_dispatch.py",
-    "vivarium_workbench_sms/sms_trace.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/remote_link.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/cli.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/deployment_run.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/cloud_dispatch.py",
+    "packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/sms_trace.py",
     "vivarium_workbench/lib/remote_run.py",
     "vivarium_workbench/lib/test_run_views.py",
     "vivarium_workbench/lib/comparative_runs.py",
@@ -563,7 +572,7 @@ allow-direct-references = true
 # Docker). They stay shipped via `packages`; no force-include needed.
 # Ship the renamed package AND the thin vivarium_dashboard/ back-compat shim
 # (deprecated; removed in Phase 3) so old imports keep resolving in wheels too.
-packages = ["vivarium_workbench", "vivarium_workbench_sms", "vivarium_dashboard"]
+packages = ["vivarium_workbench", "vivarium_dashboard"]
 # vivarium_workbench/loom/_dist (the Vite build output of the vendored
 # bigraph-loom, produced by `scripts/build_loom.sh` / `npm run build`) is
 # gitignored — it's a generated artifact, not source. hatchling's default
@@ -581,6 +590,11 @@ artifacts = ["vivarium_workbench/loom/_dist/**"]
 # installs so contributors without Node aren't blocked. See hatch_build.py.
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build.py"
+
+# docs/backend-adapters.md step P4b: the core sdist does not carry the plugin (its own sdist does), nor any build
+# output left under dist/ (release.yml builds into dist/core and dist/vivaapi; scripts/check_wheels.py checks).
+[tool.hatch.build.targets.sdist]
+exclude = ["/packages", "/dist"]
 
 [tool.pytest.ini_options]
 timeout = 120

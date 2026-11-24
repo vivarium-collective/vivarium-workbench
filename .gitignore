@@ -51,3 +51,9 @@ tests/_fixtures/ws_federation_demo/reports/
 tests/_fixtures/ws_increase_demo/.pbg/composite-state-cache/
 tests/_fixtures/ws_increase_demo/.pbg/registry-catalog/
 vivarium_workbench/loom/_dist_single
+
+# docs/backend-adapters.md step P4b: the SMS plugin lives in packages/vivarium-workbench-vivaapi/. A root copy
+# (even a leftover __pycache__) would import through the core's editable .pth and defeat the core-only install.
+/vivarium_workbench_sms/
+# scripts/pytest_core_only.sh's core-only venv.
+/.venv-core/
