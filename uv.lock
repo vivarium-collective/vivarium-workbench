@@ -3631,7 +3631,7 @@ source = { git = "https://github.com/vivarium-collective/viva-marketplace.git?re
 
 [[package]]
 name = "viva-discovery-engine"
-version = "0.7.2"
+version = "0.7.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bigraph-schema" },
@@ -3651,9 +3651,9 @@ dependencies = [
     { name = "viva-emitters", extra = ["parquet"] },
     { name = "viva-workspace" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6c/cb/1693b6fd62f48c3fa5220dfda513f697f69a898c429732f78defbd0e4b8b/viva_discovery_engine-0.7.2.tar.gz", hash = "sha256:23e5713268acb4169ebde75e26b93c5d87b298426d5b1983aed4ddf417813d02", size = 4038358, upload-time = "2026-11-20T02:20:31.371Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/26/76/d9762fbc30a1d988d5850787acb51a2694830206c3bfc3c700dcb9fa4f1d/viva_discovery_engine-0.7.6.tar.gz", hash = "sha256:b7b8ff9530a8d5a466bef15d5020bdc7b210fa3d9936cc9dd233daf46766a586", size = 4150671, upload-time = "2026-11-24T23:30:04.423Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/05/b9/f93df8a25466712fd37f014d44f5518b00a2f565186d44dcd3d99e25ede6/viva_discovery_engine-0.7.2-py3-none-any.whl", hash = "sha256:2c9e448e765a5765e86f53208f22474a5c9ac0e41184063649dbbcb05d709321", size = 648125, upload-time = "2026-11-20T02:20:29.814Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/50/d4a21362518e49a439b737f5a576eaad0a4d134a5d2ae2d1efcf911c0b09/viva_discovery_engine-0.7.6-py3-none-any.whl", hash = "sha256:056e82bc7c516e99f86493c397280a9f0af3abd3f2d2c6ca397e852e843984f5", size = 710622, upload-time = "2026-11-24T23:30:02.489Z" },
 ]
 
 [[package]]
