@@ -72,6 +72,7 @@ from vivarium_workbench.lib import composite_run_views as _cr_views
 from vivarium_workbench.lib import composite_test_run_views as _composite_test_run_views
 from vivarium_workbench.lib import loom_savepoints as _loom_savepoints
 from vivarium_workbench.lib import composite_stop_views as _composite_stop_views
+from vivarium_workbench.lib import composite_delete_views as _composite_delete_views
 from vivarium_workbench.lib import study_create_views as _study_create_views
 from vivarium_workbench.lib import investigation_run_one_views as _investigation_run_one_views
 from vivarium_workbench.lib import investigation_run_views as _investigation_run_views
@@ -4071,6 +4072,29 @@ def create_app() -> FastAPI:
           - 200  stopped / already terminal (idempotent no-op)
         """
         body, status = _composite_stop_views.stop_composite_run(ws, run_id)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post(
+        "/api/composite-run/{run_id}/delete",
+        tags=["Composites"],
+        summary="Delete a run from the Simulations DB (row + tombstone + artifacts)",
+    )
+    def composite_run_delete_route(
+        run_id: str,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Delete a composite run from the Simulations DB.
+
+        Best-effort-stops a still-running worker, removes the ``runs_meta`` row
+        (and writes a ``deleted`` tombstone so the JSONL fold does not resurrect
+        it), and deletes the run's ``.pbg/runs/<run_id>/`` artifact directory.
+
+        Status codes (via ``lib.composite_delete_views.delete_composite_run``):
+          - 400  missing ``run_id``
+          - 404  unknown run (``{"deleted": false, "outcome": "not_found"}``)
+          - 200  removed (``{"deleted": true, "outcome": "deleted"}``)
+        """
+        body, status = _composite_delete_views.delete_composite_run(ws, run_id)
         return JSONResponse(status_code=status, content=body)
 
     @app.get(
