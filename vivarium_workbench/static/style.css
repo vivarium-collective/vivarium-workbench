@@ -1714,6 +1714,8 @@ body.viv-rail-resizing-active #viv-rail-studies-section{ contain:layout; }
 /* shared info popup (composites / studies / config·ports) */
 .reg-infopop{
   position:absolute; z-index:70; max-width:340px; min-width:200px;
+  max-height:min(72vh,560px); overflow-y:auto; overflow-x:hidden;
+  overscroll-behavior:contain;
   background:#fff; border:1px solid #e2e8f0; border-radius:10px;
   box-shadow:0 12px 30px -8px rgba(15,23,42,0.28); padding:12px 14px; font-size:0.85em;
 }
