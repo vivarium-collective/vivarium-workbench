@@ -8,6 +8,12 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 
+[manifest]
+members = [
+    "vivarium-workbench",
+    "vivarium-workbench-vivaapi",
+]
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"
@@ -3726,7 +3732,6 @@ version = "0.5.8"
 source = { editable = "." }
 dependencies = [
     { name = "bigraph-schema" },
-    { name = "boto3" },
     { name = "compose-api-client" },
     { name = "fastapi" },
     { name = "investigation-contracts" },
@@ -3771,14 +3776,14 @@ dev = [
 loom-render = [
     { name = "playwright" },
 ]
-remote = [
-    { name = "boto3" },
-]
 test = [
     { name = "polars" },
     { name = "pyarrow" },
     { name = "xarray" },
     { name = "zarr" },
+]
+vivaapi = [
+    { name = "vivarium-workbench-vivaapi" },
 ]
 viz = [
     { name = "imageio" },
@@ -3786,11 +3791,14 @@ viz = [
     { name = "numpy" },
 ]
 
+[package.dev-dependencies]
+plugins = [
+    { name = "vivarium-workbench-vivaapi" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "bigraph-schema", specifier = ">=1.8.1" },
-    { name = "boto3", specifier = ">=1.34" },
-    { name = "boto3", marker = "extra == 'remote'", specifier = ">=1.34" },
     { name = "compose-api-client", specifier = ">=0.7.72" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'chat'", specifier = ">=0.27" },
@@ -3829,12 +3837,37 @@ requires-dist = [
     { name = "viva-emitters", extras = ["sqlite", "xarray", "parquet"], specifier = ">=0.4.3" },
     { name = "viva-superpowers", extras = ["evaluator"], git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main" },
     { name = "viva-workspace", git = "https://github.com/vivarium-collective/viva-workspace.git?branch=main" },
+    { name = "vivarium-workbench-vivaapi", marker = "extra == 'vivaapi'", editable = "packages/vivarium-workbench-vivaapi" },
     { name = "xarray", specifier = ">=2026.4" },
     { name = "xarray", marker = "extra == 'test'" },
     { name = "zarr", specifier = ">=3.1.6" },
     { name = "zarr", marker = "extra == 'test'" },
 ]
-provides-extras = ["remote", "viz", "loom-render", "chat", "dev", "test"]
+provides-extras = ["vivaapi", "viz", "loom-render", "chat", "dev", "test"]
+
+[package.metadata.requires-dev]
+plugins = [{ name = "vivarium-workbench-vivaapi", editable = "packages/vivarium-workbench-vivaapi" }]
+
+[[package]]
+name = "vivarium-workbench-vivaapi"
+version = "0.5.8"
+source = { editable = "packages/vivarium-workbench-vivaapi" }
+dependencies = [
+    { name = "boto3" },
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "vivarium-workbench" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boto3", specifier = ">=1.34" },
+    { name = "fastapi", specifier = ">=0.110" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "pyyaml" },
+    { name = "vivarium-workbench", editable = "." },
+]
 
 [[package]]
 name = "webcolors"

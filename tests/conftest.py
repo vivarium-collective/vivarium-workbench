@@ -29,9 +29,9 @@ for fixture_ws in _FIXTURES.iterdir() if _FIXTURES.is_dir() else []:
 # ---------------------------------------------------------------------------
 #
 # CORE_MODE is
-#   "absent"  the plugin cannot be imported: physically removed (the `core-only` CI job, authoritative), or hidden
-#             in this process by VIVARIUM_WORKBENCH_TEST_NO_PLUGIN=1 (a local convenience, BEST-EFFORT: subprocesses
-#             the tests spawn -- `dashboard_client`, the CLI -- still see the plugin);
+#   "absent"  the plugin is not installed as a real package: the core installed without it (`--no-group plugins`:
+#             the `core-only` CI job and scripts/pytest_core_only.sh, step P4b). A namespace left by a stray root
+#             `vivarium_workbench_sms/__pycache__` counts as absent, as it does for the provider registry;
 #   "off"     the plugin is installed but VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none turns providers off;
 #   None      the normal suite.
 #
@@ -41,7 +41,6 @@ for fixture_ws in _FIXTURES.iterdir() if _FIXTURES.is_dir() else []:
 # stale). Off: a `plugin` test is skipped.
 
 PLUGIN_PACKAGE = "vivarium_workbench_sms"
-NO_PLUGIN_ENV = "VIVARIUM_WORKBENCH_TEST_NO_PLUGIN"
 _PROVIDERS_ENV = "VIVARIUM_WORKBENCH_BACKEND_PROVIDERS"   # lib.backends.provider.PROVIDERS_ENV
 
 
@@ -49,29 +48,19 @@ def _is_plugin_module(name: str) -> bool:
     return name == PLUGIN_PACKAGE or name.startswith(PLUGIN_PACKAGE + ".")
 
 
-class _NoPlugin:
-    """Every plugin import fails, as if the package were not installed (same finder as
-    tests/test_core_imports_without_plugin.py)."""
+def _plugin_is_real_package() -> bool:
+    """The registry's rule (lib/backends/provider._real_package): a spec with a real origin, not a namespace."""
+    import importlib.util
 
-    def find_spec(self, fullname, path=None, target=None):
-        if _is_plugin_module(fullname):
-            raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
-        return None
+    try:
+        spec = importlib.util.find_spec(PLUGIN_PACKAGE)
+    except (ImportError, ValueError):
+        return False
+    return spec is not None and spec.origin not in (None, "namespace") and spec.submodule_search_locations is not None
 
 
 def _core_mode() -> str | None:
-    import importlib.util
-
-    if os.environ.get(NO_PLUGIN_ENV, "").strip() not in ("", "0"):
-        if not any(isinstance(f, _NoPlugin) for f in sys.meta_path):
-            sys.meta_path.insert(0, _NoPlugin())
-        for name in [n for n in sys.modules if _is_plugin_module(n)]:
-            del sys.modules[name]
-        return "absent"
-    try:
-        if importlib.util.find_spec(PLUGIN_PACKAGE) is None:
-            return "absent"
-    except (ImportError, ValueError):
+    if not _plugin_is_real_package():
         return "absent"
     if (os.environ.get(_PROVIDERS_ENV) or "").strip().lower() == "none":
         return "off"

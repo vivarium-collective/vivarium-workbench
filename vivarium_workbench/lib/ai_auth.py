@@ -309,6 +309,8 @@ def _keyring_delete(provider: str) -> None:
 
 
 def _aws_credentials_present() -> bool:
+    # boto3 is not a core dependency (step P4b moved it to the viva-api plugin); the `[chat]` extra brings it through
+    # pydantic-ai-slim[bedrock], and without it this answers False.
     try:
         import boto3
         return boto3.Session().get_credentials() is not None

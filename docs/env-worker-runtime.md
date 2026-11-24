@@ -42,7 +42,7 @@ what stops the implementations drifting into alternatives someone chooses betwee
 
 **The hosted launchers come from the backend provider** (docs/backend-adapters.md
 §2.2, step P2): the core keeps `LocalWorkerLauncher`, and the SMS plugin's
-`vivarium_workbench_sms/env_workers.py` supplies the proxy and dial-back launchers
+`packages/vivarium-workbench-vivaapi/vivarium_workbench_sms/env_workers.py` supplies the proxy and dial-back launchers
 through `Provider.worker_launcher()`. **A deployment that sets a hosted variable
 when no provider supplies one is refused**: `serve` exits 2 at startup with the
 reason, and a pool call raises `BackendConfigError`. It never quietly falls back to

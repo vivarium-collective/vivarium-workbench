@@ -19,9 +19,10 @@ import re
 from pathlib import Path
 
 import pytest
+from _plugin_paths import PLUGIN_DIR
 
 PKG = Path(__file__).resolve().parent.parent / "vivarium_workbench"
-PLUGIN = Path(__file__).resolve().parent.parent / "vivarium_workbench_sms"
+PLUGIN = PLUGIN_DIR  # tests/_plugin_paths.py (step P4b: the plugin is its own workspace member)
 CLIENT = PLUGIN / "sms_api_client.py"
 
 #: ``SmsApiClient`` methods that can reach an SMS-specific route. Those marked (fallback) go to

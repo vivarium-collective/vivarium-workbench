@@ -89,8 +89,18 @@ COPY . .
 
 # The workbench + its own declared dependencies, straight from this repo's
 # uv.lock. `--frozen` uses the lock as-is (a drifted lock fails the build rather
-# than silently re-resolving); `--no-dev` keeps test/lint tooling out of the
-# shipped image.
+# than silently re-resolving). Test/lint tooling stays out because it lives in
+# the `dev` / `test` EXTRAS, which are installed only when named. `--no-dev`
+# itself only drops a dependency GROUP named `dev`, and this project has none,
+# so today it changes nothing; it stays so a future `dev` group would not ship.
+#
+# `--extra vivaapi`: the viva-api (SMS) backend provider, which hosted
+# deployments use (docs/backend-adapters.md §2.4, step P4b). It is its own
+# distribution, vivarium-workbench-vivaapi, built from THIS commit's uv
+# workspace member (packages/vivarium-workbench-vivaapi) and locked in the same
+# uv.lock -- not downloaded from PyPI, so the image build never races the
+# release publish. Named explicitly so the production install does not depend
+# on the `plugins` default group (which installs it too).
 #
 # This does NOT pull a workspace package: v2ecoli is not a dependency of this
 # project at all (the local v2ecoli dev environment is its own project,
@@ -109,7 +119,7 @@ COPY . .
 # `vivarium-workbench[chat]` brings the chat into any image built from that
 # workspace's own environment, so such an image must not be hosted before then.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --extra vivaapi
 
 ENV PATH="/app/vivarium-workbench/.venv/bin:${PATH}"
 
@@ -155,12 +165,21 @@ RUN python -m vivarium_workbench.lib.perfetto_ui --dest /app/perfetto-ui
 # `import v2ecoli` is deliberately GONE (#932): the workspace package is not in
 # this image, is imported best-effort at runtime from the mounted workspace, and
 # was the line that made this build impossible under QEMU.
+#
+# The backend provider check (step P4b): exactly the viva-api plugin's `sms`
+# provider loads through the entry point, at the core's own version (the two
+# are released in lockstep).
 RUN python -c "\
 import vivarium_workbench, pbg_ptools.workbench_viewers; \
 import vivarium_workbench.api.app; \
 from vivarium_workbench.loom_assets import asset_dir; \
 d = asset_dir(); \
 assert (d / 'index.html').is_file(), f'loom bundle missing: {d}'; \
+from vivarium_workbench.lib.backends import provider; \
+ps = provider.providers(); \
+assert [p.name for p in ps] == ['sms'], ps; \
+import importlib.metadata as m; \
+assert m.version('vivarium-workbench-vivaapi') == m.version('vivarium-workbench'), m.version('vivarium-workbench-vivaapi'); \
 print('workbench server env ok')"
 
 # ─── runtime link mode ───────────────────────────────────────────────────────
@@ -204,8 +223,11 @@ LABEL org.opencontainers.image.title="vivarium-workbench" \
 # Same three values, readable straight off a running pod with no registry
 # access -- the thing you actually want when identifying what's deployed:
 #   kubectl exec -n <ns> deploy/workbench -- cat /app/BUILD_INFO.json
-RUN printf '{"version":"%s","revision":"%s","created":"%s"}\n' \
-        "${VERSION}" "${VCS_REF}" "${BUILD_DATE}" > /app/BUILD_INFO.json
+# plus the backend plugin's installed version (step P4b), read from its metadata
+# in this same RUN: "plugins": {"vivarium-workbench-vivaapi": "<version>"}.
+RUN PLUGIN_VERSION="$(python -c "import importlib.metadata as m; print(m.version('vivarium-workbench-vivaapi'))")" \
+ && printf '{"version":"%s","revision":"%s","created":"%s","plugins":{"vivarium-workbench-vivaapi":"%s"}}\n' \
+        "${VERSION}" "${VCS_REF}" "${BUILD_DATE}" "${PLUGIN_VERSION}" > /app/BUILD_INFO.json
 
 # ─── serve ───────────────────────────────────────────────────────────────────
 # The workspace (workspace.yaml + studies/investigations/.git/runs.db AND its

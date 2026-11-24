@@ -31,6 +31,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from _plugin_paths import plugin_files
+
 # module name -> why the workbench is allowed to import it from the plugin.
 #
 # Trimmed to what the workbench ACTUALLY imports (verified by the AST scan below).
@@ -78,7 +80,7 @@ def _workbench_imports(package: str) -> dict[str, set[str]]:
     root = pathlib.Path(__file__).resolve().parents[1] / "vivarium_workbench"
     found: dict[str, set[str]] = {}
     # step P1b (deliberate change): the SMS plugin package ships in the same distribution; check it too.
-    for f in [*root.rglob("*.py"), *(root.parent / "vivarium_workbench_sms").rglob("*.py")]:
+    for f in [*root.rglob("*.py"), *plugin_files("*.py", recursive=True)]:
         try:
             tree = ast.parse(f.read_text(encoding="utf-8"))
         except SyntaxError:

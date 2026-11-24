@@ -10,6 +10,8 @@ reintroduced.
 """
 import pathlib
 
+from _plugin_paths import plugin_files
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent / "vivarium_workbench"
 
 
@@ -70,7 +72,7 @@ def _bare_write_text_calls(text: str) -> list[tuple[int, str]]:
 
 def test_all_lib_write_text_calls_are_utf8():
     # step P1b (deliberate change): the SMS plugin's modules left lib/; check them too.
-    lib_files = list((ROOT / "lib").rglob("*.py")) + list((ROOT.parent / "vivarium_workbench_sms").rglob("*.py"))
+    lib_files = list((ROOT / "lib").rglob("*.py")) + plugin_files("*.py", recursive=True)
     server_file = ROOT / "server.py"
     all_files = sorted(lib_files) + [server_file]
 

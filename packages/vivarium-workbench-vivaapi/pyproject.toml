@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# The viva-api (SMS / viva-core) backend provider for vivarium-workbench, as its own distribution
+# (docs/backend-adapters.md §2.4, step P4b). It lives in this repo as a uv workspace member and is released in
+# lockstep with the core: identical versions, `==` pins both ways. scripts/set_version.sh moves all four places;
+# scripts/check_release.py (shared by tests/test_lockstep_versions.py and release.yml) checks them.
+[project]
+name = "vivarium-workbench-vivaapi"
+version = "0.5.8"
+description = "viva-api (SMS / viva-core) backend provider for vivarium-workbench"
+readme = "README.md"
+# The repository's LICENSE (Apache-2.0). The root project declares none in its metadata.
+license = "Apache-2.0"
+authors = [{name = "Vivarium Collective", email = "team@vivarium-collective.org"}]
+requires-python = ">=3.11"
+dependencies = [
+    # Exact: the plugin uses core internals (lib.backends.records, remote_run_landing, api.deps, backend_config,
+    # simulations_index), not just the Provider Protocol, so only the core release it was tested with is safe.
+    "vivarium-workbench==0.5.8",
+    # The remote analysis figures read S3 directly (vivarium_workbench_sms/remote_analysis_figures.py,
+    # #1072/#1078); without boto3 that path silently reports s3-unavailable.
+    "boto3>=1.34",
+    # Imported directly; the same floors as the core.
+    "pydantic>=2",
+    "fastapi>=0.110",
+    "pyyaml",
+]
+
+[project.urls]
+Homepage = "https://github.com/vivarium-collective/vivarium-workbench"
+Source = "https://github.com/vivarium-collective/vivarium-workbench/tree/main/packages/vivarium-workbench-vivaapi"
+Issues = "https://github.com/vivarium-collective/vivarium-workbench/issues"
+
+# docs/backend-adapters.md step P4a: the core finds providers through this group (lib/backends/provider.py),
+# never by importing a plugin.
+[project.entry-points."vivarium_workbench.backends"]
+sms = "vivarium_workbench_sms.provider:PROVIDER"
+
+[tool.uv.sources]
+vivarium-workbench = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["vivarium_workbench_sms"]

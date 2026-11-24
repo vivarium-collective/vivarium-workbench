@@ -111,11 +111,13 @@ jobs:
         run: uv run --frozen bash scripts/pytest_gate.sh --only-known
 
   core-only:
-    # docs/backend-adapters.md step P3 (K1): the suite with the SMS plugin REMOVED, as the core ships without it (the
-    # hosted env-worker pod, and step P4's split). Installed exactly like `suite`, then `vivarium_workbench_sms/` is
-    # deleted from the checkout: the editable install's .pth lists the project root, so the package stops resolving.
-    # tests/conftest.py then ignores the test modules that import the plugin at module level and strict-xfails the
-    # tests marked `plugin` (a pass is a failure: the mark is stale). See tests/test_plugin_test_marking.py.
+    # docs/backend-adapters.md step P3 (K1): the suite WITHOUT the SMS plugin, as the core ships without it (the hosted
+    # env-worker pod, a plain `pip install vivarium-workbench`). Since step P4b the plugin is its own distribution
+    # (vivarium-workbench-vivaapi, the uv workspace member packages/vivarium-workbench-vivaapi, installed by the
+    # `plugins` default group), so this job installs like `suite` but with `--no-group plugins`: a real core-only
+    # install, nothing deleted. tests/conftest.py then ignores the test modules that import the plugin at module
+    # level and strict-xfails the tests marked `plugin` (a pass is a failure: the mark is stale). See
+    # tests/test_plugin_test_marking.py. scripts/pytest_core_only.sh is the exact local equivalent.
     #
     # BLOCKING since step P3 Z (K3): continue-on-error is gone, so a failing shard fails the `core-only` check below
     # (it is a required check on main: branch protection set 2026-11-23).
@@ -133,18 +135,25 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - name: Install (locked, same as suite)
-        run: uv sync --frozen --extra dev --extra test --extra chat
-      - name: Remove the SMS plugin (the core ships without it)
-        # The find_spec check fails the job loudly if the removal did not take (e.g. a non-editable install).
+      - name: Install without the plugin (locked, like suite but --no-group plugins)
+        run: uv sync --frozen --extra dev --extra test --extra chat --no-group plugins
+      - name: The plugin is not installed
+        # Fails the job loudly if the install choice did not take: the package does not resolve, its distribution is
+        # absent, and no distribution declares a provider (step P4b: the core declares none).
         run: |
-          rm -rf vivarium_workbench_sms
           .venv/bin/python -c "import importlib.util, sys; spec = importlib.util.find_spec('vivarium_workbench_sms'); print('vivarium_workbench_sms ->', spec); sys.exit(spec is not None)"
-      - name: The entry point outlives the package (so the job exercises the provider-absent path)
-        # docs/backend-adapters.md step P4a: the installed metadata still names the `sms` provider; the registry must
-        # skip it as absent, not report a broken plugin or a stale install.
-        run: |
-          .venv/bin/python -c "import importlib.metadata as m, sys; eps = m.entry_points(group='vivarium_workbench.backends'); print(list(eps)); sys.exit('sms' not in eps.names)"
+          .venv/bin/python -c "
+          import importlib.metadata as m, sys
+          eps = m.entry_points(group='vivarium_workbench.backends')
+          print('entry points:', list(eps))
+          try:
+              m.distribution('vivarium-workbench-vivaapi')
+          except m.PackageNotFoundError:
+              pass
+          else:
+              sys.exit('vivarium-workbench-vivaapi is installed')
+          sys.exit(len(eps) != 0)
+          "
       - name: Smoke (the app and the CLI start without the plugin)
         run: |
           set -euo pipefail
@@ -158,7 +167,7 @@ jobs:
             echo "::error::vivarium-workbench --help lists the plugin's 'run-remote' with the plugin removed"; exit 1
           fi
       - name: pytest (core only, shard ${{ matrix.group }}/4, quarantine deselected)
-        # --no-sync: never rebuild the editable install -- hatch's `packages` names the removed directory.
+        # --no-sync: a plain `uv run` would sync the default `plugins` group back in.
         env:
           PYTEST_SPLITS: "4"
           PYTEST_GROUP: ${{ matrix.group }}

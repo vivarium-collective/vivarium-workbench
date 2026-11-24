@@ -30,6 +30,14 @@ baked in at `/app/v2ecoli` (used to seed the deployment's workspace volume).
 > environment container is the right shape *later*, once the `EnvironmentResolver`
 > port lets the workbench resolve the env over a boundary instead of importing it.
 
+**The viva-api (SMS) backend plugin.** Since step P4b (docs/backend-adapters.md) the
+plugin is its own distribution, `vivarium-workbench-vivaapi`, built from this repo's
+uv workspace member `packages/vivarium-workbench-vivaapi/`. The image carries it:
+`uv sync --frozen --no-dev --extra vivaapi` installs it from the **same commit and
+`uv.lock`** as the core (not from PyPI), the build-time sanity check fails unless
+exactly the `sms` provider loads at the core's own version, and `/app/BUILD_INFO.json`
+records it under `"plugins"`.
+
 ## Build + push
 
 ```bash

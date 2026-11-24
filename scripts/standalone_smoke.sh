@@ -34,4 +34,7 @@ fi
 
 cd "$work"
 uv sync --locked
+# docs/backend-adapters.md step P4b: a plain `uv sync` installs the core AND the viva-api backend plugin (the uv
+# workspace member packages/vivarium-workbench-vivaapi, through the `plugins` default group).
+uv run --locked python -c "from vivarium_workbench.lib.backends import provider; ps = provider.providers(); assert [p.name for p in ps] == ['sms'], ps"
 uv run --locked vwb smoke

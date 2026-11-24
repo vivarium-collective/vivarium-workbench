@@ -33,6 +33,14 @@ venv), see [docs/USAGE.md](docs/USAGE.md).
 pip install vivarium-workbench         # or: uv pip install vivarium-workbench
 ```
 
+For the viva-api (SMS / viva-core) backend — remote runs, builds and figures against
+a viva-api deployment — add the `vivaapi` extra, which installs the backend plugin
+`vivarium-workbench-vivaapi` (its own distribution, released in lockstep):
+
+```bash
+pip install 'vivarium-workbench[vivaapi]'
+```
+
 > **Renamed:** the tool was `vivarium-dashboard`; it is now `vivarium-workbench`
 > (it authors, runs, evaluates, and publishes across the whole lifecycle — a
 > workbench, not a read-only dashboard). The old `vivarium-dashboard` / `vdash` /
@@ -52,7 +60,12 @@ Or install editable from a clone for development:
 ```bash
 git clone https://github.com/vivarium-collective/vivarium-workbench.git ~/code/vivarium-workbench
 ./.venv/bin/pip install -e ~/code/vivarium-workbench   # into your workspace's venv
+# and, for the viva-api backend, the plugin from the same clone:
+./.venv/bin/pip install -e ~/code/vivarium-workbench/packages/vivarium-workbench-vivaapi
 ```
+
+(Inside the clone itself, a plain `uv sync` installs both; `uv sync --no-group plugins`
+installs the core alone.)
 
 ### 2. Get a workspace
 
