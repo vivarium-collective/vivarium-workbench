@@ -98,6 +98,30 @@ def enabled_plugin_names(ws_root: Path | None, env: Mapping[str, str] | None = N
     return _workspace_plugins(ws_root) | from_env
 
 
+def plugin_status(ws_root: Path | None, env: Mapping[str, str] | None = None) -> list[dict]:
+    """Rows for ``vwb plugins``: every discovered (installed) plugin plus any enabled
+    name that is not installed, each with ``installed`` / ``enabled`` / ``api_version``.
+    Sorted by name; first-wins on a duplicate installed name."""
+    env = os.environ if env is None else env
+    enabled = enabled_plugin_names(ws_root, env)
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for p in discover_plugins(env):
+        if p.name in seen:
+            continue
+        seen.add(p.name)
+        rows.append({
+            "name": p.name,
+            "installed": True,
+            "enabled": p.name in enabled,
+            "api_version": getattr(p, "api_version", None),
+        })
+    for name in enabled - seen:
+        rows.append({"name": name, "installed": False, "enabled": True, "api_version": None})
+    rows.sort(key=lambda r: r["name"])
+    return rows
+
+
 def select_enabled(plugins: list[WorkbenchPlugin], names: set[str]) -> list[WorkbenchPlugin]:
     """Keep enabled plugins, first-wins on a duplicate ``name``."""
     out: list[WorkbenchPlugin] = []

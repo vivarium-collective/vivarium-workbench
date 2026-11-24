@@ -4,6 +4,7 @@ A plugin adds namespaced extensions to the workbench — a backend router, a rai
 panel/page, a workspace-data folder, and skills — **without editing core**. Plugins
 are in-process Python packages, discovered via an entry-point, and run only when
 **opted in**. Design: [`docs/superpowers/specs/2026-11-23-workbench-plugin-system-design.md`](superpowers/specs/2026-11-23-workbench-plugin-system-design.md).
+Where plugins live, naming, and the known-plugins list: [plugins-registry.md](plugins-registry.md).
 
 ## Quick start
 

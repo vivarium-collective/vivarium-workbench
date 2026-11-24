@@ -1023,6 +1023,30 @@ def cmd_new_plugin(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plugins(args: argparse.Namespace) -> int:
+    """List discovered (installed) plugins and whether each is enabled for a workspace."""
+    from vivarium_workbench.plugins import plugin_status
+
+    ws = Path(args.workspace).resolve() if args.workspace else None
+    rows = plugin_status(ws)
+    if getattr(args, "json", False):
+        print(json.dumps(rows, indent=2))
+        return 0
+    if not rows:
+        print("no plugins discovered. Scaffold one with `vwb new-plugin <name>` (see docs/plugins.md).")
+        return 0
+    for r in rows:
+        if not r["installed"]:
+            note = "enabled but NOT installed"
+        elif r["enabled"]:
+            note = "enabled"
+        else:
+            note = "installed (off)"
+        api = f"api v{r['api_version']}" if r["api_version"] is not None else "api v?"
+        print(f"  {r['name']:<24} {note:<26} {api}")
+    return 0
+
+
 def cmd_catalog_add(args: argparse.Namespace) -> int:
     """Register a workspace in ``~/.pbg/workspaces.json`` so it appears in the
     dashboard's workspace switcher (idempotent). Wraps
@@ -1824,6 +1848,14 @@ def _build_parser(commands: "Sequence[Command] | None" = None) -> argparse.Argum
     p_newplug.add_argument("--dest", default=None, metavar="DIR",
                            help="target directory (default: ./viva-<name>)")
     p_newplug.set_defaults(func=cmd_new_plugin)
+
+    p_plugins = sub.add_parser(
+        "plugins",
+        help="List installed plugins and whether each is enabled for a workspace",
+    )
+    p_plugins.add_argument("--workspace", default=".", help="workspace root (default: cwd)")
+    p_plugins.add_argument("--json", action="store_true", help="emit rows as JSON")
+    p_plugins.set_defaults(func=cmd_plugins)
 
     p_audit = sub.add_parser(
         "audit",
