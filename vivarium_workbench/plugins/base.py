@@ -41,6 +41,8 @@ class PluginContributions:
     workspace_folder: Optional[str] = None
     workspace_reader: Optional[Callable[..., Any]] = None
     skills_dir: Optional[Path] = None
+    #: routes (relative to this plugin's API base) to hide from the in-app AI agent
+    ai_excluded: list = field(default_factory=list)
 
 
 class WorkbenchPlugin:
@@ -95,6 +97,13 @@ class PluginRegistry:
 
     def skills(self, dir: str) -> None:
         self._c.skills_dir = self._resolve(dir)
+
+    def ai_excluded(self, paths) -> None:
+        """Hide these routes from the in-app AI agent. Paths are relative to this
+        plugin's API base (``/api/plugins/<name>``); the loader namespaces them. Use
+        for approval-sensitive or destructive plugin routes the model should not call."""
+        for p in paths:
+            self._c.ai_excluded.append("/" + str(p).lstrip("/"))
 
     def contributions(self) -> PluginContributions:
         return self._c

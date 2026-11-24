@@ -82,6 +82,10 @@ window.KnowledgeGraphPanel = function (ctx) {
   // ctx.base    static asset base  ("/plugins/knowledge-layer/")
   // ctx.apiBase API base           ("/api/plugins/knowledge-layer")
   // ctx.api(path, opts) -> Promise<json>   fetch under apiBase
+  // ctx.host    stable host hooks (never reach for window globals):
+  //   ctx.host.dock               the shared VivPanelDock engine
+  //   ctx.host.refreshViews(slug) ask the workbench to refresh its views after
+  //                               your plugin changed workspace data
   ctx.api('/knowledge/graph').then(function (d) { ctx.el.innerHTML = render(d); });
 };
 ```

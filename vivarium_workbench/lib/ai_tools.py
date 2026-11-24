@@ -111,8 +111,14 @@ def make_client(app: FastAPI) -> httpx.AsyncClient:
 
 
 def excluded_paths(app: FastAPI) -> frozenset[str]:
-    """``EXCLUDED_PATHS`` plus what the app's backend providers declare (``ProviderRouter.ai_excluded``)."""
-    return EXCLUDED_PATHS | getattr(app.state, "provider_ai_excluded", frozenset())
+    """``EXCLUDED_PATHS`` plus what the app's backend providers declare
+    (``ProviderRouter.ai_excluded``) and what enabled plugins declare
+    (``PluginRegistry.ai_excluded``, namespaced to ``/api/plugins/<name>``)."""
+    return (
+        EXCLUDED_PATHS
+        | getattr(app.state, "provider_ai_excluded", frozenset())
+        | getattr(app.state, "plugin_ai_excluded", frozenset())
+    )
 
 
 def is_excluded(path: str, tags: list[str] | tuple[str, ...], method: str = "get", *,
