@@ -453,7 +453,13 @@ WORKSPACE_ENV = "VIVARIUM_WORKBENCH_WORKSPACE"
 async def _plain_identifiers(request: Request) -> None:
     """App-wide guard: every request field that names one directory entry (study, investigation, run id ...)
     must be a plain name, whichever route it reaches — path, query or top-level JSON body. See
-    ``lib.path_safety.IDENTIFIER_FIELDS``. FastAPI caches the request body, so this does not consume it."""
+    ``lib.path_safety.IDENTIFIER_FIELDS``. FastAPI caches the request body, so this does not consume it.
+
+    Plugin routes (``/api/plugins/<name>/*``) are exempt: a plugin's fields have the plugin's own
+    meaning (e.g. a ``study`` may be a MIRA reference, not a workspace slug), and a plugin owns its
+    own param safety (``docs/plugins.md``)."""
+    if request.url.path.startswith("/api/plugins/") or request.url.path.startswith("/plugins/"):
+        return
     _path_safety.check_identifiers(request.path_params)
     _path_safety.check_identifiers(request.query_params.multi_items())
     if request.method in ("POST", "PUT", "PATCH", "DELETE") and "json" in request.headers.get("content-type", ""):
@@ -698,6 +704,9 @@ def _add_route_like(app: FastAPI, route: object, provider: str) -> None:
         route_class_override=type(route), callbacks=route.callbacks, openapi_extra=route.openapi_extra,
         generate_unique_id_function=route.generate_unique_id_function, **extra,
     )
+
+
+from vivarium_workbench.plugins import load_plugins as _load_plugins
 
 
 def create_app() -> FastAPI:
@@ -9144,6 +9153,19 @@ def create_app() -> FastAPI:
     # lib/ai_tools adds it to its own EXCLUDED_PATHS; not imported here, [chat] is optional).
     provider_readonly, app.state.provider_ai_excluded = _include_provider_routers(app)
     app.state.readonly_allowed_mutations = frozenset(_READONLY_ALLOWED_MUTATIONS) | provider_readonly
+
+    # Load enabled plugins HERE — before the catch-all below. Each enabled plugin's
+    # router (/api/plugins/<name>), static mount (/plugins/<name>), and the
+    # /api/plugins/manifest route must be registered ahead of ``/{rel:path}``, which
+    # Starlette would otherwise match first. The workspace root is already set at this
+    # point (serve_fastapi sets it before importing this module; inproc tests set it
+    # before create_app), so per-workspace ``plugins:`` opt-in is visible. Fail-soft.
+    try:
+        from vivarium_workbench.lib import _root as _plugin_root
+
+        _load_plugins(app, _plugin_root.get_workspace_root())
+    except Exception as exc:  # noqa: BLE001 - never let plugin loading break app startup
+        logging.getLogger(__name__).warning("plugin loading failed: %s", exc)
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)
