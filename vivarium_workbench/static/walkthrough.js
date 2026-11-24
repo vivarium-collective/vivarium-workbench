@@ -12534,12 +12534,21 @@
     }
 
     // Build the visible sections AND a plain-text copy payload (one line per item,
-    // ready to paste straight to Claude).
+    // ready to paste straight to Claude). Each section carries a severity rank so
+    // the tab can lead with what matters and tuck the low-priority backlog behind
+    // an expander (0=high, 1=medium, 2=low).
+    var _SR = { high: 0, medium: 1, low: 2 };
     var copyLines = [];
     var sections = flaggedChecks.map(function (c) {
       var help = HELP[c.kind] || '';
       var items = byKindItems[c.kind] || [];
       var flagged = c.flagged || items.length || 0;
+      var groupLabel = c.issue_label || c.label || c.kind;
+      // Section severity = worst (lowest-rank) of its items; fall back to the
+      // check's own severity when the scan gave a count but no per-item detail.
+      var rank = items.length
+        ? items.reduce(function (m, it) { var r = _SR[it.severity]; return (r != null && r < m) ? r : m; }, 3)
+        : (_SR[c.severity] != null ? _SR[c.severity] : 1);
       var lis;
       if (items.length) {
         lis = items.map(function (it) {
@@ -12550,7 +12559,7 @@
           var studyTag = (it.study && it.title && it.title.indexOf(it.study) < 0)
             ? ' <span class="muted" style="font-size:0.85em">· ' + _esc(it.study) + '</span>' : '';
           // plain-text copy line
-          var ct = '- [' + (c.label || c.kind) + '] ' + (it.title || it.ref || it.kind || '');
+          var ct = '- [' + groupLabel + '] ' + (it.title || it.ref || it.kind || '');
           if (it.study && (!it.title || it.title.indexOf(it.study) < 0)) ct += ' (' + it.study + ')';
           if (it.detail) ct += ' — ' + it.detail;
           if (it.action_hint) ct += ' · ' + it.action_hint;
@@ -12568,16 +12577,35 @@
         }).join('');
       } else {
         // Flagged but the scan gave no per-item detail — surface count + a route.
-        copyLines.push('- [' + (c.label || c.kind) + '] ' + flagged + ' flagged (see Decisions tab for detail)');
+        copyLines.push('- [' + groupLabel + '] ' + flagged + ' flagged (see Decisions tab for detail)');
         lis = '<li style="margin-top:4px;font-size:0.9em;color:#64748b">' + flagged + ' flagged — '
           + '<a href="#" onclick="window._aigOpenDecisionsTab&&window._aigOpenDecisionsTab();return false;" style="color:#2563eb;text-decoration:none">open Decisions →</a></li>';
       }
-      return '<div style="margin-top:10px">'
-        + '<div style="font-weight:600;color:#b45309;font-size:0.92em"' + (help ? ' title="' + _esc(help) + '"' : '') + '>'
-          + _esc(c.label || c.kind) + ' <span class="muted" style="font-weight:400">· ' + flagged + '</span></div>'
+      var sevDot = rank === 0 ? '#dc2626' : (rank === 1 ? '#d97706' : '#94a3b8');
+      var html = '<div style="margin-top:10px">'
+        + '<div style="font-weight:600;color:#b45309;font-size:0.92em;display:flex;align-items:baseline;gap:6px"' + (help ? ' title="' + _esc(help) + '"' : '') + '>'
+          + '<span style="flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:' + sevDot + ';display:inline-block;transform:translateY(-1px)"></span>'
+          + '<span>' + _esc(groupLabel) + ' <span class="muted" style="font-weight:400">· ' + flagged + '</span></span></div>'
         + '<ul style="margin:3px 0 0;padding:0;list-style:none">' + lis + '</ul>'
         + '</div>';
-    }).join('');
+      return { rank: rank, html: html };
+    });
+    // Lead with the highest-severity sections; collapse the low-priority (rank 2)
+    // backlog behind an expander so a flood of low items can't bury the real work.
+    sections.sort(function (a, b) { return a.rank - b.rank; });
+    var primary = sections.filter(function (s) { return s.rank <= 1; });
+    var backlog = sections.filter(function (s) { return s.rank === 2; });
+    var sectionsHtml = primary.map(function (s) { return s.html; }).join('');
+    if (backlog.length) {
+      var backlogCount = backlog.reduce(function (n, s) {
+        var m = /·\s*(\d+)/.exec(s.html); return n + (m ? parseInt(m[1], 10) : 1);
+      }, 0);
+      sectionsHtml += '<details style="margin-top:11px">'
+        + '<summary style="cursor:pointer;color:#64748b;font-size:0.9em;font-weight:600;list-style:none">'
+          + '▸ ' + backlogCount + ' low-priority item' + (backlogCount === 1 ? '' : 's') + ' (' + backlog.length + ' check' + (backlog.length === 1 ? '' : 's') + ')</summary>'
+        + '<div style="margin-top:2px;opacity:0.9">' + backlog.map(function (s) { return s.html; }).join('') + '</div>'
+        + '</details>';
+    }
 
     var invName = (d.investigation || window._currentIset || '').toString();
     var copyText = 'Needs attention — investigation "' + invName + '" (' + total + ' item' + (total === 1 ? '' : 's') + '):\n' + copyLines.join('\n');
@@ -12592,7 +12620,7 @@
             + 'style="font-size:0.84em;font-weight:600;color:#2563eb;background:#eff6ff;border:1px solid #dbeafe;border-radius:6px;padding:3px 9px;cursor:pointer;white-space:nowrap">⧉ Copy</button>'
         + '</span>'
       + '</div>'
-      + sections
+      + sectionsHtml
       + (passingCount > 0 ? '<div class="muted" style="font-size:0.86em;margin-top:11px">✓ ' + passingCount + ' other check' + (passingCount === 1 ? '' : 's') + ' clear</div>' : '')
       + '<div style="margin-top:9px;padding-top:7px;border-top:1px solid #f1f5f9">'
         + '<a href="#" onclick="window._aigOpenDecisionsTab&&window._aigOpenDecisionsTab();return false;" '
