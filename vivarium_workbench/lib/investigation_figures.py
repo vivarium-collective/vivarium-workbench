@@ -471,8 +471,23 @@ def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[s
             is_svg = (not is_html) and ("image/svg" in lo or lo.endswith(".svg"))
             png_btn = ('<button class="dl png" type="button" onclick="__dlFigPng(this)" '
                        'title="Download this figure as a PNG raster">&#8595; PNG</button>') if is_svg else ""
+            # Name the download button after the figure's real format (SVG / HTML /
+            # PNG…) instead of a generic "download". The source is a data: URI in the
+            # standalone gallery (read the MIME) and a relative file in the zip/snapshot
+            # (read the extension); unknown → fall back to "download".
+            if lo.startswith("data:"):
+                _mime = lo[5:].split(";")[0].split(",")[0]
+                fmt = {"image/svg+xml": "svg", "image/png": "png", "image/gif": "gif",
+                       "image/jpeg": "jpg", "image/webp": "webp", "text/html": "html"}.get(
+                    _mime, "html" if is_html else "")
+            else:
+                _base = lo.rsplit("/", 1)[-1]
+                fmt = _base.rsplit(".", 1)[-1] if "." in _base else ("html" if is_html else "")
+            dl_txt = fmt.upper() if fmt else "download"
+            dl_title = f"Download this figure ({fmt})" if fmt else "Download this figure"
             body.append(f'<div class="card" id="{aid}"><div class="bar"><span class="name">{_escape(label)}</span>'
-                        f'{png_btn}<a class="dl" href="{_escape(arc)}" download>&#8595; download</a></div>{media}</div>')
+                        f'{png_btn}<a class="dl" href="{_escape(arc)}" download title="{_escape(dl_title)}">'
+                        f'&#8595; {_escape(dl_txt)}</a></div>{media}</div>')
         body.append("</section>")
     hdr = (f'<div class="hdr"><h1>{_escape(inv_name)} &mdash; figure gallery</h1>'
            f'<p>{n_fig} figures across {len(groups)} studies. Use the list on the left to jump to any '
