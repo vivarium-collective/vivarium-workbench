@@ -76,6 +76,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from vivarium_workbench.lib.env_worker_launcher import check_worker_config
     try:
         backend_cfg.check_config(getattr(args, "backend_base_url", None))
+        # A provider alias set while no provider is installed to read it (step P4b2): refuse before detaching too.
+        # Only here and in the other server entries: run children inherit the aliases on a workspace interpreter.
+        backend_cfg.check_unclaimed_backend_env()
         # Hosted env workers asked for but no provider supplies them: refuse BEFORE the render, the server-info
         # write and detaching, so the operator sees why and nothing is left behind. serve_fastapi checks again
         # (direct callers; the "env workers: PROXY ..." log line once logging is configured). No network call.
