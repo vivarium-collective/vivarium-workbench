@@ -1034,6 +1034,15 @@
   // Local↔Cloud in place, so you switch where a Run executes without leaving the
   // card for the Source panel's toggle. Snapshot/static mode (no VivEnv) leaves
   // the badge as a passive label.
+  // A Run would go to compose-api unsigned (compose-api allows anonymous runs, so the badge itself stays "Runs:
+  // Cloud"): offer the person's sign-in right beside the badge, where they look, rather than only on the Source page.
+  // `signed_in` is the preflight's (remote_run_compose.dispatch_preflight); the flow is static/compose-signin.js's, and
+  // it is offered only where that flow says a sign-in here would sign the calls in (ComposeSignin.available()).
+  function _signInOffered(pf) {
+    return !!(pf && pf.target === 'deployment' && pf.signed_in === false &&
+              window.ComposeSignin && typeof window.ComposeSignin.start === 'function' &&
+              window.ComposeSignin.available());
+  }
   function _runTargetClickable() {
     return !!(window.VivEnv && typeof window.VivEnv.setScope === 'function');
   }
@@ -1050,6 +1059,10 @@
       b.style.cursor = clickable ? 'pointer' : '';
       b.setAttribute('data-clickable', clickable ? '1' : '0');
     });
+    var offer = _signInOffered(pf !== undefined ? pf : window._lastRunTargetPreflight);
+    document.querySelectorAll('.pcard-signin[data-role="signin"]').forEach(function (a) {
+      a.style.display = offer ? 'inline-block' : 'none';
+    });
   }
   window._applyRunTargetBadges = _applyRunTargetBadges;
   // Re-reflect the badge live when the Environment scope / selected build changes
@@ -1058,16 +1071,25 @@
   // One delegated handler for the clickable chip: flip scope to the OTHER target.
   // Registered once; badges are re-created per render, so delegation (not per-badge
   // listeners) avoids duplicates/leaks. viv:envchange then re-applies every badge.
-  document.addEventListener('click', function (ev) {
+  function _onRunTargetClick(ev) {
+    var signIn = ev.target && ev.target.closest && ev.target.closest('.pcard-signin[data-role="signin"]');
+    if (signIn) {
+      ev.preventDefault(); ev.stopPropagation();
+      if (window.ComposeSignin) window.ComposeSignin.start('auto');
+      return;
+    }
     var chip = ev.target && ev.target.closest && ev.target.closest('.pcard-runtarget[data-role="runtarget"]');
     if (!chip || chip.getAttribute('data-clickable') !== '1') return;
     if (!_runTargetClickable()) return;
     ev.preventDefault(); ev.stopPropagation();
     try { window.VivEnv.setScope(window.VivEnv.isCloud() ? 'local' : 'remote'); }
     catch (e) { /* VivEnv gone → no-op */ }
-  });
+  }
+  document.addEventListener('click', _onRunTargetClick);
 
   var _runTargetScheduled = false;
+  // Re-fetch the preflight and re-apply every badge (compose-signin.js calls it once a sign-in finishes).
+  window._refreshRunTargetBadges = function () { _scheduleRunTargetBadges(); };
   function _scheduleRunTargetBadges() {
     if (_runTargetScheduled) return;   // debounce: one fetch per render batch, not per card
     _runTargetScheduled = true;
@@ -1140,6 +1162,9 @@
             '<span class="pcard-runtarget" data-role="runtarget" title="checking where a Run will execute…" ' +
               'style="display:inline-block;margin-left:8px;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;' +
               'background:#eef1f4;color:#8a97a4;vertical-align:middle">Runs: …</span>' +
+            '<a href="#" class="pcard-signin" data-role="signin" style="display:none;margin-left:6px;font-size:11px;' +
+              'font-weight:600;vertical-align:middle" title="Sign in to compose-api: your runs then go there as you">' +
+              'Sign in</a>' +
             '<code class="loom-addr">' + _esc(addr) + '</code>' +
             // Build-error warning chip (PR #1111 degrade). Hidden until a
             // composite-state fetch reports the shown wiring is stale/degraded

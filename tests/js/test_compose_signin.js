@@ -22,6 +22,7 @@ function page(status, opts) {
   opts = opts || {};
   const els = { 'viv-compose-row': el(), 'viv-compose-chip': el(), 'viv-compose-hint': el(),
                 'viv-compose-flow': el() };
+  els['viv-compose-flow'].style.display = 'none';   // as the template renders it
   const sent = [];
   const state = { status };
   const timers = { set: [], cleared: [] };
@@ -33,14 +34,14 @@ function page(status, opts) {
     return { ok: true, json: async () => body };
   };
   const document = { getElementById: (id) => els[id] || null, createElement: () => el() };
-  const window = { __BASE_PATH__: '/base' };
+  const window = Object.assign({ __BASE_PATH__: '/base' }, opts.window || {});
   vm.runInContext(SRC, vm.createContext({
     window, document, console, fetch, JSON,
     confirm: () => (opts.confirm === undefined ? true : opts.confirm),
     setInterval: (fn) => { timers.set.push(fn); return timers.set.length; },
     clearInterval: (id) => { timers.cleared.push(id); },
   }));
-  return { els, sent, state, timers };
+  return { els, sent, state, timers, window };
 }
 
 const OUT = { available: true, signed_in: false, profile: 'lab', api_base_url: 'https://compose.test', flow: null };
@@ -124,6 +125,55 @@ const posts = (p) => p.sent.filter((s) => s.method === 'POST');
   p.els['viv-compose-chip'].onclick();
   await flush();
   assert.ok(p.els['viv-compose-flow'].textContent.includes('Auth0 could not be reached'));
+
+  // Falsifies: a signed-in person cannot make a new login without signing out first (the safe way to re-sign).
+  p = page({ ...OUT, signed_in: true });
+  await flush();
+  const again = p.els['viv-compose-hint'].children.find((c) => c.textContent === 'Sign in again');
+  assert.ok(again, 'signed in -> "Sign in again" offered');
+  again.onclick({ preventDefault() {} });
+  await flush();
+  assert.deepStrictEqual(posts(p), [{ url: '/base/api/auth/compose-api/start', method: 'POST', body: { method: 'auto' } }]);
+
+  // Falsifies: other places (the composite card's badge) cannot start the same flow, or their badges stay stale after it.
+  let badgeRefreshes = 0;
+  p = page({ ...OUT, flow: { state: 'running', notes: ['wait'], error: null } },
+           { window: { _refreshRunTargetBadges: () => { badgeRefreshes += 1; } } });
+  await flush();
+  assert.strictEqual(typeof p.window.ComposeSignin.start, 'function');
+  assert.strictEqual(badgeRefreshes, 0, 'nothing to re-check while waiting');
+  p.state.status = { ...OUT, signed_in: true, flow: { state: 'ok', notes: [], error: null } };
+  p.timers.set[0]();
+  await flush();
+  assert.strictEqual(badgeRefreshes, 1, 'the badges are re-checked once the sign-in ends');
+  p.window.ComposeSignin.start('auto');
+  await flush();
+  assert.deepStrictEqual(posts(p).map((x) => x.body), [{ method: 'auto' }]);
+
+  // Falsifies: a failed sign-in's panel cannot be dismissed, or comes back on the next poll.
+  p = page({ ...OUT, flow: { id: 'f1', state: 'error', notes: [], error: 'denied' } });
+  await flush();
+  assert.strictEqual(p.els['viv-compose-flow'].style.display, '');
+  p.els['viv-compose-flow'].onclick();
+  await p.window.ComposeSignin.refresh();
+  await flush();
+  assert.strictEqual(p.els['viv-compose-flow'].style.display, 'none', 'dismissed, and it stays dismissed');
+
+  // Falsifies: a start the server refuses (sign-in not offered here) shows nothing.
+  p = page({ ...OUT }, { responses: { start: { ok: false, status: 409,
+    body: { available: false, reason: 'other-profile', message: 'the CLI profile is for another API' } } } });
+  await flush();
+  p.window.ComposeSignin.start('auto');
+  await flush();
+  assert.ok(p.els['viv-compose-flow'].textContent.includes('the CLI profile is for another API'));
+
+  // Falsifies: the page says sign-in is available where the server says it is not (the badge reads this).
+  p = page({ available: false, reason: 'no-extra', flow: null });
+  await flush();
+  assert.strictEqual(p.window.ComposeSignin.available(), false);
+  p = page(OUT);
+  await flush();
+  assert.strictEqual(p.window.ComposeSignin.available(), true);
 
   console.log('PASS  tests/js/test_compose_signin.js');
 })().catch((e) => { console.error(e); process.exit(1); });
