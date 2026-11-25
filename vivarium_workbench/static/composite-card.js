@@ -1036,10 +1036,12 @@
   // the badge as a passive label.
   // A Run would go to compose-api unsigned (compose-api allows anonymous runs, so the badge itself stays "Runs:
   // Cloud"): offer the person's sign-in right beside the badge, where they look, rather than only on the Source page.
-  // `signed_in` is the preflight's (remote_run_compose.dispatch_preflight); the flow is static/compose-signin.js's.
+  // `signed_in` is the preflight's (remote_run_compose.dispatch_preflight); the flow is static/compose-signin.js's, and
+  // it is offered only where that flow says a sign-in here would sign the calls in (ComposeSignin.available()).
   function _signInOffered(pf) {
     return !!(pf && pf.target === 'deployment' && pf.signed_in === false &&
-              window.ComposeSignin && typeof window.ComposeSignin.start === 'function');
+              window.ComposeSignin && typeof window.ComposeSignin.start === 'function' &&
+              window.ComposeSignin.available());
   }
   function _runTargetClickable() {
     return !!(window.VivEnv && typeof window.VivEnv.setScope === 'function');

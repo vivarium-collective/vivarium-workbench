@@ -84,7 +84,8 @@ def status() -> "tuple[dict, int]":
 
     ``signed_in`` is what the next compose-api call would carry, read as the call would read it
     (:func:`remote_run_compose._carries_credential`): a stored login that is about to expire is renewed, as it would
-    be. A credential store that cannot be read is not signed in, with the client's reason in ``error``.
+    be. A credential store that cannot be read is not signed in, with the client's reason in ``error``. While a
+    sign-in waits, ``signed_in`` is ``None`` (not read; see the comment below).
     """
     from vivarium_workbench.lib import remote_run_compose as rrc
 
@@ -94,10 +95,17 @@ def status() -> "tuple[dict, int]":
     from compose_api_client.ext import CliError
 
     body: dict = {"available": True, "profile": settings.profile, "api_base_url": settings.api_base_url}
-    try:
-        body["signed_in"] = rrc._carries_credential(rrc._session(rrc.CHECK_TIMEOUT))
-    except CliError as e:
-        body.update(signed_in=False, error=str(e))
+    with _LOCK:
+        waiting = _waiting_locked()
+    if waiting:
+        # Not read while a sign-in waits: reading may renew the stored login, and a renewal during the wait makes the
+        # client discard the new sign-in when it is committed ("Session changed while signing in").
+        body["signed_in"] = None
+    else:
+        try:
+            body["signed_in"] = rrc._carries_credential(rrc._session(rrc.CHECK_TIMEOUT))
+        except CliError as e:
+            body.update(signed_in=False, error=str(e))
     return {**body, "flow": _flow_view()}, 200
 
 

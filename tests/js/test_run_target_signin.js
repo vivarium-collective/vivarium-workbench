@@ -39,7 +39,7 @@ function card(windowExtras) {
 
 const COMPOSE = { target: 'deployment', ok: true, reason: 'inferred', dispatch: 'compose-api',
                   message: 'compose-api runs this workspace' };
-const SIGNIN = { ComposeSignin: { start() {} } };
+const SIGNIN = { ComposeSignin: { start() {}, available: () => true } };
 
 // Falsifies: a person about to send unsigned runs to compose-api is not offered the sign-in on the card.
 let c = card(SIGNIN);
@@ -59,11 +59,17 @@ c.apply({ target: 'deployment', ok: true, reason: 'ok', dispatch: 'viva-v1-docum
 assert.strictEqual(c.signIn.style.display, 'none', 'a backend that reports no signed_in -> no Sign in');
 c = card({});
 c.apply(Object.assign({}, COMPOSE, { signed_in: false }));
-assert.strictEqual(c.signIn.style.display, 'none', 'no sign-in flow on the page (a snapshot) -> no Sign in');
+assert.strictEqual(c.signIn.style.display, 'none', 'no sign-in flow on the page -> no Sign in');
+
+// Falsifies: the link shows where a sign-in here would not sign the calls in (no sign-in extra, a CLI profile for
+// another API): the preflight says signed_in false there too, but the sign-in flow says it is not available.
+c = card({ ComposeSignin: { start() {}, available: () => false } });
+c.apply(Object.assign({}, COMPOSE, { signed_in: false }));
+assert.strictEqual(c.signIn.style.display, 'none', 'sign-in not offered here -> no Sign in');
 
 // Falsifies: clicking "Sign in" does not start the shared flow, or flips Local/Cloud as a badge click does.
 const started = [], scopes = [];
-const win = { ComposeSignin: { start: (m) => started.push(m) },
+const win = { ComposeSignin: { start: (m) => started.push(m), available: () => true },
               VivEnv: { setScope: (x) => scopes.push(x), isCloud: () => true } };
 // eslint-disable-next-line no-new-func
 const onClick = new Function('window', ['_runTargetClickable', '_onRunTargetClick'].map(extract).join('\n') +

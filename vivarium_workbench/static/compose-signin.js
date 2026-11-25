@@ -8,12 +8,13 @@
 // or without a display, shows a code to enter on any device. "Use a code instead" asks for the code directly (a
 // workbench on another machine). While it waits, the page polls the status and shows the client's own messages (never
 // a token). Signed in: clicking signs out (for the compose-api CLI too) after a confirm; "Sign in again" makes a new
-// login and keeps the current one until the new one is confirmed (the client's own guarantee: a cancelled or failed
-// sign-in preserves the previous session).
+// login. The client keeps the current one if that sign-in is cancelled or fails before Google returns a new login;
+// once it does, the new login replaces the old.
 //
 // window.ComposeSignin.start(method) is the same flow for other places (the composite card's "Sign in" beside its
-// "Runs: Cloud" badge). Its progress shows in #viv-compose-flow, a panel outside any page, so it is seen from anywhere;
-// when a sign-in ends, the run-target badges are re-checked.
+// "Runs: Cloud" badge), and window.ComposeSignin.available() says whether a sign-in is offered here at all (the badge
+// offers it only then). Its progress shows in #viv-compose-flow, a panel outside any page, so it is seen from anywhere;
+// a click on the panel dismisses it. When a sign-in ends, the run-target badges are re-checked.
 
 (function () {
   const row = document.getElementById('viv-compose-row');
@@ -26,6 +27,22 @@
   const POLL_MS = 1500;
   let pollTimer = null;
   let wasWaiting = false;
+  let available = false;
+  let dismissedFlow = null;
+
+  // The panel: one place for the sign-in's instructions and outcome. Text is rewritten only when it changes (an
+  // aria-live region announces every change); a click hides it, and a dismissed sign-in stays hidden.
+  function setPanel(text) {
+    if (!text) {
+      flowBox.style.display = 'none';
+      flowBox.textContent = '';
+      return;
+    }
+    flowBox.style.display = '';
+    if (flowBox.textContent !== text) flowBox.textContent = text;
+  }
+  flowBox.title = 'Click to dismiss';
+  flowBox.onclick = () => { dismissedFlow = flowBox.dataset.flow || null; setPanel(''); };
 
   async function getStatus() {
     try {
@@ -38,13 +55,12 @@
 
   // Only a sign-in that is waiting, or one that failed, is shown: a finished one is the chip's to say.
   function showFlow(flow) {
-    if (!flow || flow.state === 'ok' || (!flow.notes.length && !flow.error)) {
-      flowBox.style.display = 'none';
-      flowBox.textContent = '';
+    if (!flow || flow.state === 'ok' || (!flow.notes.length && !flow.error) || flow.id === dismissedFlow) {
+      if (flowBox.dataset.flow) setPanel('');
       return;
     }
-    flowBox.style.display = '';
-    flowBox.textContent = flow.notes.join('\n') + (flow.error ? '\n' + 'Sign-in failed: ' + flow.error : '');
+    flowBox.dataset.flow = flow.id;
+    setPanel(flow.notes.join('\n') + (flow.error ? '\n' + 'Sign-in failed: ' + flow.error : ''));
   }
 
   function stopPolling() {
@@ -52,6 +68,8 @@
   }
 
   function render(status) {
+    available = !!status.available;
+    if (typeof window._applyRunTargetBadges === 'function') window._applyRunTargetBadges();
     if (!status.available) {
       row.style.display = 'none';
       stopPolling();
@@ -74,7 +92,7 @@
       const again = document.createElement('a');
       again.href = '#';
       again.textContent = 'Sign in again';
-      again.title = 'A new login; the current one stays until the new one is confirmed';
+      again.title = 'A new login; the current one stays if you cancel';
       again.onclick = (e) => { e.preventDefault(); startFlow('auto'); };
       hint.append(again);
     } else {
@@ -113,13 +131,13 @@
         body: JSON.stringify({ method }),
       });
       const body = await resp.json().catch(() => ({}));
-      if (!resp.ok && body.error) {
-        flowBox.style.display = '';
-        flowBox.textContent = 'Could not start signing in: ' + body.error;
+      if (!resp.ok) {
+        flowBox.dataset.flow = '';
+        setPanel('Could not start signing in: ' + (body.error || body.message || resp.status));
       }
     } catch (e) {
-      flowBox.style.display = '';
-      flowBox.textContent = 'Could not reach the workbench: ' + e;
+      flowBox.dataset.flow = '';
+      setPanel('Could not reach the workbench: ' + e);
     }
     refresh();
   }
@@ -140,9 +158,9 @@
       message = 'Could not reach the workbench: ' + e;
     }
     await refresh();
-    if (message) { flowBox.style.display = ''; flowBox.textContent = message; }
+    if (message) { flowBox.dataset.flow = ''; setPanel(message); }
   }
 
-  window.ComposeSignin = { start: startFlow, refresh };
+  window.ComposeSignin = { start: startFlow, refresh, available: () => available };
   refresh();
 })();

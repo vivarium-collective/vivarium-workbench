@@ -58,16 +58,19 @@ first credential that applies (`remote_run_compose._session`):
 3. **None**: the call is anonymous, as before.
 
 **Signing in from the page** (`lib/compose_signin.py`, `static/compose-signin.js`). With the extra, a person does not
-need the CLI to sign in. Where a run would go to compose-api unsigned (the preflight's `signed_in` is false), each
-composite card shows **Sign in** beside its **Runs: Cloud** badge; the badge itself stays Cloud, since compose-api
-allows anonymous runs. The sign-in's instructions show in a panel in the page's corner, and the badges are checked again
-once it ends. The GitHub panel's Account section also has a **compose-api** row. **Sign in** makes the login
+need the CLI to sign in. Where the readiness check reports that runs would go to compose-api unsigned (its
+`signed_in` is false; a workspace that names a prebuilt environment gets no such report) and a sign-in here would sign
+them in, each composite card shows **Sign in** beside its **Runs: Cloud** badge. The badge itself stays Cloud, since
+compose-api allows anonymous runs. The sign-in's instructions show in a panel in the page's corner (a click dismisses
+it), and the badges are checked again once it ends. The GitHub panel's Account section also has a **compose-api** row. **Sign in** makes the login
 `compose-api auth login` makes, on the same profile and in the same credential store, so the CLI and the workbench share
 it and either can sign in or out. The client opens this computer's browser, or shows a code to enter on any device over
 SSH or without a display. **Use a code instead** asks for the code directly, for a workbench on another machine. The
 page shows the client's own instructions while it waits, up to five minutes. **Signed in · <profile>** signs out after
-a confirm, for the CLI too. **Sign in again** makes a new login while keeping the current one until the new one is
-confirmed: the client preserves the previous session when a sign-in is cancelled or fails.
+a confirm, for the CLI too. **Sign in again** makes a new login. The client keeps the current one if that sign-in is
+cancelled or fails before Google returns a new login; once it does, the new login replaces the old. While a sign-in
+waits, the status does not read the stored login: a renewal during the wait would make the client discard the new
+sign-in. A renewal by the CLI or another program during the wait still does, and the page then says so.
 - **Routes:** `POST /api/auth/compose-api/start` (`{method: auto | browser | device}`), `GET …/status`, and
   `POST …/logout`.
 - **Tokens:** they go from Auth0 to the credential store inside the client and never through these routes.

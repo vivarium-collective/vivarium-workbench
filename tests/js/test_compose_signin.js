@@ -22,6 +22,7 @@ function page(status, opts) {
   opts = opts || {};
   const els = { 'viv-compose-row': el(), 'viv-compose-chip': el(), 'viv-compose-hint': el(),
                 'viv-compose-flow': el() };
+  els['viv-compose-flow'].style.display = 'none';   // as the template renders it
   const sent = [];
   const state = { status };
   const timers = { set: [], cleared: [] };
@@ -148,6 +149,31 @@ const posts = (p) => p.sent.filter((s) => s.method === 'POST');
   p.window.ComposeSignin.start('auto');
   await flush();
   assert.deepStrictEqual(posts(p).map((x) => x.body), [{ method: 'auto' }]);
+
+  // Falsifies: a failed sign-in's panel cannot be dismissed, or comes back on the next poll.
+  p = page({ ...OUT, flow: { id: 'f1', state: 'error', notes: [], error: 'denied' } });
+  await flush();
+  assert.strictEqual(p.els['viv-compose-flow'].style.display, '');
+  p.els['viv-compose-flow'].onclick();
+  await p.window.ComposeSignin.refresh();
+  await flush();
+  assert.strictEqual(p.els['viv-compose-flow'].style.display, 'none', 'dismissed, and it stays dismissed');
+
+  // Falsifies: a start the server refuses (sign-in not offered here) shows nothing.
+  p = page({ ...OUT }, { responses: { start: { ok: false, status: 409,
+    body: { available: false, reason: 'other-profile', message: 'the CLI profile is for another API' } } } });
+  await flush();
+  p.window.ComposeSignin.start('auto');
+  await flush();
+  assert.ok(p.els['viv-compose-flow'].textContent.includes('the CLI profile is for another API'));
+
+  // Falsifies: the page says sign-in is available where the server says it is not (the badge reads this).
+  p = page({ available: false, reason: 'no-extra', flow: null });
+  await flush();
+  assert.strictEqual(p.window.ComposeSignin.available(), false);
+  p = page(OUT);
+  await flush();
+  assert.strictEqual(p.window.ComposeSignin.available(), true);
 
   console.log('PASS  tests/js/test_compose_signin.js');
 })().catch((e) => { console.error(e); process.exit(1); });

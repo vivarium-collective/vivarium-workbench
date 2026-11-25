@@ -1644,6 +1644,8 @@ def test_make_public_refuses_a_bad_request_before_asking_compose_api(ws, stub, b
 
 import threading as _threading
 
+_REAL_CARRIES = rc._carries_credential
+
 
 @pytest.fixture
 def signin_client(ws, backend_env):
@@ -1741,6 +1743,13 @@ def test_signing_in_from_the_page_makes_the_cli_login_and_signs_runs_in(ws, stub
     waiting = _poll(c, lambda s: s["flow"] and s["flow"]["notes"])
     assert waiting["flow"]["state"] == "running"
     assert "WXYZ-1234" in "\n".join(waiting["flow"]["notes"])          # the client's instruction reaches the page
+    # Not read while waiting: a read may renew the stored login, and a renewal makes the client discard the sign-in.
+    assert waiting["signed_in"] is None
+    reads = []
+    backend_env.setattr(rc, "_carries_credential", lambda session: reads.append(session) or False)
+    c.get("/api/auth/compose-api/status")
+    assert reads == []
+    backend_env.setattr(rc, "_carries_credential", _REAL_CARRIES)
     (call,) = person.calls
     assert (call["profile"], call["method"], call["persistent"], call["signup"]) == ("lab", "device", True, False)
     assert call["store"] is store and set(opened) == {"lab"}           # the CLI profile's own credential store

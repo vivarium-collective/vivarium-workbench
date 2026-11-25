@@ -2983,7 +2983,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 {#- compose-api sign-in progress (static/compose-signin.js): outside every page, so a sign-in started from a composite
     card's badge shows its instructions (a device code, say) wherever the person is. -#}
 <div id="viv-compose-flow" role="status" aria-live="polite"
-     style="display:none;position:fixed;right:16px;bottom:16px;z-index:2000;max-width:420px;padding:10px 14px;
+     style="display:none;position:fixed;left:16px;right:16px;bottom:16px;margin-left:auto;z-index:2000;max-width:420px;padding:10px 14px;cursor:pointer;
             border-radius:8px;background:var(--panel,#fff);color:var(--text,#1a1a1a);border:1px solid var(--border,#d0d0d4);
             box-shadow:0 6px 24px rgba(0,0,0,0.16);white-space:pre-wrap;font-size:0.85em"></div>
 <script src="assets/compose-signin.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* compose-api sign-in unavailable */"></script>
