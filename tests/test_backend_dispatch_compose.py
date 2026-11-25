@@ -1910,27 +1910,34 @@ def test_the_sign_in_routes_refuse_another_origin_and_are_not_read_only(ws, back
 
 
 def test_the_card_waits_for_a_long_run_as_long_as_compose_api_may_run_it(ws, stub, backend_env):
-    """Falsifies: the card's runner gives up on a long run (its 2 h stall guard) while compose-api still runs it, so
-    the row is marked failed and never landed. compose-api allows a job 30 min per 1,000 steps (1.8 s per step); the
-    card waits its 2 h base plus 2 s per step."""
+    """Falsifies: the card's runner gives up on a long run at its stall guard (``poll_timeout``) while compose-api still
+    runs it, so the row is marked failed and never landed. compose-api allows a job 30 min per 1,000 steps (1.8 s per
+    step); the card waits its base plus 2 s per step. Here the run is still running past ``poll_timeout``, and a
+    7,700-step run must still be waited for and land."""
+    import time
+
     from compose_api_client.ext import ComposeSession
 
     _register_fixture_workspace(stub)
     _completed(stub)
+    stub.respond("GET", "/results/simulation/status", 200, _hpcrun("running"))
     _name(backend_env, stub.url)
-    waits = []
-    real_wait = ComposeSession.wait
+    real_status = ComposeSession.status
+    started = {}
 
-    def spy(self, simulation_id, **kwargs):
-        waits.append(kwargs.get("timeout"))
-        return real_wait(self, simulation_id, **kwargs)
+    def status(self, simulation_id):
+        started.setdefault("at", time.monotonic())
+        if time.monotonic() - started["at"] > 0.3:     # well past poll_timeout below: compose-api finishes the run
+            stub.respond("GET", "/results/simulation/status", 200, _hpcrun("completed"))
+        return real_status(self, simulation_id)
 
-    backend_env.setattr(ComposeSession, "wait", spy)
-    rc.run_composite(ws, COMPOSITE, dest=ws / ".pbg" / "out", n_steps=7700, overrides={},
-                     emit_paths=["stores/level"], poll_interval=0.01, poll_timeout=7200)
-    assert waits == [7200 + 2.0 * 7700]
+    backend_env.setattr(ComposeSession, "status", status)
+    archive = rc.run_composite(ws, COMPOSITE, dest=ws / ".pbg" / "out", n_steps=7700, overrides={},
+                               emit_paths=["stores/level"], poll_interval=0.02, poll_timeout=0.1)
+    assert archive.is_file()
     (call,) = stub.calls_to("run-simulation")
     assert call.query["interval_time"] == ["7700.0"]
+    assert rc.wait_timeout(7700, 7200) == 7200 + 2.0 * 7700
     assert rc.wait_timeout(7700, 0) is None, "a poller with its deadline off sets none here either"
 
 
