@@ -179,7 +179,12 @@ someone without the role it names the limit and the role ("compose-api refused t
 to be between 0 and 1000; up to 86400 with the long-runs role"), to someone with it only the longer limit. On a
 composite card the refusal comes once the detached run has sent the request, as that run's error. The card waits for
 a run for 2 h plus 2 s per step (`remote_run_compose.wait_timeout`), longer than compose-api's own job limit for that
-run (30 min per 1,000 steps on production), so a long run is not marked failed while compose-api still runs it.
+run (30 min per 1,000 steps on production), so a long run is not marked failed while compose-api still runs it. While
+it waits, and while it downloads the results, a credential store that refuses (the client's `StorageError`: a session
+another process holds past the client's 30 s, or a locked keychain) is retried with backoff for up to 10 minutes of
+consecutive refusals (`remote_run_compose.STORE_RETRY_SECONDS`); after that the run fails with the store's reason and
+names the run on compose-api, which may finish it all the same. A card run that failed this way cannot be landed again
+from the workbench (`/api/remote-run-land` lands into a study); its results are on compose-api under that run id.
 
 ## Routes
 

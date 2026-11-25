@@ -739,13 +739,48 @@ def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
     return out, 202
 
 
+#: How long the card's runner keeps reading a sent run through the client's credential store when that store keeps
+#: refusing (``StorageError``): a session another process holds (a renewal holds it across its Auth0 round trip, and
+#: the client waits 30 s for it), or a locked keychain. Consecutive refusals only; the run's own deadline still applies.
+STORE_RETRY_SECONDS = 600.0
+#: The first wait between those retries, doubled after each refusal up to :data:`STORE_RETRY_MAX_DELAY`.
+STORE_RETRY_FIRST_DELAY = 1.0
+STORE_RETRY_MAX_DELAY = 30.0
+
+
+def _through_store_failures(call: "Callable[[], Any]", *, label: str) -> Any:
+    """``call()``, retried while the client's credential store refuses it (``StorageError``), with backoff, for at
+    most :data:`STORE_RETRY_SECONDS` of consecutive refusals; then the last refusal is raised. A call that ran longer
+    than the current backoff before it was refused counts as progress: the next refusal starts a new streak."""
+    from compose_api_client.ext import StorageError
+
+    streak_since: "float | None" = None
+    delay = STORE_RETRY_FIRST_DELAY
+    while True:
+        started = time.monotonic()
+        try:
+            return call()
+        except StorageError as e:
+            now = time.monotonic()
+            if streak_since is None or now - started > delay:
+                streak_since, delay = now, STORE_RETRY_FIRST_DELAY
+            if now - streak_since >= STORE_RETRY_SECONDS:
+                raise
+            print(f"  {label}: the compose-api credential store refused ({e}); retrying in {delay:.0f}s", flush=True)
+            time.sleep(delay)
+            delay = min(delay * 2, STORE_RETRY_MAX_DELAY)
+
+
 def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: float, overrides: "dict | None",
                   emit_paths: "list[str] | None", poll_interval: float, poll_timeout: float) -> Path:
     """The Composites-tab remote run on compose-api (``ComposeApiRuns.run_composite``): dispatch the composite,
     wait for it, and save its results archive in ``dest``. Raises ``RuntimeError`` naming why a run could not be
-    sent or did not complete, and ``TimeoutError`` past ``poll_timeout`` (the run may still be going)."""
+    sent or did not complete, and ``TimeoutError`` past ``poll_timeout`` (the run may still be going). Once the run
+    is sent, a credential store that keeps refusing is retried (:func:`_through_store_failures`); if it never yields,
+    the error names the run on compose-api, which may finish it all the same."""
     from compose_api_client.ext import ApiTimeout, CliError
 
+    run_id = None
     try:
         steps = checked_steps(n_steps)
         with _session() as session:
@@ -757,9 +792,15 @@ def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: floa
             print(f"Submitted to compose-api ({env['name'] or 'environment chosen by compose-api'}). Run id: {run_id}",
                   flush=True)
             deadline = wait_timeout(steps, poll_timeout)
+            ends_at = None if deadline is None else time.monotonic() + deadline
+
+            def wait() -> Any:
+                left = None if ends_at is None else max(0.0, ends_at - time.monotonic())
+                return session.wait(simulation_id, poll=poll_interval, timeout=left,
+                                    on_update=lambda s: print(f"  status: {s.status}", flush=True))
+
             try:
-                state = session.wait(simulation_id, poll=poll_interval, timeout=deadline,
-                                     on_update=lambda s: print(f"  status: {s.status}", flush=True))
+                state = _through_store_failures(wait, label=f"waiting for {run_id}")
             except ApiTimeout as e:
                 raise TimeoutError(f"compose-api run {run_id} did not finish within {deadline:.0f}s; it may "
                                    "still be running there") from e
@@ -768,13 +809,18 @@ def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: floa
                 raise RuntimeError(f"compose-api run {run_id} ended {state.status}"
                                    + (f": {error}" if isinstance(error, str) and error else ""))
             Path(dest).mkdir(parents=True, exist_ok=True)
-            return session.download(simulation_id, Path(dest) / f"{run_id}{ARCHIVE_SUFFIX}")
+            return _through_store_failures(
+                lambda: session.download(simulation_id, Path(dest) / f"{run_id}{ARCHIVE_SUFFIX}"),
+                label=f"downloading {run_id}")
     except ComposeDispatchError as e:
         raise RuntimeError(str(e.body.get("error"))) from e
     except CliError as e:
         if _is_refusal(e):
             raise RuntimeError(f"compose-api refused the run: {_refusal_text(e)}") from e
-        raise RuntimeError(str(_backend_error(e)[0]["error"])) from e
+        reason = str(_backend_error(e)[0]["error"])
+        if run_id is not None:
+            reason += f" (the run was sent: it is {run_id} on compose-api, which may finish it all the same)"
+        raise RuntimeError(reason) from e
 
 
 def land(ws_root: Path, body: dict) -> tuple[dict, int]:
