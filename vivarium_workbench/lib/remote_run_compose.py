@@ -748,26 +748,27 @@ STORE_RETRY_FIRST_DELAY = 1.0
 STORE_RETRY_MAX_DELAY = 30.0
 
 
-def _through_store_failures(call: "Callable[[], Any]", *, label: str) -> Any:
-    """``call()``, retried while the client's credential store refuses it (``StorageError``), with backoff, for at
-    most :data:`STORE_RETRY_SECONDS` of consecutive refusals; then the last refusal is raised. A call that ran longer
-    than the current backoff before it was refused counts as progress: the next refusal starts a new streak."""
+def _through_store_failures(call: "Callable[[], Any]", *, label: str, ends_at: "float | None" = None) -> Any:
+    """``call()``, retried while the client's credential store refuses it (``StorageError``), with backoff, until it
+    succeeds or the refusals have gone on for :data:`STORE_RETRY_SECONDS` (counted from the first, however long each
+    refusal took: the client waits 30 s for a held session before refusing) or reach ``ends_at`` (``time.monotonic``);
+    then the last refusal is raised. One call to this is one streak: its caller's next call starts a new one."""
     from compose_api_client.ext import StorageError
 
-    streak_since: "float | None" = None
+    first: "float | None" = None
     delay = STORE_RETRY_FIRST_DELAY
     while True:
-        started = time.monotonic()
         try:
             return call()
         except StorageError as e:
             now = time.monotonic()
-            if streak_since is None or now - started > delay:
-                streak_since, delay = now, STORE_RETRY_FIRST_DELAY
-            if now - streak_since >= STORE_RETRY_SECONDS:
+            if first is None:
+                first = now
+            stop_at = first + STORE_RETRY_SECONDS if ends_at is None else min(first + STORE_RETRY_SECONDS, ends_at)
+            if now >= stop_at:
                 raise
             print(f"  {label}: the compose-api credential store refused ({e}); retrying in {delay:.0f}s", flush=True)
-            time.sleep(delay)
+            time.sleep(min(delay, max(0.0, stop_at - now)))
             delay = min(delay * 2, STORE_RETRY_MAX_DELAY)
 
 
@@ -778,7 +779,7 @@ def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: floa
     sent or did not complete, and ``TimeoutError`` past ``poll_timeout`` (the run may still be going). Once the run
     is sent, a credential store that keeps refusing is retried (:func:`_through_store_failures`); if it never yields,
     the error names the run on compose-api, which may finish it all the same."""
-    from compose_api_client.ext import ApiTimeout, CliError
+    from compose_api_client.ext import CliError
 
     run_id = None
     try:
@@ -793,17 +794,22 @@ def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: floa
                   flush=True)
             deadline = wait_timeout(steps, poll_timeout)
             ends_at = None if deadline is None else time.monotonic() + deadline
-
-            def wait() -> Any:
-                left = None if ends_at is None else max(0.0, ends_at - time.monotonic())
-                return session.wait(simulation_id, poll=poll_interval, timeout=left,
-                                    on_update=lambda s: print(f"  status: {s.status}", flush=True))
-
-            try:
-                state = _through_store_failures(wait, label=f"waiting for {run_id}")
-            except ApiTimeout as e:
-                raise TimeoutError(f"compose-api run {run_id} did not finish within {deadline:.0f}s; it may "
-                                   "still be running there") from e
+            # The client's own wait (``ComposeSession.wait``) in the open: the same status polls, but each one through
+            # _through_store_failures, so a store that refuses for a while does not end the wait, and a poll that
+            # succeeds ends a streak of refusals.
+            last = None
+            while True:
+                state = _through_store_failures(lambda: session.status(simulation_id),
+                                                label=f"waiting for {run_id}", ends_at=ends_at)
+                if last is None or state.status != last.status:
+                    print(f"  status: {state.status}", flush=True)
+                last = state
+                if state.terminal:
+                    break
+                if ends_at is not None and time.monotonic() >= ends_at:
+                    raise TimeoutError(f"compose-api run {run_id} did not finish within {deadline:.0f}s; it may "
+                                       "still be running there")
+                time.sleep(poll_interval)
             if not state.ok:
                 error = state.record.error_message if state.record is not None else None
                 raise RuntimeError(f"compose-api run {run_id} ended {state.status}"

@@ -1947,15 +1947,26 @@ def test_the_card_shows_compose_apis_own_refusal_of_a_long_run(ws, stub, backend
 
 # --- a sent run is read through a credential store that refuses for a while ---------------------------------------
 #
-# Stood in: only the client's credential store refusing (its StorageError, raised by the session's wait or download,
-# as a session lock held past the client's 30 s, or a locked keychain, raises it). The run, its dispatch, the wait,
-# the download and the landing are real, against the contract stub.
+# Stood in: only the client's credential store refusing (its StorageError, raised by a status poll or the download, as
+# a session another process holds past the client's 30 s, or a locked keychain, raises it). Each refusal here takes
+# longer than the runner's backoff, as the client's 30 s lock wait does. The run, its dispatch, the polls, the download
+# and the landing are real, against the contract stub.
 
 BUSY = "Session is busy; finish the other sign-in or retry later"
+REFUSAL_TAKES = 0.05      # longer than the patched maximum backoff below, as a real refusal (30 s) is longer than 30 s
 
 
-def _refusing(backend_env, method_name, refusals):
-    """``ComposeSession.<method_name>`` raising the client's StorageError ``refusals`` times (or forever), then real."""
+def _quick_backoff(backend_env, bound=60.0):
+    backend_env.setattr(rc, "STORE_RETRY_FIRST_DELAY", 0.01)
+    backend_env.setattr(rc, "STORE_RETRY_MAX_DELAY", 0.02)
+    backend_env.setattr(rc, "STORE_RETRY_SECONDS", bound)
+
+
+def _refusing(backend_env, method_name, pattern, before_call=None):
+    """``ComposeSession.<method_name>`` refusing (the client's StorageError, after REFUSAL_TAKES) on the calls whose
+    entry in ``pattern`` is True, and real otherwise; past the pattern, the last entry repeats."""
+    import time as _time
+
     from compose_api_client.ext import ComposeSession, StorageError
 
     real = getattr(ComposeSession, method_name)
@@ -1963,7 +1974,10 @@ def _refusing(backend_env, method_name, refusals):
 
     def refusing(self, *args, **kwargs):
         calls["n"] += 1
-        if refusals is None or calls["n"] <= refusals:
+        if before_call is not None:
+            before_call(calls["n"])
+        if pattern[min(calls["n"], len(pattern)) - 1]:
+            _time.sleep(REFUSAL_TAKES)
             raise StorageError(BUSY)
         return real(self, *args, **kwargs)
 
@@ -1972,33 +1986,58 @@ def _refusing(backend_env, method_name, refusals):
 
 
 def test_a_run_is_read_through_a_store_that_refuses_for_a_while(ws, stub, backend_env):
-    """Falsifies: a credential store that refuses for a moment while the card's runner waits for, or downloads, a
-    sent run (a session another process holds) fails the run, though compose-api runs it to the end."""
+    """Falsifies: a credential store that refuses for a while as the card's runner polls a sent run or downloads it (a
+    session another process holds) fails the run, though compose-api runs it to the end. A refusal that takes longer
+    than the backoff (the client's 30 s lock wait) must still count towards the bound, not reset it."""
     _register_fixture_workspace(stub)
     _completed(stub)
     _name(backend_env, stub.url)
-    backend_env.setattr(rc, "STORE_RETRY_FIRST_DELAY", 0.01)
-    waits = _refusing(backend_env, "wait", 3)
-    downloads = _refusing(backend_env, "download", 2)
+    _quick_backoff(backend_env)
+    polls = _refusing(backend_env, "status", [True, True, True, False])
+    downloads = _refusing(backend_env, "download", [True, True, False])
     archive = rc.run_composite(ws, COMPOSITE, dest=ws / ".pbg" / "out", n_steps=3, overrides={},
                                emit_paths=["stores/level"], poll_interval=0.01, poll_timeout=60)
     assert archive.is_file()
-    assert (waits["n"], downloads["n"]) == (4, 3)
+    assert (polls["n"], downloads["n"]) == (4, 3)
 
 
 def test_a_store_that_never_yields_fails_the_run_with_its_cause_after_the_bound(ws, stub, backend_env):
-    """Falsifies: a store that never yields (a locked keychain) is retried forever, or the failure hides its cause or
-    the run compose-api may still finish."""
+    """Falsifies: a store that never yields (a locked keychain, a session held for good) is retried forever, which a
+    refusal slower than the backoff once caused, or the failure hides its cause or the run compose-api may finish."""
+    import time
+
     _register_fixture_workspace(stub)
     _completed(stub)
     _name(backend_env, stub.url)
-    backend_env.setattr(rc, "STORE_RETRY_FIRST_DELAY", 0.01)
-    backend_env.setattr(rc, "STORE_RETRY_SECONDS", 0.3)
-    waits = _refusing(backend_env, "wait", None)
+    _quick_backoff(backend_env, bound=0.5)
+    polls = _refusing(backend_env, "status", [True])
+    started = time.monotonic()
     with pytest.raises(RuntimeError) as failed:
         rc.run_composite(ws, COMPOSITE, dest=ws / ".pbg" / "out", n_steps=3, overrides={},
                          emit_paths=["stores/level"], poll_interval=0.01, poll_timeout=60)
+    assert time.monotonic() - started < 5, "the bound ended the wait"
     message = str(failed.value)
     assert BUSY in message
     assert "on compose-api, which may finish it all the same" in message and rc.RUN_ID_PREFIX in message
-    assert 2 <= waits["n"] < 100, waits
+    assert polls["n"] >= 2
+
+
+def test_a_poll_that_succeeds_ends_a_streak_of_refusals(ws, stub, backend_env):
+    """Falsifies: refusals separated by successful polls add up to the bound (a long run with an occasional busy
+    store would then fail); only consecutive refusals count."""
+    _register_fixture_workspace(stub)
+    _completed(stub)
+    _name(backend_env, stub.url)
+    _quick_backoff(backend_env, bound=0.12)
+    stub.respond("GET", "/results/simulation/status", 200, _hpcrun("running"))
+
+    def finish_at_the_last_poll(n):
+        if n == 6:
+            stub.respond("GET", "/results/simulation/status", 200, _hpcrun("completed"))
+
+    # Three refusals in a row (~0.15 s, past the bound) would fail. Two, a successful poll (still running), then two
+    # more, then a successful poll (completed) must not: the success in between ends the first streak.
+    polls = _refusing(backend_env, "status", [True, True, False, True, True, False], finish_at_the_last_poll)
+    archive = rc.run_composite(ws, COMPOSITE, dest=ws / ".pbg" / "out", n_steps=3, overrides={},
+                               emit_paths=["stores/level"], poll_interval=0.01, poll_timeout=60)
+    assert archive.is_file() and polls["n"] == 6
