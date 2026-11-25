@@ -43,3 +43,9 @@ def test_compute_env_threads_cache_fingerprint_and_lockfile_hash(tmp_path):
     assert env["lockfile_hash"] is not None
     assert env["python"] is not None
     assert env["platform"] is not None
+
+
+def test_compute_env_extra_packages(tmp_path):
+    # extra_packages adds dists beyond the framework set (e.g. a study's simulator).
+    env = compute_env(ws_root=tmp_path, extra_packages=["process-bigraph"])
+    assert "process-bigraph" in env["sim_packages"]
