@@ -102,16 +102,17 @@ def _lockfile_hash(ws_root) -> str | None:
         return None
 
 
-def compute_env(*, ws_root=None, cache_fingerprint=None) -> dict:
+def compute_env(*, ws_root=None, cache_fingerprint=None, extra_packages=None) -> dict:
     """Best-effort snapshot of the environment a run executed under — the canonical
     shape ``{workspace_commit, dirty, branch, sim_packages:{dist:{version,git_sha}},
     lockfile_hash, python, platform, cache_fingerprint}`` (identical to the engine's
     ``capture_environment``). Every field degrades to ``None`` on failure — never
     raises. ``cache_fingerprint`` is a caller-supplied value, passed straight
-    through.
+    through. ``extra_packages`` adds dists beyond the framework set (e.g. a study's
+    declared simulator) so the recorded env captures what that run actually used.
     """
     sim_packages: dict[str, dict] = {}
-    for dist in _SIM_PACKAGES:
+    for dist in dict.fromkeys(list(_SIM_PACKAGES) + list(extra_packages or [])):
         try:
             info = _sim_package_info(dist)
         except Exception:  # noqa: BLE001
