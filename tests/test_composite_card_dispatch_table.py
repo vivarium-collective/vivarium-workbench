@@ -136,6 +136,8 @@ def card(tmp_path, monkeypatch):
             World.name("compose")
 
             class Session:
+                tokens = None  # anonymous, as ComposeSession is with no credential source
+
                 def __enter__(self):
                     return self
 

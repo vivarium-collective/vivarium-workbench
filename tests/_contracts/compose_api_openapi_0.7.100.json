@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "compose-api",
-    "version": "0.7.72"
+    "version": "0.7.100"
   },
   "paths": {
     "/curated/copasi": {
@@ -512,10 +512,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Only simulations with this label, as key:value; repeatable, all must match. Keys: source, environment, environment_version, solver, model, project, sedml_task, comparison, collection, suite_run, compliance",
+              "description": "Only simulations with this label, as key:value; repeatable, all must match. Keys: source, environment, environment_version, solver, model, project, sbml_test_case, sedml_task, comparison, collection, suite_run, compliance",
               "title": "Label"
             },
-            "description": "Only simulations with this label, as key:value; repeatable, all must match. Keys: source, environment, environment_version, solver, model, project, sedml_task, comparison, collection, suite_run, compliance"
+            "description": "Only simulations with this label, as key:value; repeatable, all must match. Keys: source, environment, environment_version, solver, model, project, sbml_test_case, sedml_task, comparison, collection, suite_run, compliance"
           },
           {
             "name": "tag",
@@ -1752,7 +1752,7 @@
           "Registry"
         ],
         "summary": "The environments documents run in, with what their interface manifests hold",
-        "description": "The environments this deployment declares (environments.yaml), then the mash-ups the database holds\n(docs/plan-environment-composition.md, D7.9). Public: the same for every caller.",
+        "description": "The environments this deployment declares (environments.yaml), then the mash-ups the database holds\n(docs/plan-environment-composition.md, D7.9). The same for every caller, but for a private repository's\nenvironments, listed only to the holders of its role (registry/access.py).",
         "operationId": "list-environments",
         "responses": {
           "200": {
@@ -1893,6 +1893,7 @@
           "Registry"
         ],
         "summary": "The catalog: every registry entry with its curation level, pin and evidence, and the environments that provide its classes",
+        "description": "Every entry but a private repository's, which only the holders of its role see (registry/access.py).",
         "operationId": "list-registry-entries",
         "responses": {
           "200": {
@@ -2187,6 +2188,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UnprocessableError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Its private repositories cannot be read now; nothing was recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
                 }
               }
             }
@@ -4660,7 +4671,7 @@
             }
           },
           "409": {
-            "description": "A run of the suite is still submitting or running",
+            "description": "A run of the suite is still submitting or running, or the versions named cannot run its solvers (a class that does not import there, or compliance cases failed or still running)",
             "content": {
               "application/json": {
                 "schema": {
@@ -5782,6 +5793,17 @@
             ],
             "title": "Reviewer"
           },
+          "alternative_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alternative To"
+          },
           "environments": {
             "items": {
               "$ref": "#/components/schemas/EntryEnvironment"
@@ -6093,7 +6115,7 @@
             },
             "type": "array",
             "title": "Refused",
-            "description": "Components a generic check failed"
+            "description": "Components a generic check failed, less those whose failure it accepts"
           }
         },
         "type": "object",
@@ -7096,7 +7118,7 @@
               }
             ],
             "title": "Findings",
-            "description": "What the generic compliance checks found in its components: a component with a `fail` is refused in this version (docs/plan-environment-composition.md, step 5)"
+            "description": "What the generic compliance checks found in its components: a component with a `fail` is refused in this version unless the version accepts it (`accepted`, its entry's reason; docs/registry-onboarding.md, Accepted findings) (docs/plan-environment-composition.md, step 5)"
           },
           "against": {
             "anyOf": [
@@ -9503,6 +9525,16 @@
           "tolerances": {
             "$ref": "#/components/schemas/Tolerances"
           },
+          "judged_by": {
+            "type": "string",
+            "enum": [
+              "agreement",
+              "reference"
+            ],
+            "title": "Judged By",
+            "description": "what decides a row: the solvers' agreement with each other, references only shown (plan-sedml D7); or the reference, each solver passing when it is close to it on every label it has (plan-sbml-test-suite S3)",
+            "default": "agreement"
+          },
           "baseline": {
             "anyOf": [
               {
@@ -9626,6 +9658,21 @@
               }
             ],
             "title": "Close To References"
+          },
+          "passes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passes",
+            "description": "where the reference decides (the suite's judged_by), each solver against it: completed and close on every label the reference has; `close` is then every solver passing"
           },
           "worst_label": {
             "anyOf": [

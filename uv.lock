@@ -126,6 +126,19 @@ wheels = [
 ]
 
 [[package]]
+name = "authlib"
+version = "1.9.10"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "joserfc" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a9/7c/e1963d10d1d7203ca913a20e377893ec27489db27f5115f25ff50ef7b5bd/authlib-1.9.10.tar.gz", hash = "sha256:f7453c4a3f5975f94cc55223c4d48ff9c7d8d3b4e3d727ed2549edaeb9b85d50", size = 184323, upload-time = "2026-11-20T09:31:59.097Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b9/93/a93953ac475b32552eed564d40632ff0ce1db4241a52d9cdcb16ae0480b7/authlib-1.9.10-py2.py3-none-any.whl", hash = "sha256:c62d10e1b23945c6d4c578a16170bfefe4879bd23d4be62edea494993dce70aa", size = 267693, upload-time = "2026-11-20T09:31:57.716Z" },
+]
+
+[[package]]
 name = "backports-tarfile"
 version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -517,16 +530,28 @@ wheels = [
 
 [[package]]
 name = "compose-api-client"
-version = "0.7.72"
+version = "0.7.100"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "httpx" },
     { name = "python-dateutil" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/83/ff/c2bfb09aa2537c142fd775b53acc70892189c41d68d43404892fa6d5320a/compose_api_client-0.7.72.tar.gz", hash = "sha256:cfd495eb472502728f95dbba4cb47ecff33fee36fe4638d4c1f849109e12a26e", size = 193083, upload-time = "2026-10-29T02:42:39.735Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dd/ee/2a41c10755effbf003dd60c043182ad1d295546f87fb2615bdd980e987df/compose_api_client-0.7.100.tar.gz", hash = "sha256:4373902438892041be45bc1b72be6ada0461172f9b0c8fb1cb10c442dee5764f", size = 196022, upload-time = "2026-11-24T10:37:04.767Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/be/a4/71968fa987f8624b799b22ac7e903bb94ac90bd2f0b7ddb21dadb186a50f/compose_api_client-0.7.72-py3-none-any.whl", hash = "sha256:0dd56f5d6d95389c6b9b8a7349ca47f3b950416b603b60a01f334c0e935cf4c0", size = 384441, upload-time = "2026-10-29T02:42:38.24Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/15/8deb272db4d5a1b6d7b9c1337942e573eb6afef2889287385bf48c247c23/compose_api_client-0.7.100-py3-none-any.whl", hash = "sha256:b1d5cf009c7229e4ffaf3e4b71fc672426080c61a6d9c52c72aa632b9cc5185d", size = 388929, upload-time = "2026-11-24T10:37:03.485Z" },
+]
+
+[package.optional-dependencies]
+auth = [
+    { name = "authlib" },
+    { name = "joserfc" },
+    { name = "keyring" },
+    { name = "platformdirs" },
+    { name = "portalocker" },
+    { name = "pydantic" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
 ]
 
 [[package]]
@@ -1241,7 +1266,7 @@ name = "importlib-metadata"
 version = "9.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zipp", marker = "python_full_version < '3.12'" },
+    { name = "zipp" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6f/7e/1e7e8dc30634b93ebb3d58a3dea569ad146e656218d3960ab04f62047b29/importlib_metadata-9.0.1.tar.gz", hash = "sha256:ab830580bc0ef3db61ce8fae716389e5462b67e033018bab6d8f80ef17172f99", size = 59124, upload-time = "2026-08-28T15:30:34.646Z" }
 wheels = [
@@ -1455,6 +1480,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d3/59/322338183ecda247fb5d1763a6cbe46eff7222eaeebafd9fa65d4bf5cb11/jmespath-1.1.0.tar.gz", hash = "sha256:472c87d80f36026ae83c6ddd0f1d05d4e510134ed462851fd5f754c8c3cbb88d", size = 27377, upload-time = "2026-01-22T16:35:26.279Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl", hash = "sha256:a5663118de4908c91729bea0acadca56526eb2698e83de10cd116ae0f4e97c64", size = 20419, upload-time = "2026-01-22T16:35:24.919Z" },
+]
+
+[[package]]
+name = "joserfc"
+version = "1.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/74/31/5c3f27e82c92a7bbe1f028033ff19e0251540395c9be244c01a50de42bdb/joserfc-1.8.0.tar.gz", hash = "sha256:cbf03cb2c6db8cc5289f1ef8718842e53dba244b4c0de5fefa0c0eaee4bde8db", size = 241023, upload-time = "2026-11-03T10:45:57.948Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5e/7e/7ffaae13415e8f51c8e8d5d1845f2de7a27ebf2717e97a38d7e7446d6030/joserfc-1.8.0-py3-none-any.whl", hash = "sha256:176b836ac7ed9a46a88629e24076314b475f33a75d0bad7f26146e572eed7c79", size = 73147, upload-time = "2026-11-03T10:45:56.531Z" },
 ]
 
 [[package]]
@@ -2417,6 +2454,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/ed/f2d26ae02d92c2689056838ed59e2a626326ad23c2831d58637d25f6c82a/polars_runtime_32-1.41.2-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:e7016a3deb641b64a31447abbbee0f34bd020a6a9ae34ee6b743837def15e2a4", size = 54328561, upload-time = "2026-05-29T17:37:32.587Z" },
     { url = "https://files.pythonhosted.org/packages/9b/c4/9c3831cc885dc7769e59abf8f583821a5fb4403fd0e4eba0ccc6d47a3d4b/polars_runtime_32-1.41.2-cp310-abi3-win_amd64.whl", hash = "sha256:1e5e5377c315e0dcafdfb2a31adc546abbaeb3f9cb1864e6536523d2af473265", size = 51978643, upload-time = "2026-05-29T17:37:37.443Z" },
     { url = "https://files.pythonhosted.org/packages/cd/c6/79e9f3f270270d7ed5575d92b7bfef49f01abd9275447161275b23b553a8/polars_runtime_32-1.41.2-cp310-abi3-win_arm64.whl", hash = "sha256:843d96f69d18eca53429c1198e58891db7f18111f83b9c419bb45ad9d73eaed5", size = 46006901, upload-time = "2026-05-29T17:37:42.522Z" },
+]
+
+[[package]]
+name = "portalocker"
+version = "4.4.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7f/d9/586fb0510fdfbd95a86f9d5c5046463aca41a55f6573d1a5a082a62e0acb/portalocker-4.4.2.tar.gz", hash = "sha256:7ac85bb2aa3c7873bf2ac72586fc6154afa4671ac786994a16617a6b7ccb3e5e", size = 310698, upload-time = "2026-10-28T00:24:58.214Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e8/43/bca094221a0f9f592fe1e982d090a92075aa302ecaa92c94cc6268a39b2c/portalocker-4.4.2-py3-none-any.whl", hash = "sha256:e661b91af34fc1806740f8e0e42990fe55cd85cbae55675ac48a400a9656a51b", size = 129702, upload-time = "2026-10-28T00:24:56.625Z" },
 ]
 
 [[package]]
@@ -3759,7 +3805,11 @@ chat = [
     { name = "mcp" },
     { name = "pydantic-ai-slim", extra = ["anthropic", "bedrock", "google", "openai"] },
 ]
+compose-api-signin = [
+    { name = "compose-api-client", extra = ["auth"] },
+]
 dev = [
+    { name = "compose-api-client", extra = ["auth"] },
     { name = "httpx" },
     { name = "import-linter" },
     { name = "mypy" },
@@ -3796,6 +3846,7 @@ plugins = [
 requires-dist = [
     { name = "bigraph-schema", specifier = ">=1.8.1" },
     { name = "compose-api-client", specifier = ">=0.7.72" },
+    { name = "compose-api-client", extras = ["auth"], marker = "extra == 'compose-api-signin'", specifier = ">=0.7.100" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'chat'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
@@ -3833,13 +3884,14 @@ requires-dist = [
     { name = "viva-emitters", extras = ["sqlite", "xarray", "parquet"], specifier = ">=0.4.3" },
     { name = "viva-superpowers", extras = ["evaluator"], git = "https://github.com/vivarium-collective/viva-superpowers.git?branch=main" },
     { name = "viva-workspace", git = "https://github.com/vivarium-collective/viva-workspace.git?branch=main" },
+    { name = "vivarium-workbench", extras = ["compose-api-signin"], marker = "extra == 'dev'" },
     { name = "vivarium-workbench-vivaapi", marker = "extra == 'vivaapi'", editable = "packages/vivarium-workbench-vivaapi" },
     { name = "xarray", specifier = ">=2026.4" },
     { name = "xarray", marker = "extra == 'test'" },
     { name = "zarr", specifier = ">=3.1.6" },
     { name = "zarr", marker = "extra == 'test'" },
 ]
-provides-extras = ["vivaapi", "viz", "loom-render", "chat", "dev", "test"]
+provides-extras = ["vivaapi", "compose-api-signin", "viz", "loom-render", "chat", "dev", "test"]
 
 [package.metadata.requires-dev]
 plugins = [{ name = "vivarium-workbench-vivaapi", editable = "packages/vivarium-workbench-vivaapi" }]
