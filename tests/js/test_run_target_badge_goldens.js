@@ -130,7 +130,7 @@ function run() {
   const doc = { querySelectorAll: () => [badge] };
   // eslint-disable-next-line no-new-func
   const apply = new Function('window', 'document',
-    extract('_selectedBuildTip') + '\n' + extract('_computeRunTarget') + '\n' + extract('_runTargetClickable') + '\n' + extract('_applyRunTargetBadges') +
+    extract('_selectedBuildTip') + '\n' + extract('_computeRunTarget') + '\n' + extract('_signInOffered') + '\n' + extract('_runTargetClickable') + '\n' + extract('_applyRunTargetBadges') +
     '\nreturn _applyRunTargetBadges;')({}, doc);
   apply(null);
   check({ text: badge.textContent, title: badge.title, bg: badge.style.background, fg: badge.style.color,

@@ -2012,7 +2012,6 @@ a.viv-bs-commit:hover { text-decoration: underline; }
         <div class="gh-value">
           <button id="viv-compose-chip" class="btn-mini" type="button" data-state="loading">…</button>
           <div class="gh-value-hint" id="viv-compose-hint"></div>
-          <div id="viv-compose-flow" style="display:none;margin-top:8px;white-space:pre-wrap;font-size:0.85em"></div>
         </div>
       </div>
     </div>
@@ -2981,6 +2980,12 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/mobile-panels.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* mobile panel switcher unavailable */"></script>
 <script src="assets/search-palette.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* global search unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>
+{#- compose-api sign-in progress (static/compose-signin.js): outside every page, so a sign-in started from a composite
+    card's badge shows its instructions (a device code, say) wherever the person is. -#}
+<div id="viv-compose-flow" role="status" aria-live="polite"
+     style="display:none;position:fixed;right:16px;bottom:16px;z-index:2000;max-width:420px;padding:10px 14px;
+            border-radius:8px;background:var(--panel,#fff);color:var(--text,#1a1a1a);border:1px solid var(--border,#d0d0d4);
+            box-shadow:0 6px 24px rgba(0,0,0,0.16);white-space:pre-wrap;font-size:0.85em"></div>
 <script src="assets/compose-signin.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* compose-api sign-in unavailable */"></script>
 <!-- chat-core.js already loaded above (shared by panel-dock.js + process-code.js). -->
 <script src="assets/ai-models.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>

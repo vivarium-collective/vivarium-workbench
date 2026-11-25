@@ -7,7 +7,13 @@
 // "Sign in": POST /api/auth/compose-api/start {method: "auto"}; the client opens this computer's browser, or, over SSH
 // or without a display, shows a code to enter on any device. "Use a code instead" asks for the code directly (a
 // workbench on another machine). While it waits, the page polls the status and shows the client's own messages (never
-// a token). Signed in: clicking signs out (for the compose-api CLI too) after a confirm.
+// a token). Signed in: clicking signs out (for the compose-api CLI too) after a confirm; "Sign in again" makes a new
+// login and keeps the current one until the new one is confirmed (the client's own guarantee: a cancelled or failed
+// sign-in preserves the previous session).
+//
+// window.ComposeSignin.start(method) is the same flow for other places (the composite card's "Sign in" beside its
+// "Runs: Cloud" badge). Its progress shows in #viv-compose-flow, a panel outside any page, so it is seen from anywhere;
+// when a sign-in ends, the run-target badges are re-checked.
 
 (function () {
   const row = document.getElementById('viv-compose-row');
@@ -19,6 +25,7 @@
   const base = () => window.__BASE_PATH__ || '';
   const POLL_MS = 1500;
   let pollTimer = null;
+  let wasWaiting = false;
 
   async function getStatus() {
     try {
@@ -64,6 +71,12 @@
       chip.textContent = 'Signed in · ' + status.profile;
       chip.title = 'Your runs go to ' + status.api_base_url + ' as you. Click to sign out.';
       chip.onclick = signOut;
+      const again = document.createElement('a');
+      again.href = '#';
+      again.textContent = 'Sign in again';
+      again.title = 'A new login; the current one stays until the new one is confirmed';
+      again.onclick = (e) => { e.preventDefault(); startFlow('auto'); };
+      hint.append(again);
     } else {
       chip.dataset.state = 'out';
       chip.textContent = 'Sign in';
@@ -80,6 +93,10 @@
     showFlow(flow);
     if (waiting && !pollTimer) pollTimer = setInterval(refresh, POLL_MS);
     if (!waiting) stopPolling();
+    if (wasWaiting && !waiting && typeof window._refreshRunTargetBadges === 'function') {
+      window._refreshRunTargetBadges();
+    }
+    wasWaiting = !!waiting;
   }
 
   async function refresh() {
@@ -126,5 +143,6 @@
     if (message) { flowBox.style.display = ''; flowBox.textContent = message; }
   }
 
+  window.ComposeSignin = { start: startFlow, refresh };
   refresh();
 })();
