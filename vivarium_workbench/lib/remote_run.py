@@ -23,6 +23,17 @@ _DEFAULT_POLL_INTERVAL = 10.0
 _DEFAULT_POLL_TIMEOUT = 7200.0  # 2 h wall-clock base; <= 0 disables the deadline
 
 
+class RemoteRunStopped(RuntimeError):
+    """A deployment run that stopped before it completed (cancelled, timed out, out of memory, failed) and kept its
+    results up to its last snapshot: ``archive`` is them, in the shape a completed run's archive has, and ``status``
+    is the backend's word for the stop. The runner lands the archive and records the run as stopped."""
+
+    def __init__(self, message: str, *, status: str, archive: Path) -> None:
+        super().__init__(message)
+        self.status = status
+        self.archive = archive
+
+
 # Paths the workbench itself (re)writes whenever it serves a workspace or runs something in it — the `.viv-build.json`
 # provenance stamp (#858), the rendered report shell (`<reports>/index.html`, `<reports>/assets/`), its per-start
 # registry/server state, and its run records and per-session state (the run registry, each study's/investigation's
@@ -193,8 +204,8 @@ def run_remote(
     The backend is the one :func:`backends.select` picks for ``ws_root`` (a provider's claim -- the session's own
     build or the deployment's pin -- else the named backend); a deployment run that none claims (the opt-in compose
     path) goes to the backend that answers unrouted requests (:func:`backends.unrouted`). With neither, a
-    ``RuntimeError``. ``analysis_options`` and ``build_ref`` are carried to the backend unread
-    (``RunFacet.run_composite``)."""
+    ``RuntimeError``. A run that stopped but kept results raises :class:`RemoteRunStopped` with them.
+    ``analysis_options`` and ``build_ref`` are carried to the backend unread (``RunFacet.run_composite``)."""
     from vivarium_workbench.lib import backends
 
     ws_root = Path(ws_root).resolve()

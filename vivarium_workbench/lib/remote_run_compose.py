@@ -30,11 +30,12 @@ import tempfile
 import time
 import uuid
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from vivarium_workbench.lib import study_spec
 from vivarium_workbench.lib.investigations import load_spec
+from vivarium_workbench.lib.remote_run import RemoteRunStopped
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -772,6 +773,25 @@ def _through_store_failures(call: "Callable[[], Any]", *, label: str, ends_at: "
             delay = min(delay * 2, STORE_RETRY_MAX_DELAY)
 
 
+def _partial_results(session: "ComposeSession", simulation_id: int, archive: Path) -> "Path | None":
+    """A stopped run's results up to its last snapshot, written to ``archive`` in the shape :func:`land_composite_results`
+    reads, or None when it kept none. compose-api (0.7.108) keeps no ``results.zip`` for a run that did not complete,
+    but its runner writes the results file every few minutes and on SIGTERM and announces it as a ``results``
+    dataset. Nothing marks that file as partial: the run's status does."""
+    run_id = run_id_of(simulation_id)
+    page = _through_store_failures(lambda: session.datasets(simulation_id=simulation_id, kind="results"),
+                                   label=f"listing {run_id}'s results")
+    files = [d for d in page.datasets if d.path.endswith(".pber")]
+    if not files:
+        return None
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
+        for d in files:
+            content = _through_store_failures(lambda d=d: session.dataset_content(d.id),
+                                              label=f"downloading {run_id}'s {d.path}")
+            z.writestr(PurePosixPath(d.path).name, content)
+    return archive
+
+
 def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: float, overrides: "dict | None",
                   emit_paths: "list[str] | None", poll_interval: float, poll_timeout: float) -> Path:
     """The Composites-tab remote run on compose-api (``ComposeApiRuns.run_composite``): dispatch the composite,
@@ -810,11 +830,21 @@ def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: floa
                     raise TimeoutError(f"compose-api run {run_id} did not finish within {deadline:.0f}s; it may "
                                        "still be running there")
                 time.sleep(poll_interval)
+            Path(dest).mkdir(parents=True, exist_ok=True)
             if not state.ok:
                 error = state.record.error_message if state.record is not None else None
-                raise RuntimeError(f"compose-api run {run_id} ended {state.status}"
-                                   + (f": {error}" if isinstance(error, str) and error else ""))
-            Path(dest).mkdir(parents=True, exist_ok=True)
+                detail = f": {error}" if isinstance(error, str) and error else ""
+                ended = f"compose-api run {run_id} ended {state.status}{detail}"
+                try:
+                    archive = _partial_results(session, simulation_id, Path(dest) / f"{run_id}{ARCHIVE_SUFFIX}")
+                except CliError as e:
+                    # The run has ended: its status, not the backend's error, is the reason (and it may not finish).
+                    raise RuntimeError(f"{ended}; its results so far could not be read: "
+                                       f"{_backend_error(e)[0]['error']}") from e
+                if archive is None:
+                    raise RuntimeError(ended)
+                raise RemoteRunStopped(f"compose-api run {run_id} stopped ({state.status}{detail})",
+                                       status=state.status, archive=archive)
             return _through_store_failures(
                 lambda: session.download(simulation_id, Path(dest) / f"{run_id}{ARCHIVE_SUFFIX}"),
                 label=f"downloading {run_id}")
@@ -832,7 +862,11 @@ def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: floa
 def land(ws_root: Path, body: dict) -> tuple[dict, int]:
     """Land a finished run's results as a study run: ``({run_id}, 200)``, the shape the legacy route answers.
 
-    409 for a run that has not completed (nothing is downloaded), 404 when compose-api does not know it, 422 for
+    A run that stopped (cancelled, timed out, out of memory, failed) lands its results up to the last snapshot
+    (:func:`_partial_results`), is recorded with the stop's status and answers ``partial: true`` with it.
+
+    409 for a run that has not finished, or stopped and kept nothing (nothing is landed), 404 when compose-api does
+    not know it, 422 for
     an archive that is not one emitter's history, 502 when compose-api cannot be reached. Provenance is the
     backend's record of the run (its simulation, image and the registry entry's commit), never the checkout.
     """
@@ -869,13 +903,17 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
     try:
         with _session() as session:
             state = session.status(simulation_id)
-            if not state.ok:
-                return {"error": f"run {run_id!r} is {state.status}; only a completed run has results to land",
+            if not state.terminal:
+                return {"error": f"run {run_id!r} is {state.status}; it has not finished",
                         "phase": _phase(state.status), "run_id": run_id}, 409
-            provenance, image = _provenance(session, simulation_id, run_id, state)
             with tempfile.TemporaryDirectory() as td:
                 archive = Path(td) / "results.zip"
-                archive.write_bytes(session.results(simulation_id))
+                if state.ok:
+                    archive.write_bytes(session.results(simulation_id))
+                elif _partial_results(session, simulation_id, archive) is None:
+                    return {"error": f"run {run_id!r} is {state.status} and kept no results to land",
+                            "phase": _phase(state.status), "run_id": run_id}, 409
+                provenance, image = _provenance(session, simulation_id, run_id, state)
                 if not zipfile.is_zipfile(archive):
                     return {"error": f"simulation {simulation_id} served something other than a results archive",
                             "run_id": run_id}, 422
@@ -905,7 +943,8 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
             cr.save_metadata(conn, spec_id=spec_id, run_id=landed, params=provenance,
                              label=f"Remote run ({deployment})", started_at=time.time(), n_steps=n_steps,
                              workspace=ws_root, manifest=manifest)
-            cr.complete_metadata(conn, run_id=landed, n_steps=n_steps, status="completed")
+            cr.complete_metadata(conn, run_id=landed, n_steps=n_steps, status="completed" if state.ok
+                                 else "cancelled" if state.status == "cancelled" else "failed")
         except Exception:
             # No history rows without the run they belong to.
             with conn:
@@ -914,7 +953,7 @@ def land(ws_root: Path, body: dict) -> tuple[dict, int]:
         cr.delete_run(conn, run_id=f"remote-pending-{run_id}", workspace=ws_root)
     finally:
         conn.close()
-    return {"run_id": landed}, 200
+    return ({"run_id": landed} if state.ok else {"run_id": landed, "partial": True, "status": state.status}), 200
 
 
 def _provenance(session: "ComposeSession", simulation_id: int, run_id: str, state: Any) -> "tuple[dict, str | None]":

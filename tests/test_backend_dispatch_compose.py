@@ -2048,3 +2048,150 @@ def test_a_poll_that_succeeds_ends_a_streak_of_refusals(ws, stub, backend_env):
     archive = rc.run_composite(ws, COMPOSITE, dest=ws / ".pbg" / "out", n_steps=3, overrides={},
                                emit_paths=["stores/level"], poll_interval=0.01, poll_timeout=60)
     assert archive.is_file() and polls["n"] == 6
+
+
+# --- a run that stopped before completing: its results up to the last snapshot ----------------------------------------
+#
+# Real artifacts (tests/_fixtures/compose_api/README.md): production simulation 12966 (mash-f3ae3f0e91@3, compose-api
+# 0.7.109), cancelled about seven minutes into a 3000 s run. Its listing as `GET /datasets?simulation_id=12966` served it
+# and its one `results` dataset, copied byte for byte: 1,721 states, t = 0 to 1720. compose-api keeps no results.zip for
+# it; nothing marks the file as partial, so the workbench reads that from the run's status.
+
+PARTIAL = "results_12966_cancelled.pber"
+
+
+def _stopped(stub, status: str, *, kept: bool = True) -> None:
+    """A run that ended ``status``, and the datasets compose-api lists for it: 12966's real ``results`` row (the page
+    the server answers to ``kind=results``) and its real file, or none."""
+    stub.respond("GET", "/results/simulation/status", 200, _hpcrun(status))
+    rows = [d for d in _json("datasets_12966_cancelled.json") if d["kind"] == "results"] if kept else []
+    stub.respond("GET", "/datasets", 200, {"datasets": rows, "total": len(rows), "next_offset": None})
+    stub.respond_bytes("GET", "/datasets/{dataset_id}/content", 200, (FIX / PARTIAL).read_bytes(),
+                       "application/octet-stream")
+
+
+def _card_run(ws, steps: float):
+    from vivarium_workbench.lib import composite_runs as cr
+    from vivarium_workbench.lib import run_runner
+
+    run_dir = ws / ".pbg" / "runs" / "card-1"
+    run_dir.mkdir(parents=True)
+    db = ws / ".pbg" / "composite-runs.db"
+    conn = cr.connect(db)
+    try:
+        cr.save_metadata(conn, spec_id=COMPOSITE, run_id="card-1", params={}, label="", started_at=0.0, n_steps=steps)
+        cr.ensure_history_table(conn)
+    finally:
+        conn.close()
+    req = run_runner.RunRequest(
+        run_id="card-1", spec_id=COMPOSITE, pkg="pbg_ws_increase_demo", workspace=ws, overrides={}, steps=steps,
+        emit_paths=["stores/level"], db_file=str(db), log_path=str(run_dir / "run.log"), target="deployment")
+    code = run_runner._execute_remote(req, run_dir)
+    with sqlite3.connect(db) as conn:
+        row = conn.execute("SELECT status, n_steps FROM runs_meta WHERE run_id = 'card-1'").fetchone()
+        times = conn.execute("SELECT min(global_time), max(global_time), count(*) FROM history "
+                             "WHERE simulation_id = 'card-1'").fetchone()
+    log = run_dir / "run.log"  # written by the runner only on a stop or failure; a completed run's is its stdout
+    return code, row, times, log.read_text() if log.is_file() else ""
+
+
+def test_a_cancelled_run_lands_its_results_up_to_the_last_snapshot(ws, stub, backend_env):
+    """Falsifies: the card's runner records a cancelled run that kept its results as failed with nothing (as before
+    this change), lands only part of them, or reads them from anywhere but the run's `results` dataset."""
+    _register_fixture_workspace(stub)
+    _stopped(stub, "cancelled")
+    _name(backend_env, stub.url)
+    code, row, times, log = _card_run(ws, 3000)
+    assert code == 1
+    assert row == ("cancelled", 1721)
+    assert times == (0.0, 1720.0, 1721)
+    assert (f"REMOTE RUN STOPPED: compose-api run {RUN_ID} stopped (cancelled) at t=1720 of 3000; "
+            "the results up to the last snapshot are landed") in log
+    (listing,) = stub.calls_to("list-datasets")
+    assert listing.query["simulation_id"] == [str(SIM_ID)] and listing.query["kind"] == ["results"]
+    (content,) = stub.calls_to("get-dataset-content")
+    assert content.path == "/datasets/c8120c16-68f6-4cf8-b7be-4fa66dbbef91/content"
+    assert stub.calls_to("get-simulation-results-file") == []
+
+
+def test_a_timed_out_run_lands_its_results_and_is_recorded_failed(ws, stub, backend_env):
+    """ASSUMED SHAPE: no real timed-out run's file exists yet. compose-api's time limit sends the same SIGTERM a
+    cancel does (#581), so this serves 12966's cancelled file as a timed-out run's; it checks only the workbench's
+    handling of the status, not what a real timeout keeps."""
+    _register_fixture_workspace(stub)
+    _stopped(stub, "timeout")
+    _name(backend_env, stub.url)
+    code, row, times, log = _card_run(ws, 3000)
+    assert code == 1
+    assert row == ("failed", 1721)
+    assert times[2] == 1721
+    assert f"compose-api run {RUN_ID} stopped (timeout) at t=1720 of 3000" in log
+
+
+def test_a_stopped_run_that_kept_nothing_fails_as_before(ws, stub, backend_env):
+    """Falsifies: a stopped run with no `results` dataset (an old environment version, a lost node) is recorded as
+    stopped with results, or its failure stops naming the status."""
+    _register_fixture_workspace(stub)
+    _stopped(stub, "cancelled", kept=False)
+    _name(backend_env, stub.url)
+    code, row, times, log = _card_run(ws, 3000)
+    assert code == 1
+    assert row == ("failed", 0)
+    assert times[2] == 0
+    assert f"REMOTE RUN FAILED: RuntimeError: compose-api run {RUN_ID} ended cancelled" in log
+    assert stub.calls_to("get-dataset-content") == []
+
+
+def test_a_stopped_run_whose_results_cannot_be_read_fails_naming_its_status(ws, stub, backend_env):
+    """Falsifies: a listing that fails after the run ended reports the backend's error with "may finish it all the
+    same", hiding that the run ended (found in review)."""
+    _register_fixture_workspace(stub)
+    _stopped(stub, "cancelled")
+    stub.respond_error("GET", "/datasets", 502, {"detail": "bad gateway"})
+    _name(backend_env, stub.url)
+    code, row, _times, log = _card_run(ws, 3000)
+    assert code == 1 and row == ("failed", 0)
+    assert f"compose-api run {RUN_ID} ended cancelled; its results so far could not be read" in log
+    assert "may finish it all the same" not in log
+
+
+def test_a_completed_run_still_lands_results_zip_and_never_lists_datasets(ws, stub, backend_env):
+    """The unchanged path: a completed run is read from results.zip only."""
+    _register_fixture_workspace(stub)
+    _completed(stub)
+    _name(backend_env, stub.url)
+    code, row, times, _log = _card_run(ws, 3)
+    assert code == 0 and row == ("completed", 6) and times[2] == 6
+    assert len(stub.calls_to("get-simulation-results-file")) == 1
+    assert stub.calls_to("list-datasets") == []
+
+
+def _detail(status: str) -> dict:
+    return {"simulation_id": SIM_ID, "experiment_id": "exp-1", "simulator_id": 282, "container_def_hash": "h",
+            "status": status, "simulator": PILOT}
+
+
+def test_a_cancelled_run_lands_in_a_study_as_partial(ws, stub, backend_env, dashboard_client):
+    """Falsifies: ⬇ Land results still refuses a cancelled run that kept its results, or lands it as completed."""
+    _stopped(stub, "cancelled")
+    stub.respond("GET", "/simulations/{simulation_id}", 200, _detail("cancelled"))
+    _name(backend_env, stub.url)
+    res = dashboard_client(ws).post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["partial"] is True and body["status"] == "cancelled"
+    with sqlite3.connect(ws / "studies" / "demo" / "runs.db") as db:
+        assert db.execute("SELECT status, n_steps FROM runs_meta WHERE run_id = ?",
+                          (body["run_id"],)).fetchone() == ("cancelled", 1721)
+        assert db.execute("SELECT max(global_time) FROM history WHERE simulation_id = ?",
+                          (body["run_id"],)).fetchone() == (1720.0,)
+    assert stub.calls_to("get-simulation-results-file") == []
+
+
+def test_a_stopped_run_that_kept_nothing_is_not_landed_in_a_study(ws, stub, backend_env, dashboard_client):
+    _stopped(stub, "out_of_memory", kept=False)
+    _name(backend_env, stub.url)
+    res = dashboard_client(ws).post("/api/remote-run-land", json={"study": "demo", "simulation_id": RUN_ID})
+    assert res.status_code == 409 and res.json()["error"] == f"run {RUN_ID!r} is out_of_memory and kept no results to land"
+    assert not (ws / "studies" / "demo" / "runs.db").is_file() or sqlite3.connect(
+        ws / "studies" / "demo" / "runs.db").execute("SELECT count(*) FROM runs_meta").fetchone() == (0,)

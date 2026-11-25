@@ -16,6 +16,7 @@ advertises `/viva/v1`.
 | Signing in as the CLI's user | compose-api-client 0.7.100, `compose_api_client.auth.signed_in_session` and `profiles.py` (biosimulations/compose-api#561) |
 | Environments, registry entries, the pilot's interface manifest | `GET /registry/environments`, `/registry/entries`, `/registry/environments/viva-pde-particle/manifest` on compose.cam.uchc.edu 0.7.33, 2026-10-22 (`tests/_fixtures/compose_api/`; the live registry has since moved, see that README) |
 | What a run's archive holds | a real export run by viva-pde-particle's real runner in its own image, and production simulation 4706 (`tests/_fixtures/compose_api/README.md`) |
+| What a stopped run keeps | compose-api 0.7.108 (biosimulations/compose-api#581): the results file written every few minutes and on SIGTERM, listed as a `results` dataset; production simulation 12966, cancelled (`tests/_fixtures/compose_api/README.md`) |
 | Address rules | compose-api `compose_api/registry/validation.py`: only `local:<module>.<Class>`; `local:!` and other protocols are always refused |
 | Cancel | compose-api `DELETE /simulations/{simulation_id}` (`cancel-simulation`, biosimulations/compose-api#346) |
 
@@ -194,15 +195,30 @@ from the workbench (`/api/remote-run-land` lands into a study); its results are 
 | Workbench | compose-api |
 |---|---|
 | submit (study baseline and variant, `/api/remote-run-submit`) | `POST /simulation/run` with the `.pbg` as `uploaded_file`. Query: `environment=<env>` (omitted when compose-api infers it), `interval_time=<n_steps>` (a local run calls `composite.run(1)` per step), `tags=workbench,study:<study>,workbench:dispatch:<uuid>`, `description` |
-| Composites-tab remote run (`/api/composite-test-run`, the detached `run_remote` -> `runs.run_composite`) | before launching, the card asks the preflight's environment lookup (`check_environment`, with a 15 s timeout) and refuses the launch with the preflight's reason (409 `unknown-environment` for a named environment compose-api does not list; 502, 401 or 403 when compose-api cannot be asked), with no run row and nothing spawned. Otherwise the same submit (tag `composite:<id>`), then the runner waits on the status, downloads the results and lands them as the card's run. It records the card's emit selection, else the composite's declared emitters; declared analyses are not run, and the run log says so |
+| Composites-tab remote run (`/api/composite-test-run`, the detached `run_remote` -> `runs.run_composite`) | before launching, the card asks the preflight's environment lookup (`check_environment`, with a 15 s timeout) and refuses the launch with the preflight's reason (409 `unknown-environment` for a named environment compose-api does not list; 502, 401 or 403 when compose-api cannot be asked), with no run row and nothing spawned. Otherwise the same submit (tag `composite:<id>`), then the runner waits on the status, downloads the results and lands them as the card's run. A run that stopped (cancelled, timed out, out of memory, failed) and kept results ([Stopped runs](#stopped-runs)) lands them the same way and is recorded `cancelled` (a cancel) or `failed` (any other stop) with the steps landed. It records the card's emit selection, else the composite's declared emitters; declared analyses are not run, and the run log says so |
 | preflight (`/api/remote-dispatch-preflight`) | the environment lookup alone: ready when one runs the workspace, otherwise its reason (the card's run-target badge then reads `Runs: Cloud · not ready ⚠`, with the reason in its tooltip) |
 | poll (`/api/remote-run-poll`) | `GET /results/simulation/status` (`submitting` until SLURM has the job) |
 | progress (`/api/remote-run-chain-progress`) | the same status, as a single job with no seeds |
-| land (`/api/remote-run-land`) | `GET /results/simulation/results/file`; its `results_*.pber` is read, landing `user_emitter` (`remote_run_landing.land_composite_results`) |
+| land (`/api/remote-run-land`) | `GET /results/simulation/results/file`; its `results_*.pber` is read, landing `user_emitter` (`remote_run_landing.land_composite_results`). A stopped run: its `results` dataset ([Stopped runs](#stopped-runs)), answered with `partial: true` and the status; a 409 while the run has not finished, or when it stopped and kept nothing |
 | cancel (`/api/remote-run-cancel`) | `DELETE /simulations/{id}`, which needs a signed-in caller ([Signing in](#signing-in)). A 401 says so |
 | visibility (`/api/remote-run-visibility`, `{simulation_id, visibility}`) | `PATCH /simulations/{id}` (`ComposeApiRuns.change_visibility`, the optional `runs` method; the run feature `visibility`), which only the run's owner or an admin may call: 401 not signed in, 403 not the owner, 404 not readable, 409 compared with runs this caller may not change (compose-api's words), 400 a value other than `public` / `private` (nothing sent). Not in the read-only allow-list, and excluded from the chat's tools (`lib/ai_tools.EXCLUDED_PATHS`) |
 | trace (`/api/remote-run-trace?simulation_id=compose-<id>`, or `composite_run_id=`) | `GET /results/simulation/trace/chrome` (`ComposeApiRuns.trace`; the core routes a compose run there by its record or id form, under either key, with or without providers) |
 | trace support (`/api/remote-run-trace-support`) | no request: when compose-api is the named backend the core answers `supported: true, capability: "get-simulation-trace-chrome"` itself (compose-api has no capabilities route); otherwise the `unrouted` backend answers, or `no-backend` with providers off (P2 Runs b2) |
+
+### Stopped runs
+
+compose-api keeps `results.zip` only for a completed run. From 0.7.108 a run's runner also writes its results file
+every few minutes and on SIGTERM, and announces it as a dataset of kind `results`. A run that stopped is read from
+there: `GET /datasets?simulation_id=<id>&kind=results`, then `GET /datasets/{id}/content`
+(`remote_run_compose._partial_results`), zipped in the archive's shape and landed as a completed run's is. Nothing on
+the dataset marks it as partial, so the run's status does: the card's run is recorded `cancelled` or `failed`, and its
+log says `stopped (<status>) at t=<last time landed> of <requested>; the results up to the last snapshot are landed`.
+A run in an older environment version, or one whose node was lost, lists no such dataset, and a results directory
+(`*.zarr`, `*.fenics`) is not read here: those fail as before, naming the status.
+
+The card shows no Results panel for a stopped run: a `failed` one shows the log line above as its error, a `cancelled`
+one shows only its status (the card's error excerpt is read for `failed` and `orphaned` rows). The landed rows are
+reached through ⬇ Raw data in the Runs table; showing them on the card is a change of its own.
 
 Run ids are `compose-<simulation id>`. compose-api's ids are integers, which the other routes read as legacy
 simulation ids, so the compose check runs before them.
@@ -268,5 +284,9 @@ As compose-api's maintainer described it on 2026-10-29 (biosimulations/compose-a
   carried. Without the extra is tested by blocking the import of `compose_api_client.auth`, as an install without the
   client's `[auth]` dependencies does. A login renewed through Auth0 is the client's own tested behaviour, not
   repeated here.
+- **Stopped runs** run against production simulation 12966's real listing and results file (cancelled): the card's run
+  and a study land. A timed-out run is tested with the same file, an assumed shape: no real timed-out run's file has
+  been captured. That `_partial_results` reads 12966 itself from production was checked by hand when this landed
+  (the same bytes as the fixture, 1,721 rows, t = 0 to 1720).
 - What neither proves: that a deployment runs the document, or builds the environment. Only a live run against
   compose-api does.

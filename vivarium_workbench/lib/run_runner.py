@@ -1082,12 +1082,18 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
             remote_emit_paths = list(req.emit_paths) or _declared_emit_paths(req.spec_id)
             if remote_emit_paths:
                 run_remote_kwargs["emit_paths"] = remote_emit_paths
-            results_path = remote_run.run_remote(req.workspace, req.spec_id, **run_remote_kwargs)
+            # A run that stopped but kept its results up to its last snapshot lands them like a completed run's,
+            # then is recorded as stopped (below).
+            stopped = None
+            try:
+                results_path = remote_run.run_remote(req.workspace, req.spec_id, **run_remote_kwargs)
+            except remote_run.RemoteRunStopped as e:
+                stopped, results_path = e, e.archive
             landed_steps = None
             if results_path is not None and zipfile.is_zipfile(results_path):
-                # A compose run's results zip: land its emitter history into this run's own store. The remote
-                # run DID complete, so a zip that cannot be landed (no emitter history, several emitters) does
-                # not make it failed -- the reason goes in the run log, where the run's page shows it.
+                # A compose run's results zip: land its emitter history into this run's own store. A zip that
+                # cannot be landed (no emitter history, several emitters) does not make a completed run failed
+                # -- the reason goes in the run log, where the run's page shows it.
                 try:
                     from vivarium_workbench.lib.remote_run_compose import STUDY_EMITTER
 
@@ -1132,6 +1138,19 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
             _write_log(req, tb)
             _write_log(req, f"\nREMOTE RUN FAILED: {reason}\n")
             cr.complete_metadata(conn, run_id=req.run_id, n_steps=0, status="failed")
+            return 1
+        if stopped is not None:
+            if landed_steps:
+                (last,) = conn.execute("SELECT MAX(global_time) FROM history WHERE simulation_id = ?",
+                                       (req.run_id,)).fetchone()
+                at = f" at t={last:g} of {req.steps:g}" if last is not None else ""
+                reason = f"{stopped}{at}; the results up to the last snapshot are landed"
+            else:
+                reason = f"{stopped}; its results could not be landed"
+            print(reason, flush=True)
+            _write_log(req, f"\nREMOTE RUN STOPPED: {reason}\n")
+            cr.complete_metadata(conn, run_id=req.run_id, n_steps=landed_steps or 0,
+                                 status="cancelled" if stopped.status == "cancelled" else "failed")
             return 1
         cr.complete_metadata(conn, run_id=req.run_id,
                              n_steps=landed_steps if landed_steps is not None else req.steps,
