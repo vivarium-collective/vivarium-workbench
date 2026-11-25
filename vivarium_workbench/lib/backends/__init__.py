@@ -127,6 +127,17 @@ class BatchStatus(Protocol):
     def status_many(self, run_ids: "list[str]") -> "dict[str, dict]": ...
 
 
+class Visibility(Protocol):
+    """Optional on a backend's ``runs`` facet: who may read a run, for a backend whose runs belong to the person who
+    made them (compose-api: a signed-in caller's runs are private to them by default). ``visibility`` is ``public`` or
+    ``private``; the answer is the views' ``(body, status)``, with the runs it changed in ``changed`` (a backend may
+    change related runs with it). The core finds it by ``getattr`` (``remote_run_views.remote_run_visibility``), and
+    a run whose backend has it gets the run feature ``visibility`` (``features.run_features``). The inert sentinels
+    and the SMS backends do not declare it."""
+
+    def change_visibility(self, run_id: str, visibility: str) -> tuple[dict, int]: ...
+
+
 class ArtifactFacet(Protocol):
     """Optional (§2.1, step P2 Analyses and figures): a run's analysis outputs -- land them locally, list and read its
     figures -- and a study's gallery of them. The views' ``(body, status)`` shapes; :meth:`read_figure` has

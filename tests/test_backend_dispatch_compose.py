@@ -1563,3 +1563,70 @@ def test_a_cli_login_compose_api_refuses_is_sent_and_the_401_says_to_sign_in_aga
     assert res.json()["error"] == ("compose-api needs a signed-in caller: sign in, or sign in again, with "
                                    f"`compose-api --profile lab auth login` (CLI profile 'lab', {stub.url}), or set "
                                    f"{rc.TOKEN_ENV_VAR}")
+
+
+# --- making a run public (the Runs table's "Make public": the optional runs.change_visibility) -----------------------
+
+CHANGED = {"visibility": "public", "simulation_ids": [SIM_ID, SIM_ID + 1]}
+
+
+def test_make_public_sends_the_owners_login_and_says_which_runs_changed(ws, stub, backend_env, inproc_client,
+                                                                        cli_auth):
+    """Falsifies: the workbench cannot make a signed-in person's run public, or does it without their login, or
+    sends another body than compose-api's ``{visibility}``. The other runs of a comparison change with it."""
+    store = _Keychain()
+    token = _login(_cli_profile("lab", stub.url), store)
+    _replace_keychain(backend_env, store)
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    _signed_in_backend(stub, backend_env, ws)
+    stub.respond("PATCH", "/simulations/{simulation_id}", 200, CHANGED)
+
+    res = inproc_client(ws).post("/api/remote-run-visibility", json={"simulation_id": RUN_ID, "visibility": "public"})
+    assert res.status_code == 200, res.text
+    assert res.json() == {"kind": "visibility", "run_id": RUN_ID, "simulation_id": RUN_ID, "visibility": "public",
+                          "changed": [RUN_ID, f"compose-{SIM_ID + 1}"]}
+    (call,) = stub.calls_to("change-simulation-visibility")
+    assert call.path == f"/simulations/{SIM_ID}" and call.body == {"visibility": "public"}
+    assert _bearer(call) == f"Bearer {token}"
+
+
+# compose-api's own details (compose_api/api/routers/simulations.py, change_simulation_visibility, 0.7.100).
+@pytest.mark.parametrize("status, detail, reason", [
+    (401, "Changing a simulation's visibility needs a signed-in caller", "unauthenticated"),
+    (403, "Only its owner may change this simulation's visibility", "forbidden"),
+    (403, "A run with no owner stays public", "forbidden"),
+    (404, "Simulation with id 4706 not found.", None),
+    (409, "Simulation 4706 is compared with runs you may not change: 4707", "not-changeable"),
+])
+def test_make_public_passes_compose_apis_refusals_through(ws, stub, backend_env, inproc_client, status, detail,
+                                                           reason):
+    """Each of compose-api's documented answers comes back as itself, never a 502: anonymous (401, with how to sign
+    in), not the owner (403), no such or unreadable run (404), a comparison with runs this caller may not change
+    (409, compose-api's words)."""
+    _name(backend_env, stub.url)
+    stub.respond("PATCH", "/simulations/{simulation_id}", status, {"detail": detail})
+    res = inproc_client(ws).post("/api/remote-run-visibility", json={"simulation_id": RUN_ID, "visibility": "public"})
+    assert res.status_code == status, res.text
+    body = res.json()
+    assert body["run_id"] == RUN_ID and body.get("reason") == reason
+    if status == 401:
+        assert "auth login" in body["error"] or rc.TOKEN_ENV_VAR in body["error"]
+    if status == 403:
+        # The client keeps no detail on a 403, so the answer names both of compose-api's causes, whichever it was:
+        # never "your account was refused" for an anonymous run that is public already.
+        assert "only its owner" in body["error"] and "already public" in body["error"]
+    if status == 409:
+        assert detail in body["error"]
+
+
+@pytest.mark.parametrize("payload, says", [
+    ({"simulation_id": RUN_ID, "visibility": "everyone"}, "visibility must be one of public, private"),
+    ({"simulation_id": RUN_ID}, "visibility must be one of public, private"),
+    ({"visibility": "public"}, "simulation_id required"),
+])
+def test_make_public_refuses_a_bad_request_before_asking_compose_api(ws, stub, backend_env, inproc_client, payload,
+                                                                     says):
+    _name(backend_env, stub.url)
+    res = inproc_client(ws).post("/api/remote-run-visibility", json=payload)
+    assert res.status_code == 400 and says in res.json()["error"], res.text
+    assert stub.calls_to("change-simulation-visibility") == []

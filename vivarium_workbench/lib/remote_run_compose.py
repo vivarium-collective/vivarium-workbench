@@ -1025,6 +1025,47 @@ def cancel(run_id: str) -> tuple[dict, int]:
             "slurm_job_id": out.slurm_job_id if isinstance(out.slurm_job_id, int) else None}, 200
 
 
+#: The values ``PATCH /simulations/{id}`` accepts (``compose_api_client.models.Visibility``).
+VISIBILITIES = ("public", "private")
+
+
+def change_visibility(run_id: str, visibility: str) -> tuple[dict, int]:
+    """``PATCH /simulations/{id}``: make a run ``public`` or ``private``. Only its owner or an admin may, so it needs a
+    signed-in caller (:func:`_session`). The other runs of every comparison it belongs to change with it, so the body
+    lists every run changed. 400 for any other value (nothing is sent); 401/404 and compose-api's 409 (the run is
+    compared with runs this caller may not change, in compose-api's words) pass through; a 403 names both of
+    compose-api's causes (not the owner; no owner, so public already); 502 only when compose-api is unreachable or
+    failed."""
+    from compose_api_client.ext import ApiError, CliError, ForbiddenError, NotFoundError
+
+    ids = {"kind": "visibility", "run_id": run_id, "simulation_id": run_id}
+    if visibility not in VISIBILITIES:
+        return {"error": f"visibility must be one of {', '.join(VISIBILITIES)}", **ids}, 400
+    try:
+        with _session() as session:
+            out = session.change_simulation_visibility(simulation_id_of(run_id), visibility)
+    except ComposeDispatchError as e:
+        return {**e.body, **ids}, e.status
+    except NotFoundError as e:
+        return {"error": str(e), **ids}, 404
+    except ForbiddenError:
+        # compose-api documents two causes for this 403, and the client keeps no detail on a ForbiddenError to tell
+        # them apart: the caller does not own the run, or the run has no owner (an anonymous run, public already).
+        return {"phase": "error", "reachable": True, "reason": "forbidden",
+                "error": f"compose-api refused to change run {run_id}: only its owner may, and a run submitted "
+                         "without signing in has no owner and is already public", **ids}, 403
+    except ApiError as e:
+        if e.status_code == 409:
+            return {"error": str(e.detail), "reason": "not-changeable", **ids}, 409
+        body, code = _backend_error(e)
+        return {**body, **ids}, code
+    except CliError as e:
+        body, code = _backend_error(e)
+        return {**body, **ids}, code
+    return {**ids, "visibility": out.visibility.value,
+            "changed": [run_id_of(i) for i in out.simulation_ids]}, 200
+
+
 def trace(run_id: str) -> "tuple[bytes | dict, int, str]":
     """The run's Chrome Trace Event JSON (``GET /results/simulation/trace/chrome``)."""
     from compose_api_client.ext import CliError, NotFoundError

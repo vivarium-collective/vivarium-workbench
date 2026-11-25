@@ -77,6 +77,8 @@ EXCLUDED_PATHS = frozenset({
     "/api/composite-run/{run_id}/download",
     # Copies any file the server can read into the workspace (where it is served back) — a user's own action.
     "/api/expert-doc",
+    # Publishes a run under the user's compose-api identity (makes it readable by anyone) — same rule: never.
+    "/api/remote-run-visibility",
 })
 
 MAX_RESPONSE_CHARS = 20_000

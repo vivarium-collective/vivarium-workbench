@@ -157,7 +157,8 @@ with no such image, in an environment compose-api infers from the classes the co
 study runs, and the Composites tab's remote run takes the same route. Cancelling a run, and the first run that builds
 an environment, need a signed-in caller: install `vivarium-workbench[compose-api-signin]` and sign in once with
 `compose-api auth login` (compose-api's CLI), or set `COMPOSE_API_TOKEN`
-([Signing in](docs/backend-compose-api.md#signing-in)). The contract, onboarding a new workspace, and what is not on
+([Signing in](docs/backend-compose-api.md#signing-in)). A signed-in run is private to you; **🔓 Make public** in
+the Runs table shares it. The contract, onboarding a new workspace, and what is not on
 compose-api yet are in [docs/backend-compose-api.md](docs/backend-compose-api.md).
 
 ### Remote compute — viva-api backend

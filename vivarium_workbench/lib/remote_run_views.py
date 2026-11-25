@@ -437,3 +437,21 @@ def remote_run_cancel(body: dict, *, ws_root: Path) -> tuple[dict, int]:
             return ub.unrouted.cancel(_no_id(body))  # no id: the backend's own 400
         return records.unowned(rid) if rid else ({"error": "simulation_id required"}, 400)
     return chosen.runs.cancel(rid)
+
+
+def remote_run_visibility(body: dict, *, ws_root: Path) -> tuple[dict, int]:
+    """Make a remote run ``public`` or ``private`` (the Runs table's "Make public"). The run's record picks its
+    backend (:func:`_owner`); a backend whose ``runs`` facet has the optional ``change_visibility``
+    (:class:`backends.Visibility`) answers, any other refuses with 409 ``not-offered``. A visibility change always
+    names a run, so there is no ``unrouted`` path. Body: ``{simulation_id, visibility, study?, deployment?}``."""
+    body = body or {}
+    rid = _first_id(body, ("run_id", "simulation_id"))
+    if not rid:
+        return {"error": "simulation_id required"}, 400
+    chosen = _owner(ws_root, rid, body)
+    if isinstance(chosen, tuple):
+        return chosen
+    change = getattr(chosen.runs, "change_visibility", None)
+    if change is None:
+        return _not_offered(rid, chosen, "visibility changes")
+    return change(rid, str(body.get("visibility") or ""))

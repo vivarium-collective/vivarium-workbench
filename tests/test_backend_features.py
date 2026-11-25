@@ -78,7 +78,7 @@ EXPECTED_ON = {
     "sms-unrecorded": SMS_RUN,
     "viva-core-run": [],
     "viva-core-int-id": [],
-    "compose-run": [],
+    "compose-run": ["visibility"],  # compose-api's runs.change_visibility (a core backend: providers off too)
     "remote-pending-77": SMS_RUN,
     "listed-int": SMS_RUN,
     "listed-str": SMS_RUN,
@@ -140,7 +140,8 @@ def test_process_features_are_the_facets_plus_the_providers_own():
 
 def test_run_features_by_kind(providers_off):
     assert bf.run_features("sms-legacy") == frozenset()  # no provider serves it now
-    assert bf.run_features("compose-api") == frozenset()
+    # compose-api is a core backend: its optional runs.change_visibility is a run feature with providers off too.
+    assert bf.run_features("compose-api") == frozenset({"visibility"})
     assert bf.run_features(None) == frozenset()
 
 
@@ -148,7 +149,7 @@ def test_run_features_by_kind(providers_off):
 def test_run_features_by_kind_providers_on():
     assert bf.run_features("sms-legacy") == frozenset(SMS_RUN)
     assert bf.run_features("viva-core") == frozenset()
-    assert bf.run_features("compose-api") == frozenset()
+    assert bf.run_features("compose-api") == frozenset({"visibility"})
     assert bf.run_features("no-such-kind") == frozenset()
 
 
@@ -197,10 +198,12 @@ def test_include_remote_false_still_annotates_the_local_rows(ws, listing, inproc
     assert _features_by_run(body["simulations"]) == expected
 
 
-def test_rows_with_providers_off_have_no_features(ws, providers_off, inproc_client):
+def test_rows_with_providers_off_have_only_the_core_backends_features(ws, providers_off, inproc_client):
+    """With providers off no plugin facet is offered; compose-api, a core backend, keeps its own (``visibility``)."""
     body = inproc_client(ws).get("/api/simulations").json()
     assert _features_by_run(body["simulations"]) == {
-        k: (None if v is None else []) for k, v in EXPECTED_ON.items() if not k.startswith("listed-")}
+        k: (None if v is None else ["visibility"] if k == "compose-run" else [])
+        for k, v in EXPECTED_ON.items() if not k.startswith("listed-")}
 
 
 @pytest.mark.plugin
@@ -264,8 +267,9 @@ def test_route_and_rows_without_the_plugin():
     result = json.loads(marker[-1][len("@@RESULT@@"):])
     assert result["status"] == [200, 200]
     assert result["features"] == {"features": []}
-    assert result["rows"] == {k: (None if v is None else []) for k, v in EXPECTED_ON.items()
-                              if not k.startswith("listed-")}
+    # Without the plugin only the core backends' own run features remain: compose-api's ``visibility``.
+    assert result["rows"] == {k: (None if v is None else ["visibility"] if k == "compose-run" else [])
+                              for k, v in EXPECTED_ON.items() if not k.startswith("listed-")}
     assert result["plugin"] is False
 
 

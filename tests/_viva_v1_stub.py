@@ -278,7 +278,7 @@ class VivaV1Stub:
                 self.end_headers()
                 self.wfile.write(payload)
 
-            do_GET = do_POST = do_DELETE = do_PUT = _serve
+            do_GET = do_POST = do_DELETE = do_PUT = do_PATCH = _serve
 
             def log_message(self, *a: Any) -> None:  # silence
                 pass

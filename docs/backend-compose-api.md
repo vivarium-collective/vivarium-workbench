@@ -65,7 +65,13 @@ install it there too when that is another environment.
 does: an anonymous run is public, and a signed-in caller's run is private to them (and admins). Status, results and
 trace of a private run answer only its owner: another person's workbench, or this one once it calls as someone else
 or anonymously (a token for another identity, the login gone), gets a 404 for it, which ends the run panel's polling.
-The owner can make a run public with `PATCH /simulations/{id}` (`compose-api simulations visibility`).
+**Making a run public.** Its owner (or an admin) can, from the Runs table: a compose-api run's actions have
+**🔓 Make public** (Share), which asks first and then calls `PATCH /simulations/{id}` through
+`/api/remote-run-visibility`. The other runs of every comparison it is in become public with it, and the toast says
+how many. Making it private again is the CLI's: `compose-api simulations visibility <id> private` (the route takes
+`private` too). Someone who is not the owner gets a 403, and so does a run submitted without signing in: it has no owner and is
+already public (the client keeps no detail on a 403, so the answer names both causes). An anonymous workbench gets a
+401 that says how to sign in.
 
 What the answers say:
 - A call compose-api refuses for want of a signed-in caller is a **401** that says which credential applied and what
@@ -155,6 +161,7 @@ shorter run.
 | progress (`/api/remote-run-chain-progress`) | the same status, as a single job with no seeds |
 | land (`/api/remote-run-land`) | `GET /results/simulation/results/file`; its `results_*.pber` is read, landing `user_emitter` (`remote_run_landing.land_composite_results`) |
 | cancel (`/api/remote-run-cancel`) | `DELETE /simulations/{id}`, which needs a signed-in caller ([Signing in](#signing-in)). A 401 says so |
+| visibility (`/api/remote-run-visibility`, `{simulation_id, visibility}`) | `PATCH /simulations/{id}` (`ComposeApiRuns.change_visibility`, the optional `runs` method; the run feature `visibility`), which only the run's owner or an admin may call: 401 not signed in, 403 not the owner, 404 not readable, 409 compared with runs this caller may not change (compose-api's words), 400 a value other than `public` / `private` (nothing sent). Not in the read-only allow-list, and excluded from the chat's tools (`lib/ai_tools.EXCLUDED_PATHS`) |
 | trace (`/api/remote-run-trace?simulation_id=compose-<id>`, or `composite_run_id=`) | `GET /results/simulation/trace/chrome` (`ComposeApiRuns.trace`; the core routes a compose run there by its record or id form, under either key, with or without providers) |
 | trace support (`/api/remote-run-trace-support`) | no request: when compose-api is the named backend the core answers `supported: true, capability: "get-simulation-trace-chrome"` itself (compose-api has no capabilities route); otherwise the `unrouted` backend answers, or `no-backend` with providers off (P2 Runs b2) |
 
