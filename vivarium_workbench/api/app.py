@@ -8309,7 +8309,8 @@ def create_app() -> FastAPI:
     # -----------------------------------------------------------------------
     # compose-api sign-in from the page: the login `compose-api auth login` makes, on the CLI's profile and in its
     # credential store, so the CLI and the workbench share it (lib.compose_signin). Tokens never pass through these
-    # routes. The two POSTs are guarded by the CSRF middleware and are not in the read-only allow-list.
+    # routes. The two POSTs are guarded by the CSRF middleware and are not in the read-only allow-list. Sync routes: the
+    # client's credential-store calls block, so they run on worker threads, and a sign-in waits on a thread of its own.
     # -----------------------------------------------------------------------
 
     @app.post(
@@ -8318,11 +8319,11 @@ def create_app() -> FastAPI:
         tags=["Auth"],
         summary="Start signing in to compose-api (browser or device code)",
     )
-    async def auth_compose_api_start(body: dict = Body(default={})) -> JSONResponse:
+    def auth_compose_api_start(body: dict = Body(default={})) -> JSONResponse:
         """Start a sign-in: ``{"method": "auto" | "browser" | "device"}``. 202 with the sign-in to poll at
         ``GET /api/auth/compose-api/status``; 400 for another method; 409 when sign-in is not offered here or one is
         already waiting (``lib.compose_signin.start``)."""
-        resp, code = await _compose_signin.start(body)
+        resp, code = _compose_signin.start(body)
         return JSONResponse(content=resp, status_code=code)
 
     @app.get(
@@ -8343,10 +8344,10 @@ def create_app() -> FastAPI:
         tags=["Auth"],
         summary="Sign out of compose-api (for the compose-api CLI too)",
     )
-    async def auth_compose_api_logout(body: dict = Body(default={})) -> JSONResponse:
+    def auth_compose_api_logout(body: dict = Body(default={})) -> JSONResponse:
         """Erase the stored login and revoke it with Auth0 when reachable, as ``compose-api auth logout`` does
         (``lib.compose_signin.logout``). The request body is accepted and ignored."""
-        resp, code = await _compose_signin.logout()
+        resp, code = _compose_signin.logout()
         return JSONResponse(content=resp, status_code=code)
 
     # -----------------------------------------------------------------------

@@ -27,6 +27,8 @@ function page(status, opts) {
   const timers = { set: [], cleared: [] };
   const fetch = async (url, o) => {
     sent.push({ url, method: (o && o.method) || 'GET', body: o && o.body ? JSON.parse(o.body) : null });
+    const canned = (opts.responses || {})[url.split('/').pop()];
+    if (canned) return { ok: canned.ok, status: canned.status || 200, json: async () => canned.body };
     const body = url.endsWith('/status') ? state.status : { flow: { state: 'running', notes: [] } };
     return { ok: true, json: async () => body };
   };
@@ -95,6 +97,33 @@ const posts = (p) => p.sent.filter((s) => s.method === 'POST');
   await flush();
   assert.ok(p.els['viv-compose-flow'].textContent.includes('Sign-in failed: the credential store is locked'));
   assert.strictEqual(p.els['viv-compose-chip'].textContent, 'Sign in');
+
+  // Falsifies: a finished sign-in keeps its old code and waiting text on screen.
+  p = page({ ...OUT, signed_in: true, flow: { state: 'ok', notes: ['Enter WXYZ-1234', 'Signed in.'], error: null } });
+  await flush();
+  assert.strictEqual(p.els['viv-compose-flow'].style.display, 'none');
+
+  // Falsifies: polling goes on behind a row that is no longer offered.
+  p = page({ ...OUT, flow: { state: 'running', notes: ['wait'], error: null } });
+  await flush();
+  p.state.status = { available: false, reason: 'token', flow: null };
+  p.timers.set[0]();
+  await flush();
+  assert.strictEqual(p.els['viv-compose-row'].style.display, 'none');
+  assert.deepStrictEqual(p.timers.cleared, [1]);
+
+  // Falsifies: a refused sign-out, or one Auth0 could not revoke, is silent.
+  p = page({ ...OUT, signed_in: true }, { responses: { logout: { ok: false, status: 409, body: { error: 'store locked' } } } });
+  await flush();
+  p.els['viv-compose-chip'].onclick();
+  await flush();
+  assert.ok(p.els['viv-compose-flow'].textContent.includes('Could not sign out: store locked'));
+  p = page({ ...OUT, signed_in: true },
+           { responses: { logout: { ok: true, body: { signed_in: false, revocation: 'unavailable' } } } });
+  await flush();
+  p.els['viv-compose-chip'].onclick();
+  await flush();
+  assert.ok(p.els['viv-compose-flow'].textContent.includes('Auth0 could not be reached'));
 
   console.log('PASS  tests/js/test_compose_signin.js');
 })().catch((e) => { console.error(e); process.exit(1); });

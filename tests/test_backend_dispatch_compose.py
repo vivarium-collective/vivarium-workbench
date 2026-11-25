@@ -1699,6 +1699,12 @@ class _PersonAtAuth0:
             await session.commit(grant, snapshot)
 
 
+def _principal(settings, subject="auth0|page-signer") -> dict:
+    """compose-api's ``GET /auth/me`` answer for a signed-in caller (the contract's CurrentPrincipalResponse)."""
+    return {"issuer": settings.issuer, "subject": subject, "audience": [settings.auth0_audience], "roles": ["user"],
+            "scopes": [], "permissions": []}
+
+
 def _poll(client, until, timeout=10.0):
     import time
 
@@ -1719,9 +1725,10 @@ def test_signing_in_from_the_page_makes_the_cli_login_and_signs_runs_in(ws, stub
 
     store = _Keychain()
     opened = _replace_keychain(backend_env, store)
-    _cli_profile("lab", stub.url)
+    profile = _cli_profile("lab", stub.url)
     backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
     _signed_in_backend(stub, backend_env, ws)
+    stub.respond("GET", "/auth/me", 200, _principal(profile))
     person = _PersonAtAuth0()
     backend_env.setattr(signin, "persistent_sign_in", person)
     c = signin_client
@@ -1742,6 +1749,8 @@ def test_signing_in_from_the_page_makes_the_cli_login_and_signs_runs_in(ws, stub
     done = _poll(c, lambda s: s["flow"]["state"] != "running")
     assert done["flow"]["state"] == "ok", done
     assert done["signed_in"] is True
+    (me,) = stub.calls_to("get-current-principal")      # the API confirmed the new login, as the CLI has it confirm
+    assert _bearer(me) == f"Bearer {person.token}"
 
     stub.respond("DELETE", "/simulations/{simulation_id}", 202, CANCELLED)
     assert c.post("/api/remote-run-cancel", json={"simulation_id": RUN_ID}).status_code == 200
@@ -1749,14 +1758,59 @@ def test_signing_in_from_the_page_makes_the_cli_login_and_signs_runs_in(ws, stub
     assert _bearer(cancel) == f"Bearer {person.token}"
 
 
-def test_one_sign_in_at_a_time_and_only_known_methods(ws, stub, backend_env, signin_client, cli_auth):
-    """Falsifies: a second sign-in starts while one waits for the person, or an unknown method is passed on."""
+def test_a_login_the_api_does_not_confirm_is_not_reported_as_signed_in(ws, stub, backend_env, signin_client,
+                                                                          cli_auth):
+    """Falsifies: the page says the sign-in worked when compose-api refuses the new login (a profile whose audience is
+    wrong for this API, say). The CLI counts a login done only once the API confirms who it is; so must the page."""
     from compose_api_client.auth import signin
 
     _replace_keychain(backend_env, _Keychain())
     _cli_profile("lab", stub.url)
     backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
     _signed_in_backend(stub, backend_env, ws)
+    stub.respond_error("GET", "/auth/me", 401, {"detail": "Invalid token audience"})
+    person = _PersonAtAuth0()
+    backend_env.setattr(signin, "persistent_sign_in", person)
+    c = signin_client
+
+    assert c.post("/api/auth/compose-api/start", json={"method": "device"}).status_code == 202
+    person.finished.set()
+    done = _poll(c, lambda s: s["flow"]["state"] != "running")
+    assert done["flow"]["state"] == "error", done
+    assert "did not confirm" in done["flow"]["error"]
+
+
+def test_a_sign_in_that_fails_before_waiting_does_not_block_the_next(ws, stub, backend_env, signin_client, cli_auth):
+    """Falsifies: a failure while preparing (before the person is asked) leaves the sign-in "running" with nothing
+    behind it, so every later start is refused as already waiting."""
+    from compose_api_client.auth import signin
+
+    _replace_keychain(backend_env, _Keychain())
+    _cli_profile("lab", stub.url)
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    _signed_in_backend(stub, backend_env, ws)
+
+    def broken_resolve(*args, **kwargs):
+        raise RuntimeError("resolve broke")
+
+    backend_env.setattr(signin, "resolve", broken_resolve)
+    c = signin_client
+    first = c.post("/api/auth/compose-api/start", json={"method": "device"})
+    assert first.status_code == 409 and "resolve broke" in first.json()["error"]
+    assert c.get("/api/auth/compose-api/status").json()["flow"]["state"] == "error"
+    second = c.post("/api/auth/compose-api/start", json={"method": "device"})
+    assert "already" not in second.json().get("error", ""), second.json()
+
+
+def test_one_sign_in_at_a_time_and_only_known_methods(ws, stub, backend_env, signin_client, cli_auth):
+    """Falsifies: a second sign-in starts while one waits for the person, or an unknown method is passed on."""
+    from compose_api_client.auth import signin
+
+    _replace_keychain(backend_env, _Keychain())
+    profile = _cli_profile("lab", stub.url)
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    _signed_in_backend(stub, backend_env, ws)
+    stub.respond("GET", "/auth/me", 200, _principal(profile))
     person = _PersonAtAuth0()
     backend_env.setattr(signin, "persistent_sign_in", person)
     c = signin_client
@@ -1809,6 +1863,9 @@ def test_signing_out_from_the_page_erases_the_cli_login(ws, stub, backend_env, s
     out = c.post("/api/auth/compose-api/logout", json={})
     assert out.status_code == 200, out.text
     assert out.json()["signed_in"] is False
+    # Auth0 cannot be reached here (the profile's domain does not resolve): the login is erased all the same, and the
+    # answer says the revocation did not happen, as the CLI's logout does.
+    assert out.json()["revocation"] == "unavailable"
     assert store.records == {}                       # erased from the store the CLI reads too
     assert c.get("/api/auth/compose-api/status").json()["signed_in"] is False
 

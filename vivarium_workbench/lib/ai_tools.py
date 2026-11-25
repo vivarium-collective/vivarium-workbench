@@ -81,6 +81,8 @@ EXCLUDED_PATHS = frozenset({
     "/api/remote-run-visibility",
     # Signs the person in to (or out of) compose-api, for the compose-api CLI too: their own action, never a chat's.
     "/api/auth/compose-api/start", "/api/auth/compose-api/logout",
+    # ... and the status shows a waiting sign-in's device code: the person's to enter, never a chat's to read.
+    "/api/auth/compose-api/status",
 })
 
 MAX_RESPONSE_CHARS = 20_000

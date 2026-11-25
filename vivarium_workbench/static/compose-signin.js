@@ -29,8 +29,9 @@
     }
   }
 
+  // Only a sign-in that is waiting, or one that failed, is shown: a finished one is the chip's to say.
   function showFlow(flow) {
-    if (!flow || (!flow.notes.length && !flow.error)) {
+    if (!flow || flow.state === 'ok' || (!flow.notes.length && !flow.error)) {
       flowBox.style.display = 'none';
       flowBox.textContent = '';
       return;
@@ -39,9 +40,14 @@
     flowBox.textContent = flow.notes.join('\n') + (flow.error ? '\n' + 'Sign-in failed: ' + flow.error : '');
   }
 
+  function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
   function render(status) {
     if (!status.available) {
       row.style.display = 'none';
+      stopPolling();
       return;
     }
     row.style.display = '';
@@ -73,7 +79,7 @@
     }
     showFlow(flow);
     if (waiting && !pollTimer) pollTimer = setInterval(refresh, POLL_MS);
-    if (!waiting && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (!waiting) stopPolling();
   }
 
   async function refresh() {
@@ -105,10 +111,19 @@
     if (!confirm('Sign out of compose-api? This signs the compose-api CLI out too.')) return;
     chip.disabled = true;
     chip.textContent = 'Signing out…';
+    let message = '';
     try {
-      await fetch(base() + '/api/auth/compose-api/logout', { method: 'POST' });
-    } catch (_e) { /* the status below says what happened */ }
-    refresh();
+      const resp = await fetch(base() + '/api/auth/compose-api/logout', { method: 'POST' });
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) message = 'Could not sign out: ' + (body.error || resp.status);
+      else if (body.revocation === 'unavailable') {
+        message = 'Signed out on this computer. Auth0 could not be reached to revoke the login; it ends when it expires.';
+      }
+    } catch (e) {
+      message = 'Could not reach the workbench: ' + e;
+    }
+    await refresh();
+    if (message) { flowBox.style.display = ''; flowBox.textContent = message; }
   }
 
   refresh();
