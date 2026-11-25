@@ -18,8 +18,9 @@ from pathlib import Path
 # Default poll interval in seconds
 _DEFAULT_POLL_INTERVAL = 10.0
 # Hardening (external users): bound the status-poll loop so a stuck remote run can't
-# hang the poller forever. Env-tunable for slow links.
-_DEFAULT_POLL_TIMEOUT = 7200.0  # 2 h wall-clock ceiling; <= 0 disables the deadline
+# hang the poller forever. A backend may wait longer for a long run (compose-api:
+# remote_run_compose.wait_timeout adds time per step).
+_DEFAULT_POLL_TIMEOUT = 7200.0  # 2 h wall-clock base; <= 0 disables the deadline
 
 
 # Paths the workbench itself (re)writes whenever it serves a workspace or runs something in it — the `.viv-build.json`

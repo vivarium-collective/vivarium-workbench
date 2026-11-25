@@ -1907,3 +1907,39 @@ def test_the_sign_in_routes_refuse_another_origin_and_are_not_read_only(ws, back
         assert c.post(path, json={}).status_code != 404                # the route exists (same origin reaches it)
         assert c.post(path, json={}, headers={"Origin": "https://evil.example"}).status_code == 403
         assert path not in app_module._READONLY_ALLOWED_MUTATIONS
+
+
+def test_the_card_waits_for_a_long_run_as_long_as_compose_api_may_run_it(ws, stub, backend_env):
+    """Falsifies: the card's runner gives up on a long run (its 2 h stall guard) while compose-api still runs it, so
+    the row is marked failed and never landed. compose-api allows a job 30 min per 1,000 steps (1.8 s per step); the
+    card waits its 2 h base plus 2 s per step."""
+    from compose_api_client.ext import ComposeSession
+
+    _register_fixture_workspace(stub)
+    _completed(stub)
+    _name(backend_env, stub.url)
+    waits = []
+    real_wait = ComposeSession.wait
+
+    def spy(self, simulation_id, **kwargs):
+        waits.append(kwargs.get("timeout"))
+        return real_wait(self, simulation_id, **kwargs)
+
+    backend_env.setattr(ComposeSession, "wait", spy)
+    rc.run_composite(ws, COMPOSITE, dest=ws / ".pbg" / "out", n_steps=7700, overrides={},
+                     emit_paths=["stores/level"], poll_interval=0.01, poll_timeout=7200)
+    assert waits == [7200 + 2.0 * 7700]
+    (call,) = stub.calls_to("run-simulation")
+    assert call.query["interval_time"] == ["7700.0"]
+    assert rc.wait_timeout(7700, 0) is None, "a poller with its deadline off sets none here either"
+
+
+def test_the_card_shows_compose_apis_own_refusal_of_a_long_run(ws, stub, backend_env):
+    """Falsifies: the card's run hides or rewrites compose-api's refusal of a run longer than the caller may run."""
+    _register_fixture_workspace(stub)
+    _name(backend_env, stub.url)
+    stub.respond_error("POST", "/simulation/run", 400, {"detail": LONG_RUN_REFUSAL})
+    with pytest.raises(RuntimeError) as refused:
+        rc.run_composite(ws, COMPOSITE, dest=ws / ".pbg" / "out", n_steps=7700, overrides={},
+                         emit_paths=["stores/level"], poll_interval=0.01, poll_timeout=5)
+    assert str(refused.value) == f"compose-api refused the run: {LONG_RUN_REFUSAL}"

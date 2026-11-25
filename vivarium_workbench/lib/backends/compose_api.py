@@ -67,7 +67,7 @@ class ComposeApiRuns:
                            emit_paths: list, steps: float) -> "tuple[dict, int] | Detached":
         """The card's run goes to the detached runner (``run_composite`` sends it to the environment compose-api's
         registry lists for this workspace). No cloud image to resolve and no git preflight: the environment's image
-        runs, not this checkout. A step count compose-api cannot run is refused now (its 400), and so is a workspace
+        runs, not this checkout. A step count that is not a positive number is refused now (400), and so is a workspace
         the readiness check refuses (:func:`remote_run_compose.check_environment`, with a short timeout since it runs
         inside the launch request): a named environment compose-api does not list (409 ``unknown-environment``), or
         a compose-api that cannot be asked (``_backend_error``'s answer: 502, or 401/403 for the token). Nothing is
