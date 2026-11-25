@@ -159,12 +159,20 @@ def test_serve_fastapi_refuses_two_backends_set_directly_in_the_environment(monk
     assert "two remote backends" in capsys.readouterr().err
 
 
-def test_serves_flag_replaces_a_stale_named_env_var(monkeypatch, tmp_path):
-    """``serve --backend-base-url B`` with a stale ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL=A`` and an alias of B is
-    one backend: the flag is what that process uses."""
+# The alias variant needs a provider to claim the alias: with none installed, serve refuses it (step P4b2).
+@pytest.mark.parametrize("alias", [pytest.param(True, marks=pytest.mark.plugin, id="alias"),
+                                   pytest.param(False, id="no-alias")])
+def test_serves_flag_replaces_a_stale_named_env_var(monkeypatch, tmp_path, alias):
+    """``serve --backend-base-url B`` with a stale ``VIVARIUM_WORKBENCH_BACKEND_BASE_URL=A`` (and, with a provider, an
+    alias of B) is one backend: the flag is what that process uses."""
     (tmp_path / "workspace.yaml").write_text("name: x\n")
-    monkeypatch.setenv(NAMED, "http://stale.test")
-    monkeypatch.setenv(SMS, "http://api:8000")
+    if alias:
+        monkeypatch.setenv(NAMED, "http://stale.test")
+        monkeypatch.setenv(SMS, "http://api:8000")
+    else:  # core-only: a stale value the core itself would refuse, so the flag must be what is checked
+        monkeypatch.setenv(NAMED, "not a url")
+        monkeypatch.delenv(SMS, raising=False)
+        monkeypatch.delenv(VIVA, raising=False)
     called = []
     monkeypatch.setattr(cli, "_serve_detached", lambda *a, **k: called.append(1) or 0)
     assert cli.main(["serve", "--workspace", str(tmp_path), "--detach", "--backend-base-url", "http://api:8000"]) == 0

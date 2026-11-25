@@ -1146,9 +1146,27 @@ def _do_build(
     from vivarium_workbench.lib.composite_resolve import resolve_composite_for_request
     composite_resolve_dir = api_dir / "composite-resolve"
     composite_resolve_dir.mkdir(parents=True, exist_ok=True)
+    committed_resolve_dir = ws_root / "reports" / "composite-resolve"
     for comp in (composites.get("composites") or []):
         cid = comp.get("id")
         if not cid:
+            continue
+        # Honor a committed override first, mirroring composite-state above.
+        committed_resolve = committed_resolve_dir / f"{cid}.json"
+        if committed_resolve.is_file():
+            try:
+                (composite_resolve_dir / f"{cid}.json").write_bytes(committed_resolve.read_bytes())
+                continue
+            except Exception:
+                pass
+        # Skip LIVE resolution for a heavy composite the workspace already
+        # pre-resolved (committed composite-state): resolving its card live runs
+        # build_core, which for a ParCa-backed baseline rebuilds sim_data (minutes
+        # -> publish timeout; the v2ecoli-parca processes orphaned at the job cap).
+        # The committed composite-state already powers Explore; only the Model-tab
+        # card degrades to "run in a live dashboard" for these. A workspace wanting
+        # the full card commits reports/composite-resolve/<id>.json (handled above).
+        if (committed_state_dir / f"{cid}.json").is_file():
             continue
         try:
             payload = resolve_composite_for_request(ws_root, cid, {})

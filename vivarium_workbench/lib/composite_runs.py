@@ -256,6 +256,27 @@ def git_repo_identity(ws_root) -> dict:
     return out
 
 
+def _declared_simulator_packages(ws_root, study) -> list[str]:
+    """The dist name(s) a study declares in its ``simulator:`` pin (RFC-0008), so a
+    run can record that package's version in its env (beyond the framework set) and
+    the `simulator-pin` audit can verify it against what actually ran. Best-effort:
+    returns ``[]`` on any missing study / ws_root / field, never raises."""
+    if not (ws_root and study):
+        return []
+    try:
+        import yaml
+        from vivarium_workbench.lib.workspace_paths import study_yaml_path
+        p = study_yaml_path(ws_root, str(study))
+        if not p.is_file():
+            return []
+        spec = yaml.safe_load(p.read_text()) or {}
+        sim = spec.get("simulator")
+        pkg = sim.get("package") if isinstance(sim, dict) else None
+        return [pkg] if isinstance(pkg, str) and pkg else []
+    except Exception:  # noqa: BLE001 — provenance is best-effort, never fatal
+        return []
+
+
 def build_run_manifest(*, spec_id, params, n_steps, emitter, emit_paths,
                        runtime, origin, study=None, pkg=None,
                        generation_id=None, ws_root=None,
@@ -330,8 +351,13 @@ def build_run_manifest(*, spec_id, params, n_steps, emitter, emit_paths,
     run_seed = seed
     if run_seed is None:
         run_seed = (params or {}).get("seed")
+    # RFC-0008: if the study declares a per-study simulator pin, record that
+    # package in the run env too (beyond the framework set) so the pin can be
+    # verified against what the run actually used. Best-effort; never blocks a run.
+    extra_pkgs = _declared_simulator_packages(ws_root, study)
     try:
-        env = env_fingerprint.compute_env(ws_root=ws_root, cache_fingerprint=cf)
+        env = env_fingerprint.compute_env(ws_root=ws_root, cache_fingerprint=cf,
+                                          extra_packages=extra_pkgs)
     except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
         env = None
 

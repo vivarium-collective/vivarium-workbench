@@ -204,7 +204,7 @@ def test_cli_backend_commands_refuse_before_running(hosted_but_off, monkeypatch,
     assert "ENV_WORKER_PROXY_BASE" in capsys.readouterr().err
 
 
-def test_api_main_refuses_before_uvicorn(hosted_but_off, monkeypatch):
+def test_api_main_refuses_before_uvicorn(hosted_but_off, monkeypatch, capsys):
     import uvicorn
 
     from vivarium_workbench.api import __main__ as api_main
@@ -212,8 +212,11 @@ def test_api_main_refuses_before_uvicorn(hosted_but_off, monkeypatch):
     monkeypatch.setattr(uvicorn, "run", _must_not_run)
     monkeypatch.setattr(sys, "argv", ["vivarium_workbench.api", "--workspace", str(hosted_but_off)])
     monkeypatch.setenv("VIVARIUM_WORKBENCH_WORKSPACE", str(hosted_but_off))  # main() writes it; restored after
-    with pytest.raises(SystemExit, match="ENV_WORKER_PROXY_BASE"):
+    with pytest.raises(SystemExit) as exc:
         api_main.main()
+    assert exc.value.code == 2  # step P4b2: exits 2 like cmd_serve / serve_fastapi (was SystemExit("ERROR: ..."))
+    err = capsys.readouterr().err
+    assert err.startswith("ERROR: ") and "ENV_WORKER_PROXY_BASE" in err
 
 
 # --- the wire, end to end with providers on (golden) ----------------------------------------------------------------

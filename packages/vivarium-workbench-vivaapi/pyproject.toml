@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 # scripts/check_release.py (shared by tests/test_lockstep_versions.py and release.yml) checks them.
 [project]
 name = "vivarium-workbench-vivaapi"
-version = "0.5.8"
+version = "0.6.0"
 description = "viva-api (SMS / viva-core) backend provider for vivarium-workbench"
 readme = "README.md"
 # The repository's LICENSE (Apache-2.0). The root project declares none in its metadata.
@@ -18,7 +18,7 @@ requires-python = ">=3.11"
 dependencies = [
     # Exact: the plugin uses core internals (lib.backends.records, remote_run_landing, api.deps, backend_config,
     # simulations_index), not just the Provider Protocol, so only the core release it was tested with is safe.
-    "vivarium-workbench==0.5.8",
+    "vivarium-workbench==0.6.0",
     # The remote analysis figures read S3 directly (vivarium_workbench_sms/remote_analysis_figures.py,
     # #1072/#1078); without boto3 that path silently reports s3-unavailable.
     "boto3>=1.34",

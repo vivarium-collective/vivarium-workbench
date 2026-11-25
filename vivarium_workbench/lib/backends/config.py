@@ -6,8 +6,12 @@
 / ``SMS_API_BASE`` aliases), its default URL and its default deployment name. Core callers read the configuration
 here, never through ``backend_config`` directly.
 
-With providers off, or the plugin absent, only the named URL counts: a provider alias that is set is ignored, and
-:func:`stray_backend_env` names it for the start-up warning (step P4b refuses it).
+With providers off, or the plugin absent, only the named URL counts: a provider alias that is set is ignored. At
+server start-up (``serve``, ``startup.serve_fastapi``, ``python -m vivarium_workbench.api``; step P4b2)
+:func:`check_unclaimed_backend_env` refuses it when no provider is installed, and :func:`stray_backend_env` names it
+for a warning when providers are turned off (``VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none``). Other processes (the
+``run`` / ``rerun`` / ``run-composite`` children on a workspace interpreter, env workers) inherit the aliases and
+never refuse them.
 
 Everything reads the environment and the provider registry only: no network call. A provider that is installed but
 broken raises (``ImportError``) as the registry does; the process entry points catch it.
@@ -97,11 +101,73 @@ def deployment_names_now() -> set[str]:
     return names
 
 
-def stray_backend_env() -> list[str]:
-    """The provider alias env vars that are set while no provider is active to read them: ignored, and named in the
-    start-up warning (step P4b refuses them). Empty whenever a provider is active."""
-    from vivarium_workbench.lib import backend_config
+def _providers_turned_off() -> bool:
+    from vivarium_workbench.lib.backends.provider import PROVIDERS_ENV
 
+    return (os.environ.get(PROVIDERS_ENV) or "").strip().lower() == "none"
+
+
+def _set_provider_env() -> list[str]:
+    """The provider settings that are set: each alias (``backend_config.BACKEND_BASE_ENV_VARS[1:]``) with a value, then
+    the provider's pinned-run switch when it is truthy (under the spelling that is set)."""
+    from vivarium_workbench.lib import backend_config
+    from vivarium_workbench.lib.env_compat import NEW_PREFIX, OLD_PREFIX, get_env
+
+    # A whitespace-only alias counts as unset.
+    found = [v for v in backend_config.BACKEND_BASE_ENV_VARS[1:] if (os.environ.get(v) or "").strip()]
+    pin = backend_config.PROVIDER_PIN_ENV
+    # A truthy pin counts on its own, even without the provider's REMOTE_REPO_URL (which the provider also needs to
+    # actually pin runs): it says the operator meant this deployment to pin runs on a provider.
+    if (get_env(pin, "") or "").strip().lower() in backend_config.PROVIDER_PIN_TRUTHY:
+        found.append(NEW_PREFIX + pin if NEW_PREFIX + pin in os.environ else OLD_PREFIX + pin)
+    return found
+
+
+def unclaimed_backend_env() -> list[str]:
+    """The provider settings (the aliases, the truthy pinned-run switch) that are set while no provider is active to
+    read them. Empty whenever a provider is active."""
     if _providers():
         return []
-    return [v for v in backend_config.BACKEND_BASE_ENV_VARS[1:] if os.environ.get(v)]
+    return _set_provider_env()
+
+
+def check_unclaimed_backend_env() -> None:
+    """Server start-up only (step P4b2): refuse a provider setting that is set while no provider is installed to read
+    it and providers are not turned off -- most likely an install (an image, a venv) built without the plugin. Raises
+    ``backend_config.BackendConfigError``. Under ``VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none`` it does nothing (the
+    operator chose no providers; :func:`stray_backend_env` warns instead).
+
+    Not part of :func:`check_config`: the ``run`` / ``rerun`` / ``run-composite`` children run on a workspace
+    interpreter that may not have the plugin, inherit the server's environment, and must keep working; env workers
+    likewise."""
+    from vivarium_workbench.lib import backend_config
+    from vivarium_workbench.lib.backends.provider import PROVIDERS_ENV
+
+    if _providers_turned_off():
+        return
+    names = unclaimed_backend_env()
+    if not names:
+        return
+    one = len(names) == 1
+    joined = ", ".join(names)
+    raise backend_config.BackendConfigError(
+        f"{joined} {'is' if one else 'are'} set, but no backend provider is installed to read "
+        f"{'it' if one else 'them'}; install vivarium-workbench[vivaapi], or unset {joined} (or set "
+        f"{PROVIDERS_ENV}=none to run without providers)")
+
+
+def stray_backend_env() -> list[str]:
+    """The provider settings that are set while providers are turned off (``VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none``):
+    ignored, and named in the start-up warning. Empty otherwise: with a provider active they are read, and with none
+    installed :func:`check_unclaimed_backend_env` refuses them."""
+    if not _providers_turned_off():
+        return []
+    return unclaimed_backend_env()
+
+
+def no_providers_note() -> Optional[str]:
+    """The neutral start-up line for a server with no backend provider installed (and providers not turned off), so
+    a user who expected remote-backend features has a breadcrumb; ``None`` otherwise (step P4b2, D4)."""
+    if _providers_turned_off() or _providers():
+        return None
+    return "backend providers: none installed"
