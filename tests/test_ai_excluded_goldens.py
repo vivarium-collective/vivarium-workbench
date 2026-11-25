@@ -17,10 +17,10 @@ from vivarium_workbench.api import app as appmod  # noqa: E402
 from vivarium_workbench.lib import ai_tools  # noqa: E402
 from vivarium_workbench.lib import backends  # noqa: E402
 
-#: Every OpenAPI operation the AI tool index leaves out, with providers on (301 operations, 250 indexed).
+#: Every OpenAPI operation the AI tool index leaves out, with providers on (304 operations, 250 indexed).
 EXCLUDED_OPERATIONS = [
     ("DELETE", "/api/ai/credentials/{provider}"), ("GET", "/api/ai/capabilities"), ("GET", "/api/ai/status"),
-    ("GET", "/api/auth/github/orgs"), ("GET", "/api/auth/github/poll"), ("GET", "/api/auth/github/status"),
+    ("GET", "/api/auth/compose-api/status"), ("GET", "/api/auth/github/orgs"), ("GET", "/api/auth/github/poll"), ("GET", "/api/auth/github/status"),
     ("GET", "/api/composite-run/{run_id}/download"), ("GET", "/api/data-source-file"), ("GET", "/api/events"),
     ("GET", "/api/events/log"), ("GET", "/api/guidance"), ("GET", "/api/investigation-notebook/{slug}"),
     ("GET", "/api/investigation/{slug}/figure/{n}.{ext}"), ("GET", "/api/investigation/{slug}/figures.html"),
@@ -31,7 +31,8 @@ EXCLUDED_OPERATIONS = [
     ("GET", "/api/study-report/{slug}"),
     ("GET", "/api/study/{slug}/figures.zip"), ("GET", "/api/study/{slug}/notebook"),
     ("GET", "/api/study/{slug}/outputs.zip"), ("GET", "/api/workspaces"), ("POST", "/api/ai/credentials"),
-    ("POST", "/api/ai/ollama-models"), ("POST", "/api/ai/select"), ("POST", "/api/auth/github/logout"),
+    ("POST", "/api/ai/ollama-models"), ("POST", "/api/ai/select"), ("POST", "/api/auth/compose-api/logout"),
+    ("POST", "/api/auth/compose-api/start"), ("POST", "/api/auth/github/logout"),
     ("POST", "/api/auth/github/start"), ("POST", "/api/auth/github/token"), ("POST", "/api/branch/push"),
     ("POST", "/api/chat/turn"), ("POST", "/api/expert-doc"), ("POST", "/api/remote-run-build"),
     ("POST", "/api/remote-run-start"), ("POST", "/api/remote-run-visibility"), ("POST", "/api/source/build-remote"), ("POST", "/api/source/materialize-repo"),
