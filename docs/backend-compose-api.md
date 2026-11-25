@@ -171,8 +171,12 @@ does not look classes up.
 - An inferred environment may not exist yet, so there is no manifest to read: only the address form (`local:` and no
   `!`) is checked here, and compose-api's own check of the classes is shown if it refuses.
 
-**Steps.** compose-api runs `interval_time` from 0 to 1000. A run asking for more is a **400** (`bad-steps`), not a
-shorter run.
+**Steps.** How long a run may be is compose-api's to say, per caller: up to its `max_interval_time` (1,000 on the
+production deployment) for anyone, and up to `max_long_run_interval_time` (86,400 there) for holders of its
+`long_run_role` (`long-runs` there). The workbench refuses only a step count that is not a positive number (a
+**400**, `bad-steps`) and sends any other as asked. compose-api's own refusal, which names the limit and the role,
+reaches the person in its words ("compose-api refused the run: Invalid interval time, it has to be between 0 and
+1000; up to 86400 with the long-runs role"); a run is never cut short.
 
 ## Routes
 

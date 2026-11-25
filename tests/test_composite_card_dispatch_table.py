@@ -330,10 +330,8 @@ def test_compose_refuses_a_step_count_it_cannot_run(card):
     from vivarium_workbench.lib import remote_run_compose
 
     card.compose()
-    m = remote_run_compose.MAX_STEPS
-    assert card.run({"steps": m + 1}) == ({
-        "error": f"compose-api runs 1 to {m} steps per run; this run asks for {float(m + 1)}",
-        "reason": "bad-steps", "max_steps": m, "run_target": "deployment"}, 400)
+    assert card.run({"steps": -5}) == ({
+        "error": "n_steps must be a positive number, got -5.0", "reason": "bad-steps", "run_target": "deployment"}, 400)
 
 
 def test_compose_runs_detached_with_no_preflight(card):

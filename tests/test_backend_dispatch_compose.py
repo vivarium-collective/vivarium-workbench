@@ -697,12 +697,31 @@ def test_a_composite_with_nothing_to_record_is_refused(ws, monkeypatch):
     assert (e.value.status, e.value.body["reason"]) == (422, "nothing-to-emit")
 
 
-def test_more_steps_than_compose_api_runs_are_refused_not_cut_short(ws, stub, backend_env, dashboard_client):
+LONG_RUN_REFUSAL = "Invalid interval time, it has to be between 0 and 1000; up to 86400 with the long-runs role"
+
+
+def test_how_long_a_run_may_be_is_compose_apis_to_say(ws, stub, backend_env, dashboard_client):
+    """Falsifies: the workbench caps a compose-api run's length itself (it once refused anything past 1,000 steps,
+    so no one, not even a holder of compose-api's long-runs role, could start a multi-generation run from it), or
+    hides compose-api's own refusal. A 7,700-step run reaches compose-api as asked; compose-api's 400, which names the
+    limit and the role, reaches the person in compose-api's words. A non-positive count is still refused here."""
     _register_fixture_workspace(stub)
     _name(backend_env, stub.url)
-    res = dashboard_client(ws).post("/api/remote-run-submit", json={"study": "demo", "n_steps": 1001})
+    c = dashboard_client(ws)
+
+    res = c.post("/api/remote-run-submit", json={"study": "demo", "n_steps": -5})
     assert res.status_code == 400 and res.json()["reason"] == "bad-steps"
     assert stub.calls_to("run-simulation") == []
+
+    res = c.post("/api/remote-run-submit", json={"study": "demo", "n_steps": 7700})
+    assert res.status_code < 400, res.text
+    (call,) = stub.calls_to("run-simulation")
+    assert call.query["interval_time"] == ["7700.0"]
+
+    stub.respond_error("POST", "/simulation/run", 400, {"detail": LONG_RUN_REFUSAL})
+    res = c.post("/api/remote-run-submit", json={"study": "demo", "n_steps": 7700})
+    assert res.status_code == 409, res.text
+    assert res.json()["error"] == f"compose-api refused the run: {LONG_RUN_REFUSAL}"
 
 
 def test_a_lost_submission_answer_finds_the_run_by_its_dispatch_tag(ws, stub, backend_env, dashboard_client):
@@ -801,14 +820,14 @@ def test_the_dispatch_preflight_names_the_environment_or_why_there_is_none(ws, s
 
 def test_the_composites_card_runs_on_compose_api_end_to_end(ws, stub, backend_env, dashboard_client):
     """The Composites tab's remote run, through the real server and its real detached runner: refused up front
-    for more steps than compose-api runs, otherwise dispatched, waited on, and landed as the card's run."""
+    for a step count that is not positive, otherwise dispatched, waited on, and landed as the card's run."""
     import time
 
     _register_fixture_workspace(stub)
     _completed(stub)
     _name(backend_env, stub.url)
     c = dashboard_client(ws)
-    res = c.post("/api/composite-test-run", json={"id": COMPOSITE, "steps": 1001})
+    res = c.post("/api/composite-test-run", json={"id": COMPOSITE, "steps": -5})
     assert res.status_code == 400 and res.json()["reason"] == "bad-steps"
     assert stub.calls_to("run-simulation") == []
 

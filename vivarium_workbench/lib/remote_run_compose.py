@@ -22,6 +22,7 @@ same dispatch through :func:`run_composite`.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -53,8 +54,6 @@ STUDY_EMITTER = "user_emitter"
 TOKEN_ENV_VAR = "COMPOSE_API_TOKEN"
 #: The workbench extra that signs calls in as the person who ran ``compose-api auth login`` (:func:`_session`).
 SIGNIN_EXTRA = "compose-api-signin"
-#: compose-api's bound on ``interval_time`` (``POST /simulation/run`` answers 400 above it).
-MAX_STEPS = 1000
 #: The prefix of the tag that names one dispatch, so a submission whose answer was lost can be found again.
 DISPATCH_TAG_PREFIX = "workbench:dispatch:"
 #: How often, and how far apart in seconds, a submission whose answer was lost is looked up by its dispatch tag.
@@ -523,16 +522,18 @@ def _is_refusal(e: Exception) -> bool:
 
 
 def checked_steps(value: object) -> float:
-    """A run's step count as compose-api takes it (``interval_time``): above 0 and at most :data:`MAX_STEPS`.
-    Raises :class:`ComposeDispatchError` (400) rather than run fewer steps than were asked for."""
+    """A run's step count as compose-api takes it (``interval_time``): a positive number, or a 400
+    (:class:`ComposeDispatchError`, ``bad-steps``). How long a run may be is compose-api's to say, per caller: up to
+    its ``max_interval_time`` for anyone and up to ``max_long_run_interval_time`` with its ``long_run_role``. Its
+    400 names the limit and the role, and reaches the person as it is (:func:`_backend_error`)."""
     try:
         steps = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         raise ComposeDispatchError({"error": f"n_steps must be a number, got {value!r}", "reason": "bad-steps"},
                                    400) from None
-    if not 0 < steps <= MAX_STEPS:
-        raise ComposeDispatchError({"error": f"compose-api runs 1 to {MAX_STEPS} steps per run; this run asks for "
-                                             f"{value}", "reason": "bad-steps", "max_steps": MAX_STEPS}, 400)
+    if not (math.isfinite(steps) and steps > 0):
+        raise ComposeDispatchError({"error": f"n_steps must be a positive number, got {value!r}",
+                                    "reason": "bad-steps"}, 400)
     return steps
 
 
