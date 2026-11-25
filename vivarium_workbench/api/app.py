@@ -63,6 +63,7 @@ from vivarium_workbench.lib import job_status_views as _job_status_views
 from vivarium_workbench.lib import run_jobs as _run_jobs
 from vivarium_workbench.lib import remote_run_views as _remote_run_views
 from vivarium_workbench.lib import auth_views as _auth_views
+from vivarium_workbench.lib import compose_signin as _compose_signin
 from vivarium_workbench.lib import ai_auth as _ai_auth
 from vivarium_workbench.lib import chat_limits as _chat_limits
 from vivarium_workbench.lib import claude_cli as _claude_cli
@@ -8303,6 +8304,49 @@ def create_app() -> FastAPI:
         ``lib.auth_views.auth_orgs``.
         """
         resp, code = _auth_views.auth_orgs()
+        return JSONResponse(content=resp, status_code=code)
+
+    # -----------------------------------------------------------------------
+    # compose-api sign-in from the page: the login `compose-api auth login` makes, on the CLI's profile and in its
+    # credential store, so the CLI and the workbench share it (lib.compose_signin). Tokens never pass through these
+    # routes. The two POSTs are guarded by the CSRF middleware and are not in the read-only allow-list.
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/api/auth/compose-api/start",
+        response_model=AuthPayload,
+        tags=["Auth"],
+        summary="Start signing in to compose-api (browser or device code)",
+    )
+    async def auth_compose_api_start(body: dict = Body(default={})) -> JSONResponse:
+        """Start a sign-in: ``{"method": "auto" | "browser" | "device"}``. 202 with the sign-in to poll at
+        ``GET /api/auth/compose-api/status``; 400 for another method; 409 when sign-in is not offered here or one is
+        already waiting (``lib.compose_signin.start``)."""
+        resp, code = await _compose_signin.start(body)
+        return JSONResponse(content=resp, status_code=code)
+
+    @app.get(
+        "/api/auth/compose-api/status",
+        response_model=AuthPayload,
+        tags=["Auth"],
+        summary="Whether compose-api calls are signed in, and the sign-in in progress (never a token)",
+    )
+    def auth_compose_api_status() -> JSONResponse:
+        """``{available, signed_in, profile, api_base_url, flow}``, or ``{available: false, reason, message}`` where
+        signing in here would not sign the calls in. Always 200 (``lib.compose_signin.status``)."""
+        resp, code = _compose_signin.status()
+        return JSONResponse(content=resp, status_code=code)
+
+    @app.post(
+        "/api/auth/compose-api/logout",
+        response_model=AuthPayload,
+        tags=["Auth"],
+        summary="Sign out of compose-api (for the compose-api CLI too)",
+    )
+    async def auth_compose_api_logout(body: dict = Body(default={})) -> JSONResponse:
+        """Erase the stored login and revoke it with Auth0 when reachable, as ``compose-api auth logout`` does
+        (``lib.compose_signin.logout``). The request body is accepted and ignored."""
+        resp, code = await _compose_signin.logout()
         return JSONResponse(content=resp, status_code=code)
 
     # -----------------------------------------------------------------------

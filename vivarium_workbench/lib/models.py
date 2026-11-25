@@ -2651,7 +2651,8 @@ class MaterializeRepoRequest(BaseModel):
 
 
 class AuthPayload(BaseModel):
-    """Pass-through payload for the 5 GitHub device-flow auth routes.
+    """Pass-through payload for the 5 GitHub device-flow auth routes, and the 3 compose-api sign-in routes
+    (``/api/auth/compose-api/{start,status,logout}``).
 
     Shared response schema for ``POST /api/auth/github/start``, ``GET
     /api/auth/github/poll``, ``GET /api/auth/github/status``, ``POST
