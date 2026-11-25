@@ -51,15 +51,22 @@ def main() -> None:
     from vivarium_workbench.lib.backends import config as backend_cfg
     from vivarium_workbench.lib.env_worker_launcher import check_worker_config
 
+    # Refusals exit 2, as cli.cmd_serve and startup.serve_fastapi do (step P4b2: was SystemExit("ERROR: ..."), status 1).
     try:
         backend_cfg.check_config()  # one remote backend per process (docs/backend-adapters.md step 1c)
+        backend_cfg.check_unclaimed_backend_env()  # an alias no installed provider reads (step P4b2)
         check_worker_config()  # hosted env workers asked for, but no provider supplies them (step P2)
     except BackendConfigError as e:
-        raise SystemExit(f"ERROR: {e}") from e
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(2) from e
     except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
-        raise SystemExit(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}") from e
-    for var in backend_cfg.stray_backend_env():  # ignored with providers off (step P3 C1; P4b refuses it)
+        print(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}", file=sys.stderr)
+        raise SystemExit(2) from e
+    for var in backend_cfg.stray_backend_env():  # ignored with providers turned off (step P3 C1; P4b2 keeps it)
         print(f"warning: {var} is set but no backend provider is active; it is ignored", file=sys.stderr)
+    note = backend_cfg.no_providers_note()
+    if note:
+        print(note)
     # Import string (not the app object) so --reload works.
     uvicorn.run("vivarium_workbench.api.app:app", host=args.host, port=args.port, reload=args.reload)
 

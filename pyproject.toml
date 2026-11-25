@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vivarium-workbench"
-version = "0.5.8"
+version = "0.6.0"
 description = "Web-based workbench for Vivarium / process-bigraph workspaces"
 authors = [{name = "Vivarium Collective", email = "team@vivarium-collective.org"}]
 requires-python = ">=3.11"
@@ -153,9 +153,12 @@ dependencies = [
 
 [project.optional-dependencies]
 # The viva-api backend provider (docs/backend-adapters.md §2.4, step P4b): its own distribution, built from
-# packages/vivarium-workbench-vivaapi/ in this repo and released in lockstep (identical versions, `==` both ways;
-# scripts/set_version.sh). It declares boto3 itself (the S3 figures fallback), so the core does not.
-vivaapi = ["vivarium-workbench-vivaapi==0.5.8"]
+# packages/vivarium-workbench-vivaapi/ in this repo, with an identical version and `==` pins both ways
+# (scripts/set_version.sh). It declares boto3 itself (the S3 figures fallback), so the core does not. The plugin is
+# NOT published to PyPI (Jim, 2026-11-24; only the core is), so from PyPI this extra does not resolve: it serves the
+# image (`uv sync --extra vivaapi`), the dev setup, and uv installs from git, where uv takes the plugin from the same
+# commit (README "Install").
+vivaapi = ["vivarium-workbench-vivaapi==0.6.0"]
 # Call compose-api as the person signed in with its CLI (`compose-api auth login`), not only with COMPOSE_API_TOKEN
 # (lib/remote_run_compose.py; docs/backend-compose-api.md, "Signing in"). The client's [auth] extra reads the CLI's
 # profiles and its stored login from the OS credential store; 0.7.100 is the first release with

@@ -74,16 +74,22 @@ def serve_fastapi(workspace: Path, port: int, host: str = "127.0.0.1", base_path
 
     try:
         backend_cfg.check_config()
+        # A provider alias (or the pinned-run switch) set while no provider is installed to read it: refuse, an
+        # install built without the plugin (step P4b2). Server start-up only: run children and env workers inherit it.
+        backend_cfg.check_unclaimed_backend_env()
     except BackendConfigError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
     except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
         print(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
-    # A provider alias set while no provider is active to read it (providers off, or the plugin absent) is ignored;
-    # say so (step P3 C1; step P4b refuses it).
+    # With providers turned off (VIVARIUM_WORKBENCH_BACKEND_PROVIDERS=none) a set alias is ignored; say so (step P3
+    # C1; P4b2 keeps the warning for this explicit choice).
     for var in backend_cfg.stray_backend_env():
         print(f"warning: {var} is set but no backend provider is active; it is ignored", file=sys.stderr)
+    note = backend_cfg.no_providers_note()
+    if note:
+        print(note)
 
     # Configure structured logging so the access-log middleware actually emits.
     # basicConfig is a no-op if the root logger is already configured.

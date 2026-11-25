@@ -309,6 +309,50 @@ _GALLERY_CSS = (
     ".card .bar .dl:hover{background:var(--teal);color:#fff}.card .bar .dl[disabled]{opacity:.6;cursor:default}"
     ".card iframe,.card img{width:100%;border:0;display:block}.card img{padding:14px;background:#fff}"
     ".hdr{padding:24px 26px 0}.hdr h1{font-size:22px;margin:0 0 4px}.hdr p{color:var(--soft);font-size:13.5px;max-width:860px;margin:0}"
+    # --- mobile: the side menu becomes an off-canvas drawer; images go full-width ---
+    ".menu-btn{display:none;position:fixed;top:12px;left:12px;z-index:65;align-items:center;gap:6px;"
+    "font:inherit;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--line);"
+    "background:#fff;color:var(--soft);border-radius:8px;padding:8px 12px;box-shadow:0 2px 8px rgba(0,0,0,.1)}"
+    ".menu-btn:active{background:var(--bg)}"
+    ".backdrop{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:55}"
+    ".backdrop.show{display:block}"
+    "@media(max-width:760px){"
+    ".wrap{display:block;max-width:none}"
+    ".menu-btn{display:inline-flex}"
+    "nav{position:fixed;top:0;left:0;z-index:60;width:84%;max-width:320px;height:100vh;"
+    "transform:translateX(-100%);transition:transform .25s ease;will-change:transform;"
+    "box-shadow:0 0 28px rgba(0,0,0,.22)}"
+    "nav.open{transform:none}"
+    "nav a{padding:10px 12px;line-height:1.3}nav .f{padding-left:22px;font-size:12.5px}"
+    "main{padding:58px 12px 28px}"
+    ".hdr{padding:0 2px 2px}.hdr h1{font-size:19px}.hdr p{font-size:13px}"
+    ".grp>h2{font-size:16px;margin:22px 0 2px}"
+    ".card{margin:12px 0;border-radius:10px}.card img{padding:6px}"
+    ".card .bar{padding:9px 12px}"
+    "#dl-zip-btn{top:auto!important;bottom:14px!important;right:14px!important}"
+    "}"
+)
+
+
+# Mobile drawer toggle for the side menu. On phones the nav is an off-canvas
+# drawer (CSS @media above); this opens/closes it and closes it after a jump link
+# is tapped so the chosen figure is immediately in view. Placed in the body BEFORE
+# the zip button so it is kept when `_indexHtml()` strips the zip control from the
+# downloaded copy — the zipped gallery stays mobile-friendly too.
+_GALLERY_NAV_JS = (
+    "<script>"
+    "function __figToggleNav(){var n=document.getElementById('fignav'),"
+    "b=document.getElementById('figbackdrop');if(!n)return;var o=n.classList.toggle('open');"
+    "if(b)b.classList.toggle('show',o);var t=document.querySelector('.menu-btn');"
+    "if(t)t.setAttribute('aria-expanded',o?'true':'false');}"
+    "function __figCloseNav(){var n=document.getElementById('fignav'),"
+    "b=document.getElementById('figbackdrop');if(n)n.classList.remove('open');"
+    "if(b)b.classList.remove('show');var t=document.querySelector('.menu-btn');"
+    "if(t)t.setAttribute('aria-expanded','false');}"
+    "document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('#fignav a');"
+    "if(a)__figCloseNav();});"
+    "document.addEventListener('keydown',function(e){if(e.key==='Escape')__figCloseNav();});"
+    "</script>"
 )
 
 
@@ -427,8 +471,23 @@ def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[s
             is_svg = (not is_html) and ("image/svg" in lo or lo.endswith(".svg"))
             png_btn = ('<button class="dl png" type="button" onclick="__dlFigPng(this)" '
                        'title="Download this figure as a PNG raster">&#8595; PNG</button>') if is_svg else ""
+            # Name the download button after the figure's real format (SVG / HTML /
+            # PNG…) instead of a generic "download". The source is a data: URI in the
+            # standalone gallery (read the MIME) and a relative file in the zip/snapshot
+            # (read the extension); unknown → fall back to "download".
+            if lo.startswith("data:"):
+                _mime = lo[5:].split(";")[0].split(",")[0]
+                fmt = {"image/svg+xml": "svg", "image/png": "png", "image/gif": "gif",
+                       "image/jpeg": "jpg", "image/webp": "webp", "text/html": "html"}.get(
+                    _mime, "html" if is_html else "")
+            else:
+                _base = lo.rsplit("/", 1)[-1]
+                fmt = _base.rsplit(".", 1)[-1] if "." in _base else ("html" if is_html else "")
+            dl_txt = fmt.upper() if fmt else "download"
+            dl_title = f"Download this figure ({fmt})" if fmt else "Download this figure"
             body.append(f'<div class="card" id="{aid}"><div class="bar"><span class="name">{_escape(label)}</span>'
-                        f'{png_btn}<a class="dl" href="{_escape(arc)}" download>&#8595; download</a></div>{media}</div>')
+                        f'{png_btn}<a class="dl" href="{_escape(arc)}" download title="{_escape(dl_title)}">'
+                        f'&#8595; {_escape(dl_txt)}</a></div>{media}</div>')
         body.append("</section>")
     hdr = (f'<div class="hdr"><h1>{_escape(inv_name)} &mdash; figure gallery</h1>'
            f'<p>{n_fig} figures across {len(groups)} studies. Use the list on the left to jump to any '
@@ -438,10 +497,14 @@ def figures_gallery_index_html(inv_name: str, groups: list[tuple[str, Optional[s
             f'<title>{_escape(inv_name)} — figure gallery</title>'
             f'<link rel=preconnect href="https://fonts.googleapis.com">'
             f'<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel=stylesheet>'
-            f'<style>{_GALLERY_CSS}</style></head><body><div class="wrap">'
-            f'<nav><h1>Figures</h1><p class="sub">{n_fig} figures &middot; {len(groups)} studies</p>'
+            f'<style>{_GALLERY_CSS}</style></head><body>'
+            f'<button class="menu-btn" onclick="__figToggleNav()" aria-expanded="false" '
+            f'aria-controls="fignav" aria-label="Show or hide the figure list">&#9776; Figures</button>'
+            f'<div id="figbackdrop" class="backdrop" onclick="__figCloseNav()"></div>'
+            f'<div class="wrap">'
+            f'<nav id="fignav"><h1>Figures</h1><p class="sub">{n_fig} figures &middot; {len(groups)} studies</p>'
             + "".join(nav) + '</nav><main>' + hdr + "".join(body) + '</main></div>'
-            + _GALLERY_DL_BTN + _GALLERY_PNG_JS + '</body></html>')
+            + _GALLERY_NAV_JS + _GALLERY_DL_BTN + _GALLERY_PNG_JS + '</body></html>')
 
 
 def build_figures_gallery_page(ws_root, name: str) -> Optional[str]:

@@ -696,3 +696,28 @@ def test_collect_emit_paths_tolerates_string_measure():
     out = collect_emit_paths_from_spec(
         {"behavior_tests": [{"name": "t", "measure": {"path": "species.glucose"}}]})
     assert "species/glucose" in out
+
+
+def test_build_run_manifest_records_declared_simulator(tmp_path):
+    # RFC-0008: a study's declared `simulator.package` is captured in the run env.
+    import yaml
+    from vivarium_workbench.lib import composite_runs as cr
+    (tmp_path / "workspace.yaml").write_text("name: t\n")
+    sd = tmp_path / "studies" / "s"; sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text(yaml.safe_dump(
+        {"name": "s", "simulator": {"package": "process-bigraph", "ref": "x"}}))
+    m = cr.build_run_manifest(spec_id="c", params={}, n_steps=1, emitter=None,
+                              emit_paths=[], runtime={}, origin="local",
+                              study="s", ws_root=tmp_path)
+    assert "process-bigraph" in (m["env"] or {}).get("sim_packages", {})
+
+
+def test_build_run_manifest_no_simulator_is_fine(tmp_path):
+    from vivarium_workbench.lib import composite_runs as cr
+    (tmp_path / "workspace.yaml").write_text("name: t\n")
+    sd = tmp_path / "studies" / "s"; sd.mkdir(parents=True)
+    (sd / "study.yaml").write_text("name: s\n")
+    m = cr.build_run_manifest(spec_id="c", params={}, n_steps=1, emitter=None,
+                              emit_paths=[], runtime={}, origin="local",
+                              study="s", ws_root=tmp_path)
+    assert isinstance(m["env"], dict)  # built fine, no crash

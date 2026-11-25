@@ -1,18 +1,27 @@
 """Reconstructable environment fingerprint for a run's manifest.
 
 ``compute_env()`` captures just enough about the surrounding software
-environment — the workspace's git HEAD, key simulation packages' versions
-(+ a best-effort git SHA when installed from a local checkout), a hash of
-the workspace's ``uv.lock``, the Python/platform strings, and the caller's
-already-computed cache fingerprint — that a rerun can tell whether it
-executed under materially the same environment as the original run.
+environment — the workspace's git HEAD (+ dirty flag + branch), key simulation
+packages' versions (+ a best-effort git SHA when installed from a local
+checkout), a hash of the workspace's ``uv.lock``, the Python/platform strings,
+and the caller's already-computed cache fingerprint — that a rerun can tell
+whether it executed under materially the same environment as the original run.
 
-Every field is independently best-effort: a lookup failure degrades that
-one field to ``None`` rather than raising, so environment capture can never
-block a run from being recorded (reproducible-rerun-spine Task 2, item 2 /
-G1). ``env_id()`` folds an env dict into a short, stable, order-independent
-digest so two runs' environments can be compared with one string equality
-check instead of a deep dict diff.
+**Canonical shape (keep in sync by hand).** This produces the SAME env shape and
+the SAME ``env_id`` algorithm as the engine's
+``discovery_engine.study.run_registry.capture_environment`` / ``env_id`` — the
+single canonical definition. The workbench keeps its own implementation (rather
+than importing it) only because it pins discovery-engine from a PyPI *release*,
+which may lag the engine's git main where that API landed; the key set is pinned
+in ``tests/test_env_fingerprint.py`` so the two cannot silently drift. When the
+pinned engine release carries ``capture_environment``, collapse this to a thin
+delegation.
+
+Every field is independently best-effort: a lookup failure degrades that one
+field to ``None`` rather than raising, so environment capture can never block a
+run from being recorded. ``env_id()`` folds an env dict into a short, stable,
+order-independent digest so two runs' environments compare with one string
+equality check instead of a deep dict diff.
 """
 from __future__ import annotations
 
@@ -21,60 +30,64 @@ import json
 import platform
 from pathlib import Path
 
-# Packages whose version + provenance materially affect a sim run's
-# reproducibility. Best-effort: any package not installed (or not
-# importable under its import name) simply comes back {version: None,
-# git_sha: None} rather than raising.
-_SIM_PACKAGES = ("v2ecoli", "process-bigraph", "bigraph-schema", "viva_superpowers")
+# The canonical package set (matches the engine's framework list + the
+# workbench's domain package). Each is captured best-effort: a package not
+# installed simply comes back absent rather than raising.
+_SIM_PACKAGES = (
+    "v2ecoli", "process-bigraph", "bigraph-schema", "bigraph-loom",
+    "viva-discovery-engine", "vivarium-workbench", "viva-emitters", "viva-superpowers",
+)
+# dist -> import name where it isn't just dist.replace("-", "_").
+_IMPORT_NAME = {"viva-discovery-engine": "discovery_engine"}
 
 
-def _workspace_commit(ws_root) -> str | None:
-    """Best-effort git HEAD of ``ws_root`` (mirrors the code_version lookup
-    in ``composite_runs.build_run_manifest``)."""
+def _git_out(ws_root, *args) -> str | None:
+    """Best-effort ``git -C ws_root <args>`` stdout (stripped), else None."""
     if ws_root is None:
         return None
     try:
         import subprocess
-        out = subprocess.run(
-            ["git", "-C", str(ws_root), "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True, timeout=5,
-        )
-        return out.stdout.strip() or None
+        r = subprocess.run(["git", "-C", str(ws_root), *args],
+                           capture_output=True, text=True, timeout=5, check=False)
+        return (r.stdout.strip() or None) if r.returncode == 0 else None
     except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
+        return None
+
+
+def _workspace_dirty(ws_root) -> bool | None:
+    """True/False from ``git status --porcelain`` (None if not resolvable). A
+    dirty tree means the commit alone does not faithfully reproduce the run."""
+    if ws_root is None:
+        return None
+    try:
+        import subprocess
+        r = subprocess.run(["git", "-C", str(ws_root), "status", "--porcelain"],
+                           capture_output=True, text=True, timeout=5, check=False)
+        return bool(r.stdout.strip()) if r.returncode == 0 else None
+    except Exception:  # noqa: BLE001
         return None
 
 
 def _package_git_sha(module_file: str | None) -> str | None:
-    """Best-effort git SHA of the repo containing ``module_file``. A package
-    installed editable / from a local checkout carries provenance this way;
-    a wheel install has no ``.git`` and degrades to ``None``."""
+    """Best-effort git SHA of the repo containing ``module_file`` — populated for
+    an editable/local checkout, None for a wheel install."""
     if not module_file:
         return None
-    try:
-        import subprocess
-        repo_dir = str(Path(module_file).resolve().parent)
-        out = subprocess.run(
-            ["git", "-C", repo_dir, "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True, timeout=5,
-        )
-        return out.stdout.strip() or None
-    except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
-        return None
+    return _git_out(Path(module_file).resolve().parent, "rev-parse", "HEAD")
 
 
-def _sim_package_info(name: str) -> dict:
-    version = None
+def _sim_package_info(dist: str) -> dict:
+    version = git_sha = None
     try:
         from importlib.metadata import version as _pkg_version
-        version = _pkg_version(name)
-    except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
+        version = _pkg_version(dist)
+    except Exception:  # noqa: BLE001
         version = None
-    git_sha = None
     try:
         import importlib
-        mod = importlib.import_module(name.replace("-", "_"))
+        mod = importlib.import_module(_IMPORT_NAME.get(dist, dist.replace("-", "_")))
         git_sha = _package_git_sha(getattr(mod, "__file__", None))
-    except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
+    except Exception:  # noqa: BLE001
         git_sha = None
     return {"version": version, "git_sha": git_sha}
 
@@ -84,41 +97,42 @@ def _lockfile_hash(ws_root) -> str | None:
         return None
     try:
         lock = Path(ws_root) / "uv.lock"
-        if not lock.is_file():
-            return None
-        return hashlib.sha256(lock.read_bytes()).hexdigest()[:16]
-    except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
+        return hashlib.sha256(lock.read_bytes()).hexdigest()[:16] if lock.is_file() else None
+    except Exception:  # noqa: BLE001
         return None
 
 
-def compute_env(*, ws_root=None, cache_fingerprint=None) -> dict:
-    """Best-effort snapshot of the environment a run executed under.
-
-    Every field independently degrades to ``None`` on failure — this must
-    never raise or block a run from being recorded. ``cache_fingerprint`` is
-    a caller-supplied, already-computed value (e.g. v2ecoli's
-    ``run_condition_multigen_parquet.cache_fingerprint()`` short hash);
-    passed straight through rather than recomputed here, since only the
-    caller knows which cache directory produced the run.
+def compute_env(*, ws_root=None, cache_fingerprint=None, extra_packages=None) -> dict:
+    """Best-effort snapshot of the environment a run executed under — the canonical
+    shape ``{workspace_commit, dirty, branch, sim_packages:{dist:{version,git_sha}},
+    lockfile_hash, python, platform, cache_fingerprint}`` (identical to the engine's
+    ``capture_environment``). Every field degrades to ``None`` on failure — never
+    raises. ``cache_fingerprint`` is a caller-supplied value, passed straight
+    through. ``extra_packages`` adds dists beyond the framework set (e.g. a study's
+    declared simulator) so the recorded env captures what that run actually used.
     """
-    sim_packages = {}
-    for name in _SIM_PACKAGES:
+    sim_packages: dict[str, dict] = {}
+    for dist in dict.fromkeys(list(_SIM_PACKAGES) + list(extra_packages or [])):
         try:
-            sim_packages[name] = _sim_package_info(name)
-        except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
-            sim_packages[name] = {"version": None, "git_sha": None}
+            info = _sim_package_info(dist)
+        except Exception:  # noqa: BLE001
+            info = {"version": None, "git_sha": None}
+        if info["version"] is not None or info["git_sha"] is not None:
+            sim_packages[dist] = info
 
     try:
         py = platform.python_version()
-    except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
+    except Exception:  # noqa: BLE001
         py = None
     try:
         plat = platform.platform()
-    except Exception:  # noqa: BLE001 — best-effort provenance, never fatal
+    except Exception:  # noqa: BLE001
         plat = None
 
     return {
-        "workspace_commit": _workspace_commit(ws_root),
+        "workspace_commit": _git_out(ws_root, "rev-parse", "HEAD"),
+        "dirty": _workspace_dirty(ws_root),
+        "branch": _git_out(ws_root, "rev-parse", "--abbrev-ref", "HEAD"),
         "sim_packages": sim_packages,
         "lockfile_hash": _lockfile_hash(ws_root),
         "python": py,
@@ -128,11 +142,8 @@ def compute_env(*, ws_root=None, cache_fingerprint=None) -> dict:
 
 
 def env_id(env: dict) -> str:
-    """Stable 16-hex sha256 digest of ``env``.
-
-    Order-independent: ``json.dumps(..., sort_keys=True)`` sorts keys at
-    every nesting level, so passing the same env dict with keys (at any
-    level) reordered yields the same id.
-    """
+    """Stable 16-hex sha256 digest of ``env`` (order-independent via sorted keys).
+    The same algorithm as the engine's ``env_id`` so a run's id is identical
+    whichever writer recorded its environment."""
     payload = json.dumps(env, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode()).hexdigest()[:16]

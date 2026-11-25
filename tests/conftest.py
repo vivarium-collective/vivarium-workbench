@@ -449,10 +449,22 @@ def _isolate_viva_api_base():
     Tests that want a specific base still ``monkeypatch.setenv`` it (function
     scope wins over this); tests that want the *unconfigured* default must
     delete **both** names, which is what "unconfigured" has always meant.
+
+    With the plugin physically absent (``CORE_MODE == "absent"``, the core-only job) the aliases and both
+    ``REMOTE_PINNED`` spellings are instead **removed** for the session (step P4b2): the client they isolate is not
+    installed, and with no provider installed a set alias makes server start-up refuse. A developer's exported alias
+    must not turn every core-only server test into a refusal, and spawned servers (``os.environ.copy()``) inherit the
+    clean environment -- they can never fall back to the tunnel, because nothing installed reads the aliases.
     """
-    previous = {k: os.environ.get(k) for k in ("VIVA_API_BASE", "SMS_API_BASE")}
+    aliases = ("VIVA_API_BASE", "SMS_API_BASE")
+    if CORE_MODE == "absent":
+        aliases += ("VIVARIUM_WORKBENCH_REMOTE_PINNED", "VIVARIUM_DASHBOARD_REMOTE_PINNED")
+    previous = {k: os.environ.get(k) for k in aliases}
     for k in previous:
-        os.environ[k] = UNREACHABLE_VIVA_API_BASE
+        if CORE_MODE == "absent":
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = UNREACHABLE_VIVA_API_BASE
     # The explicit name (``serve --backend-base-url``) outranks both aliases and opts a
     # process into running on that backend: a developer's exported value must never leak
     # into a test run, and tests that want it set it themselves (monkeypatch).

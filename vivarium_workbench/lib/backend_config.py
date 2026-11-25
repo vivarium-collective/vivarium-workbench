@@ -27,10 +27,18 @@ from vivarium_workbench.lib.env_compat import get_env
 
 #: The env var naming the backend (``serve --backend-base-url`` sets it), then the alias names a backend provider
 #: reads (the SMS plugin: ``VIVA_API_BASE``, ``SMS_API_BASE``). The core reads only the first; the alias names are
-#: kept here only so the core can warn about an alias that no active provider claims (``backends.config``; P4b
-#: refuses it). The aliases' precedence, their one-backend check and their default URL are the provider's.
+#: kept here only so the core can name an alias that no provider claims (``backends.config``): server start-up
+#: refuses it when no provider is installed, and warns when providers are turned off. The aliases' precedence, their
+#: one-backend check and their default URL are the provider's.
 BACKEND_BASE_ENV = "VIVARIUM_WORKBENCH_BACKEND_BASE_URL"
 BACKEND_BASE_ENV_VARS = (BACKEND_BASE_ENV, "VIVA_API_BASE", "SMS_API_BASE")
+
+#: The ``env_compat`` suffix of the provider's pinned-run switch (``VIVARIUM_WORKBENCH_REMOTE_PINNED``, or its legacy
+#: ``VIVARIUM_DASHBOARD_`` spelling), which the SMS plugin reads. The core reads it only to name it, as it does the
+#: aliases above, when it is truthy (:data:`PROVIDER_PIN_TRUTHY`) and no provider is active to read it.
+PROVIDER_PIN_ENV = "REMOTE_PINNED"
+#: The values the provider treats as on (stripped, case-insensitive); ``0`` or an empty value is off.
+PROVIDER_PIN_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
 def normalize_backend_base_url(url: str) -> str:

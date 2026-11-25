@@ -76,6 +76,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from vivarium_workbench.lib.env_worker_launcher import check_worker_config
     try:
         backend_cfg.check_config(getattr(args, "backend_base_url", None))
+        # A provider alias set while no provider is installed to read it (step P4b2): refuse before detaching too.
+        # Only here and in the other server entries: run children inherit the aliases on a workspace interpreter.
+        backend_cfg.check_unclaimed_backend_env()
         # Hosted env workers asked for but no provider supplies them: refuse BEFORE the render, the server-info
         # write and detaching, so the operator sees why and nothing is left behind. serve_fastapi checks again
         # (direct callers; the "env workers: PROXY ..." log line once logging is configured). No network call.
@@ -1005,6 +1008,48 @@ def cmd_scaffold_workspace(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_new_plugin(args: argparse.Namespace) -> int:
+    """Scaffold a runnable workbench-plugin skeleton (a new repo's worth of files)."""
+    from vivarium_workbench.plugins.scaffold import scaffold_plugin
+
+    dest = Path(args.dest) if args.dest else Path.cwd() / f"viva-{args.name}"
+    try:
+        root = scaffold_plugin(dest, args.name)
+    except (ValueError, FileExistsError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    pkg = "viva_" + args.name.replace("-", "_")
+    print(f"scaffolded plugin {args.name!r} at {root}")
+    print(f"  cd {root} && pip install -e \".[dev]\" && pytest")
+    print(f"  then add `plugins: [{args.name}]` to a workspace's workspace.yaml")
+    print(f"  edit {pkg}/api.py (routes) and {pkg}/static/panel.js (panel); see docs/plugins.md")
+    return 0
+
+
+def cmd_plugins(args: argparse.Namespace) -> int:
+    """List discovered (installed) plugins and whether each is enabled for a workspace."""
+    from vivarium_workbench.plugins import plugin_status
+
+    ws = Path(args.workspace).resolve() if args.workspace else None
+    rows = plugin_status(ws)
+    if getattr(args, "json", False):
+        print(json.dumps(rows, indent=2))
+        return 0
+    if not rows:
+        print("no plugins discovered. Scaffold one with `vwb new-plugin <name>` (see docs/plugins.md).")
+        return 0
+    for r in rows:
+        if not r["installed"]:
+            note = "enabled but NOT installed"
+        elif r["enabled"]:
+            note = "enabled"
+        else:
+            note = "installed (off)"
+        api = f"api v{r['api_version']}" if r["api_version"] is not None else "api v?"
+        print(f"  {r['name']:<24} {note:<26} {api}")
+    return 0
+
+
 def cmd_catalog_add(args: argparse.Namespace) -> int:
     """Register a workspace in ``~/.pbg/workspaces.json`` so it appears in the
     dashboard's workspace switcher (idempotent). Wraps
@@ -1255,6 +1300,18 @@ def cmd_server_open(args: argparse.Namespace) -> int:
 
 def cmd_server_restart(args: argparse.Namespace) -> int:
     """Stop the dashboard server (if running) then start it detached."""
+    # Refuse an unclaimed provider alias BEFORE stopping the running server (step P4b2): cmd_serve would refuse it
+    # anyway, and the operator would be left with no server at all.
+    from vivarium_workbench.lib.backend_config import BackendConfigError
+    from vivarium_workbench.lib.backends import config as backend_cfg
+    try:
+        backend_cfg.check_unclaimed_backend_env()
+    except BackendConfigError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    except ImportError as e:  # an installed but broken backend plugin: say so, never a bare traceback
+        print(f"ERROR: the backend plugin failed to load: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
     cmd_server_stop(args)
     args.detach = True
     return cmd_serve(args)
@@ -1438,9 +1495,9 @@ def cmd_render_loom(args: argparse.Namespace) -> int:
 BACKEND_COMMANDS = frozenset({"serve", "server-restart", "run", "rerun", "run-composite"})
 NO_BACKEND_COMMANDS = frozenset({
     "add-dashboard", "audit", "catalog-add", "compose-entry", "doctor", "gen-readme", "logs", "migrate-artifacts",
-    "migrate-fields", "migrate-investigations", "migrate-studies", "prepare-investigation", "render-loom",
-    "render-viz", "runs", "scaffold-investigation", "scaffold-workspace", "server-open", "server-status",
-    "server-stop", "smoke", "status", "sync", "warm-catalog", "workspace-trust",
+    "migrate-fields", "migrate-investigations", "migrate-studies", "new-plugin", "plugins", "prepare-investigation",
+    "render-loom", "render-viz", "runs", "scaffold-investigation", "scaffold-workspace", "server-open",
+    "server-status", "server-stop", "smoke", "status", "sync", "warm-catalog", "workspace-trust",
 })
 
 
@@ -1797,6 +1854,23 @@ def _build_parser(commands: "Sequence[Command] | None" = None) -> argparse.Argum
                                "(needs --registry); exit 1 on an error")
     p_centry.add_argument("--json", action="store_true", help="emit the entry and findings as JSON")
     p_centry.set_defaults(func=cmd_compose_entry)
+
+    p_newplug = sub.add_parser(
+        "new-plugin",
+        help="Scaffold a runnable workbench-plugin skeleton (router + panel + test + README)",
+    )
+    p_newplug.add_argument("name", help="url-safe plugin name, e.g. my-feature")
+    p_newplug.add_argument("--dest", default=None, metavar="DIR",
+                           help="target directory (default: ./viva-<name>)")
+    p_newplug.set_defaults(func=cmd_new_plugin)
+
+    p_plugins = sub.add_parser(
+        "plugins",
+        help="List installed plugins and whether each is enabled for a workspace",
+    )
+    p_plugins.add_argument("--workspace", default=".", help="workspace root (default: cwd)")
+    p_plugins.add_argument("--json", action="store_true", help="emit rows as JSON")
+    p_plugins.set_defaults(func=cmd_plugins)
 
     p_audit = sub.add_parser(
         "audit",

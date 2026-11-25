@@ -72,6 +72,7 @@ from vivarium_workbench.lib import composite_run_views as _cr_views
 from vivarium_workbench.lib import composite_test_run_views as _composite_test_run_views
 from vivarium_workbench.lib import loom_savepoints as _loom_savepoints
 from vivarium_workbench.lib import composite_stop_views as _composite_stop_views
+from vivarium_workbench.lib import composite_delete_views as _composite_delete_views
 from vivarium_workbench.lib import study_create_views as _study_create_views
 from vivarium_workbench.lib import investigation_run_one_views as _investigation_run_one_views
 from vivarium_workbench.lib import investigation_run_views as _investigation_run_views
@@ -453,7 +454,13 @@ WORKSPACE_ENV = "VIVARIUM_WORKBENCH_WORKSPACE"
 async def _plain_identifiers(request: Request) -> None:
     """App-wide guard: every request field that names one directory entry (study, investigation, run id ...)
     must be a plain name, whichever route it reaches — path, query or top-level JSON body. See
-    ``lib.path_safety.IDENTIFIER_FIELDS``. FastAPI caches the request body, so this does not consume it."""
+    ``lib.path_safety.IDENTIFIER_FIELDS``. FastAPI caches the request body, so this does not consume it.
+
+    Plugin routes (``/api/plugins/<name>/*``) are exempt: a plugin's fields have the plugin's own
+    meaning (e.g. a ``study`` may be a MIRA reference, not a workspace slug), and a plugin owns its
+    own param safety (``docs/plugins.md``)."""
+    if request.url.path.startswith("/api/plugins/") or request.url.path.startswith("/plugins/"):
+        return
     _path_safety.check_identifiers(request.path_params)
     _path_safety.check_identifiers(request.query_params.multi_items())
     if request.method in ("POST", "PUT", "PATCH", "DELETE") and "json" in request.headers.get("content-type", ""):
@@ -698,6 +705,9 @@ def _add_route_like(app: FastAPI, route: object, provider: str) -> None:
         route_class_override=type(route), callbacks=route.callbacks, openapi_extra=route.openapi_extra,
         generate_unique_id_function=route.generate_unique_id_function, **extra,
     )
+
+
+from vivarium_workbench.plugins import load_plugins as _load_plugins
 
 
 def create_app() -> FastAPI:
@@ -4062,6 +4072,29 @@ def create_app() -> FastAPI:
           - 200  stopped / already terminal (idempotent no-op)
         """
         body, status = _composite_stop_views.stop_composite_run(ws, run_id)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.post(
+        "/api/composite-run/{run_id}/delete",
+        tags=["Composites"],
+        summary="Delete a run from the Simulations DB (row + tombstone + artifacts)",
+    )
+    def composite_run_delete_route(
+        run_id: str,
+        ws: Path = Depends(get_workspace),
+    ) -> JSONResponse:
+        """Delete a composite run from the Simulations DB.
+
+        Best-effort-stops a still-running worker, removes the ``runs_meta`` row
+        (and writes a ``deleted`` tombstone so the JSONL fold does not resurrect
+        it), and deletes the run's ``.pbg/runs/<run_id>/`` artifact directory.
+
+        Status codes (via ``lib.composite_delete_views.delete_composite_run``):
+          - 400  missing ``run_id``
+          - 404  unknown run (``{"deleted": false, "outcome": "not_found"}``)
+          - 200  removed (``{"deleted": true, "outcome": "deleted"}``)
+        """
+        body, status = _composite_delete_views.delete_composite_run(ws, run_id)
         return JSONResponse(status_code=status, content=body)
 
     @app.get(
@@ -9144,6 +9177,19 @@ def create_app() -> FastAPI:
     # lib/ai_tools adds it to its own EXCLUDED_PATHS; not imported here, [chat] is optional).
     provider_readonly, app.state.provider_ai_excluded = _include_provider_routers(app)
     app.state.readonly_allowed_mutations = frozenset(_READONLY_ALLOWED_MUTATIONS) | provider_readonly
+
+    # Load enabled plugins HERE — before the catch-all below. Each enabled plugin's
+    # router (/api/plugins/<name>), static mount (/plugins/<name>), and the
+    # /api/plugins/manifest route must be registered ahead of ``/{rel:path}``, which
+    # Starlette would otherwise match first. The workspace root is already set at this
+    # point (serve_fastapi sets it before importing this module; inproc tests set it
+    # before create_app), so per-workspace ``plugins:`` opt-in is visible. Fail-soft.
+    try:
+        from vivarium_workbench.lib import _root as _plugin_root
+
+        _load_plugins(app, _plugin_root.get_workspace_root())
+    except Exception as exc:  # noqa: BLE001 - never let plugin loading break app startup
+        logging.getLogger(__name__).warning("plugin loading failed: %s", exc)
 
     # -----------------------------------------------------------------------
     # CATCH-ALL — MUST stay registered LAST (immediately before ``return app``)

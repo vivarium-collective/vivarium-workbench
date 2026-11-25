@@ -1,0 +1,1 @@
+{"css": ["example.css"], "js": ["example.js"], "panels": [{"id": "example-hello", "title": "Hello", "icon": "beaker", "group": "Example", "side": "left", "entry": "ExampleHelloPanel"}]}

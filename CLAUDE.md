@@ -90,11 +90,14 @@ packages/vivarium-workbench-vivaapi/vivarium_workbench_sms vivarium_dashboard`, 
 and `uv run mypy`.
 Dependencies are managed with `uv` (`uv.lock`). The repo is a **uv workspace**: the root is the core
 (`vivarium-workbench`) and `packages/vivarium-workbench-vivaapi/` is the viva-api (SMS) backend plugin, its own
-distribution (import package `vivarium_workbench_sms`; docs/backend-adapters.md step P4b), released in lockstep
-(`scripts/set_version.sh`). A plain `uv sync` / `uv run` installs both (the `plugins` default group);
+distribution (import package `vivarium_workbench_sms`; docs/backend-adapters.md step P4b) with an identical version
+and `==` pins both ways (`scripts/set_version.sh`). Both are built and checked on every tag; only the core is published
+to PyPI (Jim, 2026-11-24). A plain `uv sync` / `uv run` installs both (the `plugins` default group);
 `--no-group plugins` installs the core alone (`scripts/pytest_core_only.sh` runs the suite that way). With pip,
 install both editable into the venv that will run it: `pip install -e . -e packages/vivarium-workbench-vivaapi`
-(`pip install -e .` alone gets no SMS features). Published: `pip install 'vivarium-workbench[vivaapi]'`.
+(`pip install -e .` alone gets no SMS features). The plugin is not on PyPI, so
+`pip install 'vivarium-workbench[vivaapi]'` from PyPI does not resolve; from git, `uv add 'vivarium-workbench[vivaapi] @
+git+https://github.com/vivarium-collective/vivarium-workbench.git'` installs both (README "Install").
 Note `bigraph-loom`, `viva-superpowers` (formerly pbg-superpowers) and
 `discovery-engine` are direct git/path deps.
 
@@ -175,6 +178,17 @@ for polling endpoints and are lost on restart.
 Vanilla JS (no bundler/build). `index.html.j2` is rendered once at serve time
 (`lib/report.render_dashboard`). `client.js` is the SPA driver; `data-source.js`
 abstracts whether data comes from the live server or a published static bundle.
+
+### Plugins (`vivarium_workbench/plugins/`)
+External features opt in via in-process plugins instead of editing core. A plugin is
+a pip-installable package declaring a `vivarium_workbench.plugins` entry-point; at
+startup `plugins.load_plugins(app, ws_root)` (called from the app lifespan) wires each
+*enabled* plugin's `APIRouter` under `/api/plugins/<name>`, mounts its static dir under
+`/plugins/<name>`, and records a UI manifest served at `/api/plugins/manifest` that
+`static/plugin-loader.js` reads to register panels via `VivPanelDock`. Enabled =
+installed AND listed in the workspace's `workspace.yaml` `plugins:` or env
+`VIVARIUM_WORKBENCH_PLUGINS`. Each plugin's load is fail-soft. Authoring guide:
+[docs/plugins.md](docs/plugins.md).
 
 ### Publish / read-only bundle (`publish.py`)
 Exports a workspace to a self-contained static bundle (`api/*.json` + per-study
