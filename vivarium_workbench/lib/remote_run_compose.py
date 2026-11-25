@@ -22,6 +22,7 @@ same dispatch through :func:`run_composite`.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -53,8 +54,6 @@ STUDY_EMITTER = "user_emitter"
 TOKEN_ENV_VAR = "COMPOSE_API_TOKEN"
 #: The workbench extra that signs calls in as the person who ran ``compose-api auth login`` (:func:`_session`).
 SIGNIN_EXTRA = "compose-api-signin"
-#: compose-api's bound on ``interval_time`` (``POST /simulation/run`` answers 400 above it).
-MAX_STEPS = 1000
 #: The prefix of the tag that names one dispatch, so a submission whose answer was lost can be found again.
 DISPATCH_TAG_PREFIX = "workbench:dispatch:"
 #: How often, and how far apart in seconds, a submission whose answer was lost is looked up by its dispatch tag.
@@ -522,17 +521,35 @@ def _is_refusal(e: Exception) -> bool:
     return isinstance(e, InvalidRequestError) or (isinstance(e, ApiError) and e.status_code == 409)
 
 
+#: How long the card's run waits for compose-api, at least: the remote run poller's default (2 h) is a stall guard,
+#: and a long run must not outlast it. compose-api limits a run's SLURM job to 30 minutes per 1,000 steps (production:
+#: slurm_time_limit_minutes / max_interval_time, capped at 12 h), i.e. 1.8 s per step; the card waits for
+#: WAIT_PER_STEP seconds per step on top of the guard's base, which covers the queue.
+WAIT_PER_STEP = 2.0
+
+
+def wait_timeout(steps: float, poll_timeout: float) -> "float | None":
+    """How long :func:`run_composite` waits for a run of ``steps`` before giving up on it (``None``: no deadline, when
+    the poller's is off). Never less than ``poll_timeout``, and at least ``poll_timeout`` plus
+    :data:`WAIT_PER_STEP` per step, so the card does not mark a long run failed while compose-api is still running it."""
+    if not poll_timeout or poll_timeout <= 0:
+        return None
+    return poll_timeout + WAIT_PER_STEP * float(steps)
+
+
 def checked_steps(value: object) -> float:
-    """A run's step count as compose-api takes it (``interval_time``): above 0 and at most :data:`MAX_STEPS`.
-    Raises :class:`ComposeDispatchError` (400) rather than run fewer steps than were asked for."""
+    """A run's step count as compose-api takes it (``interval_time``): a positive number, or a 400
+    (:class:`ComposeDispatchError`, ``bad-steps``). How long a run may be is compose-api's to say, per caller: up to
+    its ``max_interval_time`` for anyone and up to ``max_long_run_interval_time`` with its ``long_run_role``. Its
+    400 names the limit and the role, and reaches the person as it is (:func:`_backend_error`)."""
     try:
         steps = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         raise ComposeDispatchError({"error": f"n_steps must be a number, got {value!r}", "reason": "bad-steps"},
                                    400) from None
-    if not 0 < steps <= MAX_STEPS:
-        raise ComposeDispatchError({"error": f"compose-api runs 1 to {MAX_STEPS} steps per run; this run asks for "
-                                             f"{value}", "reason": "bad-steps", "max_steps": MAX_STEPS}, 400)
+    if not (math.isfinite(steps) and steps > 0):
+        raise ComposeDispatchError({"error": f"n_steps must be a positive number, got {value!r}",
+                                    "reason": "bad-steps"}, 400)
     return steps
 
 
@@ -671,7 +688,7 @@ def dispatch_preflight(ws_root: Path) -> dict:
 
 def submit(ws_root: Path, body: dict) -> tuple[dict, int]:
     """``POST /simulation/run`` for a study's composite. ``({run_id, phase: "running", backend}, 202)``; 400 for a
-    step count compose-api does not run, 401 for a first run that needs a signed-in caller, 409 when a named
+    step count that is not a positive number (how many compose-api runs is its to refuse: 409, below), 401 for a first run that needs a signed-in caller, 409 when a named
     environment does not exist, a class is not in its environment, or compose-api refuses the run (its words are
     shown), 422 for a composite that cannot be exported, 502 when compose-api cannot be reached or failed (never
     retried: a retry could submit twice, or start a second environment build; a submission whose answer was lost is
@@ -739,12 +756,12 @@ def run_composite(ws_root: Path, composite_id: str, *, dest: Path, n_steps: floa
             run_id = run_id_of(simulation_id)
             print(f"Submitted to compose-api ({env['name'] or 'environment chosen by compose-api'}). Run id: {run_id}",
                   flush=True)
+            deadline = wait_timeout(steps, poll_timeout)
             try:
-                state = session.wait(simulation_id, poll=poll_interval,
-                                     timeout=poll_timeout if poll_timeout and poll_timeout > 0 else None,
+                state = session.wait(simulation_id, poll=poll_interval, timeout=deadline,
                                      on_update=lambda s: print(f"  status: {s.status}", flush=True))
             except ApiTimeout as e:
-                raise TimeoutError(f"compose-api run {run_id} did not finish within {poll_timeout:.0f}s; it may "
+                raise TimeoutError(f"compose-api run {run_id} did not finish within {deadline:.0f}s; it may "
                                    "still be running there") from e
             if not state.ok:
                 error = state.record.error_message if state.record is not None else None

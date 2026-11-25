@@ -133,4 +133,26 @@ describe('SetupRunPanel run-kind (temporal vs workflow)', () => {
     await waitFor(() => expect(body).not.toBeNull(), { timeout: 5000 });
     expect(body.steps).toBe(1);
   });
+
+  // Falsifies: the page caps a run's Duration (a multi-generation compose-api run needs ~2,527 per generation). How
+  // long a run may be is the backend's to say (compose-api: its long-runs role); the page sends what was typed.
+  it('a long Duration is sent as typed, not capped', async () => {
+    let body: any = null;
+    const fetchMock = vi.fn((url: string, opts?: any) => {
+      if (url.includes('/api/composite-test-run')) {
+        body = JSON.parse(opts.body);
+        return Promise.resolve({ ok: true, status: 202, json: async () => ({ run_id: 'r-l', status: 'running' }) });
+      }
+      if (url.includes('/api/composite-run/r-l/status'))
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ run_id: 'r-l', status: 'running', progress_step: 0, n_steps: 20000 }) });
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ runs: [] }) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<SetupRunPanel {...PANEL_EXTRAS} compositeId="pkg.composites.long" emitSet={new Set()} />);
+    fireEvent.change(screen.getByLabelText(/Duration/), { target: { value: '20000' } });
+    fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
+    await waitFor(() => expect(body).not.toBeNull(), { timeout: 5000 });
+    expect(body.steps).toBe(20000);   // past the input's max=10000 too: that attribute only bounds the stepper
+  });
 });
