@@ -57,6 +57,23 @@ first credential that applies (`remote_run_compose._session`):
    (`compose-api config show` prints where profiles are configured) and sign in to that profile.
 3. **None**: the call is anonymous, as before.
 
+**Signing in from the page** (`lib/compose_signin.py`, `static/compose-signin.js`). With the extra, a person does not
+need the CLI to sign in. The GitHub panel's Account section has a **compose-api** row: **Sign in** makes the login
+`compose-api auth login` makes, on the same profile and in the same credential store, so the CLI and the workbench share
+it and either can sign in or out. The client opens this computer's browser, or shows a code to enter on any device over
+SSH or without a display. **Use a code instead** asks for the code directly, for a workbench on another machine. The
+page shows the client's own instructions while it waits, up to five minutes. **Signed in · <profile>** signs out after
+a confirm, for the CLI too.
+- **Routes:** `POST /api/auth/compose-api/start` (`{method: auto | browser | device}`), `GET …/status`, and
+  `POST …/logout`.
+- **Tokens:** they go from Auth0 to the credential store inside the client and never through these routes.
+- **Guards:** the POSTs are CSRF-guarded, not in the read-only allow-list, and excluded from the chat's tools.
+- **When the row is hidden:** where a sign-in here would not sign the calls in. That means no backend named,
+  `COMPOSE_API_TOKEN` set, or a CLI profile for another API.
+- **Linux:** a Linux host needs a running Secret Service (GNOME Keyring or KWallet), as the CLI does. The client keeps
+  no file fallback.
+- **Known wart:** the client's browser callback page still says to return to the terminal.
+
 Without the extra, only `COMPOSE_API_TOKEN` signs a call in, as before. Install the extra where the workbench runs;
 the Composites tab's remote runs run on the workspace's interpreter (`env_resolver.resolve_run_interpreter`), so
 install it there too when that is another environment.

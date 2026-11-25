@@ -2004,6 +2004,17 @@ a.viv-bs-commit:hover { text-decoration: underline; }
           </div>
         </div>
       </div>
+
+      {#- compose-api sign-in (static/compose-signin.js): shown only where signing in here would sign this workbench's
+          compose-api runs in; the login is the compose-api CLI's, so either can sign in or out. -#}
+      <div class="gh-row" id="viv-compose-row" style="display:none">
+        <div class="gh-label">compose-api</div>
+        <div class="gh-value">
+          <button id="viv-compose-chip" class="btn-mini" type="button" data-state="loading">…</button>
+          <div class="gh-value-hint" id="viv-compose-hint"></div>
+          <div id="viv-compose-flow" style="display:none;margin-top:8px;white-space:pre-wrap;font-size:0.85em"></div>
+        </div>
+      </div>
     </div>
 
     <!-- ── Branch & sync — the workspace's git state. Repo/branch are CHOSEN in
@@ -2970,6 +2981,7 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/mobile-panels.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* mobile panel switcher unavailable */"></script>
 <script src="assets/search-palette.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* global search unavailable */"></script>
 <script src="assets/github-login.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* github-login unavailable */"></script>
+<script src="assets/compose-signin.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* compose-api sign-in unavailable */"></script>
 <!-- chat-core.js already loaded above (shared by panel-dock.js + process-code.js). -->
 <script src="assets/ai-models.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>
 <script src="assets/chat.js{% if asset_version %}?v={{ asset_version }}{% endif %}" onerror="/* chat unavailable */"></script>

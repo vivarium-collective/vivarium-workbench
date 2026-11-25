@@ -1630,3 +1630,252 @@ def test_make_public_refuses_a_bad_request_before_asking_compose_api(ws, stub, b
     res = inproc_client(ws).post("/api/remote-run-visibility", json=payload)
     assert res.status_code == 400 and says in res.json()["error"], res.text
     assert stub.calls_to("change-simulation-visibility") == []
+
+
+# --- signing in from the page (lib/compose_signin.py; /api/auth/compose-api/*) -----------------------------------
+#
+# Real here: the routes and the CSRF middleware, the app on ONE event loop across requests (a TestClient entered as a
+# context manager, as uvicorn keeps one loop), the background task, the client's `resolve`, `connection_for`,
+# `SignInRequest`, profile resolution and journaled `AuthSession`, `signed_in_session` reading the result, and a run
+# request to the contract stub. Stood in: the OS keychain (`_Keychain`, as above) and Auth0's side of the sign-in.
+# `persistent_sign_in` is replaced by a double that calls `notify` as the client does, waits for the test to let the
+# person "finish", then commits a real grant through the client's `AuthSession` into the store it was handed: what
+# a finished sign-in leaves. The client's OAuth exchange itself is the client's to test (compose-api's tests).
+
+import threading as _threading
+
+
+@pytest.fixture
+def signin_client(ws, backend_env):
+    """A client on one event loop for the whole test, and the module's sign-in state reset around it."""
+    from fastapi.testclient import TestClient
+
+    from vivarium_workbench.api.app import create_app, get_workspace
+    from vivarium_workbench.lib import _root, compose_signin
+
+    saved_root = _root.get_workspace_root()
+    compose_signin._FLOW = None
+    _root.set_workspace_root(ws)
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: ws
+    with TestClient(app, base_url="http://127.0.0.1") as tc:
+        yield tc
+    compose_signin._FLOW = None
+    if saved_root is not None:
+        _root.set_workspace_root(saved_root)
+
+
+class _PersonAtAuth0:
+    """``persistent_sign_in`` with Auth0's side stood in: tells the person what to do through ``notify``, waits until
+    the test says they finished, then commits a real grant into the store, through the client's ``AuthSession``."""
+
+    def __init__(self):
+        self.calls: list = []
+        self.finished = _threading.Event()
+        self.token = None
+
+    async def __call__(self, settings, request, store, *, notify, **kwargs):
+        import asyncio
+        import secrets
+        from datetime import UTC, datetime, timedelta
+
+        from compose_api_client.auth import AuthSession, Identity, TokenGrant
+        from compose_api_client.profiles import requested_scopes
+        from pydantic import SecretStr
+
+        self.calls.append({"profile": settings.profile, "method": str(request.method),
+                           "persistent": request.persistent, "signup": request.signup, "store": store})
+        notify("Open https://login.example.invalid/activate and enter WXYZ-1234")
+        while not self.finished.is_set():
+            await asyncio.sleep(0.02)
+        now = datetime.now(UTC)
+        self.token = f"access-{settings.profile}-{secrets.token_hex(8)}"
+        grant = TokenGrant(identity=Identity(issuer=settings.issuer, subject="auth0|page-signer"),
+                           access_token=SecretStr(self.token), access_token_expires_at=now + timedelta(hours=1),
+                           refresh_token=SecretStr(secrets.token_hex(8)), scopes=requested_scopes(persistent=True),
+                           received_at=now)
+        session = AuthSession(settings, store)
+        async with session.login_transaction() as snapshot:
+            await session.commit(grant, snapshot)
+
+
+def _principal(settings, subject="auth0|page-signer") -> dict:
+    """compose-api's ``GET /auth/me`` answer for a signed-in caller (the contract's CurrentPrincipalResponse)."""
+    return {"issuer": settings.issuer, "subject": subject, "audience": [settings.auth0_audience], "roles": ["user"],
+            "scopes": [], "permissions": []}
+
+
+def _poll(client, until, timeout=10.0):
+    import time
+
+    deadline = time.monotonic() + timeout
+    while True:
+        status = client.get("/api/auth/compose-api/status").json()
+        if until(status) or time.monotonic() > deadline:
+            return status
+        time.sleep(0.05)
+
+
+def test_signing_in_from_the_page_makes_the_cli_login_and_signs_runs_in(ws, stub, backend_env, signin_client,
+                                                                         cli_auth):
+    """Falsifies: the page's sign-in signs in on another profile or store than the CLI's, is not persistent, does not
+    survive the request that started it (it must keep waiting for the person), hides the client's instructions, or
+    leaves runs unsigned. After it, a run request carries the login it made."""
+    from compose_api_client.auth import signin
+
+    store = _Keychain()
+    opened = _replace_keychain(backend_env, store)
+    profile = _cli_profile("lab", stub.url)
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    _signed_in_backend(stub, backend_env, ws)
+    stub.respond("GET", "/auth/me", 200, _principal(profile))
+    person = _PersonAtAuth0()
+    backend_env.setattr(signin, "persistent_sign_in", person)
+    c = signin_client
+
+    before = c.get("/api/auth/compose-api/status").json()
+    assert (before["available"], before["signed_in"], before["profile"]) == (True, False, "lab"), before
+
+    res = c.post("/api/auth/compose-api/start", json={"method": "device"})
+    assert res.status_code == 202, res.text
+    waiting = _poll(c, lambda s: s["flow"] and s["flow"]["notes"])
+    assert waiting["flow"]["state"] == "running"
+    assert "WXYZ-1234" in "\n".join(waiting["flow"]["notes"])          # the client's instruction reaches the page
+    (call,) = person.calls
+    assert (call["profile"], call["method"], call["persistent"], call["signup"]) == ("lab", "device", True, False)
+    assert call["store"] is store and set(opened) == {"lab"}           # the CLI profile's own credential store
+
+    person.finished.set()
+    done = _poll(c, lambda s: s["flow"]["state"] != "running")
+    assert done["flow"]["state"] == "ok", done
+    assert done["signed_in"] is True
+    (me,) = stub.calls_to("get-current-principal")      # the API confirmed the new login, as the CLI has it confirm
+    assert _bearer(me) == f"Bearer {person.token}"
+
+    stub.respond("DELETE", "/simulations/{simulation_id}", 202, CANCELLED)
+    assert c.post("/api/remote-run-cancel", json={"simulation_id": RUN_ID}).status_code == 200
+    (cancel,) = stub.calls_to("cancel-simulation")
+    assert _bearer(cancel) == f"Bearer {person.token}"
+
+
+def test_a_login_the_api_does_not_confirm_is_not_reported_as_signed_in(ws, stub, backend_env, signin_client,
+                                                                          cli_auth):
+    """Falsifies: the page says the sign-in worked when compose-api refuses the new login (a profile whose audience is
+    wrong for this API, say). The CLI counts a login done only once the API confirms who it is; so must the page."""
+    from compose_api_client.auth import signin
+
+    _replace_keychain(backend_env, _Keychain())
+    _cli_profile("lab", stub.url)
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    _signed_in_backend(stub, backend_env, ws)
+    stub.respond_error("GET", "/auth/me", 401, {"detail": "Invalid token audience"})
+    person = _PersonAtAuth0()
+    backend_env.setattr(signin, "persistent_sign_in", person)
+    c = signin_client
+
+    assert c.post("/api/auth/compose-api/start", json={"method": "device"}).status_code == 202
+    person.finished.set()
+    done = _poll(c, lambda s: s["flow"]["state"] != "running")
+    assert done["flow"]["state"] == "error", done
+    assert "did not confirm" in done["flow"]["error"]
+
+
+def test_a_sign_in_that_fails_before_waiting_does_not_block_the_next(ws, stub, backend_env, signin_client, cli_auth):
+    """Falsifies: a failure while preparing (before the person is asked) leaves the sign-in "running" with nothing
+    behind it, so every later start is refused as already waiting."""
+    from compose_api_client.auth import signin
+
+    _replace_keychain(backend_env, _Keychain())
+    _cli_profile("lab", stub.url)
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    _signed_in_backend(stub, backend_env, ws)
+
+    def broken_resolve(*args, **kwargs):
+        raise RuntimeError("resolve broke")
+
+    backend_env.setattr(signin, "resolve", broken_resolve)
+    c = signin_client
+    first = c.post("/api/auth/compose-api/start", json={"method": "device"})
+    assert first.status_code == 409 and "resolve broke" in first.json()["error"]
+    assert c.get("/api/auth/compose-api/status").json()["flow"]["state"] == "error"
+    second = c.post("/api/auth/compose-api/start", json={"method": "device"})
+    assert "already" not in second.json().get("error", ""), second.json()
+
+
+def test_one_sign_in_at_a_time_and_only_known_methods(ws, stub, backend_env, signin_client, cli_auth):
+    """Falsifies: a second sign-in starts while one waits for the person, or an unknown method is passed on."""
+    from compose_api_client.auth import signin
+
+    _replace_keychain(backend_env, _Keychain())
+    profile = _cli_profile("lab", stub.url)
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    _signed_in_backend(stub, backend_env, ws)
+    stub.respond("GET", "/auth/me", 200, _principal(profile))
+    person = _PersonAtAuth0()
+    backend_env.setattr(signin, "persistent_sign_in", person)
+    c = signin_client
+
+    assert c.post("/api/auth/compose-api/start", json={"method": "carrier-pigeon"}).status_code == 400
+    assert c.post("/api/auth/compose-api/start", json={"method": "device"}).status_code == 202
+    again = c.post("/api/auth/compose-api/start", json={"method": "device"})
+    assert again.status_code == 409 and "already" in again.json()["error"]
+    person.finished.set()
+    assert _poll(c, lambda s: s["flow"]["state"] != "running")["flow"]["state"] == "ok"
+    assert len(person.calls) == 1
+
+
+def test_sign_in_is_offered_only_where_it_would_sign_the_calls_in(ws, stub, backend_env, signin_client, cli_auth):
+    """Falsifies: the page offers a sign-in that would not sign this workbench's calls in: no backend named, a
+    COMPOSE_API_TOKEN that takes precedence, or a CLI profile for another API (its login is never sent here)."""
+    from compose_api_client.auth import signin
+
+    person = _PersonAtAuth0()
+    backend_env.setattr(signin, "persistent_sign_in", person)
+    _replace_keychain(backend_env, _Keychain())
+    c = signin_client
+
+    assert c.get("/api/auth/compose-api/status").json()["reason"] == "no-backend"
+    _signed_in_backend(stub, backend_env, ws)
+    _cli_profile("elsewhere", "https://compose.elsewhere.invalid")
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "elsewhere")
+    other = c.get("/api/auth/compose-api/status").json()
+    assert (other["available"], other["reason"]) == (False, "other-profile"), other
+    assert c.post("/api/auth/compose-api/start", json={}).status_code == 409
+    _cli_profile("lab", stub.url)
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    backend_env.setenv(rc.TOKEN_ENV_VAR, "a-token")
+    assert c.get("/api/auth/compose-api/status").json()["reason"] == "token"
+    backend_env.delenv(rc.TOKEN_ENV_VAR)
+    assert c.get("/api/auth/compose-api/status").json()["available"] is True
+    assert person.calls == []
+
+
+def test_signing_out_from_the_page_erases_the_cli_login(ws, stub, backend_env, signin_client, cli_auth):
+    """Falsifies: signing out leaves the CLI's stored login (so runs stay signed in), or needs Auth0 to clear it."""
+    store = _Keychain()
+    _login(_cli_profile("lab", stub.url), store)
+    _replace_keychain(backend_env, store)
+    backend_env.setenv("COMPOSE_API_CLI_PROFILE", "lab")
+    _signed_in_backend(stub, backend_env, ws)
+    c = signin_client
+
+    assert c.get("/api/auth/compose-api/status").json()["signed_in"] is True
+    out = c.post("/api/auth/compose-api/logout", json={})
+    assert out.status_code == 200, out.text
+    assert out.json()["signed_in"] is False
+    # Auth0 cannot be reached here (the profile's domain does not resolve): the login is erased all the same, and the
+    # answer says the revocation did not happen, as the CLI's logout does.
+    assert out.json()["revocation"] == "unavailable"
+    assert store.records == {}                       # erased from the store the CLI reads too
+    assert c.get("/api/auth/compose-api/status").json()["signed_in"] is False
+
+
+def test_the_sign_in_routes_refuse_another_origin_and_are_not_read_only(ws, backend_env, signin_client):
+    """Falsifies: a page on another origin can start or end a sign-in here, or a read-only workbench offers it."""
+    from vivarium_workbench.api import app as app_module
+
+    c = signin_client
+    for path in ("/api/auth/compose-api/start", "/api/auth/compose-api/logout"):
+        assert c.post(path, json={}).status_code != 404                # the route exists (same origin reaches it)
+        assert c.post(path, json={}, headers={"Origin": "https://evil.example"}).status_code == 403
+        assert path not in app_module._READONLY_ALLOWED_MUTATIONS
