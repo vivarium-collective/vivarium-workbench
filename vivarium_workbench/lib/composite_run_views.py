@@ -24,9 +24,10 @@ from pathlib import Path
 
 from vivarium_workbench.lib import composite_runs as cr
 from vivarium_workbench.lib.backends.ids import REMOTE_RUN_PREFIX
+from vivarium_workbench.lib.remote_run import STOPPED_LOG_MARK
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
-_TERMINAL_STATUSES = {"completed", "failed", "orphaned"}
+_TERMINAL_STATUSES = {"completed", "failed", "orphaned", "cancelled"}
 
 
 def _db_file(ws_root: Path) -> Path:
@@ -161,8 +162,13 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
     8198–8212):
 
     * ``failed`` / ``orphaned``: if ``log_path`` is in meta, adds ``log_path``
-      to the response and (when the file exists) reads the last 2 000 chars as
-      the ``error`` excerpt.
+      to the response and (when the file exists) reads the log's salient tail
+      as the ``error`` excerpt.
+    * ``cancelled``: the same, when the excerpt is a stopped remote run's line
+      (``STOPPED_LOG_MARK``), which says where its landed results are. A run
+      stopped locally ends with a faulthandler dump, which is not shown.
+    * ``downloadable``: ``completed`` or ``cancelled`` (``/download`` serves a
+      cancelled run's directory, e.g. a stopped remote run's landed results).
     * ``completed``: reads ``viz_html`` from
       ``.pbg/runs/<run_id>/viz.json`` when the file exists; skipped on
       ``JSONDecodeError``.
@@ -226,15 +232,16 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
         # / analysis flush) so the UI can announce the current stage.
         "phase": meta.get("phase") if meta["status"] == "running" else None,
     }
-    resp["downloadable"] = False
-    if meta["status"] in ("failed", "orphaned"):
+    resp["downloadable"] = meta["status"] in ("completed", "cancelled")
+    if meta["status"] in ("failed", "orphaned", "cancelled"):
         log_rel = meta.get("log_path")
         if log_rel:
             resp["log_path"] = log_rel
             log_full = ws_root / log_rel
             if log_full.is_file():
-                resp["error"] = _salient_error_excerpt(
-                    log_full.read_text(encoding="utf-8"))
+                excerpt = _salient_error_excerpt(log_full.read_text(encoding="utf-8"))
+                if meta["status"] != "cancelled" or excerpt.lstrip().startswith(STOPPED_LOG_MARK):
+                    resp["error"] = excerpt
     elif meta["status"] == "completed":
         wp = WorkspacePaths.load(ws_root)
         run_dir = wp.pbg / "runs" / run_id
@@ -251,14 +258,11 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
             has_analyses = content not in ("", "[]")
         resp["has_analyses"] = has_analyses
         resp["has_report"] = (run_dir / "report.html").is_file()
-        resp["downloadable"] = True
-    else:
-        resp["downloadable"] = False
     return resp, 200
 
 
 def _run_is_terminal(ws_root, run_id: str) -> bool:
-    """Return True iff the run's status is terminal (completed/failed/orphaned).
+    """Return True iff the run's status is terminal (completed/failed/orphaned/cancelled).
 
     Reuses the same ``connect`` + ``query_run_meta`` path as
     :func:`build_composite_run_status` — no parallel DB read.

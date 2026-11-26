@@ -4040,7 +4040,8 @@ def create_app() -> FastAPI:
 
         Returns ``{run_id, status, progress_step, n_steps, heartbeat_at}`` plus
         (for terminal states) ``log_path`` + ``error`` excerpt
-        (failed/orphaned) or ``viz_html`` (completed).
+        (failed/orphaned, and a stopped remote run's cancelled) or ``viz_html``
+        (completed).
 
         HTTP 404 when the db is absent or the run is not found.
 

@@ -214,3 +214,23 @@ def test_http_download_completed_run_returns_zip(tmp_path, inproc_client):
     assert len(names) > 0
     assert "report.html" in names
     assert "request.json" not in names
+
+
+def test_a_run_cancelled_locally_shows_no_log_excerpt_and_its_zip_downloads(tmp_path):
+    """A run stopped from the UI is SIGTERMed, and cli.py's faulthandler then dumps its stack into the log: the card
+    must not show a stack frame as the reason. Only a stopped remote run's own line is shown for `cancelled`."""
+    ws = _make_ws(tmp_path)
+    log = ws / ".pbg" / "runs" / "rC" / "run.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("step 2 of 9\nCurrent thread 0x0001 (most recent call first):\n"
+                   '  File "/home/me/ws/pkg/proc.py", line 42 in update\n', encoding="utf-8")
+    conn = cr.connect(ws / ".pbg" / "composite-runs.db")
+    cr.save_metadata(conn, spec_id="demo.spec", run_id="rC", params={}, label="test", started_at=1_000_000.0,
+                     n_steps=9, log_path=".pbg/runs/rC/run.log")
+    cr.mark_cancelled(conn, run_id="rC")
+    conn.close()
+    body, code = crv.build_composite_run_status(ws, "rC")
+    assert code == 200 and body["status"] == "cancelled"
+    assert "error" not in body and body["downloadable"] is True
+    _, _, zcode = crv.build_composite_run_zip(str(ws), "rC")
+    assert zcode == 200

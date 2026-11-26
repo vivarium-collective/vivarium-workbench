@@ -2079,7 +2079,9 @@ def _card_run(ws, steps: float):
     db = ws / ".pbg" / "composite-runs.db"
     conn = cr.connect(db)
     try:
-        cr.save_metadata(conn, spec_id=COMPOSITE, run_id="card-1", params={}, label="", started_at=0.0, n_steps=steps)
+        # As the card's launch records it (composite_test_run_views.py): the log, relative to the workspace.
+        cr.save_metadata(conn, spec_id=COMPOSITE, run_id="card-1", params={}, label="", started_at=0.0, n_steps=steps,
+                         log_path=str((run_dir / "run.log").relative_to(ws)))
         cr.ensure_history_table(conn)
     finally:
         conn.close()
@@ -2195,3 +2197,35 @@ def test_a_stopped_run_that_kept_nothing_is_not_landed_in_a_study(ws, stub, back
     assert res.status_code == 409 and res.json()["error"] == f"run {RUN_ID!r} is out_of_memory and kept no results to land"
     assert not (ws / "studies" / "demo" / "runs.db").is_file() or sqlite3.connect(
         ws / "studies" / "demo" / "runs.db").execute("SELECT count(*) FROM runs_meta").fetchone() == (0,)
+
+
+def test_a_cancelled_card_run_says_where_its_results_are_and_its_zip_downloads(ws, stub, backend_env, dashboard_client):
+    """Falsifies: the card of a cancelled run that kept its results shows only "✗ cancelled" (the status route read no
+    log for it), or its run's zip is refused as unfinished (`cancelled` missing from the terminal set)."""
+    import io
+    import zipfile
+
+    _register_fixture_workspace(stub)
+    _stopped(stub, "cancelled")
+    _name(backend_env, stub.url)
+    _card_run(ws, 3000)
+    c = dashboard_client(ws)
+    status = c.get("/api/composite-run/card-1/status").json()
+    assert status["status"] == "cancelled" and status["downloadable"] is True
+    assert status["error"].strip() == (f"REMOTE RUN STOPPED: compose-api run {RUN_ID} stopped (cancelled) at t=1720 of 3000; "
+                               "the results up to the last snapshot are landed: Runs, ⬇ Raw data")
+    res = c.get("/api/composite-run/card-1/download")
+    assert res.status_code == 200, res.text
+    with zipfile.ZipFile(io.BytesIO(res._body)) as outer:  # the test client keeps the bytes there
+        inner = zipfile.ZipFile(io.BytesIO(outer.read(f"{RUN_ID}{rc.ARCHIVE_SUFFIX}")))
+    assert inner.read(inner.namelist()[0]) == (FIX / PARTIAL).read_bytes()
+
+
+def test_a_completed_card_runs_status_is_unchanged(ws, stub, backend_env, dashboard_client):
+    _register_fixture_workspace(stub)
+    _completed(stub)
+    _name(backend_env, stub.url)
+    _card_run(ws, 3)
+    status = dashboard_client(ws).get("/api/composite-run/card-1/status").json()
+    assert status["status"] == "completed" and status["downloadable"] is True
+    assert "error" not in status and status["has_report"] is False and status["has_analyses"] is False
