@@ -1144,11 +1144,11 @@ def _execute_remote(req: RunRequest, run_dir: Path) -> int:
                 (last,) = conn.execute("SELECT MAX(global_time) FROM history WHERE simulation_id = ?",
                                        (req.run_id,)).fetchone()
                 at = f" at t={last:g} of {req.steps:g}" if last is not None else ""
-                reason = f"{stopped}{at}; the results up to the last snapshot are landed"
+                reason = f"{stopped}{at}; the results up to the last snapshot are landed: Runs, ⬇ Raw data"
             else:
                 reason = f"{stopped}; its results could not be landed"
             print(reason, flush=True)
-            _write_log(req, f"\nREMOTE RUN STOPPED: {reason}\n")
+            _write_log(req, f"\n{remote_run.STOPPED_LOG_MARK} {reason}\n")
             cr.complete_metadata(conn, run_id=req.run_id, n_steps=landed_steps or 0,
                                  status="cancelled" if stopped.status == "cancelled" else "failed")
             return 1

@@ -1272,8 +1272,8 @@ class CompositeRunStatus(BaseModel):
 
     Backed by ``lib.composite_run_views.build_composite_run_status``.  Success
     shape: ``{run_id, status, progress_step, n_steps, heartbeat_at}`` plus, for
-    terminal states, ``log_path`` + ``error`` (failed/orphaned) or ``viz_html``
-    (completed).  Error paths (HTTP 404) are carried via
+    terminal states, ``log_path`` + ``error`` (failed/orphaned, and a stopped
+    remote run's cancelled) or ``viz_html`` (completed).  Error paths (HTTP 404) are carried via
     :class:`fastapi.responses.JSONResponse`.  Pure pass-through
     (``extra="allow"``, no declared fields) so all terminal-state fields survive.
     """

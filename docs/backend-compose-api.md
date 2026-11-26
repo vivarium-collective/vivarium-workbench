@@ -212,13 +212,14 @@ every few minutes and on SIGTERM, and announces it as a dataset of kind `results
 there: `GET /datasets?simulation_id=<id>&kind=results`, then `GET /datasets/{id}/content`
 (`remote_run_compose._partial_results`), zipped in the archive's shape and landed as a completed run's is. Nothing on
 the dataset marks it as partial, so the run's status does: the card's run is recorded `cancelled` or `failed`, and its
-log says `stopped (<status>) at t=<last time landed> of <requested>; the results up to the last snapshot are landed`.
+log says `stopped (<status>) at t=<last time landed> of <requested>; the results up to the last snapshot are landed: Runs, ⬇ Raw data`.
 A run in an older environment version, or one whose node was lost, lists no such dataset, and a results directory
 (`*.zarr`, `*.fenics`) is not read here: those fail as before, naming the status.
 
-The card shows no Results panel for a stopped run: a `failed` one shows the log line above as its error, a `cancelled`
-one shows only its status (the card's error excerpt is read for `failed` and `orphaned` rows). The landed rows are
-reached through ⬇ Raw data in the Runs table; showing them on the card is a change of its own.
+The card shows no Results panel for a stopped run: it shows the run's status and the log line above as its error. The
+landed rows are reached through ⬇ Raw data in the Runs table, and `/api/composite-run/<id>/download` serves the run's
+directory (the landed archive and its log) for a `cancelled` run as for a `failed` one. Showing the rows on the card is
+a change of its own.
 
 Run ids are `compose-<simulation id>`. compose-api's ids are integers, which the other routes read as legacy
 simulation ids, so the compose check runs before them.

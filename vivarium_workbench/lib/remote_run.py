@@ -23,6 +23,11 @@ _DEFAULT_POLL_INTERVAL = 10.0
 _DEFAULT_POLL_TIMEOUT = 7200.0  # 2 h wall-clock base; <= 0 disables the deadline
 
 
+#: How the runner's log line for a :class:`RemoteRunStopped` run begins: the card's status reads a cancelled run's log
+#: only when it ends with this line (a run stopped locally ends with a faulthandler dump instead).
+STOPPED_LOG_MARK = "REMOTE RUN STOPPED:"
+
+
 class RemoteRunStopped(RuntimeError):
     """A deployment run that stopped before it completed (cancelled, timed out, out of memory, failed) and kept its
     results up to its last snapshot: ``archive`` is them, in the shape a completed run's archive has, and ``status``
