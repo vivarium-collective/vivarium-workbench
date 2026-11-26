@@ -1,0 +1,54 @@
+[
+  {
+    "id": "87062591-6764-4135-b927-03bb45cfcc2a",
+    "simulation_id": 12966,
+    "path": "05d6cbbc8f7f5e2f86958adf618bc351_0f1411c.omex",
+    "kind": "input",
+    "media_type": "application/zip",
+    "display_name": "Simulation input",
+    "origin": "manifest",
+    "size_bytes": 561,
+    "sha256": "6b38d235000b345993bfa543c3f0c25b6e3811f553098a0dc1d4ac727bd57568",
+    "attributes": {
+      "batch": false,
+      "end_time": 3000.0,
+      "file_type": "omex"
+    },
+    "span_id": "732f0bdc855cdbc7",
+    "available": true,
+    "created_at": "2026-11-25T19:10:51.441Z",
+    "updated_at": "2026-11-25T19:10:51.441Z"
+  },
+  {
+    "id": "9d4a9dfa-c6a5-456b-a843-64931b9f3534",
+    "simulation_id": 12966,
+    "path": "job.out",
+    "kind": "log",
+    "media_type": "text/plain",
+    "display_name": "SLURM log",
+    "origin": "manifest",
+    "size_bytes": null,
+    "sha256": null,
+    "attributes": {},
+    "span_id": "732f0bdc855cdbc7",
+    "available": true,
+    "created_at": "2026-11-25T19:18:57.775Z",
+    "updated_at": "2026-11-25T19:18:57.775Z"
+  },
+  {
+    "id": "c8120c16-68f6-4cf8-b7be-4fa66dbbef91",
+    "simulation_id": 12966,
+    "path": "output/results_2026-11-25[None#14-11-14.199991].pber",
+    "kind": "results",
+    "media_type": "application/x-ndjson",
+    "display_name": "results_2026-11-25[None#14-11-14.199991].pber",
+    "origin": "manifest",
+    "size_bytes": 529800,
+    "sha256": "ae45d5474aca070a31fdcb81b2fe9ed51e38a9a03b38104da191f0185cc97963",
+    "attributes": {},
+    "span_id": "732f0bdc855cdbc7",
+    "available": true,
+    "created_at": "2026-11-25T19:18:57.775Z",
+    "updated_at": "2026-11-25T19:18:57.775Z"
+  }
+]
