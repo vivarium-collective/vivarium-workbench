@@ -907,6 +907,45 @@ _THIN_ROUTE_TABLE: tuple[R, ...] = (
       summary='Uninstall a catalog module (PyPI or git-submodule) from the workspace', tags=['Registry & catalog'],
       params=(P('req', CatalogUninstallRequest),),
     ),
+    # ── Auth: GitHub device-flow + compose-api sign-in ──────────────────────────
+    # Pure (resp, code) delegators with no workspace dependency (adapter nows_pos).
+    R('post', '/api/auth/github/start', (_auth_views, 'auth_start'), 'auth_github_start',
+      shape='A', adapter='nows_pos',
+      response_model=AuthPayload, summary='Initiate a GitHub OAuth Device Flow', tags=['Auth'],
+      params=(P('body', dict, Body(default={})),),
+    ),
+    R('post', '/api/auth/github/token', (_auth_views, 'auth_token'), 'auth_github_token',
+      shape='A', adapter='nows_pos',
+      response_model=AuthPayload, summary='Sign in by pasting a GitHub token', tags=['Auth'],
+      params=(P('body', dict, Body(default={})),),
+    ),
+    R('get', '/api/auth/github/poll', (_auth_views, 'auth_poll'), 'auth_github_poll',
+      shape='A', adapter='nows_pos',
+      response_model=AuthPayload, summary='Poll the GitHub token endpoint for a pending device flow', tags=['Auth'],
+      params=(P('flow_id', str, ''),),
+    ),
+    R('get', '/api/auth/github/status', (_auth_views, 'auth_status'), 'auth_github_status',
+      shape='A', adapter='nows_pos',
+      response_model=AuthPayload, summary='Current GitHub auth session (never the token)', tags=['Auth'],
+    ),
+    R('post', '/api/auth/github/logout', (_auth_views, 'auth_logout'), 'auth_github_logout',
+      shape='A', adapter='nows_pos',
+      response_model=AuthPayload, summary='Clear the GitHub auth session + keyring entry', tags=['Auth'],
+      params=(P('body', dict, Body(default={})),),
+    ),
+    R('get', '/api/auth/github/orgs', (_auth_views, 'auth_orgs'), 'auth_github_orgs',
+      shape='A', adapter='nows_pos',
+      response_model=AuthPayload, summary="The user's GitHub namespace + orgs", tags=['Auth'],
+    ),
+    R('post', '/api/auth/compose-api/start', (_compose_signin, 'start'), 'auth_compose_api_start',
+      shape='A', adapter='nows_pos',
+      response_model=AuthPayload, summary='Start signing in to compose-api (browser or device code)', tags=['Auth'],
+      params=(P('body', dict, Body(default={})),),
+    ),
+    R('get', '/api/auth/compose-api/status', (_compose_signin, 'status'), 'auth_compose_api_status',
+      shape='A', adapter='nows_pos',
+      response_model=AuthPayload, summary='Whether compose-api calls are signed in, and the sign-in in progress (never a token)', tags=['Auth'],
+    ),
 )
 # fmt: on
 
@@ -7699,163 +7738,13 @@ def create_app() -> FastAPI:
 
 
     # -----------------------------------------------------------------------
-    # Auth — GitHub OAuth Device Flow (5 thin wrappers over lib.github_auth)
-    #
-    # The device-flow/session state lives in the lib.github_auth process-global
-    # singletons shared with the stdlib server, so these routes need no state
-    # extraction.  Every path (success AND error) is returned via JSONResponse
-    # so the lib-mapped status code (200/202/400/401/403/410/502/503) is
-    # preserved verbatim — a plain model return would force 200.  The 2 POSTs
-    # accept a permissive body they ignore (Body(default={})); the CSRF
-    # middleware already guards them.
-    # -----------------------------------------------------------------------
-
-    @app.post(
-        "/api/auth/github/start",
-        response_model=AuthPayload,
-        tags=["Auth"],
-        summary="Initiate a GitHub OAuth Device Flow",
-    )
-    def auth_github_start(body: dict = Body(default={})) -> JSONResponse:
-        """Initiate a GitHub Device Flow (mirrors the stdlib
-        ``POST /api/auth/github/start``).
-
-        Returns the ``user_code`` + ``verification_uri`` to display plus a
-        server-issued ``flow_id`` for ``/poll`` (the ``device_code`` is held
-        server-side, never returned).  The request body is accepted and ignored.
-
-        Status codes (byte-identical to the legacy handler): 503
-        (``{"error": "no_client_id"}`` — deployment not configured), 502
-        (other GitHub-side failure), 200 (success).  Library-backed via the pure
-        ``lib.auth_views.auth_start``.
-        """
-        resp, code = _auth_views.auth_start(body)
-        return JSONResponse(content=resp, status_code=code)
-
-    @app.post(
-        "/api/auth/github/token",
-        response_model=AuthPayload,
-        tags=["Auth"],
-        summary="Sign in by pasting a GitHub token",
-    )
-    def auth_github_token(body: dict = Body(default={})) -> JSONResponse:
-        """Sign in with a pasted GitHub token (PAT or ``gh`` token).
-
-        The universal fallback that needs neither a ``gh`` CLI session nor a
-        device-flow OAuth App client_id — usable on headless/remote servers.
-        Validates the token via GitHub's ``/user`` and persists the session.
-
-        Status: 200 ``{authenticated, login, source}``; 400 (empty token);
-        401 (GitHub rejected the token).  Library-backed via
-        ``lib.auth_views.auth_token``.
-        """
-        resp, code = _auth_views.auth_token(body)
-        return JSONResponse(content=resp, status_code=code)
-
-    @app.get(
-        "/api/auth/github/poll",
-        response_model=AuthPayload,
-        tags=["Auth"],
-        summary="Poll the GitHub token endpoint for a pending device flow",
-    )
-    def auth_github_poll(flow_id: str = "") -> JSONResponse:
-        """Poll a pending device flow (mirrors the stdlib
-        ``GET /api/auth/github/poll?flow_id=<uuid>``).
-
-        A missing/blank ``flow_id`` returns HTTP 400
-        ``{"status": "error", "detail": "missing_flow_id"}``; otherwise the
-        ``poll_device_flow`` outcome maps to an HTTP code the client can use
-        without parsing JSON: 200 (ok), 202 (pending), 410 (expired), 403
-        (denied), 400 (any other/error status).  Library-backed via the pure
-        ``lib.auth_views.auth_poll``.
-        """
-        resp, code = _auth_views.auth_poll(flow_id)
-        return JSONResponse(content=resp, status_code=code)
-
-    @app.get(
-        "/api/auth/github/status",
-        response_model=AuthPayload,
-        tags=["Auth"],
-        summary="Current GitHub auth session (never the token)",
-    )
-    def auth_github_status() -> JSONResponse:
-        """Current auth session (mirrors the stdlib
-        ``GET /api/auth/github/status``).
-
-        Returns ``{authenticated: false}`` or ``{authenticated: true, login,
-        source, scopes}`` — never the token itself.  Always HTTP 200.
-        Library-backed via the pure ``lib.auth_views.auth_status``.
-        """
-        resp, code = _auth_views.auth_status()
-        return JSONResponse(content=resp, status_code=code)
-
-    @app.post(
-        "/api/auth/github/logout",
-        response_model=AuthPayload,
-        tags=["Auth"],
-        summary="Clear the GitHub auth session + keyring entry",
-    )
-    def auth_github_logout(body: dict = Body(default={})) -> JSONResponse:
-        """Clear the in-memory session + persisted keyring entry (mirrors the
-        stdlib ``POST /api/auth/github/logout``).
-
-        Always returns HTTP 200 ``{"ok": true}``.  The request body is accepted
-        and ignored.  The CSRF middleware already guards this POST.
-        Library-backed via the pure ``lib.auth_views.auth_logout``.
-        """
-        resp, code = _auth_views.auth_logout(body)
-        return JSONResponse(content=resp, status_code=code)
-
-    @app.get(
-        "/api/auth/github/orgs",
-        response_model=AuthPayload,
-        tags=["Auth"],
-        summary="The user's GitHub namespace + orgs",
-    )
-    def auth_github_orgs() -> JSONResponse:
-        """List the user's personal namespace + orgs (mirrors the stdlib
-        ``GET /api/auth/github/orgs``).
-
-        Returns ``{login, orgs: [{name, kind}, ...]}`` on success.  Status codes
-        (byte-identical to the legacy handler): 401
-        (``{"error": "unauthenticated"}`` — no session), 502 (orgs lookup
-        failed), 200 (success).  Library-backed via the pure
-        ``lib.auth_views.auth_orgs``.
-        """
-        resp, code = _auth_views.auth_orgs()
-        return JSONResponse(content=resp, status_code=code)
-
-    # -----------------------------------------------------------------------
     # compose-api sign-in from the page: the login `compose-api auth login` makes, on the CLI's profile and in its
     # credential store, so the CLI and the workbench share it (lib.compose_signin). Tokens never pass through these
-    # routes. The two POSTs are guarded by the CSRF middleware and are not in the read-only allow-list. Sync routes: the
+    # routes. The POSTs are guarded by the CSRF middleware and are not in the read-only allow-list. Sync routes: the
     # client's credential-store calls block, so they run on worker threads, and a sign-in waits on a thread of its own.
+    # (/start and /status are now table-driven — see _THIN_ROUTE_TABLE. /logout stays here because its delegate takes
+    # no args, which the nows_pos adapter can't express.)
     # -----------------------------------------------------------------------
-
-    @app.post(
-        "/api/auth/compose-api/start",
-        response_model=AuthPayload,
-        tags=["Auth"],
-        summary="Start signing in to compose-api (browser or device code)",
-    )
-    def auth_compose_api_start(body: dict = Body(default={})) -> JSONResponse:
-        """Start a sign-in: ``{"method": "auto" | "browser" | "device"}``. 202 with the sign-in to poll at
-        ``GET /api/auth/compose-api/status``; 400 for another method; 409 when sign-in is not offered here or one is
-        already waiting (``lib.compose_signin.start``)."""
-        resp, code = _compose_signin.start(body)
-        return JSONResponse(content=resp, status_code=code)
-
-    @app.get(
-        "/api/auth/compose-api/status",
-        response_model=AuthPayload,
-        tags=["Auth"],
-        summary="Whether compose-api calls are signed in, and the sign-in in progress (never a token)",
-    )
-    def auth_compose_api_status() -> JSONResponse:
-        """``{available, signed_in, profile, api_base_url, flow}``, or ``{available: false, reason, message}`` where
-        signing in here would not sign the calls in. Always 200 (``lib.compose_signin.status``)."""
-        resp, code = _compose_signin.status()
-        return JSONResponse(content=resp, status_code=code)
 
     @app.post(
         "/api/auth/compose-api/logout",
