@@ -725,10 +725,12 @@
   function clampDock(dock, size, vw, vh) {
     var n = Math.round(+size) || 0;
     if (dock === 'bottom' || dock === 'top') return Math.max(110, Math.min(n, Math.max(110, Math.floor(vh * 0.7))));
-    var cap = Math.floor(vw * 0.6);                              // never more than 60% of the window...
-    // Allow docked panels to shrink down near the collapse threshold (drag past
-    // COLLAPSE_AT in panel-dock.js to collapse to a strip); min ~80px, max 720.
-    return Math.max(Math.min(80, cap), Math.min(n, Math.min(720, cap)));
+    var cap = Math.floor(vw * 0.88);                            // a docked panel may take up to 88%
+    // of the window, so the panel it sits beside (e.g. the investigation next to a
+    // widened Study window) can be dragged VERY narrow (~12% of the window). Still
+    // clamps to a usable min (~80px; drag past COLLAPSE_AT in panel-dock.js to
+    // collapse to a strip). The old min(720, 60%) cap locked the neighbour at ≥40%.
+    return Math.max(Math.min(80, cap), Math.min(n, cap));
   }
 
   var api = {

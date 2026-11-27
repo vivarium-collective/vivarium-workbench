@@ -97,17 +97,19 @@ def test_detail_header_reworked_back_addstudy_toggles():
     """The investigation-detail header: Back lands top-left and reads 'Back to
     Investigations'; a + Study button creates a study pre-scoped to the open
     investigation; the two toggles read as Details / Graph show-hide controls."""
-    # Back relabeled + is the first control in the header bar (top-left).
+    # Back relabeled + is the first control in the single-row header bar (top-left).
     assert "Back to Investigations" in HTML
-    top = HTML[HTML.index('class="inv-header-top"'):]
-    assert top.index('id="ws-back"') < top.index('class="inv-header-nav"'), \
+    bar = HTML[HTML.index('class="inv-header-bar'):]
+    assert bar.index('id="ws-back"') < bar.index('class="inv-header-nav"'), \
         "Back should sit left of the right-hand nav cluster"
     # + Study, scoped to the current investigation.
     assert 'id="ws-add-study"' in HTML
     assert "_openBrowseCreate('study', window._currentIset)" in HTML
-    # Toggles relabeled to read as reveal controls, with an active/pressed state.
-    assert "> Details<" in HTML and "> Graph<" in HTML
-    assert "inv-toggle-on" in JS
+    # The old Details/Graph toggle BUTTONS were removed: the Details panel now
+    # collapses by DRAG to a slim "Investigation details" re-expand bar, and the
+    # graph keeps its own resize bar — freeing header space.
+    assert 'id="inv-intro-collapsed-bar"' in HTML
+    assert 'id="aig-resize-bar"' in HTML
 
 
 def test_validation_is_a_tab_without_rfc_label():

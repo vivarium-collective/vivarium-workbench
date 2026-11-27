@@ -13581,6 +13581,47 @@
     try { var v = localStorage.getItem('inv-overview-collapsed'); return v === null ? false : v === '1'; }
     catch (e) { return false; }
   }
+  // Drag-resize the Details panel (#investigation-intro): the panel scrolls within
+  // a set height, and dragging the handle up past the panel collapses it (same
+  // state the Details toggle uses). Height persists in localStorage; wiring is
+  // idempotent (re-applies the stored height on every render).
+  function _wireInvIntroResize() {
+    var handle = document.getElementById('inv-intro-resize');
+    var intro = document.getElementById('investigation-intro');
+    if (!handle || !intro) return;
+    try {
+      var h = parseInt(localStorage.getItem('inv-overview-height') || '', 10);
+      if (h > 0) { intro.style.height = h + 'px'; intro.style.overflow = 'auto'; }
+    } catch (e) { /* ignore */ }
+    if (handle._wired) return;
+    handle._wired = true;
+    handle.addEventListener('pointerdown', function (ev) {
+      ev.preventDefault();
+      var startY = ev.clientY, startH = intro.getBoundingClientRect().height, moved = false;
+      intro.style.overflow = 'auto';
+      try { handle.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+      function _collapse() {
+        intro.style.height = '';
+        try { localStorage.setItem('inv-overview-collapsed', '1'); } catch (e2) { /* ignore */ }
+        _applyInvOverviewState();
+      }
+      function mv(e) {
+        if (Math.abs(e.clientY - startY) > 3) moved = true;
+        var nh = startH + (e.clientY - startY);
+        if (nh < 44) { _collapse(); up(); return; }   // dragged up past the panel -> collapse
+        intro.style.height = nh + 'px';
+      }
+      function up() {
+        document.removeEventListener('pointermove', mv);
+        document.removeEventListener('pointerup', up);
+        void moved;   // click-to-collapse removed (too reactive); use the collapse button
+        try { if (intro.style.height) localStorage.setItem('inv-overview-height', parseInt(intro.style.height, 10)); } catch (e) { /* ignore */ }
+      }
+      document.addEventListener('pointermove', mv);
+      document.addEventListener('pointerup', up);
+    });
+  }
+
   function _applyInvOverviewState() {
     var view = document.getElementById('investigation-detail-view');
     if (!view) return;
@@ -13609,6 +13650,8 @@
       btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       btn.classList.toggle('inv-toggle-on', !collapsed);
     }
+    _wireInvIntroResize();
+    _updateBothCollapsed();
   }
   function _toggleInvOverview() {
     var willOpen = _invOverviewCollapsed();   // currently collapsed -> this click opens it
@@ -15187,14 +15230,27 @@
   // Collapse the inline investigation graph to a thin "Investigation graph" bar
   // (triggered by dragging the graph↔study divider all the way up, or a control),
   // and expand it back (click the bar) to a normal height.
+  // When BOTH the Details panel and the graph are collapsed, lay their two slim
+  // re-expand bars out on a single row (CSS .inv-both-collapsed) instead of two.
+  function _updateBothCollapsed() {
+    var view = document.getElementById('investigation-detail-view');
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!view) return;
+    var both = view.classList.contains('inv-overview-collapsed') &&
+               !!(fs && fs.classList.contains('aig-collapsed'));
+    view.classList.toggle('inv-both-collapsed', both);
+  }
+  window._updateBothCollapsed = _updateBothCollapsed;
   function _aigCollapseInline() {
     var fs = document.getElementById('investigation-dag-fs');
     if (fs) fs.classList.add('aig-collapsed');
     _aigSyncGraphToggle();
+    _updateBothCollapsed();
   }
   function _aigExpandInline() {
     var fs = document.getElementById('investigation-dag-fs');
     if (fs) fs.classList.remove('aig-collapsed');
+    _updateBothCollapsed();
     var shell = document.getElementById('investigation-dag-shell');
     if (shell) {
       shell._aigProgrammaticResize = true;
@@ -15633,6 +15689,41 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _aigWireResizeBar);
   else _aigWireResizeBar();
 
+  // The collapsed "Investigation graph" bar reveals the graph on a DOWNWARD DRAG
+  // as well as on click (its onclick already calls _aigExpandInline). So you can
+  // drag the slim bar back down to pull the graph out, without hunting for the
+  // header "Graph" button.
+  function _aigWireCollapsedBar() {
+    var bar = document.querySelector('#investigation-dag-fs .aig-collapsed-bar');
+    if (!bar || bar._aigDragWired) return;
+    bar._aigDragWired = true;
+    bar.addEventListener('pointerdown', function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      var fs = document.getElementById('investigation-dag-fs');
+      if (!fs || !fs.classList.contains('aig-collapsed')) return;
+      var startY = e.clientY, fired = false;
+      try { bar.setPointerCapture(e.pointerId); } catch (_) { /* older browsers */ }
+      function mv(ev) {
+        if (!fired && (ev.clientY - startY) > 6) {
+          fired = true;
+          if (typeof window._aigExpandInline === 'function') window._aigExpandInline();
+          up();
+        }
+      }
+      function up() {
+        bar.removeEventListener('pointermove', mv);
+        bar.removeEventListener('pointerup', up);
+        bar.removeEventListener('pointercancel', up);
+      }
+      bar.addEventListener('pointermove', mv);
+      bar.addEventListener('pointerup', up);
+      bar.addEventListener('pointercancel', up);
+    });
+  }
+  window._aigWireCollapsedBar = _aigWireCollapsedBar;
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _aigWireCollapsedBar);
+  else _aigWireCollapsedBar();
+
   // Ctrl/⌘ + mouse-wheel (and trackpad pinch, which the browser delivers as a
   // wheel event with ctrlKey=true) zooms the investigation graph via the UNIFIED
   // zoom — so it adjusts semantic detail (band) AND magnification together, just
@@ -15959,12 +16050,15 @@
   // DAG (no jump to the legacy Studies tab). The iframe is the same
   // /studies/<name> route the standalone embed uses.
   function _openStudyInsideInvestigation(name, tab) {
-    // Unified with every other study-open entry point: route through the single
-    // workspace router so a graph node / ref link / needs-attention button opens
-    // the study exactly like clicking a study card — the investigation context
-    // collapses to the slim bar and the study opens as a tab in the porthole.
-    // (Previously this embedded a separate panel BELOW the graph with its own
-    // Pop-out/×, leaving the context expanded — the inconsistency this fixes.)
+    // Open the study as a free-floating, redockable Study WINDOW (study-panel.js,
+    // on VivPanelDock) — independent of the investigation graph, which stays put.
+    // You can move / redock / collapse the study window like the Chat / Code / Graph
+    // panels. Falls back to the porthole router when the study panel isn't present
+    // (e.g. an older published snapshot bundle without study-panel.js).
+    if (window.StudyPanel && typeof window.StudyPanel.open === 'function') {
+      window.StudyPanel.open(name, tab);
+      return;
+    }
     _openStudyEmbeddedNewTab(name, tab);
   }
   window._openStudyInsideInvestigation = _openStudyInsideInvestigation;
@@ -17357,6 +17451,18 @@
     // Single router: show the study's OWN investigation workspace, then
     // open/focus its study tab. Never the legacy icon view, never full-window nav.
     // Optional `tab` deep-links the porthole to a study sub-tab (e.g. conclusions).
+    // Prefer the dockable Study WINDOW (study-panel.js) for EVERY study-open gesture
+    // — a graph-node double-click, a study card in the Studies browser, or a ref
+    // link — so they all retarget the one reusable Study panel (wherever the user
+    // has docked it) instead of embedding a fresh study below the graph. Falls back
+    // to the in-porthole router below when the panel isn't present (e.g. a published
+    // snapshot bundle without study-panel.js).
+    if (window.StudyPanel && typeof window.StudyPanel.open === 'function' &&
+        document.getElementById('viv-study-panel')) {
+      window.StudyPanel.open(name, tab);
+      try { _selectStudyInRail(name); } catch (e) { /* ignore */ }
+      return;
+    }
     // Prefer the investigation you're already viewing if this study belongs to it,
     // so opening a study from investigation B's graph doesn't reroute to the study's
     // primary (first) investigation A. Fall back to the first-membership lookup.
