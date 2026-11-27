@@ -250,7 +250,7 @@ def next_finding_id(study: dict) -> str:
 
 def _draft_for_pass(outcome: OutcomeRow) -> ProposedFinding:
     desc = outcome.description or outcome.test_name
-    statement = f"v2ecoli reproduces {desc!r} within tolerance (test {outcome.test_name!r} PASS)."
+    statement = f"The model reproduces {desc!r} within tolerance (test {outcome.test_name!r} PASS)."
     return ProposedFinding(
         id="",  # filled in by caller
         kind="biological",
@@ -273,7 +273,7 @@ def _draft_for_fail(outcome: OutcomeRow, *, kind: str = "biological") -> Propose
     if kind == "biological":
         status = "contradicts"
         statement = (
-            f"v2ecoli does NOT reproduce {desc!r} (test {outcome.test_name!r} FAIL); "
+            f"The model does NOT reproduce {desc!r} (test {outcome.test_name!r} FAIL); "
             "the gap likely reflects a real biological mismatch."
         )
     else:

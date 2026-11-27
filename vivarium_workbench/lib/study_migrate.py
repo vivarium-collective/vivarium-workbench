@@ -43,26 +43,17 @@ def _discover_nested_studies(ws_root: Path) -> list[tuple[str, str, Path]]:
 
 
 def _detect_producer(ws_root: Path, discovered: list[tuple[str, str, Path]]) -> str | None:
-    """Find the ParCa/sim_data producer among discovered studies. Prefer a slug
-    containing 'parca' if multiple candidates qualify."""
-    candidates: list[str] = []
+    """Find the sim_data producer among discovered studies: the first study that
+    declares ``sim_data`` in its ``outputs``. A producer is whatever the spec
+    declares, regardless of how the study happens to be named."""
     for _inv_name, slug, src_dir in discovered:
         try:
             spec = yaml.safe_load((src_dir / "study.yaml").read_text(encoding="utf-8")) or {}
         except Exception:
             spec = {}
-        outputs = spec.get("outputs") or []
-        is_producer = "sim_data" in outputs or "parca" in slug.lower()
-        if is_producer:
-            candidates.append(slug)
-
-    if not candidates:
-        return None
-
-    for slug in candidates:
-        if "parca" in slug.lower():
+        if "sim_data" in (spec.get("outputs") or []):
             return slug
-    return candidates[0]
+    return None
 
 
 def _needs_backfill(spec: dict) -> bool:
