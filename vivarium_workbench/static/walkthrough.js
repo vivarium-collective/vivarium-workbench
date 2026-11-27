@@ -15633,6 +15633,41 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _aigWireResizeBar);
   else _aigWireResizeBar();
 
+  // The collapsed "Investigation graph" bar reveals the graph on a DOWNWARD DRAG
+  // as well as on click (its onclick already calls _aigExpandInline). So you can
+  // drag the slim bar back down to pull the graph out, without hunting for the
+  // header "Graph" button.
+  function _aigWireCollapsedBar() {
+    var bar = document.querySelector('#investigation-dag-fs .aig-collapsed-bar');
+    if (!bar || bar._aigDragWired) return;
+    bar._aigDragWired = true;
+    bar.addEventListener('pointerdown', function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      var fs = document.getElementById('investigation-dag-fs');
+      if (!fs || !fs.classList.contains('aig-collapsed')) return;
+      var startY = e.clientY, fired = false;
+      try { bar.setPointerCapture(e.pointerId); } catch (_) { /* older browsers */ }
+      function mv(ev) {
+        if (!fired && (ev.clientY - startY) > 6) {
+          fired = true;
+          if (typeof window._aigExpandInline === 'function') window._aigExpandInline();
+          up();
+        }
+      }
+      function up() {
+        bar.removeEventListener('pointermove', mv);
+        bar.removeEventListener('pointerup', up);
+        bar.removeEventListener('pointercancel', up);
+      }
+      bar.addEventListener('pointermove', mv);
+      bar.addEventListener('pointerup', up);
+      bar.addEventListener('pointercancel', up);
+    });
+  }
+  window._aigWireCollapsedBar = _aigWireCollapsedBar;
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _aigWireCollapsedBar);
+  else _aigWireCollapsedBar();
+
   // Ctrl/⌘ + mouse-wheel (and trackpad pinch, which the browser delivers as a
   // wheel event with ctrlKey=true) zooms the investigation graph via the UNIFIED
   // zoom — so it adjusts semantic detail (band) AND magnification together, just
@@ -15959,12 +15994,15 @@
   // DAG (no jump to the legacy Studies tab). The iframe is the same
   // /studies/<name> route the standalone embed uses.
   function _openStudyInsideInvestigation(name, tab) {
-    // Unified with every other study-open entry point: route through the single
-    // workspace router so a graph node / ref link / needs-attention button opens
-    // the study exactly like clicking a study card — the investigation context
-    // collapses to the slim bar and the study opens as a tab in the porthole.
-    // (Previously this embedded a separate panel BELOW the graph with its own
-    // Pop-out/×, leaving the context expanded — the inconsistency this fixes.)
+    // Open the study as a free-floating, redockable Study WINDOW (study-panel.js,
+    // on VivPanelDock) — independent of the investigation graph, which stays put.
+    // You can move / redock / collapse the study window like the Chat / Code / Graph
+    // panels. Falls back to the porthole router when the study panel isn't present
+    // (e.g. an older published snapshot bundle without study-panel.js).
+    if (window.StudyPanel && typeof window.StudyPanel.open === 'function') {
+      window.StudyPanel.open(name, tab);
+      return;
+    }
     _openStudyEmbeddedNewTab(name, tab);
   }
   window._openStudyInsideInvestigation = _openStudyInsideInvestigation;
@@ -17357,6 +17395,18 @@
     // Single router: show the study's OWN investigation workspace, then
     // open/focus its study tab. Never the legacy icon view, never full-window nav.
     // Optional `tab` deep-links the porthole to a study sub-tab (e.g. conclusions).
+    // Prefer the dockable Study WINDOW (study-panel.js) for EVERY study-open gesture
+    // — a graph-node double-click, a study card in the Studies browser, or a ref
+    // link — so they all retarget the one reusable Study panel (wherever the user
+    // has docked it) instead of embedding a fresh study below the graph. Falls back
+    // to the in-porthole router below when the panel isn't present (e.g. a published
+    // snapshot bundle without study-panel.js).
+    if (window.StudyPanel && typeof window.StudyPanel.open === 'function' &&
+        document.getElementById('viv-study-panel')) {
+      window.StudyPanel.open(name, tab);
+      try { _selectStudyInRail(name); } catch (e) { /* ignore */ }
+      return;
+    }
     // Prefer the investigation you're already viewing if this study belongs to it,
     // so opening a study from investigation B's graph doesn't reroute to the study's
     // primary (first) investigation A. Fall back to the first-membership lookup.

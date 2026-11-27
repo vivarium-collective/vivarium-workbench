@@ -5004,11 +5004,26 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 #investigation-dag-fs.aig-collapsed .aig-toolbar,
 #investigation-dag-fs.aig-collapsed #investigation-dag-shell,
 #investigation-dag-fs.aig-collapsed .aig-dock-grip { display: none !important; }
-/* The standalone collapsed "▸ Investigation graph" bar was removed — collapsing
-   no longer takes its own line. The header-nav "Graph" button (next to Overview)
-   is the always-available toggle instead. (The popout "bring it back" bar is a
-   separate element, .aig-poppedout-bar, and is unaffected.) */
-#investigation-dag-fs.aig-collapsed .aig-collapsed-bar { display: none !important; }
+/* When the inline graph is collapsed, bring back the slim "Investigation graph"
+   bar in its place — a clear, full-width bar you can CLICK or DRAG DOWN to reveal
+   the graph (the header-nav "Graph" button still works too). The drag-down gesture
+   is wired by _aigWireCollapsedBar (walkthrough.js). */
+#investigation-dag-fs.aig-collapsed .aig-collapsed-bar {
+  display: flex !important; align-items: center; gap: 8px; width: 100%;
+  box-sizing: border-box; text-align: left; cursor: ns-resize;
+  background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px;
+  padding: 7px 12px; margin: 0; color: #475569; font-weight: 600; font-size: 0.85em;
+  user-select: none; touch-action: none;
+}
+#investigation-dag-fs.aig-collapsed .aig-collapsed-bar::after {
+  content: "drag down or click to show"; margin-left: auto; font-weight: 500;
+  font-size: 0.82em; color: #94a3b8;
+}
+#investigation-dag-fs.aig-collapsed .aig-collapsed-bar:hover { background: #e2e8f0; color: #334155; }
+#investigation-dag-fs.aig-collapsed .aig-collapsed-bar:hover::after { color: #64748b; }
+:root[data-theme="dark"] #investigation-dag-fs.aig-collapsed .aig-collapsed-bar {
+  background: #1e293b; border-color: #334155; color: #cbd5e1;
+}
 /* While the graph is popped out, the inline graph VACATES the inset and this bar
    stands in its place (click to bring it back). Styled like the collapsed bar. */
 #investigation-dag-fs.aig-poppedout-hidden { display: none !important; }
@@ -6490,6 +6505,68 @@ body.vp-dragging .viv-graph-body .aig-toolbar{ cursor:grabbing; }
   cursor:pointer; color:#64748b; font-size:0.95em; line-height:1; padding:0;
 }
 .viv-graph-panel.vp-collapsed .viv-graph-expand:hover{ background:#eef2ff; color:#3730a3; }
+
+/* ── Dockable Study-detail panel (study-panel.js) — a VivPanelDock window hosting
+   the /studies/<name> route in an iframe. Opened by a graph-node double-click,
+   free to move / redock / collapse independently of the investigation graph. */
+.viv-study-panel{
+  --viv-study-w:520px; --viv-study-h:440px;
+  flex:0 0 var(--viv-study-w); width:var(--viv-study-w); min-width:0;
+  display:flex; flex-direction:column; position:relative; overflow:hidden;
+  background:var(--panel, #fff); border-left:1px solid var(--border, #e2e6eb);
+  transition:flex-basis .18s ease, width .18s ease;
+}
+.viv-study-panel[hidden]{ display:none !important; }
+.viv-study-panel[data-dock="left"]{ border-left:none; border-right:1px solid var(--border, #e2e6eb); }
+.viv-study-panel[data-dock="bottom"]{
+  flex:0 0 var(--viv-study-h); width:auto; height:var(--viv-study-h); min-height:0;
+  border-left:none; border-top:1px solid var(--border, #e2e6eb);
+}
+.viv-study-panel[data-dock="top"]{
+  flex:0 0 var(--viv-study-h); width:auto; height:var(--viv-study-h); min-height:0;
+  border-left:none; border-bottom:1px solid var(--border, #e2e6eb);
+}
+.viv-study-resize-handle{
+  position:absolute; top:0; left:0; bottom:0; width:6px;
+  cursor:col-resize; z-index:6; background:transparent; transition:background .12s ease;
+}
+.viv-study-resize-handle:hover{ background:#c7d2fe; }
+.viv-study-panel[data-dock="left"] .viv-study-resize-handle{ left:auto; right:0; }
+.viv-study-panel[data-dock="bottom"] .viv-study-resize-handle{ left:0; right:0; top:0; bottom:auto; width:auto; height:6px; cursor:row-resize; }
+.viv-study-panel[data-dock="top"] .viv-study-resize-handle{ left:0; right:0; top:auto; bottom:0; width:auto; height:6px; cursor:row-resize; }
+.viv-study-head{
+  flex:0 0 auto; display:flex; align-items:center; gap:4px; padding:5px 8px;
+  border-bottom:1px solid var(--border, #e5e7eb); background:var(--panel-2, #f9fafb);
+  cursor:grab; user-select:none;
+}
+.viv-study-head:active{ cursor:grabbing; }
+.viv-study-title{ display:flex; align-items:baseline; gap:8px; min-width:0; }
+.viv-study-title strong{ font-size:.95em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.viv-study-body{ flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; position:relative; }
+.viv-study-frame{ width:100%; height:100%; border:0; display:block; }
+body.viv-popout .viv-study-resize-handle{ display:none !important; }
+/* Collapsed strip: an obvious click/drag bar (same as the graph panel). */
+.viv-study-expand{ display:none; }
+.viv-study-panel.vp-collapsed{ flex:0 0 auto !important; }
+.viv-study-panel.vp-collapsed[data-dock="left"],
+.viv-study-panel.vp-collapsed[data-dock="right"]{ width:16px !important; }
+.viv-study-panel.vp-collapsed[data-dock="top"],
+.viv-study-panel.vp-collapsed[data-dock="bottom"]{ height:16px !important; min-height:0 !important; }
+.viv-study-panel.vp-collapsed .viv-study-head,
+.viv-study-panel.vp-collapsed .viv-study-body{ display:none !important; }
+.viv-study-panel.vp-collapsed .viv-study-expand{
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  width:100%; height:100%; border:none; padding:0; line-height:1;
+  background:#eef2ff; color:#4f46e5; font-size:11px; font-weight:600;
+  letter-spacing:.02em; overflow:hidden; white-space:nowrap; touch-action:none;
+}
+.viv-study-panel.vp-collapsed .viv-study-expand::before{ content:"⋮⋮"; letter-spacing:-2px; opacity:.7; font-size:13px; }
+.viv-study-panel.vp-collapsed[data-dock="bottom"] .viv-study-expand,
+.viv-study-panel.vp-collapsed[data-dock="top"] .viv-study-expand{ cursor:ns-resize; }
+.viv-study-panel.vp-collapsed[data-dock="left"] .viv-study-expand,
+.viv-study-panel.vp-collapsed[data-dock="right"] .viv-study-expand{ cursor:ew-resize; writing-mode:vertical-rl; gap:6px; }
+.viv-study-panel.vp-collapsed .viv-study-expand:hover{ background:#e0e7ff; color:#3730a3; }
+.viv-study-panel, #viv-study-panel{ min-width:0; }
 
 /* ── Dockable Studies panel (studies-panel.js) — same VivPanelDock chrome as the
    Graph panel, but its body hosts the relocated study-browser section and scrolls. */
