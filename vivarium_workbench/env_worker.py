@@ -214,7 +214,11 @@ def _registry_catalog() -> dict:
         mod = __import__(f"{package_name}.core", fromlist=["build_core"])
         core = mod.build_core()
     except ImportError as e:
-        return {"error": f"could not import {package_name}.core: {e}", "processes": [], "types": []}
+        return {"error": f"could not import {package_name}.core: {e} — the workspace venv may be "
+                         f"stale (the pinned sim/composite package is not installed); re-sync it with "
+                         f"`uv pip install -e .` in the workspace root, or run "
+                         f"`vivarium-workbench doctor --workspace .` to diagnose",
+                "processes": [], "types": []}
     except Exception as e:  # noqa: BLE001
         return {"error": f"build_core() failed: {e}", "processes": [], "types": []}
 
