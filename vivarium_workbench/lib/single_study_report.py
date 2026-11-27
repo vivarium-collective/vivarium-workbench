@@ -2242,11 +2242,16 @@ def render_single_study_report(
     unresolved_composites: list[dict] = []
     try:
         from vivarium_workbench.lib.composite_lookup import (
-            known_composite_ids, suggest_composite_ref,
-            unresolved_study_composite_refs,
+            known_composite_ids, pinned_simulator_installed,
+            suggest_composite_ref, unresolved_study_composite_refs,
         )
         known = known_composite_ids(ws_root)
         refs = unresolved_study_composite_refs(study_spec, known) or []
+        # Simulation-deferred: a study pinning a simulator absent from THIS env
+        # (framework-only render) can't resolve its composite here, so the "not
+        # found in registry" banner would be a false positive — suppress it.
+        if refs and pinned_simulator_installed(study_spec) is False:
+            refs = []
         for ref in refs:
             try:
                 suggestion = suggest_composite_ref(ref, known)

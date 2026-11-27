@@ -849,10 +849,18 @@ def render_study_detail_html(ws_root: Path, name: str, spec: dict, *, base_path:
     unresolved_composites: list = []
     try:
         from vivarium_workbench.lib.composite_lookup import (
-            known_composite_ids, unresolved_study_composite_refs,
+            known_composite_ids, pinned_simulator_installed,
+            unresolved_study_composite_refs,
         )
         unresolved_composites = unresolved_study_composite_refs(
             spec, known_composite_ids(ws_root)) or []
+        # Simulation-deferred: when the study pins a simulator that isn't
+        # installed in THIS env (e.g. the framework-only read-only publish), its
+        # composite can't resolve here — the "not found in registry" banner would
+        # be a false positive. Suppress it; genuine broken-ref detection runs
+        # where the sim is installed.
+        if unresolved_composites and pinned_simulator_installed(spec) is False:
+            unresolved_composites = []
     except Exception:
         unresolved_composites = []
     # Fable G2: the six status axes relabeled as the six gates (§13), plus

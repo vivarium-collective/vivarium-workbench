@@ -554,6 +554,11 @@ def _unresolved_composite_items(slug: str, spec: dict, known_ids: set) -> list[d
     out: list[dict] = []
     try:
         unresolved = composite_lookup.unresolved_study_composite_refs(spec, known_ids)
+        # Simulation-deferred: a study pinning a simulator absent from THIS env
+        # can't resolve its composite here — don't surface a false "unregistered
+        # composite" blocker. Genuine broken refs are caught where the sim lives.
+        if unresolved and composite_lookup.pinned_simulator_installed(spec) is False:
+            unresolved = []
     except Exception:  # noqa: BLE001
         return out
     for ref in unresolved:
