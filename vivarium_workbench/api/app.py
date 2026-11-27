@@ -144,7 +144,7 @@ from vivarium_workbench.lib import workspace_manifest_views as _workspace_manife
 from vivarium_workbench.lib import install_views as _install_views
 from vivarium_workbench.lib import catalog_install_views as _catalog_install_views
 from vivarium_workbench.lib import catalog_uninstall_views as _catalog_uninstall_views
-from vivarium_workbench.lib.catalog_uninstall_impact import module_uninstall_impact
+from vivarium_workbench.lib.catalog_uninstall_impact import module_uninstall_impact  # noqa: F401  (referenced via _THIN_ROUTE_TABLE through _APP_MODULE)
 from vivarium_workbench.lib import finding_views as _finding_views
 from vivarium_workbench.lib import investigation_graph_views as _ig_views
 from vivarium_workbench.lib import audit_views as _audit_views
@@ -703,7 +703,212 @@ def _add_route_like(app: FastAPI, route: object, provider: str) -> None:
     )
 
 
+import sys as _sys
+
 from vivarium_workbench.plugins import load_plugins as _load_plugins
+from vivarium_workbench.api.route_registrar import P, R, register_table
+
+
+
+# ---------------------------------------------------------------------------
+# Declarative thin-route table (registered in create_app via register_table).
+# These are pure lib.* delegators; see api/route_registrar.py for the shapes/adapters.
+# ---------------------------------------------------------------------------
+_APP_MODULE = _sys.modules[__name__]
+
+# fmt: off
+_THIN_ROUTE_TABLE: tuple[R, ...] = (
+    R('get', '/api/workspace-manifest', (_workspace_manifest_views, 'workspace_manifest'), 'workspace_manifest',
+      shape='A', adapter='pos',
+      summary='One-call workspace situational-awareness snapshot for agents', tags=['System'],
+    ),
+    R('get', '/api/data-sources', (_data_sources, 'enumerate_data_sources'), 'data_sources',
+      shape='C', adapter='pos',
+      response_model=DataSourcesPayload, summary='Workspace data-source bundle (from workspace.yaml)', tags=['Data, inputs & references'],
+    ),
+    R('get', '/api/saved-visualizations', (_saved_viz, 'build_saved_visualizations'), 'saved_visualizations',
+      shape='C', adapter='pos',
+      response_model=SavedVisualizationsPayload, summary='Saved 3D packs and report cards', tags=['Studies'],
+    ),
+    R('get', '/api/visualization-instances', (_study_viz, 'build_visualization_instances'), 'visualization_instances',
+      shape='C', adapter='pos',
+      response_model=VisualizationInstances, summary='Class-backed visualization instances from workspace.yaml', tags=['Studies'],
+    ),
+    R('post', '/api/composite-config-translate', (_composite_config_adapt, 'composite_config_translate'), 'composite_config_translate',
+      shape='A', adapter='model_dump',
+      summary="Adapt a JSON config document onto a composite's declared params", tags=['Composites'],
+      params=(P('req', CompositeConfigTranslateBody),),
+    ),
+    R('get', '/api/catalog', (_APP_MODULE, 'build_catalog'), 'catalog',
+      shape='C', adapter='pos',
+      response_model=CatalogPayload, summary='Package catalog with per-workspace install state', tags=['Registry & catalog'],
+    ),
+    R('get', '/api/catalog-uninstall-impact', (_APP_MODULE, 'module_uninstall_impact'), 'catalog_uninstall_impact',
+      shape='B', adapter='pos',
+      response_model=dict, summary='What uninstalling a module would remove/break in this workspace', tags=['Registry & catalog'],
+      params=(P('name', str),),
+    ),
+    R('get', '/api/git-status', (_git_status, 'build_git_status'), 'git_status_route',
+      shape='C', adapter='pos',
+      response_model=GitStatus, summary='Live git sync state for the workspace', tags=['Git & workstream'],
+    ),
+    R('get', '/api/generation', (_work_views, 'build_generation'), 'generation_route',
+      shape='C', adapter='pos',
+      response_model=Generation, summary='Workspace coordinated-generation provenance banner', tags=['Git & workstream'],
+    ),
+    R('get', '/api/work-composite-diff', (_work_views, 'build_work_composite_diff'), 'work_composite_diff_route',
+      shape='C', adapter='pos',
+      response_model=WorkCompositeDiff, summary='Model-code changes on the active branch vs its merge-base', tags=['Git & workstream'],
+    ),
+    R('get', '/api/study-test-audit', (_audit_panel_views, 'build_study_test_audit'), 'study_test_audit_route',
+      shape='A', adapter='pos',
+      summary='Test-sufficiency axes + gate (Assurance › Audit)', tags=['Rigor & jobs'],
+      params=(P('study', Optional[str], None),),
+    ),
+    R('get', '/api/study-loop-state', (_loop_provenance_views, 'build_study_loop_state'), 'study_loop_state_route',
+      shape='A', adapter='pos',
+      summary='Agentic model-build loop provenance (Assurance › Build)', tags=['Rigor & jobs'],
+      params=(P('study', Optional[str], None),),
+    ),
+    R('get', '/api/investigation-graph', (_ig_views, 'build_investigation_graph'), 'investigation_graph',
+      shape='A', adapter='pos',
+      summary='Typed AIG: study DAG + per-study evidence-chain nodes/edges/violations', tags=['Data, inputs & references'],
+      params=(P('investigation', str, ''),),
+    ),
+    R('get', '/api/argument-overlay', (_ig_views, 'build_argument_overlay'), 'argument_overlay',
+      shape='A', adapter='pos',
+      summary='Argument graph + ordered narrative + audit gaps for an investigation', tags=['Data, inputs & references'],
+      params=(P('investigation', str, ''),),
+    ),
+    R('get', '/api/audit', (_audit_views, 'build_audit'), 'audit',
+      shape='A', adapter='pos',
+      summary='Read-only L0-L5 study-reproducibility audit report', tags=['Data, inputs & references'],
+    ),
+    R('post', '/api/composite-run/{run_id}/stop', (_composite_stop_views, 'stop_composite_run'), 'composite_run_stop_route',
+      shape='A', adapter='pos',
+      summary='Stop an in-flight detached run (SIGTERM the process group)', tags=['Composites'],
+      params=(P('run_id', str),),
+    ),
+    R('post', '/api/composite-run/{run_id}/delete', (_composite_delete_views, 'delete_composite_run'), 'composite_run_delete_route',
+      shape='A', adapter='pos',
+      summary='Delete a run from the Simulations DB (row + tombstone + artifacts)', tags=['Composites'],
+      params=(P('run_id', str),),
+    ),
+    R('get', '/api/workspaces', (_workspace_deps, 'build_workspaces'), 'workspaces_route',
+      shape='C', adapter='pos',
+      response_model=WorkspacesList, summary='Workspace-switcher dropdown (catalog + live server status)', tags=['Workspaces & sources'],
+    ),
+    R('post', '/api/visualization-accept', (_viz_accept_views, 'visualization_accept'), 'visualization_accept',
+      shape='A', adapter='model_dump_eu',
+      response_model=VisualizationAcceptResponse, summary='Finalize a generated visualization file (no git commit on the FastAPI path)', tags=['Visualizations'],
+      params=(P('req', VisualizationAcceptBody),),
+    ),
+    R('post', '/api/visualization-preview', (_viz_preview_views, 'visualization_preview'), 'visualization_preview',
+      shape='A', adapter='model_dump_none',
+      summary='Render a visualization class in-process against demo or investigation data', tags=['Visualizations'],
+      params=(P('req', VisualizationPreviewRequest),),
+    ),
+    R('post', '/api/visualization-preview-instance', (_viz_preview_instance_views, 'visualization_preview_instance'), 'visualization_preview_instance',
+      shape='A', adapter='model_dump_none',
+      summary='Preview a workspace.yaml-registered visualization instance by name', tags=['Visualizations'],
+      params=(P('req', VisualizationPreviewInstanceRequest),),
+    ),
+    R('post', '/api/investigation-trigger', (_investigation_trigger, 'investigation_trigger'), 'investigation_trigger',
+      shape='A', adapter='model_dump_none',
+      summary='Layer-4 pull-or-compute: run one study / continue from here', tags=['Investigations'],
+      params=(P('req', InvestigationTriggerRequest),),
+    ),
+    R('post', '/api/study-tests-run', (_test_run_views, 'study_tests_run'), 'study_tests_run',
+      shape='A', adapter='model_dump_none',
+      summary="Run pytest against a study's tests/ directory", tags=['Studies'],
+      params=(P('req', StudyTestsRunRequest),),
+    ),
+    R('post', '/api/run-tests', (_test_run_views, 'run_workspace_tests'), 'run_tests',
+      shape='A', adapter='model_dump_none',
+      summary='Run pytest for the whole workspace', tags=['Studies'],
+      params=(P('req', RunTestsRequest),),
+    ),
+    R('post', '/api/composite-test-run', (_composite_test_run_views, 'composite_test_run'), 'composite_test_run',
+      shape='A', adapter='model_dump_none',
+      summary='Start a detached composite run (returns 202 {run_id})', tags=['Composites'],
+      params=(P('req', CompositeTestRunRequest),),
+    ),
+    R('post', '/api/investigation-run-one', (_investigation_run_one_views, 'investigation_run_one'), 'investigation_run_one',
+      shape='A', adapter='model_dump_none',
+      summary="Run a single ad-hoc composite (the 'Duplicate run' flow)", tags=['Investigations'],
+      params=(P('req', InvestigationRunOneRequest),),
+    ),
+    R('post', '/api/investigation-run', (_investigation_run_views, 'investigation_run'), 'investigation_run',
+      shape='A', adapter='model_dump_none',
+      summary="Run all of an investigation's simulations + render its visualizations", tags=['Investigations'],
+      params=(P('req', InvestigationRunRequest),),
+    ),
+    R('post', '/api/study-create', (_study_create_views, 'study_create'), 'study_create',
+      shape='A', adapter='model_dump_none',
+      summary='Scaffold a new study directory (deferred commit)', tags=['Studies'],
+      params=(P('req', StudyCreateRequest),),
+    ),
+    R('post', '/api/investigation-run-unblocked', (_run_unblocked_views, 'investigation_run_unblocked'), 'investigation_run_unblocked',
+      shape='A', adapter='model_dump_none',
+      summary="Enumerate + run all of an investigation's unblocked variants", status_code=202, tags=['Investigations'],
+      params=(P('req', InvestigationRunUnblockedRequest),),
+    ),
+    R('get', '/api/study-remote-figures', (_remote_run_views, 'study_figures'), 'study_remote_figures',
+      shape='A', adapter='pos',
+      summary="Aggregate a study's remote-sim figures + ptools for its Viz/Analyses tabs", tags=['Runs'],
+      params=(P('study', str, ''), P('limit', int, 10)),
+    ),
+    R('get', '/api/remote-run-config', (_remote_run_views, 'remote_run_config'), 'remote_run_config',
+      shape='A', adapter='pos',
+      summary='Whether pinned remote runs are enabled + the resolved build', tags=['Runs'],
+    ),
+    R('post', '/api/dirty-commit-all', (_git_commit_views, 'dirty_commit_all'), 'dirty_commit_all',
+      shape='A', adapter='pos',
+      response_model=DirtyCommitAllResponse, summary='Stage + commit all dirty files (minus reports/) on the active branch', tags=['Git & workstream'],
+      params=(P('body', dict, Body(default={})),),
+    ),
+    R('post', '/api/work-push', (_work_mutations, 'work_push'), 'work_push',
+      shape='A', adapter='pos',
+      response_model=WorkPushResponse, summary='Push the active workstream branch to origin', tags=['Git & workstream'],
+      params=(P('body', dict, Body(default={})),),
+    ),
+    R('post', '/api/work-end', (_work_mutations, 'work_end'), 'work_end',
+      shape='A', adapter='pos',
+      response_model=WorkEndResponse, summary='Check out the base branch + clear the workstream', tags=['Git & workstream'],
+      params=(P('body', dict, Body(default={})),),
+    ),
+    R('post', '/api/suggest', (_misc_post_views, 'suggest'), 'suggest',
+      shape='A', adapter='model_dump_none',
+      summary='Write a Claude-suggestion request file', tags=['Rigor & jobs'],
+      params=(P('req', SuggestRequest),),
+    ),
+    R('post', '/api/open-window', (_misc_post_views, 'open_window'), 'open_window',
+      shape='A', adapter='model_dump_none',
+      summary="Open a dashboard URL in the user's browser", tags=['Rigor & jobs'],
+      params=(P('req', OpenWindowRequest),),
+    ),
+    R('post', '/api/system-deps-install', (_install_views, 'system_deps_install'), 'system_deps_install',
+      shape='A', adapter='model_dump_none',
+      summary="Run install commands for a catalog module's system-dep checks", tags=['Registry & catalog'],
+      params=(P('req', SystemDepsInstallRequest),),
+    ),
+    R('post', '/api/import-install', (_install_views, 'import_install'), 'import_install',
+      shape='A', adapter='model_dump_none',
+      summary='Pip-install a registered import into the workspace venv', tags=['Registry & catalog'],
+      params=(P('req', ImportInstallRequest),),
+    ),
+    R('post', '/api/catalog-install', (_catalog_install_views, 'catalog_install'), 'catalog_install',
+      shape='A', adapter='model_dump_none',
+      summary='Install a catalog module (PyPI direct or git-submodule) into the venv', tags=['Registry & catalog'],
+      params=(P('req', CatalogInstallRequest),),
+    ),
+    R('post', '/api/catalog-uninstall', (_catalog_uninstall_views, 'catalog_uninstall'), 'catalog_uninstall',
+      shape='A', adapter='model_dump_none',
+      summary='Uninstall a catalog module (PyPI or git-submodule) from the workspace', tags=['Registry & catalog'],
+      params=(P('req', CatalogUninstallRequest),),
+    ),
+)
+# fmt: on
 
 
 def create_app() -> FastAPI:
@@ -958,6 +1163,13 @@ def create_app() -> FastAPI:
             pass
         return await call_next(request)
 
+    # Table-driven thin wrapper routes (see api/route_registrar.py): the pure
+    # lib.* delegators, registered from a declarative table instead of hand-written
+    # defs. Registered before the specific routes below and the catch-all; each
+    # reproduces its original path/method/operationId/params/response_model exactly
+    # (test_openapi_structural_contract gates the schema).
+    register_table(app, _THIN_ROUTE_TABLE, get_workspace)
+
     @app.get("/health", tags=["System"], summary="Service liveness check")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -1046,26 +1258,6 @@ def create_app() -> FastAPI:
             total=total, offset=offset, limit=limit,
             remote=RemoteSourceState.model_validate(remote_state) if remote_state else None)
 
-    @app.get(
-        "/api/workspace-manifest",
-        tags=["System"],
-        summary="One-call workspace situational-awareness snapshot for agents",
-    )
-    def workspace_manifest(ws: Path = Depends(get_workspace)) -> JSONResponse:
-        """One-call situational awareness (mirrors the stdlib /api/workspace-manifest).
-
-        Aggregates six best-effort sections into a single snapshot so an agent
-        does not have to stitch together ten separate API calls: workspace
-        identity + git state (``workspace``), composites (``composites``),
-        studies (``studies``), registry summary (``registry``), dirty-tree
-        health (``health``), and installed pbg-* skills (``skills``).
-
-        Always returns HTTP 200 — each section degrades to an empty default
-        rather than failing the whole manifest.  Library-backed via
-        ``lib.workspace_manifest_views.workspace_manifest``.
-        """
-        out, status = _workspace_manifest_views.workspace_manifest(ws)
-        return JSONResponse(content=out, status_code=status)
 
     @app.get(
         "/api/investigation-summaries",
@@ -1097,16 +1289,6 @@ def create_app() -> FastAPI:
             investigations=[InvestigationSummary.model_validate(d) for d in summaries]
         )
 
-    @app.get(
-        "/api/data-sources",
-        response_model=DataSourcesPayload,
-        tags=["Data, inputs & references"],
-        summary="Workspace data-source bundle (from workspace.yaml)",
-    )
-    def data_sources(ws: Path = Depends(get_workspace)) -> DataSourcesPayload:
-        """Repo-wide data-source bundle (workspace.yaml `dashboard.data_sources`
-        provider), via lib.data_sources — no stdlib server dependency."""
-        return DataSourcesPayload.model_validate(_data_sources.enumerate_data_sources(ws))
 
     @app.get(
         "/api/references-bib",
@@ -1130,17 +1312,6 @@ def create_app() -> FastAPI:
             pass  # cache failures must never break the references view
         return ReferencesBibPayload(entries=[BibEntry.model_validate(e) for e in entries])
 
-    @app.get(
-        "/api/saved-visualizations",
-        response_model=SavedVisualizationsPayload,
-        tags=["Studies"],
-        summary="Saved 3D packs and report cards",
-    )
-    def saved_visualizations(ws: Path = Depends(get_workspace)) -> SavedVisualizationsPayload:
-        """Saved interactive visualizations (3D packs, report cards),
-        via lib.saved_visualizations — no stdlib server dependency."""
-        return SavedVisualizationsPayload.model_validate(
-            _saved_viz.build_saved_visualizations(ws))
 
     @app.get(
         "/api/study-charts/{slug}",
@@ -1755,25 +1926,6 @@ def create_app() -> FastAPI:
             return VisualizationStatus.model_validate(body)
         return JSONResponse(status_code=status, content=body)
 
-    @app.get(
-        "/api/visualization-instances",
-        response_model=VisualizationInstances,
-        tags=["Studies"],
-        summary="Class-backed visualization instances from workspace.yaml",
-    )
-    def visualization_instances(
-        ws: Path = Depends(get_workspace),
-    ) -> VisualizationInstances:
-        """Class-backed visualization instances configured in workspace.yaml.
-
-        Mirrors ``GET /api/visualization-instances`` from the stdlib server.
-        Always returns HTTP 200 — errors degrade to ``{instances: []}``.
-
-        Library-backed via ``lib.study_viz_views.build_visualization_instances``.
-        """
-        return VisualizationInstances.model_validate(
-            _study_viz.build_visualization_instances(ws)
-        )
 
     @app.get(
         "/api/analysis-viewers",
@@ -2454,33 +2606,6 @@ def create_app() -> FastAPI:
         except Exception as e:  # noqa: BLE001
             return {"id": id, "status": "unavailable", "notice": f"audit worker error: {e}"}
 
-    @app.post(
-        "/api/composite-config-translate",
-        tags=["Composites"],
-        summary="Adapt a JSON config document onto a composite's declared params",
-    )
-    def composite_config_translate(
-        req: CompositeConfigTranslateBody,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Item 86: the "external config" JSON-spec input mode.
-
-        Body: ``{composite_id, config_json}``. Resolves ``composite_id``'s
-        declared parameters (the same lookup ``GET /api/composite-resolve``
-        uses) and matches ``config_json``'s top-level keys against them —
-        exact-name matches pass through; a small, fixed set of known
-        process-injection keys nest into a declared ``injected_processes``-
-        shaped map param when present. Non-mutating — no write side effects,
-        the caller applies the returned params into its own form state.
-
-        Returns ``{"params": {...}, "unmatched": [...]}`` (200), or
-        ``{"error": ...}`` at 400 (missing composite_id) / 404 (unknown
-        composite) / 422 (config_json not a JSON object).
-        """
-        body, status = _composite_config_adapt.composite_config_translate(
-            ws, req.model_dump()
-        )
-        return JSONResponse(status_code=status, content=body)
 
     @app.post(
         "/api/config-to-composite",
@@ -2672,22 +2797,6 @@ def create_app() -> FastAPI:
 
         return InvestigationsPayload.model_validate(build_investigations(ws))
 
-    @app.get(
-        "/api/catalog",
-        response_model=CatalogPayload,
-        tags=["Registry & catalog"],
-        summary="Package catalog with per-workspace install state",
-    )
-    def catalog(ws: Path = Depends(get_workspace)) -> CatalogPayload:
-        """Package catalog for this workspace (mirrors the stdlib /api/catalog).
-
-        Returns the pbg module catalog annotated with per-workspace install
-        state (imports / pyproject / venv presence).  Best-effort: venv/
-        pyproject probes swallow errors — the route never returns 500.
-
-        Library-backed via ``lib.catalog.build_catalog`` — the single implementation.
-        """
-        return CatalogPayload.model_validate(build_catalog(ws))
 
     @app.get(
         "/api/structured-resources",
@@ -2775,43 +2884,11 @@ def create_app() -> FastAPI:
         except Exception:  # noqa: BLE001
             return {"repos": []}
 
-    @app.get(
-        "/api/catalog-uninstall-impact",
-        tags=["Registry & catalog"],
-        summary="What uninstalling a module would remove/break in this workspace",
-    )
-    def catalog_uninstall_impact(
-        name: str, ws: Path = Depends(get_workspace)
-    ) -> dict:
-        """Pre-uninstall impact report for catalog module ``name``.
-
-        Returns the module's own composites/studies/investigations that would
-        stop showing up, plus this workspace's OWN studies/investigations that
-        reference them (and would be left with a dangling reference). Powers the
-        Modules-tab uninstall confirmation. Best-effort (never 500s).
-        """
-        return module_uninstall_impact(ws, name)
 
     # -----------------------------------------------------------------------
     # Git & branches routes
     # -----------------------------------------------------------------------
 
-    @app.get(
-        "/api/git-status",
-        response_model=GitStatus,
-        tags=["Git & workstream"],
-        summary="Live git sync state for the workspace",
-    )
-    def git_status_route(ws: Path = Depends(get_workspace)) -> GitStatus:
-        """Live sync state for the workspace's git remote.
-
-        Returns branch, push state (pushed/ahead/behind/diverged/no_origin),
-        commit counts, PR linkage, dirty-file count, and GitHub availability.
-
-        Via ``git_status.build_git_status`` — always 200, degrades gracefully
-        when origin is absent or git is not available.
-        """
-        return GitStatus.model_validate(_git_status.build_git_status(ws))
 
     @app.get(
         "/api/work-status",
@@ -2867,50 +2944,6 @@ def create_app() -> FastAPI:
         files = [DirtyFile.model_validate(f) for f in payload["files"]]
         return DirtyStatus(count=payload["count"], files=files)
 
-    @app.get(
-        "/api/generation",
-        response_model=Generation,
-        tags=["Git & workstream"],
-        summary="Workspace coordinated-generation provenance banner",
-    )
-    def generation_route(
-        ws: Path = Depends(get_workspace),
-    ) -> Generation:
-        """Current coordinated generation for the workspace.
-
-        Returns ``{generation: {generation_id, git_sha, param_set_hash,
-        created_at, label, n_runs}}`` or ``{generation: null}`` when no
-        generation is active.  Always HTTP 200 (best-effort; any error →
-        ``{generation: null}`` rather than 500).
-
-        Library-backed via ``lib.work_views.build_generation``.
-        """
-        return Generation.model_validate(_work_views.build_generation(ws))
-
-    @app.get(
-        "/api/work-composite-diff",
-        response_model=WorkCompositeDiff,
-        tags=["Git & workstream"],
-        summary="Model-code changes on the active branch vs its merge-base",
-    )
-    def work_composite_diff_route(
-        ws: Path = Depends(get_workspace),
-    ) -> WorkCompositeDiff:
-        """Files changed on the active branch that look like model code.
-
-        Returns ``{base, branch, changes: [{path, lines_added, lines_removed,
-        category}, ...]}`` sorted by largest diff, capped at 500 entries.
-        Categories: ``composite``, ``process``, ``step``, ``library helper``,
-        ``type definition``.
-
-        Always HTTP 200 — merge-base / diff failures carry an ``error`` key
-        with an empty ``changes`` list rather than a 500.
-
-        Library-backed via ``lib.work_views.build_work_composite_diff``.
-        """
-        return WorkCompositeDiff.model_validate(
-            _work_views.build_work_composite_diff(ws)
-        )
 
     # -----------------------------------------------------------------------
     # Investigations detail routes
@@ -3184,61 +3217,6 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=exc.status, content=exc.body)
         return JSONResponse(status_code=200, content=body)
 
-    @app.get(
-        "/api/study-test-audit",
-        tags=["Rigor & jobs"],
-        summary="Test-sufficiency axes + gate (Assurance › Audit)",
-    )
-    def study_test_audit_route(
-        study: Optional[str] = None,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Deterministic test-sufficiency report backing Assurance › Audit's
-        "Sufficiency" group: is the study's OWN Test set rigorous enough
-        that passing it means something?
-
-        Runs ``viva_superpowers.test_audit.build_audit_report`` (discrimination,
-        objective_coverage, redundancy, discriminating_control, band_provenance
-        axes) over the study's run-merged spec, plus ``audit_gate`` (a top-level
-        ``gate``: pass/warn/fail).
-
-        HTTP 400 when ``?study=`` is missing (``{"error": "missing ?study="}``);
-        HTTP 404 when no study.yaml/spec.yaml exists for the slug
-        (``{"error": "study not found"}``). Never HTTP 500: an unimportable
-        ``viva_superpowers.test_audit`` or any scoring failure degrades to a
-        200 body ``{"unavailable": true, "reason": "..."}``.
-
-        Library-backed via ``lib.audit_panel_views.build_study_test_audit``.
-        """
-        body, status = _audit_panel_views.build_study_test_audit(ws, study)
-        return JSONResponse(status_code=status, content=body)
-
-    @app.get(
-        "/api/study-loop-state",
-        tags=["Rigor & jobs"],
-        summary="Agentic model-build loop provenance (Assurance › Build)",
-    )
-    def study_loop_state_route(
-        study: Optional[str] = None,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Model-build loop provenance backing Assurance › Build: "was the
-        pass earned honestly?"
-
-        Reads ``.pbg/loop/<study>.json`` via ``viva_superpowers.loop_state``:
-        locked-tests hash, the reopen trail (``reopen_count`` +
-        ``prior_hashes``), iteration history, and current state/outcome.
-
-        HTTP 400 when ``?study=`` is missing. Never HTTP 500 and never 404:
-        a study not built via ``/viva-model-build`` (no loop file) — the
-        common case — degrades to a 200 body ``{"present": false, "study",
-        "reason"}`` so the panel renders a graceful one-line note instead of
-        an error.
-
-        Library-backed via ``lib.loop_provenance_views.build_study_loop_state``.
-        """
-        body, status = _loop_provenance_views.build_study_loop_state(ws, study)
-        return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
     # Studies detail routes
@@ -3576,51 +3554,6 @@ def create_app() -> FastAPI:
             )
         return IsetDetail.model_validate(result)
 
-    @app.get(
-        "/api/investigation-graph",
-        tags=["Data, inputs & references"],
-        summary="Typed AIG: study DAG + per-study evidence-chain nodes/edges/violations",
-    )
-    def investigation_graph(investigation: str = "", ws: Path = Depends(get_workspace)):
-        """Typed Actionable Investigation Graph for one investigation (RFC-0002
-        Phase B4). Study nodes + pipeline_gate study->study edges, plus each
-        study's chain nodes/edges and validate_chain violations. The payload is
-        dynamic/nested, so it returns a passthrough JSONResponse (matching other
-        dynamic endpoints) rather than a typed response_model. 404 when the
-        investigation.yaml is absent."""
-        body, status = _ig_views.build_investigation_graph(ws, investigation)
-        return JSONResponse(status_code=status, content=body)
-
-    @app.get(
-        "/api/argument-overlay",
-        tags=["Data, inputs & references"],
-        summary="Argument graph + ordered narrative + audit gaps for an investigation",
-    )
-    def argument_overlay(investigation: str = "", ws: Path = Depends(get_workspace)):
-        """The RFC-0005 Argument/Narrative projection for one investigation: the
-        derived Claim graph (claims + epistemic edges), the ordered narrative, and
-        the audit gaps (unsupported transitions, each with a candidate follow-up).
-        Dynamic/nested payload -> passthrough JSONResponse. 404 when the
-        investigation.yaml is absent; an empty ``available: false`` payload (200)
-        when the viva_superpowers derivation layer isn't importable."""
-        body, status = _ig_views.build_argument_overlay(ws, investigation)
-        return JSONResponse(status_code=status, content=body)
-
-    @app.get(
-        "/api/audit",
-        tags=["Data, inputs & references"],
-        summary="Read-only L0-L5 study-reproducibility audit report",
-    )
-    def audit(ws: Path = Depends(get_workspace)):
-        """Read-only L0-L5 reproducibility audit for the workspace (the visible
-        companion to the CI gate). Runs
-        ``discovery_engine.study.audit.audit_workspace`` and returns its
-        ``as_dict()`` — per-study/-investigation checks + a summary. Purely
-        informational: no gate, no allowlist, no writes. Tolerant — a workspace
-        with no studies or any audit error still returns 200 with an empty
-        ``studies`` list, so the payload is a passthrough JSONResponse."""
-        body, status = _audit_views.build_audit(ws)
-        return JSONResponse(status_code=status, content=body)
 
     @app.get(
         "/api/audit-report",
@@ -4046,52 +3979,6 @@ def create_app() -> FastAPI:
             return CompositeRunStatus.model_validate(body)
         return JSONResponse(status_code=status, content=body)
 
-    @app.post(
-        "/api/composite-run/{run_id}/stop",
-        tags=["Composites"],
-        summary="Stop an in-flight detached run (SIGTERM the process group)",
-    )
-    def composite_run_stop_route(
-        run_id: str,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Stop a running composite run and mark it ``cancelled`` (issue #754).
-
-        Signals the run's process group (SIGTERM — the worker's faulthandler
-        dumps a traceback into its run.log before exiting) and records the
-        terminal ``cancelled`` state, so a frozen run is recoverable without
-        force-quitting the whole Python process.
-
-        Status codes (via ``lib.composite_stop_views.stop_composite_run``):
-          - 400  missing ``run_id``
-          - 404  unknown run (``{"outcome": "not_found"}``)
-          - 200  stopped / already terminal (idempotent no-op)
-        """
-        body, status = _composite_stop_views.stop_composite_run(ws, run_id)
-        return JSONResponse(status_code=status, content=body)
-
-    @app.post(
-        "/api/composite-run/{run_id}/delete",
-        tags=["Composites"],
-        summary="Delete a run from the Simulations DB (row + tombstone + artifacts)",
-    )
-    def composite_run_delete_route(
-        run_id: str,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Delete a composite run from the Simulations DB.
-
-        Best-effort-stops a still-running worker, removes the ``runs_meta`` row
-        (and writes a ``deleted`` tombstone so the JSONL fold does not resurrect
-        it), and deletes the run's ``.pbg/runs/<run_id>/`` artifact directory.
-
-        Status codes (via ``lib.composite_delete_views.delete_composite_run``):
-          - 400  missing ``run_id``
-          - 404  unknown run (``{"deleted": false, "outcome": "not_found"}``)
-          - 200  removed (``{"deleted": true, "outcome": "deleted"}``)
-        """
-        body, status = _composite_delete_views.delete_composite_run(ws, run_id)
-        return JSONResponse(status_code=status, content=body)
 
     @app.get(
         "/api/composite-run/{run_id}/download",
@@ -4254,25 +4141,6 @@ def create_app() -> FastAPI:
         from vivarium_workbench.lib.provenance_manifest import build_manifest
         return ProvenanceManifest(**build_manifest(ws))
 
-    @app.get(
-        "/api/workspaces",
-        response_model=WorkspacesList,
-        tags=["Workspaces & sources"],
-        summary="Workspace-switcher dropdown (catalog + live server status)",
-    )
-    def workspaces_route(ws: Path = Depends(get_workspace)) -> WorkspacesList:
-        """Workspace-switcher dropdown payload (mirrors the stdlib GET /api/workspaces).
-
-        Reads ``~/.pbg/workspaces.json`` (global catalog) and joins each entry
-        with ``~/.pbg/servers/<name>.json`` to determine live/stale/stopped
-        status.  Returns ``{current: {name, path}, workspaces: [...]}``.
-
-        Always HTTP 200 — falls back to current-workspace-only when the catalog
-        is missing or corrupt.
-
-        Library-backed via ``lib.workspace_deps_views.build_workspaces``.
-        """
-        return WorkspacesList.model_validate(_workspace_deps.build_workspaces(ws))
 
     @app.get(
         "/api/system-deps-check",
@@ -5996,111 +5864,6 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=status, content=body)
         return body
 
-    @app.post(
-        "/api/visualization-accept",
-        response_model=VisualizationAcceptResponse,
-        tags=["Visualizations"],
-        summary="Finalize a generated visualization file (no git commit on the FastAPI path)",
-    )
-    def visualization_accept(
-        req: VisualizationAcceptBody,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Finalize a generated visualization: invalidate the registry cache,
-        verify the generated file imports cleanly in-process, smoke-test the
-        workspace ``build_core()``, and confirm the class is discoverable.
-
-        Body: ``{name, class_name?}``.
-
-        Status codes (byte-identical to the legacy handler's pre-wrapper steps):
-          - 200  ``{"ok": True}``
-          - 400  ``{"error": "name is required"}``
-          - 404  ``{"error": "generated file not found at <rel>"}``
-          - 500  ``{"error": "generated file failed to import: ..."}``
-          - 500  ``{"error": "workspace build_core() failed after importing ..."}``
-          - 500  ``{"error": "class <name> not found in generated file after import; ..."}``
-
-        Note: the live server path commits the no-op via ``_active_branch_action``;
-        this FastAPI route defers that git commit to the flip and returns
-        ``{ok: true}`` on success.  The CSRF middleware already guards this POST.
-
-        Library-backed via the pure ``lib.viz_accept_views.visualization_accept``;
-        every path is wrapped in ``JSONResponse`` so the lib-returned status code
-        is preserved verbatim.
-        """
-        resp, status = _viz_accept_views.visualization_accept(
-            ws, req.model_dump(exclude_unset=True)
-        )
-        return JSONResponse(status_code=status, content=resp)
-
-    @app.post(
-        "/api/visualization-preview",
-        tags=["Visualizations"],
-        summary="Render a visualization class in-process against demo or investigation data",
-    )
-    def visualization_preview(
-        req: VisualizationPreviewRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Render a ``viva_superpowers`` Visualization class IN-PROCESS (instantiate
-        + call ``.update()``; NO subprocess) against synthetic demo data or an
-        existing investigation's emitter outputs.
-
-        Body: ``{"address", "config"?, "source"?}`` — ``source`` is ``"demo"``
-        (default) or ``"investigation:<name>"``.  Returns ``{ok, html,
-        source_used, notes}``.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.viz_preview_views.visualization_preview``):
-          - 400  ``{"error": "address is required"}``
-          - 404  ``{"error": "class not registered: <address>"}``
-          - 200  demo / investigation render success (``{ok: true, …}``) OR a
-            demo render that RAISES (``{ok: false, html: "<…demo render
-            failed…>", …}``) — only validation is non-200.
-
-        ``model_dump(exclude_none=True)`` keeps omitted optionals absent so the
-        builder's ``.get(...)`` defaults apply.  The CSRF middleware already
-        guards this POST.  Every path is wrapped in ``JSONResponse`` so the
-        lib-returned status code is preserved verbatim.
-        """
-        resp, status = _viz_preview_views.visualization_preview(
-            ws, req.model_dump(exclude_none=True)
-        )
-        return JSONResponse(status_code=status, content=resp)
-
-    @app.post(
-        "/api/visualization-preview-instance",
-        tags=["Visualizations"],
-        summary="Preview a workspace.yaml-registered visualization instance by name",
-    )
-    def visualization_preview_instance(
-        req: VisualizationPreviewInstanceRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Preview a ``workspace.yaml``-registered visualization instance BY NAME.
-
-        Body: ``{"name", "source"?}``.  Looks up the instance entry and either
-        returns a description-only **stub** (entry has no ``class``) or delegates
-        to ``lib.viz_preview_views.visualization_preview`` with ``{"address":
-        f"local:{cls}", "config": …, "source": …}`` (entry has a class).  NO
-        network, NO subprocess.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.viz_preview_instance_views.visualization_preview_instance``):
-          - 400  ``{"error": "name is required"}``
-          - 404  ``{"error": "visualization '<name>' not registered"}``
-          - 200  description-only stub (``{ok: true, source_used: "stub", …}``)
-            OR whatever the delegated ``visualization_preview`` returns.
-
-        ``model_dump(exclude_none=True)`` keeps omitted optionals absent so the
-        builder's ``.get(...)`` defaults apply.  The CSRF middleware already
-        guards this POST.  Every path is wrapped in ``JSONResponse`` so the
-        lib-returned status code is preserved verbatim.
-        """
-        resp, status = _viz_preview_instance_views.visualization_preview_instance(
-            ws, req.model_dump(exclude_none=True)
-        )
-        return JSONResponse(status_code=status, content=resp)
 
     # -----------------------------------------------------------------------
     # Batch 25: Upload / import (POST routes)
@@ -7478,33 +7241,6 @@ def create_app() -> FastAPI:
                          "error": str(exc)})
         return JSONResponse(status_code=200, content=body)
 
-    @app.post(
-        "/api/investigation-trigger",
-        tags=["Investigations"],
-        summary="Layer-4 pull-or-compute: run one study / continue from here",
-    )
-    def investigation_trigger(
-        req: InvestigationTriggerRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Trigger a study via process-bigraph's pull-or-compute over its graph.
-
-        Body: ``{"investigation", "target_study", "on_missing"?, "launch"?}``.
-        Builds the pbg investigation document, calls
-        ``process_bigraph.templates.trigger`` on ``target_study`` — filling each
-        cached prerequisite with a ``CachedResults`` reference (pull), leaving
-        the target open (compute), pruning non-ancestors — and (unless
-        ``launch`` is False) launches the target through the existing detached
-        composite-run subsystem, wiring pulled upstream artifact paths into it.
-
-        Returns ``{"investigation", "target", "on_missing", "commit", "report":
-        {target, pulled, computed, pruned}, "run"?, "launch_status"?}`` (200).
-        400 invalid body; 404 unknown investigation/target; 409 an uncached
-        prerequisite under ``on_missing="error"`` (message names it).
-        """
-        body, status = _investigation_trigger.investigation_trigger(
-            ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
 
     @app.post("/api/save-run-as-variant", tags=["Runs"],
               summary="Save a run (composite+config) as a named study variant")
@@ -7561,29 +7297,6 @@ def create_app() -> FastAPI:
             status_code=200,
             content={"deleted": bool(summary.get("deleted_rows")), **summary})
 
-    @app.post(
-        "/api/study-tests-run",
-        tags=["Studies"],
-        summary="Run pytest against a study's tests/ directory",
-    )
-    def study_tests_run(
-        req: StudyTestsRunRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Run pytest against ``studies/<study>/tests/``.
-
-        Mirrors the stdlib ``POST /api/study-tests-run``.  Body: ``{"study"}`` —
-        returns ``{"summary", "tests", "note"}``.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.test_run_views.study_tests_run``):
-          - 400  missing ``study`` (``{"error": "missing 'study' in body"}``)
-          - 404  study not found (``{"error": "study not found: <slug>"}``)
-          - 409  tests already running (``StudyTestsConcurrentError``)
-          - 200  ``{summary, tests, note}``
-        """
-        body, status = _test_run_views.study_tests_run(ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
 
     @app.post(
         "/api/study-grade",
@@ -7601,29 +7314,6 @@ def create_app() -> FastAPI:
         body, status = _study_grade.grade_study(ws, req.study)
         return JSONResponse(status_code=status, content=body)
 
-    @app.post(
-        "/api/run-tests",
-        tags=["Studies"],
-        summary="Run pytest for the whole workspace",
-    )
-    def run_tests(
-        req: RunTestsRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Run pytest for the workspace's ``tests/`` directory (v0.3.0: no model
-        param).
-
-        Mirrors the stdlib ``POST /api/run-tests``.  Returns ``{"returncode",
-        "stdout", "stderr"}`` (200) for a completed run.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.test_run_views.run_workspace_tests``):
-          - 500  ``{"error": "pytest timed out after 120s"}`` (TimeoutExpired)
-          - 500  ``{"error": "<exc>"}`` (any other exception)
-          - 200  ``{returncode, stdout, stderr}``
-        """
-        body, status = _test_run_views.run_workspace_tests(ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
     # P2: composite-test-run — start a DETACHED composite run
@@ -7638,32 +7328,6 @@ def create_app() -> FastAPI:
     # guards this POST.
     # -----------------------------------------------------------------------
 
-    @app.post(
-        "/api/composite-test-run",
-        tags=["Composites"],
-        summary="Start a detached composite run (returns 202 {run_id})",
-    )
-    def composite_test_run(
-        req: CompositeTestRunRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Start a detached composite run.
-
-        Mirrors the stdlib ``POST /api/composite-test-run``.  Body:
-        ``{"id", "overrides"?, "steps"?, "label"?, "emit_paths"?}`` — writes the
-        run-request file + runs_meta row, spawns the run-composite CLI detached,
-        and returns 202 ``{run_id, status: "running"}`` immediately.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.composite_test_run_views.composite_test_run``):
-          - 400  missing ``id`` (``{"error": "missing id"}``)
-          - 429  at concurrency cap (``{"error": "too many runs in progress …"}``)
-          - 500  spawn failure (``{"error": "spawn failed: …", "run_id": …}``)
-          - 202  ``{run_id, status: "running"}``
-        """
-        body, status = _composite_test_run_views.composite_test_run(
-            ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
 
     @app.get("/api/remote-dispatch-preflight", tags=["Composites"],
              summary="Is this workspace ready for a remote (deployment) composite run?")
@@ -7760,32 +7424,6 @@ def create_app() -> FastAPI:
     # builder's ``.get(...)`` defaults apply.  CSRF middleware already guards it.
     # -----------------------------------------------------------------------
 
-    @app.post(
-        "/api/investigation-run-one",
-        tags=["Investigations"],
-        summary="Run a single ad-hoc composite (the 'Duplicate run' flow)",
-    )
-    def investigation_run_one(
-        req: InvestigationRunOneRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Run a single ad-hoc composite execution for an investigation.
-
-        Mirrors the stdlib ``POST /api/investigation-run-one``.  Body:
-        ``{"investigation"|"study"|"name", "sim_name"?, "overrides"?, "steps"?,
-        "label"?}`` — appends the result as a one-off run to the investigation's
-        ``runs.db``.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.investigation_run_one_views.investigation_run_one``):
-          - 400  missing investigation / spec parse error / shape-less spec
-          - 404  spec.yaml or composite (sidecar / registry) not found
-          - 200  run succeeded (``{ok: true, run_id, investigation, sim_name,
-            viz_html}``) OR run failed (``{ok: false, run_id, error}``)
-        """
-        body, status = _investigation_run_one_views.investigation_run_one(
-            ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
     # P4: investigation-run — run ALL of an investigation's simulations + viz
@@ -7804,36 +7442,6 @@ def create_app() -> FastAPI:
     # middleware already guards it.
     # -----------------------------------------------------------------------
 
-    @app.post(
-        "/api/investigation-run",
-        tags=["Investigations"],
-        summary="Run all of an investigation's simulations + render its visualizations",
-    )
-    def investigation_run(
-        req: InvestigationRunRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Run every simulation of an investigation + render its visualizations.
-
-        Mirrors the stdlib ``POST /api/investigation-run``.  Body:
-        ``{"name"|"study"|"investigation"}``.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.investigation_run_views.investigation_run``, modulo the deferred
-        commit and the 409 below):
-          - 400  missing name / ``InvestigationSpecError`` (spec error)
-          - 404  ``FileNotFoundError`` (composite/spec file missing)
-          - 409  the workspace resolves to the ``deployment`` run target —
-                 this route is SYNCHRONOUS and cannot honor it; the body's
-                 ``hint`` names ``POST /api/investigation-run-unblocked``,
-                 which submits a background job and dispatches to viva-api
-                 (REFACTOR-PLAN §2A.8 workstream 8 step 2a)
-          - 500  workspace core build failed
-          - 200  the run/render summary dict
-        """
-        body, status = _investigation_run_views.investigation_run(
-            ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
     # Scaffold: study-create — scaffold a new study directory.
@@ -7853,33 +7461,6 @@ def create_app() -> FastAPI:
     # already guards it.
     # -----------------------------------------------------------------------
 
-    @app.post(
-        "/api/study-create",
-        tags=["Studies"],
-        summary="Scaffold a new study directory (deferred commit)",
-    )
-    def study_create(
-        req: StudyCreateRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Scaffold a new study directory.
-
-        Mirrors the stdlib ``POST /api/study-create``.  Body:
-        ``{"name", "source"?, "composite"?}``.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.study_create_views.study_create``, modulo the
-        deferred commit):
-          - 400  missing ``name`` / name fails ``^[a-zA-Z0-9_-]+$``
-          - 404  ``source`` composite not resolvable
-          - 409  investigation already exists
-          - 500  scaffold ``action`` raised (``{"error": "action failed: …"}``)
-          - 200  ``{ok: true, name}``  (scaffold run inline; the live
-            ``_active_branch_action`` commit is deferred)
-        """
-        body, status = _study_create_views.study_create(
-            ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
     # P5: investigation-run-unblocked — enumerate every member study's unblocked
@@ -7900,44 +7481,6 @@ def create_app() -> FastAPI:
     # the builder's "all studies" default applies.  CSRF middleware guards it.
     # -----------------------------------------------------------------------
 
-    @app.post(
-        "/api/investigation-run-unblocked",
-        tags=["Investigations"],
-        summary="Enumerate + run all of an investigation's unblocked variants",
-        status_code=202,
-    )
-    def investigation_run_unblocked(
-        req: InvestigationRunUnblockedRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Enumerate + submit a run job for an investigation's unblocked variants.
-
-        Mirrors the stdlib ``POST /api/investigation-run-unblocked``.  Body:
-        ``{"investigation", "studies"?}`` — enumerates every member study's
-        unblocked variants and runs them sequentially on a background thread
-        submitted to the in-process ``lib.run_jobs.manager`` singleton (the SAME
-        manager the ``GET /api/investigation-run-unblocked-status`` poller reads,
-        so the submit is visible to the status GET); returns a ``job_id``
-        immediately.  ``studies`` optionally narrows to a subset (a single slug
-        or a list).
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.run_unblocked_views.investigation_run_unblocked``):
-          - 400  missing investigation (``{"error": "investigation is required"}``)
-          - 404  investigation not found (``{"error": "investigation not found: <slug>"}``)
-          - 500  ``yaml.YAMLError`` (``{"error": "yaml parse failed: <e>"}``)
-          - 400  no variants to queue (the per-status breakdown + ``items[]``)
-          - 202  ``{"job_id": <id>, "items": [...]}``
-
-        The CSRF middleware already guards this POST.  Every path (incl. the 202
-        success and the no-queued 400) is wrapped in ``JSONResponse`` so the
-        lib-returned status code is preserved verbatim.  ``model_dump(
-        exclude_none=True)`` keeps an omitted ``studies`` absent so the builder's
-        "all studies" default applies.
-        """
-        body, status = _run_unblocked_views.investigation_run_unblocked(
-            ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
     # Remote-run THIN CLIENT (WS1, two-phase). sms-api owns async/state; these
@@ -8009,17 +7552,6 @@ def create_app() -> FastAPI:
         body, status = _remote_run_views.analysis_figures(ws, simulation_id, deployment=deployment, study=study)
         return JSONResponse(status_code=status, content=body)
 
-    @app.get("/api/study-remote-figures", tags=["Runs"],
-             summary="Aggregate a study's remote-sim figures + ptools for its Viz/Analyses tabs")
-    def study_remote_figures(study: str = "", limit: int = 10,
-                             ws: Path = Depends(get_workspace)) -> JSONResponse:
-        """Volume-capped gallery manifest of the remote figures/ptools across a
-        study's completed remote sims — the data source for rendering the study
-        Visualizations/Analyses tabs via the remote setting. Figure bytes are
-        fetched lazily through /api/remote-analysis-figure. Every backend with an
-        ``artifacts`` facet is asked; none (providers off) is an empty gallery."""
-        body, status = _remote_run_views.study_figures(ws, study, limit)
-        return JSONResponse(status_code=status, content=body)
 
     @app.get("/api/remote-analysis-figure", tags=["Runs"],
              summary="Serve one rendered figure/ptools file from a remote analysis")
@@ -8165,14 +7697,6 @@ def create_app() -> FastAPI:
                             headers=headers)
         return JSONResponse(status_code=status, content=body)
 
-    @app.get("/api/remote-run-config", tags=["Runs"],
-             summary="Whether pinned remote runs are enabled + the resolved build")
-    def remote_run_config(ws: Path = Depends(get_workspace)) -> JSONResponse:
-        """Report pinned-run config so the client can relabel the run card. When
-        pinned mode is on, eagerly resolves the build so the UI can show the
-        commit; degrades to ``pinned:true`` w/o a build rather than erroring."""
-        body, status = _remote_run_views.remote_run_config(ws)
-        return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
     # Auth — GitHub OAuth Device Flow (5 thin wrappers over lib.github_auth)
@@ -8488,38 +8012,6 @@ def create_app() -> FastAPI:
         body, status = _git_commit_views.branch_push(ws, payload)
         return JSONResponse(status_code=status, content=body)
 
-    @app.post(
-        "/api/dirty-commit-all",
-        response_model=DirtyCommitAllResponse,
-        tags=["Git & workstream"],
-        summary="Stage + commit all dirty files (minus reports/) on the active branch",
-    )
-    def dirty_commit_all(
-        body: dict = Body(default={}),
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Stage and commit all dirty files (minus reports/) under the active workstream.
-
-        Mirrors the stdlib ``POST /api/dirty-commit-all``.  Adopts the workspace's
-        current git HEAD as the workstream when none is active, checks it out if
-        HEAD differs, stages ``git add -A``, un-stages ``reports/``, then commits
-        under the ``pbg-template`` identity with an auto-generated conventional
-        message.  The request body is accepted and ignored.
-
-        Status codes (byte-identical to the legacy handler):
-          - 409  no active workstream (``{"error": "no active workstream"}``)
-          - 500  ``{"error": "git rev-parse failed: <stderr[:200]>"}``
-          - 500  ``{"error": "could not check out '<branch>': <stderr[:200]>"}``
-          - 409  already clean (``{"error": "working tree is already clean"}``)
-          - 500  ``{"error": "git operation failed: <stderr[:300]>"}``
-          - 200  ``{commit_sha: <sha[:7]>, message, paths}``
-
-        The CSRF middleware already guards this POST.  Library-backed via the
-        pure ``lib.git_commit_views.dirty_commit_all``; every path is wrapped in
-        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
-        """
-        resp, status = _git_commit_views.dirty_commit_all(ws, body)
-        return JSONResponse(status_code=status, content=resp)
 
     # -----------------------------------------------------------------------
     # Workstream — branch lifecycle + report-attach WRITE routes (4 POSTs)
@@ -8567,65 +8059,6 @@ def create_app() -> FastAPI:
         resp, status = _work_mutations.work_start(ws, payload)
         return JSONResponse(status_code=status, content=resp)
 
-    @app.post(
-        "/api/work-push",
-        response_model=WorkPushResponse,
-        tags=["Git & workstream"],
-        summary="Push the active workstream branch to origin",
-    )
-    def work_push(
-        body: dict = Body(default={}),
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Push the active workstream branch to ``origin`` with ``-u``.
-
-        Mirrors the stdlib ``POST /api/work-push``.  Adopts the workspace's
-        current git HEAD as the workstream when none is active.  Refuses cleanly
-        with a structured ``no_origin`` diagnosis when no origin remote exists,
-        attaches a ``diagnose_push_error`` diagnosis to push failures, and marks
-        the workstream ``pushed`` on success.  The request body is ignored.
-
-        Status codes (byte-identical to the legacy handler):
-          - 409  ``{"error": "no active workstream"}``
-          - 409  ``{"error": "no GitHub remote configured", "diagnosis": {...no_origin...}}``
-          - 500  ``{"error": "push failed: <err[:300]>", "diagnosis"?}``
-          - 200  ``{ok: true, branch, log}``
-
-        The CSRF middleware already guards this POST.  Library-backed via the
-        pure ``lib.work_mutations.work_push``; every path is wrapped in
-        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
-        """
-        resp, status = _work_mutations.work_push(ws, body)
-        return JSONResponse(status_code=status, content=resp)
-
-    @app.post(
-        "/api/work-end",
-        response_model=WorkEndResponse,
-        tags=["Git & workstream"],
-        summary="Check out the base branch + clear the workstream",
-    )
-    def work_end(
-        body: dict = Body(default={}),
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """End the active workstream: check out the base branch + clear state.
-
-        Mirrors the stdlib ``POST /api/work-end``.  Refuses when no workstream is
-        active or the tree is dirty, then ``git checkout <base>`` (base from the
-        workstream state, default ``"main"``) and clears the workstream state.
-        The request body is ignored.
-
-        Status codes (byte-identical to the legacy handler):
-          - 409  ``{"error": "no active workstream"}``
-          - 409  ``{"error": "uncommitted changes — commit or stash before ending"}``
-          - 200  ``{ok: true}``
-
-        The CSRF middleware already guards this POST.  Library-backed via the
-        pure ``lib.work_mutations.work_end``; every path is wrapped in
-        ``JSONResponse`` so the lib-returned status code is preserved verbatim.
-        """
-        resp, status = _work_mutations.work_end(ws, body)
-        return JSONResponse(status_code=status, content=resp)
 
     @app.post(
         "/api/work-attach-report",
@@ -9006,28 +8439,6 @@ def create_app() -> FastAPI:
     # lib-returned status code is preserved verbatim.
     # -----------------------------------------------------------------------
 
-    @app.post(
-        "/api/suggest",
-        tags=["Rigor & jobs"],
-        summary="Write a Claude-suggestion request file",
-    )
-    def suggest(
-        req: SuggestRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Write a Claude-suggestion request file. Body: ``{kind, context_extras?}``.
-
-        Mirrors the stdlib ``POST /api/suggest``.  Builds the request context
-        (workspace name/description, active branch, capped ``main..<branch>``
-        git-log commits) and persists it via ``suggest_requests.write_request``.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.misc_post_views.suggest``):
-          - 400  ``{"error": "invalid kind (must be one of …)"}``
-          - 200  ``{ok, id, skill_command, instructions}``
-        """
-        body, status = _misc_post_views.suggest(ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
 
     @app.post(
         "/api/study-report-single",
@@ -9060,30 +8471,6 @@ def create_app() -> FastAPI:
         resp, status = _misc_post_views.study_report_single(ws, body)
         return JSONResponse(status_code=status, content=resp)
 
-    @app.post(
-        "/api/open-window",
-        tags=["Rigor & jobs"],
-        summary="Open a dashboard URL in the user's browser",
-    )
-    def open_window(
-        req: OpenWindowRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Open a dashboard URL in the user's browser. Body: ``{route?}``.
-
-        Mirrors the stdlib ``POST /api/open-window``.  Reads the base URL from
-        ``<ws>/.pbg/server/server-info`` and dispatches the platform-appropriate
-        open command via a 5s-timeout ``subprocess.run``.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.misc_post_views.open_window``):
-          - 503  server-info file not found
-          - 501  unsupported platform
-          - 500  server-info parse failed / open failed
-          - 200  ``{ok: True, url}``
-        """
-        body, status = _misc_post_views.open_window(ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
 
     # -----------------------------------------------------------------------
     # Installs: system-deps-install + import-install — venv / system installs
@@ -9101,125 +8488,6 @@ def create_app() -> FastAPI:
     # already guards both.
     # -----------------------------------------------------------------------
 
-    @app.post(
-        "/api/system-deps-install",
-        tags=["Registry & catalog"],
-        summary="Run install commands for a catalog module's system-dep checks",
-    )
-    def system_deps_install(
-        req: SystemDepsInstallRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Run install commands for the named checks of a catalog module.
-
-        Mirrors the stdlib ``POST /api/system-deps-install``.  Body:
-        ``{"name", "check_names"}`` — runs each check's platform install commands
-        (``shell=True``, 600s timeout), then re-checks every requested dep.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.install_views.system_deps_install``):
-          - 400  missing ``name`` / empty ``check_names``
-          - 404  unknown module (``{"error": "unknown module: …"}``)
-          - 200  ``{ok, log, recheck}``
-        """
-        body, status = _install_views.system_deps_install(
-            ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
-
-    @app.post(
-        "/api/import-install",
-        tags=["Registry & catalog"],
-        summary="Pip-install a registered import into the workspace venv",
-    )
-    def import_install(
-        req: ImportInstallRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Pip-install a ``workspace.yaml``-registered import into the venv.
-
-        Mirrors the stdlib ``POST /api/import-install``.  Body:
-        ``{"name", "target"?}`` — installs editable (venv ``pip`` preferred,
-        system ``uv`` fallback, 120s timeout); on success it marks the import
-        ``installed=True`` (+ ``install_path``) in workspace.yaml and invalidates
-        the registry cache.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.install_views.import_install``, modulo the deferred commit):
-          - 400  missing name / no install target
-          - 404  import not registered / target path missing
-          - 500  no installer / install timeout / install error / non-zero
-            returncode (``{"error": "install failed", "log": …[, "diagnosis"]}``)
-          - 200  ``{ok: true, log}``  (workspace.yaml mutation run inline)
-        """
-        body, status = _install_views.import_install(
-            ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
-
-    @app.post(
-        "/api/catalog-install",
-        tags=["Registry & catalog"],
-        summary="Install a catalog module (PyPI direct or git-submodule) into the venv",
-    )
-    def catalog_install(
-        req: CatalogInstallRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Install a catalog module into the workspace venv.
-
-        Mirrors the stdlib ``POST /api/catalog-install`` (the biggest handler in
-        the migration).  Body: ``{"name", "skip_system_deps_check"?}`` — installs
-        directly from PyPI when the catalog entry carries a ``pypi_name``, else
-        via the legacy git-submodule + editable-install path, gated on a
-        system-dependency check.
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.catalog_install_views.catalog_install``, modulo the deferred
-        commit):
-          - 400  missing ``name``
-          - 404  module not in catalog (``{"error": "module '…' not in catalog"}``)
-          - 409  unmet system dependencies (``{error, name, platform, missing,
-            hint}``; bypass with ``skip_system_deps_check=true``)
-          - 500  no installer available / install failure (``{"error":
-            "action failed: …", "log", "install_mode"[, "diagnosis"]}``)
-          - 200  ``{ok: true, module, install_mode, log}``  (install + workspace.yaml
-            mutation run inline; the live ``_commit_or_run`` commit is deferred)
-        """
-        body, status = _catalog_install_views.catalog_install(
-            ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
-
-    @app.post(
-        "/api/catalog-uninstall",
-        tags=["Registry & catalog"],
-        summary="Uninstall a catalog module (PyPI or git-submodule) from the workspace",
-    )
-    def catalog_uninstall(
-        req: CatalogUninstallRequest,
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Remove a catalog module from the workspace venv (the last catalog committer).
-
-        Mirrors the stdlib ``POST /api/catalog-uninstall``.  Body: ``{"name"}`` —
-        reverses catalog-install (pypi: remove dependency + pip uninstall;
-        reference: remove dependency + uv source + git submodule deinit/rm + pip
-        uninstall; both: pop ``workspace.yaml`` imports entry).  A module not
-        declared in ``workspace.yaml.imports`` is delegated to the "unmanaged"
-        path (venv-only uninstall + untracked ``external/<name>/`` removal).
-
-        Status codes (byte-identical to the legacy handler, via
-        ``lib.catalog_uninstall_views.catalog_uninstall``, modulo the deferred
-        commit):
-          - 400  missing ``name``
-          - 200  unmanaged already-uninstalled (``{ok, already_uninstalled}``)
-          - 409  unmanaged module still required by a parent
-          - 500  no installer available / uninstall ``action`` failure
-          - 200  ``{ok: true, module, install_mode, log}``  (uninstall +
-            workspace.yaml mutation run inline; the live ``_commit_or_run``
-            commit is deferred)
-        """
-        body, status = _catalog_uninstall_views.catalog_uninstall(
-            ws, req.model_dump(exclude_none=True))
-        return JSONResponse(status_code=status, content=body)
 
     # Routes only a backend provider serves (step P2 Runs a2): after every core
     # route, before the catch-all; refuses a clash. The effective read-only

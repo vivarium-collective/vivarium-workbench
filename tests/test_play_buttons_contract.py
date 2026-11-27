@@ -14,6 +14,7 @@ silently stop working. (The endpoints' full behaviour is covered by
 test_composite_test_run_views_lib / test_run_stop / test_composite_stop_views_lib;
 this file guards that the button→endpoint wiring stays intact.)
 """
+import re
 from pathlib import Path
 
 import vivarium_workbench
@@ -28,18 +29,31 @@ def _js() -> str:
 
 
 def _assert_route(src: str, method: str, path: str) -> None:
-    """The route `path` is registered as `@app.<method>(...)` in app.py.
+    """The route `path` is registered for `method` in app.py — either as a
+    hand-written `@app.<method>(...)` decorator, or as a declarative
+    `R("<method>", "<path>", ...)` entry in the thin-route table (see
+    api/route_registrar.py; a pure lib delegator may live there instead of a
+    hand-written def). Still fails loudly if the endpoint is removed or its
+    method changes — only the registration *style* is now either/or.
 
     The path literal can appear more than once (e.g. also in the readonly
     mutation allowlist), so accept the route if ANY occurrence is preceded by
-    the expected decorator.
+    the expected decorator; quote style may be single or double.
     """
-    literal = f'"{path}"'
-    occurrences = [i for i in range(len(src)) if src.startswith(literal, i)]
-    assert occurrences, f"button endpoint {path!r} is no longer registered in app.py"
-    decorated = any(f"@app.{method}(" in src[max(0, i - 300):i] for i in occurrences)
-    assert decorated, (
-        f"{path!r} is present but no @app.{method}(...) registers it — the "
+    # Declarative thin-route-table entry: R('post', '/api/...'  (quote-agnostic).
+    table = re.search(
+        rf"""R\(\s*['"]{re.escape(method)}['"]\s*,\s*['"]{re.escape(path)}['"]""", src)
+    if table:
+        return
+    # Hand-written decorator: the path literal preceded by @app.<method>(.
+    for quote in ('"', "'"):
+        literal = f"{quote}{path}{quote}"
+        occurrences = [i for i in range(len(src)) if src.startswith(literal, i)]
+        if occurrences and any(f"@app.{method}(" in src[max(0, i - 300):i] for i in occurrences):
+            return
+    raise AssertionError(
+        f"button endpoint {path!r} ({method.upper()}) is neither a @app.{method}(...) "
+        f"decorator nor an R(\"{method}\", ...) thin-route-table entry in app.py — the "
         f"button's endpoint or request method changed")
 
 
