@@ -206,7 +206,7 @@ def seed_followup_study(workspace: Path, parent_name: str,
         # before exiting Design.
         "baseline": [{
             "name": "baseline-placeholder",
-            "composite": "v2ecoli.composites.baseline.baseline",
+            "composite": "",
             "params": {"seed": 0, "cache_dir": "out/cache"},
         }],
 
@@ -226,7 +226,7 @@ def seed_followup_study(workspace: Path, parent_name: str,
 
         "simulation_set": [],
         "model_change": {
-            "base_model": "v2ecoli.composites.baseline.baseline",
+            "base_model": "",
             "new_processes": [],
             "new_state_variables": [],
             "new_parameters": [],
@@ -390,7 +390,7 @@ def _seed_from_proposal(workspace: Path, parent_name: str, parent_spec: dict,
         },
         "baseline": [{
             "name": "baseline-placeholder",
-            "composite": "v2ecoli.composites.baseline.baseline",
+            "composite": "",
             "params": {"seed": 0, "cache_dir": "out/cache"},
         }],
         "purpose": {
@@ -405,7 +405,7 @@ def _seed_from_proposal(workspace: Path, parent_name: str, parent_spec: dict,
         },
         "simulation_set": [],
         "model_change": {
-            "base_model": "v2ecoli.composites.baseline.baseline",
+            "base_model": "",
             "new_processes": [],
             "new_state_variables": [],
             "new_parameters": [],

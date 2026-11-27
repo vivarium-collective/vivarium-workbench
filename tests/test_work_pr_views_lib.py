@@ -14,8 +14,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from vivarium_workbench.lib import work_pr_views as wp
 
 
@@ -273,42 +271,21 @@ def test_default_upstream_repo_from_workspace_yaml(tmp_path, monkeypatch):
     assert wp.default_upstream_repo(tmp_path) == "my-org/my-repo"
 
 
-def test_default_upstream_repo_from_external_remote(tmp_path, monkeypatch):
-    # No workspace.yaml; external/v2ecoli exists with a git@ origin URL.
-    (tmp_path / "external" / "v2ecoli").mkdir(parents=True)
-
-    def _run(argv, *a, **k):
-        assert argv == ["git", "remote", "get-url", "origin"]
-        assert k.get("cwd") == tmp_path / "external" / "v2ecoli"
-        return _cp(0, stdout="git@github.com:owner-x/name-y.git\n")
-
-    monkeypatch.setattr(wp.subprocess, "run", _run)
-    assert wp.default_upstream_repo(tmp_path) == "owner-x/name-y"
-
-
-def test_default_upstream_repo_from_external_remote_https(tmp_path, monkeypatch):
-    (tmp_path / "external" / "v2ecoli").mkdir(parents=True)
-    monkeypatch.setattr(
-        wp.subprocess, "run",
-        lambda *a, **k: _cp(0, stdout="https://github.com/o2/n2.git\n"))
-    assert wp.default_upstream_repo(tmp_path) == "o2/n2"
-
-
-def test_default_upstream_repo_fallback(tmp_path, monkeypatch):
-    # Neither workspace.yaml nor external/ dir → hard-coded fallback, no subprocess.
+def test_default_upstream_repo_empty_when_unset(tmp_path, monkeypatch):
+    # No workspace.yaml at all -> no upstream assumed. The core targets no default
+    # repository (previously it fell back to a hardcoded vivarium-collective/v2ecoli).
     monkeypatch.setattr(
         wp.subprocess, "run",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no subprocess")))
-    assert wp.default_upstream_repo(tmp_path) == "vivarium-collective/v2ecoli"
+    assert wp.default_upstream_repo(tmp_path) == ""
 
 
-def test_default_upstream_repo_empty_yaml_falls_through_to_fallback(tmp_path, monkeypatch):
+def test_default_upstream_repo_empty_when_yaml_has_no_upstream(tmp_path, monkeypatch):
     (tmp_path / "workspace.yaml").write_text("name: ws\n", encoding="utf-8")  # no upstream_repo
-    # external/ absent → fallback (subprocess never reached)
     monkeypatch.setattr(
         wp.subprocess, "run",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no subprocess")))
-    assert wp.default_upstream_repo(tmp_path) == "vivarium-collective/v2ecoli"
+    assert wp.default_upstream_repo(tmp_path) == ""
 
 
 # ===========================================================================
@@ -559,8 +536,20 @@ def test_link_fork_login_resolve_failure_500(monkeypatch, tmp_path):
     assert (resp, code) == ({"error": "could not resolve gh login: api boom"}, 500)
 
 
-def test_link_default_upstream_used_when_omitted(monkeypatch, tmp_path):
-    """No upstream_repo in body → default_upstream_repo(ws_root) fallback feeds the URL."""
+def test_link_no_upstream_configured_400(monkeypatch, tmp_path):
+    """No upstream_repo in the body and none declared in workspace.yaml -> a clear
+    400 asking to set one, rather than silently targeting a default repository."""
+    _patch_state(monkeypatch, {"active_branch": "feat/x"})
+    monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(wp.subprocess, "run", lambda argv, *a, **k: _cp(0))
+    resp, code = wp.work_link_branch(tmp_path, {})  # tmp_path has no workspace.yaml
+    assert code == 400
+    assert "upstream_repo" in resp["error"]
+
+
+def test_link_default_upstream_from_workspace_yaml(monkeypatch, tmp_path):
+    """upstream_repo declared in workspace.yaml feeds the link when the body omits it."""
+    (tmp_path / "workspace.yaml").write_text("upstream_repo: my-org/my-repo\n", encoding="utf-8")
     _patch_state(monkeypatch, {"active_branch": "feat/x"})
     monkeypatch.setattr(wp.shutil, "which", lambda name: "/usr/bin/gh")
 
@@ -571,13 +560,13 @@ def test_link_default_upstream_used_when_omitted(monkeypatch, tmp_path):
             return _cp(1)
         if argv[:3] == ["git", "remote", "add"]:
             assert argv == ["git", "remote", "add", "origin",
-                            "https://github.com/vivarium-collective/v2ecoli.git"]
+                            "https://github.com/my-org/my-repo.git"]
             return _cp(0)
         if argv[:2] == ["git", "push"]:
             return _cp(0)
         raise AssertionError(argv)
 
     monkeypatch.setattr(wp.subprocess, "run", _run)
-    resp, code = wp.work_link_branch(tmp_path, {})  # tmp_path has no workspace.yaml/external
+    resp, code = wp.work_link_branch(tmp_path, {})
     assert code == 200
-    assert resp["upstream_repo"] == "vivarium-collective/v2ecoli"
+    assert resp["upstream_repo"] == "my-org/my-repo"
