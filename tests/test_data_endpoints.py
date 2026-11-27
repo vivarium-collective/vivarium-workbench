@@ -594,13 +594,21 @@ def test_snapshot_repo_label_in_template():
         "index.html.j2 missing .viv-repo-label class"
 
 
-def test_snapshot_css_hides_switcher_and_shows_label():
-    """snapshot-readonly.css must hide #viv-workspace-switcher and show #snapshot-repo-label."""
+def test_snapshot_css_hides_authoring_and_superseded_repo_label():
+    """snapshot-readonly.css must hide live-authoring controls (.js-authoring)
+    and the compact #snapshot-repo-label.
+
+    The original rule ("hide the workspace switcher, show a static repo label")
+    was deliberately reversed: snapshot now KEEPS the workspace/Source switcher as
+    a navigator across published workspaces, and the compact #snapshot-repo-label
+    is HIDDEN because the live repo+branch chip supersedes it (see the comments in
+    snapshot-readonly.css). This guards the two rules that still define the
+    snapshot stylesheet's contract."""
     text = (STATIC_DIR / "snapshot-readonly.css").read_text()
-    assert "#viv-workspace-switcher" in text, \
-        "snapshot-readonly.css missing rule to hide #viv-workspace-switcher"
+    assert ".js-authoring" in text, \
+        "snapshot-readonly.css missing the .js-authoring hide rule"
     assert "#snapshot-repo-label" in text, \
-        "snapshot-readonly.css missing rule to show #snapshot-repo-label"
+        "snapshot-readonly.css missing the #snapshot-repo-label supersession rule"
 
 
 def test_walkthrough_sets_repo_label():

@@ -1,9 +1,11 @@
-"""Test that the loom-explore static bundle is served by the dashboard.
+"""Test that the bigraph-loom static bundle is served by the dashboard.
 
 After the extraction from pbg-template, the bundle lives inside the
-``vivarium_workbench`` package (``vivarium_workbench/static/loom-explore/``)
-rather than the workspace's ``scripts/_assets/`` tree. These tests verify
-that the server still serves the bundle correctly from the new location.
+``vivarium_workbench`` package (served from ``loom_assets.asset_dir()``, i.e.
+``vivarium_workbench/loom/_dist/``) rather than the workspace's
+``scripts/_assets/`` tree, and the viewer was renamed loom-explore →
+bigraph-loom (served under ``/bigraph-loom/``). These tests verify that the
+server still serves the bundle correctly from the new location.
 """
 import json
 import urllib.request
@@ -32,7 +34,7 @@ def workspace_server(tmp_path, dashboard_client):
 
 
 def test_loom_explore_index_served(workspace_server):
-    with urllib.request.urlopen(workspace_server.url + "/loom-explore/index.html") as resp:
+    with urllib.request.urlopen(workspace_server.url + "/bigraph-loom/index.html") as resp:
         assert resp.status == 200
         body = resp.read().decode()
         # The bundled prod build is a Vite-generated SPA; index.html should
@@ -41,9 +43,9 @@ def test_loom_explore_index_served(workspace_server):
 
 
 def test_loom_explore_root_redirects_to_index(workspace_server):
-    """Visiting /loom-explore/ (trailing slash) should serve index.html."""
+    """Visiting /bigraph-loom/ (trailing slash) should serve index.html."""
     try:
-        with urllib.request.urlopen(workspace_server.url + "/loom-explore/") as resp:
+        with urllib.request.urlopen(workspace_server.url + "/bigraph-loom/") as resp:
             assert resp.status == 200
             body = resp.read().decode()
             assert "<html" in body.lower() or "<!doctype" in body.lower()
@@ -54,26 +56,26 @@ def test_loom_explore_root_redirects_to_index(workspace_server):
 
 def test_loom_explore_js_assets_served(workspace_server):
     """Every .js file under assets/ should be servable."""
-    import vivarium_workbench
-    bundle = Path(vivarium_workbench.__file__).parent / "static" / "loom-explore" / "assets"
-    js_files = list(bundle.glob("*.js"))
+    from vivarium_workbench import loom_assets
+    bundle = Path(loom_assets.asset_dir()) / "assets"
+    js_files = list(bundle.glob("*.js")) if bundle.is_dir() else []
     if not js_files:
-        pytest.skip("no JS files in bundled loom-explore/assets")
+        pytest.skip("no JS files in bundled bigraph-loom/assets")
     for js in js_files:
-        url = workspace_server.url + "/loom-explore/assets/" + js.name
+        url = workspace_server.url + "/bigraph-loom/assets/" + js.name
         with urllib.request.urlopen(url) as resp:
             assert resp.status == 200, f"{js.name}: HTTP {resp.status}"
 
 
 def test_loom_explore_css_assets_served(workspace_server):
     """Every .css file under assets/ should be servable."""
-    import vivarium_workbench
-    bundle = Path(vivarium_workbench.__file__).parent / "static" / "loom-explore" / "assets"
-    css_files = list(bundle.glob("*.css"))
+    from vivarium_workbench import loom_assets
+    bundle = Path(loom_assets.asset_dir()) / "assets"
+    css_files = list(bundle.glob("*.css")) if bundle.is_dir() else []
     if not css_files:
-        pytest.skip("no CSS files in bundled loom-explore/assets")
+        pytest.skip("no CSS files in bundled bigraph-loom/assets")
     for css in css_files:
-        url = workspace_server.url + "/loom-explore/assets/" + css.name
+        url = workspace_server.url + "/bigraph-loom/assets/" + css.name
         with urllib.request.urlopen(url) as resp:
             assert resp.status == 200
             assert "text/css" in (resp.headers.get("Content-Type", "") or "")
@@ -82,7 +84,7 @@ def test_loom_explore_css_assets_served(workspace_server):
 def test_loom_explore_path_traversal_refused(workspace_server):
     """A path with .. must be refused."""
     try:
-        urllib.request.urlopen(workspace_server.url + "/loom-explore/../workspace.yaml")
+        urllib.request.urlopen(workspace_server.url + "/bigraph-loom/../workspace.yaml")
         raise AssertionError("expected refusal")
     except urllib.error.HTTPError as e:
         assert e.code in (403, 404), f"expected 403/404, got {e.code}"
@@ -90,17 +92,18 @@ def test_loom_explore_path_traversal_refused(workspace_server):
 
 def test_loom_explore_missing_file_404(workspace_server):
     try:
-        urllib.request.urlopen(workspace_server.url + "/loom-explore/assets/nonexistent.js")
+        urllib.request.urlopen(workspace_server.url + "/bigraph-loom/assets/nonexistent.js")
         raise AssertionError("expected 404")
     except urllib.error.HTTPError as e:
         assert e.code == 404
 
 
-def test_ui_config_default_is_loom_explore(workspace_server):
-    """When no ui block is set in workspace.yaml, the default is loom-explore."""
+def test_ui_config_default_is_bigraph_loom(workspace_server):
+    """When no ui block is set in workspace.yaml, the default is bigraph-loom
+    (the viewer was renamed loom-explore → bigraph-loom)."""
     with urllib.request.urlopen(workspace_server.url + "/api/ui-config") as resp:
         data = json.loads(resp.read())
-    assert data["composite_view"] == "loom-explore"
+    assert data["composite_view"] == "bigraph-loom"
 
 
 def test_ui_config_respects_workspace_flag(workspace_server):
