@@ -38,7 +38,7 @@ SMS_METHODS = frozenset({
     "list_build_simulations", "download_workspace", "simulation_status", "get_simulation",
     "cancel_simulation", "simulation_chain_progress", "simulation_trace", "run_simulation", "download_data",
     # /api/v1/.../analys*
-    "run_analysis", "analysis_status", "list_analyses",
+    "run_analysis", "analysis_status", "list_analyses", "analysis_figures", "analysis_figure",
     # /compose/v1, rewritten to the interim /viva/v1/compose
     "compose_submit", "compose_status", "compose_status_batch", "download_compose_results",
     # /env-worker/v1 (rewritten to /viva/v1/workers): viva-api's hosted env workers (step P2 Workers moved the
@@ -53,6 +53,7 @@ SMS_METHODS = frozenset({
 NOT_SMS_RECEIVERS = frozenset({
     ("lib.remote_run_compose", "session"),   # compose-api's own client (compose_api_client.ComposeSession)
     ("lib.ai_views", "ai_tools"),            # the AI chat's own capabilities() (a module function)
+    ("api.app", "_remote_run_views"),        # core view fns analysis_figure(s), not the SMS client (name collision)
 })
 
 #: The SMS-specific prefixes. ``/viva/v1/compose`` is the interim home of ``/compose/v1``; ``/env-worker/v1`` is
