@@ -782,6 +782,42 @@ def unresolved_study_composite_refs(spec: dict, known_ids: set[str]) -> list[str
     return [r for r in flagged if not _ref_resolves(r, known)]
 
 
+def pinned_simulator_installed(spec: dict) -> Optional[bool]:
+    """Whether a study's pinned simulator distribution is importable HERE.
+
+    A study may pin the simulator that owns its composite via a ``simulator:``
+    block (``{package, ref, registry}`` — the per-study reproducibility
+    contract). That package is an external distribution installed from the pin;
+    in a *framework-only* render env (e.g. the read-only workbench publish, which
+    installs the render framework but NOT the sim engines — several aren't
+    pip-buildable in CI) it is deliberately absent, so NONE of its composites can
+    resolve against the live registry.
+
+    Returns:
+      * ``True``  — the study pins a simulator and its distribution is installed.
+      * ``False`` — the study pins a simulator and its distribution is NOT
+        installed (its composite refs are *simulation-deferred*, not broken).
+      * ``None``  — the study declares no usable ``simulator:`` pin, so this
+        notion doesn't apply (callers keep their normal behavior).
+
+    Callers use ``False`` to suppress the "composite not found in registry" lint:
+    in a sim-absent env that banner can't tell a deferred ref from a broken one,
+    so claiming "not found / may not be real" would be a false positive. Genuine
+    broken-ref detection belongs where the sim IS installed (its own CI).
+    """
+    sim = (spec or {}).get("simulator")
+    if not isinstance(sim, dict):
+        return None
+    pkg = sim.get("package")
+    if not isinstance(pkg, str) or not pkg.strip():
+        return None
+    try:
+        metadata.distribution(pkg.strip())
+        return True
+    except Exception:  # noqa: BLE001 — PackageNotFoundError (and any metadata hiccup)
+        return False
+
+
 def _dedupe_alias_composites(records: list) -> list:
     """Collapse a composite that's registered under more than one id.
 
