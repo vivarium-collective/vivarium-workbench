@@ -79,15 +79,29 @@ def land_remote_simulation_artifacts(ws_root: Path, simulation_id: int, run_id: 
     """
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
+    run_dir = WorkspacePaths.load(ws_root).pbg / "runs" / run_id
     with tempfile.TemporaryDirectory() as td:
         tar_path = client.download_data(int(simulation_id), Path(td))
         extract_root = Path(td) / "extract"
         extract_root.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(tar_path, "r:gz") as tar:
-            tar.extractall(extract_root, filter="data")
+        try:
+            with tarfile.open(tar_path, "r:gz") as tar:
+                tar.extractall(extract_root, filter="data")
+        except tarfile.ReadError:
+            # A multi-node colony dispatch has no store tar (POST /data is empty).
+            # Recover its analysis figures into the run folder instead of failing.
+            # (.pbg is not served, so to VIEW these, land into a study via
+            # land_remote_run; this study-less path just makes the run recoverable
+            # and its analyses.json resolvable.)
+            colony = _land_colony_analyses(run_dir, ws_root, client, int(simulation_id), run_id)
+            return {
+                "run_id": run_id,
+                "analyses": bool(colony["analyses"]),
+                "ptools": 0,
+                "figures": colony["figures"],
+            }
         remote_run_landing.fold_analyses(extract_root, ws_root, run_id)
         ptools_n = remote_run_landing.land_ptools_tsvs(extract_root, ws_root, run_id)
-    run_dir = WorkspacePaths.load(ws_root).pbg / "runs" / run_id
     return {
         "run_id": run_id,
         "analyses": (run_dir / "analyses.json").is_file(),

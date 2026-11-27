@@ -116,6 +116,12 @@ class _FakeColonyClient:
         self.fetched.append((analysis, path))
         return f"<html>{analysis}:{path}</html>".encode()
 
+    def download_data(self, simulation_id, dest_dir, timeout=None):
+        # A colony dispatch's POST /data returns an empty store tar.
+        p = Path(dest_dir) / f"sim_{simulation_id}.tar.gz"
+        p.write_bytes(b"")
+        return p
+
 
 @pytest.mark.plugin
 def test_land_colony_no_store_lands_analysis_figures(tmp_path: Path, sl):
@@ -160,6 +166,24 @@ def test_land_colony_no_store_lands_analysis_figures(tmp_path: Path, sl):
     finally:
         conn.close()
     assert row is not None and row[0] == "completed"
+
+
+@pytest.mark.plugin
+def test_land_simulation_artifacts_colony_no_store(tmp_path: Path, sl):
+    """The study-less Runs-table land path (land_remote_simulation_artifacts) must
+    also survive a colony's empty store tar: recover the analysis figures into the
+    run folder instead of crashing on the missing store."""
+    ws_root = tmp_path / "workspace"
+    (ws_root / "studies").mkdir(parents=True)
+    client = _FakeColonyClient()
+
+    result = sl.land_remote_simulation_artifacts(ws_root, 2150, "run-colony-xyz", client)
+
+    assert result["analyses"] is True
+    assert result["figures"] == 2
+    fig = ws_root / ".pbg" / "runs" / "run-colony-xyz" / "viz" / "analysis-colony-1" / "viz" / "mass_fraction__gen=0.html"
+    assert fig.is_file()
+    assert (ws_root / ".pbg" / "runs" / "run-colony-xyz" / "analyses.json").is_file()
 
 
 @pytest.mark.plugin
