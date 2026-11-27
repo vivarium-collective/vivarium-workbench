@@ -145,13 +145,16 @@ def test_run_with_emitter_default_name_is_xarray(tmp_path):
 
 
 def test_run_with_emitter_short_run_does_not_silently_empty(tmp_path):
-    """A run too short to fill the xarray buffer must NOT silently yield an empty
-    store. A 1-emit-tick run deterministically under-fills the flat-Step buffer
-    (the close-time final flush asserts ``not include_static``) → an empty
-    ``.zarr``; the broker's content guard fires and falls back to sqlite with a
-    diagnosable warning. (Regression test for Finding 1: that AssertionError used
-    to be swallowed, leaving an empty store + empty charts with no user-visible
-    error.)"""
+    """A short run must NOT silently yield an empty store. The flat-Step buffer
+    (size 3) flushes on close even for a 1-emit-tick run, so a 1-tick run writes
+    real ``generation=N`` data and the zarr read-side broker reads it back — the
+    short run charts a real, non-empty series (no downgrade to sqlite needed).
+
+    Regression test: the store used to read back EMPTY because the zarr trace
+    reader looked for ``time_gen=N`` only on the leaf's IMMEDIATE parent, but the
+    emitter nests the store path (``counter_store/value``) so ``time_gen`` sits on
+    the ancestor ``lineage_seed=<s>`` partition node. See
+    ``comparative_viz._extract_trace_from_zarr``."""
     pytest.importorskip("xarray")
     pytest.importorskip("zarr")
     db_file = str(tmp_path / "runs.db")
@@ -160,21 +163,21 @@ def test_run_with_emitter_short_run_does_not_silently_empty(tmp_path):
         emit_paths=["counter_store"], out_dir=str(tmp_path), core=_core(),
         steps=1, db_file=db_file)
 
-    # Guard fired: fell back to a readable sqlite store with a recorded warning.
-    assert prov["output_kind"] == "sqlite"
-    assert prov["store_path"] == db_file
-    assert "warning" in prov and prov["warning"]
+    # The short run produced a readable zarr store (NOT an empty-store fallback).
+    assert prov["output_kind"] == "zarr"
+    store = prov["store_path"]
+    from pathlib import Path as _Path
+    assert _Path(store).exists()
 
-    # The fall-back store holds the run's data (so the run is NOT empty).
-    import viva_emitters
-    rows = viva_emitters.load_history(db_file, "r-short")
-    # Nested record shape (#1301): counter_store/value -> counter_store.value.
-    series = [(r.get("counter_store") or {}).get("value") for r in rows]
-    assert len(rows) >= 1
-    assert any((v or 0) > 0 for v in series)
-
-    # The empty/partial zarr store was cleaned up (not left to be mis-resolved).
-    assert not (tmp_path / "r-short.zarr").exists()
+    # The read-side broker reads a real, non-empty series back out — the exact
+    # path the charts use. An empty read here is the regression this guards.
+    kind, resolved = emitters.read_source(store)
+    assert kind == "zarr"
+    reader = emitters.reader_for("zarr")
+    times, values = reader(_Path(resolved), "counter_store/value")
+    assert values, "short xarray run charted EMPTY (reader could not extract data)"
+    assert len(times) == len(values)
+    assert any(v > 0 for v in values)  # the counter actually advanced
 
 
 # ---------------------------------------------------------------------------
@@ -205,28 +208,39 @@ def test_run_with_emitter_xarray_writes_zarr(tmp_path):
 
     reader = emitters.reader_for("zarr")
     times, values = reader(Path(store), "counter_store/value")
-    assert isinstance(times, list) and isinstance(values, list)
+    # Non-empty: the reader must actually extract the series. A weak list-type-only
+    # assertion let a reader regression hide — the store held data but read empty
+    # because time_gen lives on the ancestor partition node, not the leaf's parent.
+    assert values and len(times) == len(values)
+    assert any(v > 0 for v in values)  # the counter advanced
 
 
-def test_run_with_emitter_zarr_fallback_uses_fresh_state(tmp_path):
+def test_run_with_emitter_zarr_fallback_uses_fresh_state(tmp_path, monkeypatch):
     """MINOR 3: the empty-STORE fall-back drives a Composite from `state` once
     (xarray) then re-drives a NEW Composite from the same `state` (sqlite). Assert
     (a) the caller's `state` is left pristine for the fresh re-run, and (b) the
     progress heartbeat double-counts (the documented, harmless re-count: the
-    re-drive replays 1..steps so the max-runtime guard stays armed)."""
+    re-drive replays 1..steps so the max-runtime guard stays armed).
+
+    Short runs now flush real data, so the empty-store branch no longer triggers
+    naturally — force it by making the content guard report the store empty. This
+    exercises the fall-back's fresh-state re-drive + double-count in isolation,
+    independent of whether any real run produces an empty store."""
     pytest.importorskip("xarray")
     pytest.importorskip("zarr")
+    monkeypatch.setattr(emitters, "_zarr_store_has_observable_data",
+                        lambda store: False)
     db_file = str(tmp_path / "runs.db")
     state = _doc()
     seen = []
-    # steps=1 deterministically under-fills the flat-Step buffer → empty store →
-    # the zarr branch (which already drove `steps` ticks) falls back to sqlite.
     prov = emitters.run_with_emitter(
         "xarray", state=state, run_id="r-fresh", emit_paths=["counter_store"],
         out_dir=str(tmp_path), core=_core(), steps=1, db_file=db_file,
         progress_cb=seen.append)
 
     assert prov["output_kind"] == "sqlite"
+    # The empty result is diagnosable (not silent).
+    assert prov.get("warning")
     # The caller's state dict is untouched, so the sqlite re-run starts clean.
     assert state["counter_store"]["value"] == 0.0
     # Documented harmless double-count: progress fired for the zarr drive AND the

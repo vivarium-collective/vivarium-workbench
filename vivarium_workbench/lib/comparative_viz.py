@@ -208,17 +208,32 @@ def _extract_trace_from_zarr(zarr_path: Path,
 
     times: list[float] = []
     values: list[float] = []
-    # XArrayEmitter store layout (verified 2026-05-23):
+    # XArrayEmitter store layout:
     #   .../lineage_seed=<s>/                      ← partition; has time_gen=<N> data_vars
-    #   .../lineage_seed=<s>/<leaf>/               ← LEAF NODE (named after observable)
+    #   .../lineage_seed=<s>/<store>/.../<leaf>/   ← LEAF NODE (named after observable)
     #     data_vars: generation=1, generation=2, ...   ← per-generation value arrays
     # Both leaf data_vars and partition time_gen=<N> share dim emitstep_gen=<N>.
+    # NOTE: the leaf is NOT necessarily a direct child of the partition node —
+    # the emitter mirrors the full store path, so an observable like
+    # ``counter_store/value`` (or v2ecoli's ``listeners/monomer_counts``) nests
+    # one or more intermediate store groups between the ``lineage_seed=<s>``
+    # partition (which carries ``time_gen=<N>``) and the leaf. So the matching
+    # time series lives on an ANCESTOR, not always the immediate parent — walk up
+    # to find it. (The old flat layout, leaf directly under the partition, is the
+    # first ancestor checked, so this stays backward-compatible.)
+    def _time_var_for(node, t_name):
+        anc = node.parent
+        while anc is not None:
+            if t_name in (anc.data_vars or {}):
+                return anc[t_name]
+            anc = anc.parent
+        return None
+
     try:
         for node in dt.subtree:
             if node.name != leaf:
                 continue
-            parent = node.parent
-            if parent is None:
+            if node.parent is None:
                 continue
             # Per-generation pairs; sort by N for time-ordered concat.
             gen_keys: list[tuple[int, str]] = []
@@ -233,8 +248,8 @@ def _extract_trace_from_zarr(zarr_path: Path,
             gen_keys.sort()
             for gen_n, var_name in gen_keys:
                 v_var = node[var_name]
-                t_name = f"time_gen={gen_n}"
-                if t_name not in (parent.data_vars or {}):
+                t_var = _time_var_for(node, f"time_gen={gen_n}")
+                if t_var is None:
                     continue
                 # Vector leaf: select within id_<leaf> using observable_index.
                 # Scalar leaves have ndim==1 (only the emitstep dim) so no
@@ -249,7 +264,7 @@ def _extract_trace_from_zarr(zarr_path: Path,
                     # be a 2D slab, can't render as a line. Skip silently.
                     continue
                 v_arr = v_var.values
-                t_arr = parent[t_name].values
+                t_arr = t_var.values
                 n = min(len(t_arr), len(v_arr))
                 for i in range(n):
                     times.append(float(t_arr[i]))
