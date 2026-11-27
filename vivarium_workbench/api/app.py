@@ -946,6 +946,31 @@ _THIN_ROUTE_TABLE: tuple[R, ...] = (
       shape='A', adapter='nows_pos',
       response_model=AuthPayload, summary='Whether compose-api calls are signed in, and the sign-in in progress (never a token)', tags=['Auth'],
     ),
+    # ── Remote-run thin client (phase 2+) + remote backend health ───────────────
+    R('get', '/api/source/remote-health', (_workspace_deps, 'remote_health'), 'source_remote_health_route',
+      shape='C', adapter='nows_pos',
+      response_model=RemoteHealth, summary='Reachability + version of the configured remote backend', tags=['Workspaces & sources'],
+    ),
+    R('post', '/api/remote-run-submit', (_remote_run_views, 'remote_run_submit'), 'remote_run_submit',
+      shape='A', adapter='ws_body_or_empty', status_code=202,
+      summary='Thin-client phase 2: issue the run for a completed build', tags=['Runs'],
+      params=(P('req', Union[dict, None], Body(default=None)),),
+    ),
+    R('post', '/api/remote-run-land', (_remote_run_views, 'remote_run_land'), 'remote_run_land',
+      shape='A', adapter='ws_body_or_empty', status_code=200,
+      summary='Thin-client phase 3: download + land a completed run', tags=['Runs'],
+      params=(P('req', Union[dict, None], Body(default=None)),),
+    ),
+    R('post', '/api/remote-run-land-artifacts', (_remote_run_views, 'remote_run_land_artifacts'), 'remote_run_land_artifacts',
+      shape='A', adapter='ws_body_or_empty', status_code=200,
+      summary="Land a remote run's analyses + PTools exports (study-less, on demand)", tags=['Runs'],
+      params=(P('req', Union[dict, None], Body(default=None)),),
+    ),
+    R('post', '/api/remote-run-analysis', (_remote_run_views, 'remote_run_analysis'), 'remote_run_analysis',
+      shape='A', adapter='ws_body_or_empty', status_code=202,
+      summary='Fire the analysis phase on an existing completed simulation', tags=['Runs'],
+      params=(P('req', Union[dict, None], Body(default=None)),),
+    ),
 )
 # fmt: on
 
@@ -4141,19 +4166,6 @@ def create_app() -> FastAPI:
     # Workspace & source routes  (Batch 13). GET /api/source/builds is the SMS provider's route
     # (vivarium_workbench_sms/routes.py, step P2 Builds B3).
     # -----------------------------------------------------------------------
-
-    @app.get(
-        "/api/source/remote-health",
-        response_model=RemoteHealth,
-        tags=["Workspaces & sources"],
-        summary="Reachability + version of the configured remote backend",
-    )
-    def source_remote_health_route() -> RemoteHealth:
-        """Best-effort probe of the configured remote backend for the Source
-        panel's health indicator: is it configured, is it reachable, what version.
-        Always HTTP 200; never raises. Library-backed via
-        ``lib.workspace_deps_views.remote_health``."""
-        return RemoteHealth.model_validate(_workspace_deps.remote_health())
 
     @app.get(
         "/api/backend/features",
@@ -7529,52 +7541,6 @@ def create_app() -> FastAPI:
     # ``-status``) are the SMS provider's routes (``Provider.router``, step P2
     # Runs a2), included by ``_include_provider_routers`` below.
     # -----------------------------------------------------------------------
-    @app.post("/api/remote-run-submit", tags=["Runs"], status_code=202,
-              summary="Thin-client phase 2: issue the run for a completed build")
-    def remote_run_submit(
-        req: Union[dict, None] = Body(default=None),
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        body, status = _remote_run_views.remote_run_submit(ws, req or {})
-        return JSONResponse(status_code=status, content=body)
-
-    @app.post("/api/remote-run-land", tags=["Runs"], status_code=200,
-              summary="Thin-client phase 3: download + land a completed run")
-    def remote_run_land(
-        req: Union[dict, None] = Body(default=None),
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        body, status = _remote_run_views.remote_run_land(ws, req or {})
-        return JSONResponse(status_code=status, content=body)
-
-    @app.post("/api/remote-run-land-artifacts", tags=["Runs"], status_code=200,
-              summary="Land a remote run's analyses + PTools exports (study-less, on demand)")
-    def remote_run_land_artifacts(
-        req: Union[dict, None] = Body(default=None),
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """Study-less landing for a Runs-table remote row: download the sim's
-        results and fold analyses.json + copy ptools/*.tsv into
-        .pbg/runs/<run_id>/, so the Analyses button and PTools viewer work.
-        Body: {simulation_id, run_id}."""
-        body, status = _remote_run_views.remote_run_land_artifacts(ws, req or {})
-        return JSONResponse(status_code=status, content=body)
-
-    @app.post("/api/remote-run-analysis", tags=["Runs"], status_code=202,
-              summary="Fire the analysis phase on an existing completed simulation")
-    def remote_run_analysis(
-        req: Union[dict, None] = Body(default=None),
-        ws: Path = Depends(get_workspace),
-    ) -> JSONResponse:
-        """On-demand analysis for a remote simulation that has already finished.
-
-        viva-api auto-runs the analysis as the dispatch DAG's last node, so this
-        is for re-running it: a failed analysis, a study whose `analyses` changed
-        since the run, or a simulation dispatched before the auto-trigger
-        existed. Returns the analysis id to poll via `/api/remote-run-poll`."""
-        body, status = _remote_run_views.remote_run_analysis(ws, req or {})
-        return JSONResponse(status_code=status, content=body)
-
     @app.get("/api/remote-analysis-figures", tags=["Runs"],
              summary="List a remote sim's completed-analysis figures + ptools")
     def remote_analysis_figures(simulation_id: str = "", deployment: Union[str, None] = None,
