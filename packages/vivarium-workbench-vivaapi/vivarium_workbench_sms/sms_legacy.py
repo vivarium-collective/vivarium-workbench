@@ -205,6 +205,7 @@ def land_tail(ws_root: Path, body: dict) -> tuple[dict, int]:
             merged_config_hash=exec_prov["merged_config_hash"],
             expected_seeds=int(expected_seeds) if expected_seeds else None,
             base_url=getattr(client, "base_url", None),
+            client=client,
         )
     response: dict = {"run_id": run_id}
     if analysis_errors:

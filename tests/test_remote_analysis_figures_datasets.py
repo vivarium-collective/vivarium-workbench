@@ -85,6 +85,34 @@ def _fresh_caches(monkeypatch):
     raf._s3_check.clear()
 
 
+def test_fetch_by_analysis_uses_credential_less_api_before_s3(monkeypatch):
+    """When the datasets registry isn't served AND this host has no AWS creds,
+    fetch_by_analysis still resolves the figure through sms-api's own
+    /analysis-figure endpoint (which the server reads from S3 with its own
+    credentials) -- tried before the direct-S3 path that needs local creds."""
+
+    class _ApiClient:
+        base_url = "http://fake"
+
+        def __init__(self):
+            self.figure_calls: list = []
+
+        def capabilities(self):
+            return {"version": "t", "capabilities": []}  # no viva-v1-datasets
+
+        def analysis_figure(self, sid, analysis, path):
+            self.figure_calls.append((sid, analysis, path))
+            return b"<html>api-figure</html>"
+
+    monkeypatch.setattr(raf, "_s3_client", lambda: None)  # no AWS creds on this host
+    client = _ApiClient()
+
+    got = raf.fetch_by_analysis(client, 2150, "analysis-colony-1", "viz/x.html")
+
+    assert got == (b"<html>api-figure</html>", "text/html; charset=utf-8")
+    assert client.figure_calls == [(2150, "analysis-colony-1", "viz/x.html")]
+
+
 def test_listing_groups_by_analysis_dir_and_hides_chromosome_views(monkeypatch):
     _no_s3(monkeypatch)
     client = FakeClient([
