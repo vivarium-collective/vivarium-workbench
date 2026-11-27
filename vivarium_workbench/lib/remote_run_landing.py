@@ -14,6 +14,7 @@ import shutil
 import zipfile
 from pathlib import Path
 
+from vivarium_workbench.lib import analysis_provider
 from vivarium_workbench.lib import composite_runs as cr
 
 
@@ -94,6 +95,7 @@ def _fold_one_analysis_json(analysis_json_path: Path, extract_root: Path) -> lis
     """
     data = json.loads(analysis_json_path.read_text(encoding="utf-8"))
     out_dir = analysis_json_path.parent
+    layout = analysis_provider.output_layout()
     summary = data.get("summary")
     top_errors = data.get("errors") or []
     entries: list[dict] = []
@@ -104,13 +106,13 @@ def _fold_one_analysis_json(analysis_json_path: Path, extract_root: Path) -> lis
             continue
         scale_results = data.get(scale) if isinstance(data.get(scale), dict) else {}
         for name in name_status:
-            written = []
-            for sub in ("viz", "ptools"):
+            written: list[str] = []
+            for sub in layout.fold_subdirs:
                 subdir = out_dir / sub
                 if subdir.is_dir():
                     written.extend(
                         p.relative_to(extract_root).as_posix()
-                        for p in sorted(subdir.glob(f"{name}__*"))
+                        for p in sorted(subdir.glob(f"{name}{layout.filename_sep}*"))
                         if p.is_file()
                     )
             # Structural errors naming this analysis, plus any inline failed group.
@@ -148,7 +150,7 @@ def fold_analyses(extract_root: Path, ws_root: Path, run_id: str) -> None:
     ``run_id`` directly, without going through the study-shaped
     ``land_remote_run`` (which mints its own, unrelated run_id).
     """
-    results = sorted(extract_root.glob("**/analyses/*/analysis.json"))
+    results = sorted(extract_root.glob(analysis_provider.output_layout().analysis_json_glob))
     if not results:
         return
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
@@ -186,7 +188,7 @@ def land_ptools_tsvs(
     (overwrites); a copy failure is skipped, never raised, so an otherwise-completed
     run still lands.
     """
-    tsvs = sorted(extract_root.glob("**/ptools/*.tsv"))
+    tsvs = sorted(extract_root.glob(analysis_provider.output_layout().ptools_glob))
     if not tsvs:
         return 0
     from vivarium_workbench.lib.workspace_paths import WorkspacePaths
