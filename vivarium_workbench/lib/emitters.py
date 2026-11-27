@@ -574,18 +574,20 @@ def _run_xarray(*, state, run_id, emit_paths, out_dir, core, steps,
     _drive(composite, steps, progress_cb)
     _, close_errors = _flush_step_emitters(composite)
 
-    # GUARD (Finding 1): the flat-Step XArrayEmitter's async writer only persists
-    # a COMPLETE buffer; a run shorter than the buffer (size 3) writes the hive
-    # partition coordinates but omits the observable leaf data — deterministically
-    # for a 1-tick run (its close-time final flush asserts ``not include_static``,
-    # an AssertionError that ``_flush_step_emitters`` now SURFACES via
-    # ``close_errors`` instead of swallowing) and NON-deterministically for a
-    # 2-tick run (an executor race). Either way the ``.zarr`` charts empty. Since
-    # xarray is the DEFAULT emitter (Task 6) and ``run_runner.execute`` resolves
-    # the Run tab through ``default_emitter``, that empty store would be the
-    # DEFAULT outcome for short interactive runs. Detect the empty store by its
-    # actual content (``num_writes`` does NOT distinguish the flaky 2-tick case)
-    # and fall back to sqlite so the default path NEVER silently yields nothing.
+    # GUARD (Finding 1): a safety net for a zarr store that drove but holds NO
+    # observable leaf data — the run would then chart empty, and since xarray is
+    # the DEFAULT emitter (Task 6) and ``run_runner.execute`` resolves the Run tab
+    # through ``default_emitter``, that empty store would be the default outcome.
+    # Fall back to sqlite so the default path NEVER silently yields nothing. The
+    # store's actual content is what's checked (``num_writes`` does not distinguish
+    # a partition-only write), together with any close-time error surfaced by
+    # ``_flush_step_emitters``.
+    #
+    # NOTE: short runs are NOT empty — the flat-Step buffer (size 3) flushes on
+    # close even for a 1-tick run (it writes ``generation=<N>`` arrays with the
+    # emitted values; the fixed zarr reader in ``comparative_viz`` reads them back
+    # by walking up to the ``time_gen=<N>`` partition node). So this guard rarely
+    # fires in practice; it remains for a genuinely data-less store or a close error.
     if close_errors or not _zarr_store_has_observable_data(store):
         warning = (
             f"xarray run {run_id!r}: the zarr store has no observable data after "

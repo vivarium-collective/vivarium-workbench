@@ -62,14 +62,24 @@ tests/test_visualization_endpoints.py::test_post_create_from_composite_creates_v
 # and they now pass, so they re-join the blocking gate.
 tests/test_publish.py::test_walkthrough_composite_popout_is_snapshot_aware
 
-# ── Emitter/store selection — asserts sqlite where the default is now xarray/zarr
+# ── Emitter/store selection — FIXED (zarr reader), held quarantined on purpose ─
 tests/test_emitters_run_with_emitter.py::test_run_with_emitter_short_run_does_not_silently_empty
 tests/test_emitters_run_with_emitter.py::test_run_with_emitter_zarr_fallback_uses_fresh_state
-# Same class as the two entries above (emitter-kind resolution not reset between
-# parametrized cases): failed on main post-merge (run 30963442285, suite 2/4)
-# with `assert 'sqlite' == 'zarr'` for kind=xarray. Verified unrelated to that
-# merge's actual diff (remote_build_source.py/source_build_views.py/app.py --
-# nothing emitter-related) and passes cleanly in isolation on the same commit.
+# These two now PASS (this PR fixes the real defect: the zarr trace reader
+# comparative_viz._extract_trace_from_zarr read every xarray store back as empty
+# because it looked for time_gen=<N> on the leaf's IMMEDIATE parent, but the
+# emitter nests the store path so time_gen lives on the ancestor lineage_seed
+# partition node — fixed to walk up). Their bodies are updated to assert the real
+# behavior (short run charts a real non-empty series), so the quarantine-watch job
+# will report them PASSING — that is expected.
+# They are kept quarantined ON PURPOSE: un-quarantining them adds 2 tests to the
+# blocking suite, which shifts pytest-split's shard balance and DETERMINISTICALLY
+# co-locates pre-existing test-isolation leakers (SMS provider-cache poisoning +
+# os.environ pops that aren't restored, e.g. test_openapi_structural_contract's
+# _build_openapi) with their victims (test_remote_run_endpoints,
+# test_provenance_manifest, test_viva_v1_client_contract, test_remote_dispatch_*).
+# Those leaks are latent on main and unrelated to emitters. Un-quarantine these
+# two once that provider/env test-isolation is hardened (separate follow-up).
 
 # ── Template drift (page/tab markup changed; assertions never updated) ────────
 tests/test_spine_present_c_unbury.py::test_discovery_implications_elevated_above_conclusion_text
