@@ -23,40 +23,29 @@
    repeat its heading. Clamped to 2 lines; full text lives in Overview →
    Background → Question. #}
 {% set _q = (study.purpose.question if study.purpose else none) or study.question %}
+<div class="study-sticky-head" id="study-head">
 <header class="study-header">
-  <div style="display:flex; align-items:flex-start; gap:14px; justify-content:space-between;">
-  <div class="study-head-main" style="min-width:0; flex:1 1 auto">
-  <div style="display:flex; align-items:center; gap:12px; min-width:0; flex-wrap:wrap">
-  <h1 class="study-title" style="margin:0">
-    {% if name_chip %}<span class="study-num-chip" style="font-size:0.5em; font-weight:700; color:#64748b; background:#f1f5f9; padding:3px 9px; border-radius:9999px; vertical-align:middle; margin-right:8px">{{ name_chip }}</span>{% endif %}<span class="study-name" id="study-name" data-slug="{{ name }}" data-study-kind="{{ study.kind }}" title="{{ name }}" data-edit-kind="study" data-edit-field="title" data-edit-value="{{ study.title or '' }}" data-edit-label="Title">{{ display_name }}</span>
-    {# The old standalone "kind" + "phase" pills were visual noise next to the
-       title (uniform across a computational investigation; the phase just
-       duplicated the gate ladder below). Kind is kept as a data attribute for
-       any consumer; the lifecycle stage is now shown — and highlighted "you are
-       here" — inside the six-gate status row below (gate-current). #}
-  </h1>
-  </div>
-  {% if _q and (_q | trim) != (display_name | trim) %}<p id="study-question-headline" class="study-question-headline" title="{{ _q }}" data-edit-kind="study" data-edit-field="question" data-edit-value="{{ study.question }}" data-edit-multiline data-edit-label="Question"><span class="q-glyph">Q</span> <span class="study-question-headline-text">{{ _q }}</span></p>{% endif %}
-  </div>
-  <span class="study-header-actions" style="display:inline-flex; gap:10px; flex-shrink:0; align-items:center;">
-    {# Two-axis study markers — Progress (● Completed) × Verdict (◆ Supported) —
-       sit top-right with the nav (filled by _renderStudyAxisMarkers in
-       study-detail.js) so the title + question take the full left width. #}
+  {# Compact action bar — progress + verdict pills, Shortcuts, study navigator —
+     a single right-aligned row ABOVE the title, so the title + question below run
+     the FULL width (fewer wrapped lines, far less white space). #}
+  <div class="study-head-bar">
     <span id="study-axis-markers" data-slug="{{ name }}" style="display:inline-flex; gap:8px; align-items:center; flex-wrap:wrap"></span>
-    {# Export (figures / notebook) moved OUT of the header into the Overview
-       panel's section toolbar (Phase 4 refinement). The launch actions
-       (↻ Reproduce / ▶ Run current spec / ⚙ Dispatch composite) were moved OUT
-       of the header into the Simulations → Runs subtab (see
-       #sim-run-actions below): they belong with the runs they produce, and they
-       were crowding the top-right corner where the docked investigation graph
-       now parks. The header keeps only the study navigator. #}
-    {# Narrative navigation: jump to the next study along this investigation's
-       leads-to chain. Populated/shown by study-detail.js (_wireNextStudy),
-       which asks the parent investigation view for the next slug; hidden on a
-       terminal study or outside an investigation. #}
-    {# Study navigator: ← prev along the chain, a ⇄ jump menu to any study in
-       the investigation (grouped: this study's parents / what it leads to /
-       all), and next →. Wired by _wireStudyNav; hidden outside an investigation. #}
+    {# Shortcuts (report / notebook / figures) — outside-click dropdown wired by _wireStudyExportMenu. #}
+    <span class="study-dl study-export-wrap" style="position:relative; display:inline-flex; align-self:center">
+      <button type="button" id="study-export-btn" class="btn-mini" aria-haspopup="true" aria-expanded="false" title="Shortcuts — open in the browser or download (report, notebook, figures)">Shortcuts ▾</button>
+      <div id="study-export-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:190px;padding:4px">
+        <div class="study-export-sec">Report</div>
+        <button type="button" id="study-report-open" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyReportOpen(event, '{{ study.name }}')">Open in browser</button>
+        <button type="button" id="study-report-dl" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyReportDownload(event, '{{ study.name }}')">Download HTML</button>
+        <div class="study-export-sec">Notebook</div>
+        <button type="button" id="study-nb-open" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyNotebookOpen(event, '{{ study.name }}')">Open in browser</button>
+        <button type="button" id="study-dl-notebook" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')">Download .ipynb</button>
+        <div class="study-export-sec">Figures</div>
+        <button type="button" id="study-fig-open" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyFiguresOpen(event, '{{ study.name }}')">Open in browser</button>
+        <button type="button" id="study-dl-figures" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')">Download (zip)</button>
+      </div>
+    </span>
+    {# Study navigator: ← prev, ⇄ jump menu, next → — wired by _wireStudyNav; hidden outside an investigation. #}
     <span id="study-nav" class="study-nav" data-investigation="{{ study.investigation }}" style="display:none">
       <button type="button" id="study-prev" class="btn-mini study-nav-btn" title="Previous study" aria-label="Previous study">←</button>
       <span class="study-jump-wrap" style="position:relative;display:inline-flex">
@@ -65,9 +54,24 @@
       </span>
       <button type="button" id="study-next" class="btn-mini study-nav-btn" title="Next study" aria-label="Next study">→</button>
     </span>
-  </span>
   </div>
+  <h1 class="study-title" style="margin:0">
+    {% if name_chip %}<span class="study-num-chip" style="font-size:0.5em; font-weight:700; color:#64748b; background:#f1f5f9; padding:3px 9px; border-radius:9999px; vertical-align:middle; margin-right:8px">{{ name_chip }}</span>{% endif %}<span class="study-name" id="study-name" data-slug="{{ name }}" data-study-kind="{{ study.kind }}" title="{{ name }}" data-edit-kind="study" data-edit-field="title" data-edit-value="{{ study.title or '' }}" data-edit-label="Title">{{ display_name }}</span>
+  </h1>
+  {% if _q and (_q | trim) != (display_name | trim) %}<p id="study-question-headline" class="study-question-headline q-collapsed" title="{{ _q }}" data-edit-kind="study" data-edit-field="question" data-edit-value="{{ study.question }}" data-edit-multiline data-edit-label="Question"><button type="button" class="q-toggle" aria-expanded="false" title="Show / hide the research question" onclick="window._toggleStudyQuestion && window._toggleStudyQuestion(event)"><span class="q-glyph">Q</span><span class="q-caret" aria-hidden="true">▸</span></button><span class="study-question-headline-text">{{ _q }}</span></p>{% endif %}
 </header>
+<script>
+// Collapsible research question: toggle the one-line clamp on the Q headline.
+// stopPropagation so clicking the Q glyph never opens the inline-edit on the <p>.
+window._toggleStudyQuestion = function (ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  var p = document.getElementById('study-question-headline');
+  if (!p) return;
+  var collapsed = p.classList.toggle('q-collapsed');
+  var btn = p.querySelector('.q-toggle');
+  if (btn) btn.setAttribute('aria-expanded', String(!collapsed));
+};
+</script>
 
 {# Composite-resolution lint banner (framework-emitters). Surfaced server-side
    from the live registry via composite_lookup.unresolved_study_composite_refs:
@@ -135,27 +139,22 @@
     <svg class="pillar-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="9" r="2.2"/><path d="M6 8.2v7.6"/><path d="M6 12h6a4 4 0 0 0 4-4V11"/></svg>
     <span class="pillar-label">{{ "Decide" if _is_v3 else "Conclusions" }}</span>
   </button>
-  {# Export menu — top-right of the study tab bar (moved out of the Overview
-     panel). Same handlers + outside-click dropdown as before (wired by
-     _wireStudyExportMenu). Styled to match the investigation-level ↓ Export. #}
-  <span class="study-dl study-export-wrap" style="margin-left:auto; align-self:center; position:relative; display:inline-flex">
-    <button type="button" id="study-export-btn" class="btn-mini" aria-haspopup="true" aria-expanded="false" title="Shortcuts — open in the browser or download (report, notebook, figures)">Shortcuts ▾</button>
-    {# Mirrors the investigation ↓ Export: each artifact offers open-in-browser
-       AND download. Report → the self-contained single-study report; Notebook →
-       the runnable .ipynb; Figures → the study's Visualizations tab / outputs zip. #}
-    <div id="study-export-menu" role="menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.14);z-index:70;min-width:190px;padding:4px">
-      <div class="study-export-sec">Report</div>
-      <button type="button" id="study-report-open" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyReportOpen(event, '{{ study.name }}')">Open in browser</button>
-      <button type="button" id="study-report-dl" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyReportDownload(event, '{{ study.name }}')">Download HTML</button>
-      <div class="study-export-sec">Notebook</div>
-      <button type="button" id="study-nb-open" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyNotebookOpen(event, '{{ study.name }}')">Open in browser</button>
-      <button type="button" id="study-dl-notebook" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyNotebookFromCard(event, '{{ study.name }}', '{{ study.investigation }}')">Download .ipynb</button>
-      <div class="study-export-sec">Figures</div>
-      <button type="button" id="study-fig-open" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyFiguresOpen(event, '{{ study.name }}')">Open in browser</button>
-      <button type="button" id="study-dl-figures" role="menuitem" class="btn-mini study-export-item" onclick="window._vivStudyFiguresFromCard(event, '{{ study.name }}')">Download (zip)</button>
-    </div>
-  </span>
 </nav>
+</div>
+<script>
+// Collapse the sticky header to a single-line (cut-off) title when scrolled — the
+// badges + question hide and the tabs stay pinned at top. Classic position:sticky
+// "stuck" detector: top:-1px makes the header clip 1px once pinned, so its
+// IntersectionObserver ratio drops below 1 exactly when it becomes stuck. Works
+// regardless of which ancestor is the scroll container.
+(function () {
+  var head = document.getElementById('study-head');
+  if (!head || !('IntersectionObserver' in window)) return;
+  new IntersectionObserver(function (es) {
+    head.classList.toggle('scrolled', es[0].intersectionRatio < 1);
+  }, { threshold: [1] }).observe(head);
+})();
+</script>
 <style>
 /* Task 4: header restructure — kind tag, promoted question, tightened status row.
    The 6-axis stepper + gate-status colors below are carried over verbatim from
@@ -171,7 +170,32 @@
 .study-question-headline>.ie-pencil{right:6px;top:1px}
 h1.study-title .study-name.ie-editable{padding-right:36px}
 h1.study-title .study-name>.ie-pencil{right:4px;top:6px}
-.study-question-headline .q-glyph{display:inline-block;font-size:0.78em;font-weight:700;font-family:ui-monospace,monospace;color:#64748b;background:#f1f5f9;padding:1px 7px;border-radius:4px;margin-right:6px;vertical-align:middle}
+.study-question-headline .q-glyph{display:inline-block;font-size:0.78em;font-weight:700;font-family:ui-monospace,monospace;color:#64748b;background:#f1f5f9;padding:1px 7px;border-radius:4px;margin-right:0;vertical-align:middle}
+/* Collapsible research question. Default collapsed (one clamped line) keeps the
+   header compact; the Q button / caret expands it. */
+.q-toggle{border:none;background:transparent;padding:0;margin-right:7px;cursor:pointer;display:inline-flex;align-items:center;gap:3px;vertical-align:middle}
+.q-toggle:hover .q-glyph{background:#e2e8f0;color:#334155}
+.q-caret{font-size:0.6em;color:#94a3b8;transition:transform .15s ease}
+.study-question-headline:not(.q-collapsed) .q-caret{transform:rotate(90deg)}
+.study-question-headline.q-collapsed .study-question-headline-text{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;opacity:.72}
+/* Compact + cleaner header: one-line title, right-aligned action bar, pinned tabs. */
+.study-head-bar{display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:5px}
+.study-header{padding-bottom:2px}
+/* Title shows IN FULL at rest (wraps), a bit tighter than the old huge block. */
+h1.study-title{font-size:1.35em;line-height:1.26;font-weight:700}
+.study-question-headline{margin:3px 0 0 0;padding-right:40px}
+/* One sticky header+tabs unit that pins to the top of the scroll area. The generic
+   `header{position:sticky}` rule is neutralised on the inner header so ONLY this
+   wrapper pins; top:-1px feeds the "stuck" detector in the script above. */
+.study-sticky-head{position:sticky;top:-1px;z-index:50;background:#fff;box-shadow:0 1px 0 #e2e8f0}
+.study-sticky-head > header.study-header{position:static;z-index:auto;box-shadow:none}
+.study-tabs{background:transparent}
+/* Collapsed (scrolled) state: hide the action bar + question and shrink the title
+   to one cut-off line — the section tabs stay pinned at the top. */
+#study-head.scrolled .study-head-bar,
+#study-head.scrolled #study-question-headline{display:none}
+#study-head.scrolled > header.study-header{padding-top:8px;padding-bottom:2px}
+#study-head.scrolled h1.study-title{font-size:1.02em;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 /* Study Export menu — styled to match the investigation-level ↓ Export menu
    exactly: grey uppercase section labels + full-width, left-aligned, stacked
    text-link items (not inline pills). Mirrors walkthrough.js `_sec` + `_mi`. */

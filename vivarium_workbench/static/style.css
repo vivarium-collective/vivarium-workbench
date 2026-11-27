@@ -4997,6 +4997,31 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 #inv-overview-toggle { font-weight: 600; }
 #investigation-detail-view.inv-overview-collapsed > #investigation-intro,
 #investigation-detail-view.inv-overview-collapsed > #investigation-decision-cockpit { display: none; }
+/* Details panel: drag-resize (scrolls within a set height) + collapse. The handle
+   below the panel resizes it; dragging to the top collapses it to a slim bar. This
+   (plus the graph's #aig-resize-bar) replaces the header Details/Graph toggles. */
+#investigation-intro { overflow: auto; min-height: 0; }
+.inv-intro-resize { height: 13px; margin: -6px 0 8px; cursor: ns-resize; position: relative; overflow: visible; touch-action: none; }
+.inv-intro-resize::after { content: ''; display: block; width: 46px; height: 3px; border-radius: 2px; background: #cbd5e1; margin: 5px auto; transition: background .12s; }
+.inv-intro-resize:hover::after { background: #94a3b8; }
+/* A dedicated collapse button pinned to the right end of a drag bar (so the bar
+   itself only resizes — no accidental click-to-collapse). Used on BOTH the Details
+   handle and the graph's #aig-resize-bar. */
+#aig-resize-bar { position: relative; overflow: visible; }
+.bar-collapse-btn { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); z-index: 3; border: 1px solid #e2e8f0; background: #fff; color: #64748b; cursor: pointer; font-size: 10px; line-height: 1; padding: 2px 6px; border-radius: 5px; }
+.bar-collapse-btn:hover { background: #e2e8f0; color: #334155; }
+/* Collapsed re-expand bars — Details + graph share one height so the one-row view
+   is tidy (matches .aig-collapsed-bar: padding 7/12, 0.85em, border-box). */
+.inv-intro-collapsed-bar { display: none; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; margin: 0 0 8px; padding: 7px 12px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px; color: #475569; font-size: 0.85em; font-weight: 600; cursor: pointer; text-align: left; }
+.inv-intro-collapsed-bar:hover { background: #e2e8f0; color: #334155; }
+#investigation-detail-view.inv-overview-collapsed > #inv-intro-collapsed-bar { display: flex; }
+#investigation-detail-view.inv-overview-collapsed > #inv-intro-resize { display: none; }
+/* Both Details AND the graph collapsed → their two slim re-expand bars share ONE
+   row (other children default to their own full-width row; hidden ones drop out). */
+#investigation-detail-view.inv-both-collapsed { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+#investigation-detail-view.inv-both-collapsed > * { flex: 0 0 100%; }
+#investigation-detail-view.inv-both-collapsed > #inv-intro-collapsed-bar { flex: 1 1 220px; width: auto; margin: 0; }
+#investigation-detail-view.inv-both-collapsed > #investigation-dag-fs { flex: 1 1 220px; margin: 0; }
 /* Inline-graph collapse: drag the graph↔study divider all the way up (or the bar)
    to collapse the whole inline graph (toolbar + shell) to a single clickable
    "Investigation graph" bar; click it to expand. */
@@ -5015,10 +5040,7 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
   padding: 7px 12px; margin: 0; color: #475569; font-weight: 600; font-size: 0.85em;
   user-select: none; touch-action: none;
 }
-#investigation-dag-fs.aig-collapsed .aig-collapsed-bar::after {
-  content: "drag down or click to show"; margin-left: auto; font-weight: 500;
-  font-size: 0.82em; color: #94a3b8;
-}
+#investigation-dag-fs.aig-collapsed .aig-collapsed-bar::after { display: none; }
 #investigation-dag-fs.aig-collapsed .aig-collapsed-bar:hover { background: #e2e8f0; color: #334155; }
 #investigation-dag-fs.aig-collapsed .aig-collapsed-bar:hover::after { color: #64748b; }
 :root[data-theme="dark"] #investigation-dag-fs.aig-collapsed .aig-collapsed-bar {
@@ -5256,6 +5278,21 @@ button:has(> .aig-tb-blabel) {
   color: #64748b; margin-top: 1px; text-transform: none;
 }
 button:hover > .aig-tb-blabel { color: #3730a3; }
+/* --- Compact investigation header + graph toolbar: reclaim vertical space so the
+   graph gets more real estate by default (single-row header, tighter toolbar). --- */
+.inv-header-bar .inv-hdr-btn { padding: 2px 8px; font-size: 0.82em; line-height: 1.35; }
+.inv-header-bar .inv-hdr-sep { width: 1px; height: 15px; background: #e2e8f0; margin: 0 2px; display: inline-block; flex: 0 0 auto; }
+.aig-toolbar { margin: 0 0 6px; padding: 3px 7px; gap: 3px 6px; }
+.aig-toolbar .aig-tb-btn { padding: 2px 7px; }
+/* Icon-over-label toolbar buttons: shrink the stacked height (smaller label, no gap). */
+.aig-toolbar button:has(> .aig-tb-blabel) { line-height: 1; }
+.aig-toolbar .aig-tb-blabel { font-size: 7.5px; margin-top: 0; }
+/* Hide the interaction hint in the toolbar (the behavior is in node tooltips) and
+   stop the slider/groups from growing, so the toolbar stays a single compact row
+   and the graph keeps the height. */
+.aig-toolbar .aig-tb-hint { display: none; }
+.aig-toolbar .aig-tb-group { flex: 0 0 auto; }
+.aig-toolbar .aig-tb-slider-wide { width: 96px; flex: 0 0 auto; }
 .aig-tb-link {
   border: none;
   background: transparent;

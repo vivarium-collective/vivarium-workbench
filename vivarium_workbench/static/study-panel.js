@@ -70,6 +70,14 @@
       // reveals the investigation graph above it (one unified divider).
       onResize: function () { _coordinateGraph(); },
       onDock: function () { _coordinateGraph(); },
+      // Closing the Study window clears the graph's "open" marker.
+      onClose: function () {
+        current = '';
+        try {
+          if (global._wsStudyTabs) global._wsStudyTabs.active = null;
+          if (typeof global._wsHighlightActiveDagNode === 'function') global._wsHighlightActiveDagNode(null);
+        } catch (e) { /* no graph present — ignore */ }
+      },
     });
     _ctl = ctl;
 
@@ -97,6 +105,15 @@
         var sameStudy = (current === name);
         current = name;
         if (nameEl) nameEl.textContent = name;
+        // Mark this study's node as "open" in the investigation graph — restores the
+        // open-marker the old inline-open flow (_wsOpenStudyTab) set. Keep
+        // _wsStudyTabs.active in sync so the highlight survives graph re-renders
+        // (walkthrough.js re-applies it from .active on every re-render).
+        try {
+          global._wsStudyTabs = global._wsStudyTabs || {};
+          global._wsStudyTabs.active = name;
+          if (typeof global._wsHighlightActiveDagNode === 'function') global._wsHighlightActiveDagNode(name);
+        } catch (e) { /* no investigation graph present (e.g. snapshot) — ignore */ }
         // The study page's own init reads ?tab=<kind> (study-detail.js _runStudyInit),
         // so carry the tab as a query param — it opens on that tab with no load race.
         var base = href(name);

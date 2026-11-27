@@ -13581,6 +13581,47 @@
     try { var v = localStorage.getItem('inv-overview-collapsed'); return v === null ? false : v === '1'; }
     catch (e) { return false; }
   }
+  // Drag-resize the Details panel (#investigation-intro): the panel scrolls within
+  // a set height, and dragging the handle up past the panel collapses it (same
+  // state the Details toggle uses). Height persists in localStorage; wiring is
+  // idempotent (re-applies the stored height on every render).
+  function _wireInvIntroResize() {
+    var handle = document.getElementById('inv-intro-resize');
+    var intro = document.getElementById('investigation-intro');
+    if (!handle || !intro) return;
+    try {
+      var h = parseInt(localStorage.getItem('inv-overview-height') || '', 10);
+      if (h > 0) { intro.style.height = h + 'px'; intro.style.overflow = 'auto'; }
+    } catch (e) { /* ignore */ }
+    if (handle._wired) return;
+    handle._wired = true;
+    handle.addEventListener('pointerdown', function (ev) {
+      ev.preventDefault();
+      var startY = ev.clientY, startH = intro.getBoundingClientRect().height, moved = false;
+      intro.style.overflow = 'auto';
+      try { handle.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+      function _collapse() {
+        intro.style.height = '';
+        try { localStorage.setItem('inv-overview-collapsed', '1'); } catch (e2) { /* ignore */ }
+        _applyInvOverviewState();
+      }
+      function mv(e) {
+        if (Math.abs(e.clientY - startY) > 3) moved = true;
+        var nh = startH + (e.clientY - startY);
+        if (nh < 44) { _collapse(); up(); return; }   // dragged up past the panel -> collapse
+        intro.style.height = nh + 'px';
+      }
+      function up() {
+        document.removeEventListener('pointermove', mv);
+        document.removeEventListener('pointerup', up);
+        void moved;   // click-to-collapse removed (too reactive); use the collapse button
+        try { if (intro.style.height) localStorage.setItem('inv-overview-height', parseInt(intro.style.height, 10)); } catch (e) { /* ignore */ }
+      }
+      document.addEventListener('pointermove', mv);
+      document.addEventListener('pointerup', up);
+    });
+  }
+
   function _applyInvOverviewState() {
     var view = document.getElementById('investigation-detail-view');
     if (!view) return;
@@ -13609,6 +13650,8 @@
       btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       btn.classList.toggle('inv-toggle-on', !collapsed);
     }
+    _wireInvIntroResize();
+    _updateBothCollapsed();
   }
   function _toggleInvOverview() {
     var willOpen = _invOverviewCollapsed();   // currently collapsed -> this click opens it
@@ -15187,14 +15230,27 @@
   // Collapse the inline investigation graph to a thin "Investigation graph" bar
   // (triggered by dragging the graph↔study divider all the way up, or a control),
   // and expand it back (click the bar) to a normal height.
+  // When BOTH the Details panel and the graph are collapsed, lay their two slim
+  // re-expand bars out on a single row (CSS .inv-both-collapsed) instead of two.
+  function _updateBothCollapsed() {
+    var view = document.getElementById('investigation-detail-view');
+    var fs = document.getElementById('investigation-dag-fs');
+    if (!view) return;
+    var both = view.classList.contains('inv-overview-collapsed') &&
+               !!(fs && fs.classList.contains('aig-collapsed'));
+    view.classList.toggle('inv-both-collapsed', both);
+  }
+  window._updateBothCollapsed = _updateBothCollapsed;
   function _aigCollapseInline() {
     var fs = document.getElementById('investigation-dag-fs');
     if (fs) fs.classList.add('aig-collapsed');
     _aigSyncGraphToggle();
+    _updateBothCollapsed();
   }
   function _aigExpandInline() {
     var fs = document.getElementById('investigation-dag-fs');
     if (fs) fs.classList.remove('aig-collapsed');
+    _updateBothCollapsed();
     var shell = document.getElementById('investigation-dag-shell');
     if (shell) {
       shell._aigProgrammaticResize = true;
