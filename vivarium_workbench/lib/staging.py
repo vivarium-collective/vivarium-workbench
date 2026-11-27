@@ -5,8 +5,8 @@ record and the local compute environment share one git history. This module is
 the single, layout-aware source of *what a scoped dashboard commit stages*, split
 into two **owned** lists so the boundary is explicit:
 
-- :func:`science_paths` — the scientific record (the ``ScientificContent`` domain:
-  studies, investigations, authored config).
+- :func:`science_paths` — the scientific record (studies, investigations,
+  authored config).
 - :func:`environment_paths` — the local compute environment / code + deps (the
   deferred ``ComputeEnvironment`` domain).
 

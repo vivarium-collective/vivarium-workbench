@@ -292,11 +292,7 @@ investigation-contracts = { git = "https://github.com/vivarium-collective/invest
 # git dependency entirely. allow-direct-references is left enabled below since
 # other direct-reference deps may be reintroduced; it is currently unused.
 
-# ─── import-linter — the ports & adapters layering gate (REFACTOR-PLAN §2A.1) ──
-# Keeps `lib.ports` a PURE interface layer: a port may never import a concrete
-# adapter or the git/impl modules an adapter wraps. So the domain can depend on
-# the interface without dragging in an implementation, and a cloud adapter swaps
-# in without the port changing. Enforced in CI (`lint-imports`).
+# ─── import-linter — package-boundary gates (enforced in CI via `lint-imports`) ──
 [tool.importlinter]
 root_packages = ["vivarium_workbench", "vivarium_workbench_sms", "viva_superpowers", "discovery_engine"]
 
@@ -350,17 +346,6 @@ name = "route dependencies do not import the app"
 type = "forbidden"
 source_modules = ["vivarium_workbench.api.deps"]
 forbidden_modules = ["vivarium_workbench.api.app"]
-
-[[tool.importlinter.contracts]]
-name = "ports are pure interfaces (no adapter / no git-impl imports)"
-type = "forbidden"
-source_modules = ["vivarium_workbench.lib.ports"]
-forbidden_modules = [
-    "vivarium_workbench.lib.adapters",
-    "vivarium_workbench.lib.git_status",
-    "vivarium_workbench.lib.work_state",
-    "vivarium_workbench.lib.git_commit_views",
-]
 
 [[tool.importlinter.contracts]]
 # Phase 2.1/3: the workbench imports only a NARROW, DECLARED core of

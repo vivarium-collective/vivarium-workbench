@@ -7,8 +7,8 @@ process-global ``lib._root`` directly in the request path.
 See `docs/session-registry.md` §7 and `docs/REFACTOR-PLAN.md` §2A.6.
 
 **Slice 1 scope.** The context carries just ``ws_root`` + ``session_key``; the
-``ScientificContent`` / ``EnvironmentResolver`` ports are threaded onto it in
-later slices. Resolution is behavior-preserving: a bound session (via
+resolvers for the scientific record and the compute environment are threaded
+onto it in later slices. Resolution is behavior-preserving: a bound session (via
 ``/api/source/switch``) resolves to its bound path; an unbound session and every
 cookie-less client fall back to the process default workspace — exactly today's
 behavior.

@@ -109,12 +109,7 @@ from vivarium_workbench.lib import simulations_index as _simulations_index
 from vivarium_workbench.lib import events as _events
 from vivarium_workbench.lib import metadata_mutations as _meta_mut
 from vivarium_workbench.lib import study_crud_mutations as _study_crud_mut
-from vivarium_workbench.lib.adapters import scientific_content as _record
-# git-status routes call through the scientific_content port, so this module is
-# not referenced by name in app.py — but the test suite reaches
-# `app._git_status.build_git_status/build_work_status` to monkeypatch git output,
-# so the alias must stay importable here. noqa: keep the seam.
-from vivarium_workbench.lib import git_status as _git_status  # noqa: F401
+from vivarium_workbench.lib import git_status as _git_status
 from vivarium_workbench.lib import git_commit_views as _git_commit_views
 from vivarium_workbench.lib import work_mutations as _work_mutations
 from vivarium_workbench.lib import work_pr_views as _work_pr_views
@@ -2813,11 +2808,10 @@ def create_app() -> FastAPI:
         Returns branch, push state (pushed/ahead/behind/diverged/no_origin),
         commit counts, PR linkage, dirty-file count, and GitHub availability.
 
-        Via the ``ScientificContent`` port (local-git adapter → ``build_git_status``)
-        — always 200, degrades gracefully when origin is absent or git is not
-        available.
+        Via ``git_status.build_git_status`` — always 200, degrades gracefully
+        when origin is absent or git is not available.
         """
-        return GitStatus.model_validate(_record.for_workspace(ws).status())
+        return GitStatus.model_validate(_git_status.build_git_status(ws))
 
     @app.get(
         "/api/work-status",
@@ -2838,9 +2832,9 @@ def create_app() -> FastAPI:
         nullable ``pr_number`` / ``pr_url``), rather than a single model whose
         14 null defaults would leak into the inactive response.
 
-        Via the ``ScientificContent`` port (local-git adapter → ``build_work_status``).
+        Via ``git_status.build_work_status``.
         """
-        payload = _record.for_workspace(ws).work_status()
+        payload = _git_status.build_work_status(ws)
         if payload.get("active"):
             return WorkStatusActive.model_validate(payload)
         return WorkStatusInactive.model_validate(payload)
@@ -2860,10 +2854,10 @@ def create_app() -> FastAPI:
         index, etc.). The 500 body is ``{"error": "git status failed: ..."}`` —
         byte-identical to the legacy handler.
 
-        Via the ``ScientificContent`` port (local-git adapter → ``build_dirty_status``).
+        Via ``git_status.build_dirty_status``.
         """
         try:
-            payload = _record.for_workspace(ws).dirty_status()
+            payload = _git_status.build_dirty_status(ws)
         except subprocess.CalledProcessError as exc:
             stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
             return JSONResponse(
