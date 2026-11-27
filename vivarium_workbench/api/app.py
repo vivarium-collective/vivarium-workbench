@@ -971,6 +971,16 @@ _THIN_ROUTE_TABLE: tuple[R, ...] = (
       summary='Fire the analysis phase on an existing completed simulation', tags=['Runs'],
       params=(P('req', Union[dict, None], Body(default=None)),),
     ),
+    R('post', '/api/remote-run-cancel', (_remote_run_views, 'remote_run_cancel'), 'remote_run_cancel',
+      shape='A', adapter='body_or_empty_ws_kwarg',
+      summary='Cancel a real remote simulation/chain-dispatch campaign (item 53)', tags=['Runs'],
+      params=(P('req', Union[dict, None], Body(default=None)),),
+    ),
+    R('post', '/api/remote-run-visibility', (_remote_run_views, 'remote_run_visibility'), 'remote_run_visibility',
+      shape='A', adapter='body_or_empty_ws_kwarg',
+      summary='Make a remote run public or private (its backend\'s owner-only change; compose-api)', tags=['Runs'],
+      params=(P('req', Union[dict, None], Body(default=None)),),
+    ),
 )
 # fmt: on
 
@@ -7627,30 +7637,6 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=400, content={"error": "simulation_id required"})
         body, status = _remote_run_views.remote_run_chain_progress({"simulation_id": simulation_id, **where},
                                                                    ws_root=ws)
-        return JSONResponse(status_code=status, content=body)
-
-    @app.post("/api/remote-run-cancel", tags=["Runs"],
-              summary="Cancel a real remote simulation/chain-dispatch campaign (item 53)")
-    def remote_run_cancel(req: Union[dict, None] = Body(default=None),
-                          ws: Path = Depends(get_workspace)) -> JSONResponse:
-        """Backlog item 53: proxies viva-api's ``DELETE /api/v1/simulations/{id}/
-        cancel``, the "Stop campaign" control. For a chain-dispatch campaign row,
-        viva-api's own handler walks every seed's own dependsOn chain and
-        cancels/terminates whichever job is actually non-terminal per seed — see
-        ``lib.remote_run_views.remote_run_cancel`` for the full proxy contract.
-        Body: ``{simulation_id}``."""
-        body, status = _remote_run_views.remote_run_cancel(req or {}, ws_root=ws)
-        return JSONResponse(status_code=status, content=body)
-
-    @app.post("/api/remote-run-visibility", tags=["Runs"],
-              summary="Make a remote run public or private (its backend's owner-only change; compose-api)")
-    def remote_run_visibility(req: Union[dict, None] = Body(default=None),
-                              ws: Path = Depends(get_workspace)) -> JSONResponse:
-        """The Runs table's "Make public": the run's backend changes who may read it, when it offers that (the
-        optional ``runs.change_visibility``; 409 ``not-offered`` otherwise). Body: ``{simulation_id, visibility}``
-        with ``visibility`` ``public`` or ``private``. Not in the read-only allow-list, and excluded from the chat's
-        tools: sharing a run is its owner's own action. See ``lib.remote_run_views.remote_run_visibility``."""
-        body, status = _remote_run_views.remote_run_visibility(req or {}, ws_root=ws)
         return JSONResponse(status_code=status, content=body)
 
     @app.get("/api/remote-run-trace-support", tags=["Runs"],

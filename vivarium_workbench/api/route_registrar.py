@@ -26,6 +26,8 @@ Adapters (how the route's params + workspace become the lib call):
   * ``"model_dump_none"``— ``fn(ws, req.model_dump(exclude_none=True))``.
   * ``"ws_body_or_empty"``— ``fn(ws, req or {})``  (single dict body param that
     defaults to None; a missing/empty body is coerced to ``{}``).
+  * ``"body_or_empty_ws_kwarg"``— ``fn(req or {}, ws_root=ws)``  (as above, but the
+    workspace is the ``ws_root=`` keyword after the body, not the leading positional).
 
 CONTRACT — late-bind the lib delegate; never capture the callable at registration.
     Give each :class:`R` its delegate as a ``(owner, "attr")`` tuple (``owner`` a module or the
@@ -59,7 +61,8 @@ from fastapi.responses import JSONResponse
 
 _EMPTY = inspect.Parameter.empty
 
-_NEEDS_WS = {"pos", "model_dump", "model_dump_eu", "model_dump_none", "ws_body_or_empty"}
+_NEEDS_WS = {"pos", "model_dump", "model_dump_eu", "model_dump_none", "ws_body_or_empty",
+             "body_or_empty_ws_kwarg"}
 _MODEL_DUMP_KW: dict[str, dict[str, bool]] = {
     "model_dump": {},
     "model_dump_eu": {"exclude_unset": True},
@@ -135,6 +138,11 @@ def _make_endpoint(spec: R, get_workspace: Callable[..., Any]) -> Callable[..., 
             # pass ``req or {}`` so a missing/empty body becomes an empty dict.
             req = bound[param_names[0]]
             raw = fn(ws, req or {})
+        elif spec.adapter == "body_or_empty_ws_kwarg":
+            # Like ws_body_or_empty but the workspace is passed as the keyword
+            # ``ws_root=`` after the body: ``fn(req or {}, ws_root=ws)``.
+            req = bound[param_names[0]]
+            raw = fn(req or {}, ws_root=ws)
         else:  # model_dump family — single body param ``req``
             req = bound[param_names[0]]
             raw = fn(ws, req.model_dump(**(kw or {})))
