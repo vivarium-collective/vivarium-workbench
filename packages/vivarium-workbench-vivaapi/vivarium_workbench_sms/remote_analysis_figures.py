@@ -675,6 +675,19 @@ def fetch_by_analysis(client, simulation_id: int, analysis_name: str,
             got = None
         if got:
             return got
+    # Credential-less API fallback: sms-api serves the stored figure from S3 with
+    # its OWN credentials via GET /api/v1/simulations/{id}/analysis-figure, so a
+    # workbench host with no AWS credentials (the common case) still resolves the
+    # figure. Tried before the direct-S3 path below, which needs this client's own
+    # AWS credentials; best-effort, so any failure falls through to S3 unchanged.
+    _api_figure = getattr(client, "analysis_figure", None)
+    if callable(_api_figure):
+        try:
+            body = _api_figure(simulation_id, analysis_name, rel)
+        except Exception:
+            body = None
+        if body:
+            return body, _content_type(rel)
     try:
         analyses = client.list_analyses(simulation_id)
     except Exception:
