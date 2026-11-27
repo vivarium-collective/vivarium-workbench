@@ -1259,6 +1259,33 @@ class SmsApiClient:
         out = self._get(f"/api/v1/simulations/{simulation_id}/analyses")
         return out if isinstance(out, list) else []
 
+    def analysis_figures(self, simulation_id: int) -> dict:
+        """GET /api/v1/simulations/{id}/analysis-figures -- the stored analysis
+        figures for a completed simulation, served by sms-api from S3 with its
+        OWN credentials (this client needs no AWS credentials). Returns
+        ``{available, reason, analyses: [{name, status, source, result_uri,
+        figures: [{path, ...}]}]}``.
+
+        This is the recovery surface for a multi-node composite (colony)
+        dispatch: such a run has no per-seed native store (POST /data returns an
+        empty tar), and its output is the analysis-flush figures enumerated
+        here. Returns a shaped empty dict when the response is unexpected."""
+        out = self._get(f"/api/v1/simulations/{simulation_id}/analysis-figures")
+        if isinstance(out, dict):
+            return out
+        return {"available": False, "reason": "unexpected-response", "analyses": []}
+
+    def analysis_figure(self, simulation_id: int, analysis: str, path: str) -> bytes:
+        """GET /api/v1/simulations/{id}/analysis-figure?analysis=&path= -- one
+        stored figure's raw bytes (HTML/SVG/PNG), served by sms-api from S3 with
+        its own credentials (no AWS credentials needed here). ``analysis`` is the
+        analysis name and ``path`` its figure path relative to the analysis'
+        result, both exactly as listed by :meth:`analysis_figures`."""
+        qs = urlencode({"analysis": analysis, "path": path})
+        return self._get_bytes(
+            f"/api/v1/simulations/{simulation_id}/analysis-figure?{qs}", accept="*/*"
+        )
+
     # ------------------------------------------------------------------
     # Compose endpoints (generic .pbg runner, Phase C)
     # ------------------------------------------------------------------

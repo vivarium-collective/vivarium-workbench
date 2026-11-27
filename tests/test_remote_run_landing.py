@@ -82,6 +82,105 @@ def _make_remote_zarr_tar_with_analysis(tmp_path: Path, seed: int = 0) -> Path:
     return tar_path
 
 
+def _make_empty_remote_tar(tmp_path: Path) -> Path:
+    """A multi-node composite (colony) dispatch's POST /data returns an EMPTY
+    (0-byte) tar -- it has no per-seed native store. tarfile.open raises
+    ReadError on it, which land_remote_run must treat as "no store, try the
+    analysis id-space" rather than letting it fail the landing."""
+    tar_path = tmp_path / "sim_colony_empty.tar.gz"
+    tar_path.write_bytes(b"")
+    return tar_path
+
+
+class _FakeColonyClient:
+    """Stands in for SmsApiClient's analysis-figures API: the colony recovery
+    surface. Records which figures were fetched so the test can assert each one
+    was persisted."""
+
+    base_url = "http://test"
+
+    def __init__(self, analyses=None):
+        self._analyses = analyses if analyses is not None else [{
+            "name": "analysis-colony-1", "status": "completed", "n_tp": 5,
+            "figures": [
+                {"path": "viz/mass_fraction__gen=0.html"},
+                {"path": "viz/mass_fraction__gen=1.html"},
+            ],
+        }]
+        self.fetched: list[tuple[str, str]] = []
+
+    def analysis_figures(self, simulation_id):
+        return {"available": True, "reason": "ok", "analyses": self._analyses}
+
+    def analysis_figure(self, simulation_id, analysis, path):
+        self.fetched.append((analysis, path))
+        return f"<html>{analysis}:{path}</html>".encode()
+
+
+@pytest.mark.plugin
+def test_land_colony_no_store_lands_analysis_figures(tmp_path: Path, sl):
+    """A multi-node composite (colony) dispatch has no per-seed store -- POST
+    /data returns an empty tar. Landing must NOT crash (the found bug: it raised
+    FileNotFoundError and recorded nothing). Instead it recovers the run's output
+    from the analysis id-space: persists each figure under the study (so it
+    survives publishing and needs no live backend / AWS creds), writes the
+    analyses.json manifest pointing at those files, and records a completed run."""
+    ws_root = tmp_path / "workspace"
+    study = ws_root / "studies" / "colony"
+    study.mkdir(parents=True)
+    client = _FakeColonyClient()
+
+    run_id = sl.land_remote_run(
+        study, spec_id="colony", simulation_id=2150, experiment_id="exp-colony",
+        commit="c", tar_path=_make_empty_remote_tar(tmp_path), ws_root=ws_root,
+        base_url="http://test", client=client, expected_seeds=1,
+    )
+
+    # Each figure persisted under the study, faithfully by its analysis + relpath.
+    fig = study / "viz" / "analysis-colony-1" / "viz" / "mass_fraction__gen=0.html"
+    assert fig.is_file()
+    assert "analysis-colony-1" in fig.read_text()
+    assert len(client.fetched) == 2
+
+    # The analyses.json manifest points at the persisted study files.
+    manifest = json.loads((ws_root / ".pbg" / "runs" / run_id / "analyses.json").read_text())
+    assert manifest == [{
+        "name": "analysis-colony-1",
+        "written": [
+            "viz/analysis-colony-1/viz/mass_fraction__gen=0.html",
+            "viz/analysis-colony-1/viz/mass_fraction__gen=1.html",
+        ],
+        "errors": [],
+    }]
+
+    # The run is recorded as completed (recoverable), not crashed.
+    conn = sqlite3.connect(str(study / "runs.db"))
+    try:
+        row = conn.execute("SELECT status FROM runs_meta WHERE run_id=?", (run_id,)).fetchone()
+    finally:
+        conn.close()
+    assert row is not None and row[0] == "completed"
+
+
+@pytest.mark.plugin
+def test_land_no_store_and_no_colony_analyses_reraises(tmp_path: Path, sl):
+    """An empty store tar with NO recoverable analyses is a genuinely empty/failed
+    run, not a colony -- landing must re-raise the store error rather than record
+    a hollow run."""
+    ws_root = tmp_path / "workspace"
+    study = ws_root / "studies" / "s"
+    study.mkdir(parents=True)
+    client = _FakeColonyClient(analyses=[])  # nothing completed to recover
+
+    with pytest.raises((tarfile.ReadError, FileNotFoundError)):
+        sl.land_remote_run(
+            study, spec_id="s", simulation_id=1, experiment_id="e", commit="c",
+            tar_path=_make_empty_remote_tar(tmp_path), ws_root=ws_root,
+            base_url="http://test", client=client,
+        )
+    assert not (study / "runs.db").exists()  # no hollow run recorded
+
+
 @pytest.mark.plugin
 def test_land_folds_analysis_manifest_into_pbg_runs_analyses_json(tmp_path: Path, sl):
     """Once the analysis job has completed, landing (with ws_root passed) must

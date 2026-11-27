@@ -40,6 +40,7 @@ a study destination.
 
 from __future__ import annotations
 
+import json
 import shutil
 import tarfile
 import tempfile
@@ -171,6 +172,73 @@ def _count_parquet_rows(source_dir: Path) -> int | None:
     return total if found else None
 
 
+def _land_colony_analyses(study_dir: Path, ws_root: Path, client, simulation_id: int,
+                          run_id: str) -> dict:
+    """Land a multi-node composite (colony) dispatch, which has NO per-seed native
+    store -- POST /data returns an empty tar. Its output is the analysis-flush
+    figures, recovered through the client's analysis-figures API (sms-api serves
+    them from S3 with its OWN credentials; this landing needs no AWS creds).
+
+    Fetches each completed analysis' figures to ``<study_dir>/viz/<analysis>/
+    <path>`` (persisted, so they survive publishing and need no live backend) and
+    writes the ``.pbg/runs/<run_id>/analyses.json`` manifest the Analyses view
+    reads -- the same ``{name, written, errors}`` shape ``fold_analyses`` produces
+    for per-seed runs, but with ``written`` paths pointing at the now-persisted
+    study files. Returns ``{analyses: [names], figures: int, viz_dir: Path | None,
+    n_tp: int | None}``; best-effort per figure, and ``{"analyses": []}`` when
+    nothing is recoverable so the caller re-raises the original store error.
+    """
+    from vivarium_workbench.lib.workspace_paths import WorkspacePaths
+    from vivarium_workbench_sms.sms_api_client import SmsApiError
+
+    empty = {"analyses": [], "figures": 0, "viz_dir": None, "n_tp": None}
+    try:
+        manifest = client.analysis_figures(int(simulation_id))
+    except SmsApiError:
+        return empty
+    recs = [a for a in manifest.get("analyses", []) if a.get("status") == "completed"]
+    if not recs:
+        return empty
+
+    viz_root = Path(study_dir) / "viz"
+    base = viz_root.resolve()
+    entries: list[dict] = []
+    names: list[str] = []
+    n_fig = 0
+    n_tp = None
+    for a in recs:
+        name = str(a.get("name") or "analysis")
+        if not is_plain_name(name):  # defense-in-depth: our own API, but never let a name escape
+            continue
+        names.append(name)
+        if a.get("n_tp") is not None:
+            n_tp = a.get("n_tp")
+        written: list[str] = []
+        for fig in a.get("figures") or []:
+            relpath = fig.get("path") if isinstance(fig, dict) else None
+            if not relpath:
+                continue
+            dest = viz_root / name / relpath
+            try:
+                dest.resolve().relative_to(base)  # containment guard
+            except (ValueError, OSError):
+                continue
+            try:
+                data = client.analysis_figure(int(simulation_id), name, relpath)
+            except SmsApiError:
+                continue  # best-effort: a dropped tunnel re-lands on the next land
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+            written.append(dest.relative_to(study_dir).as_posix())
+            n_fig += 1
+        entries.append({"name": name, "written": written, "errors": []})
+
+    run_dir = WorkspacePaths.load(ws_root).pbg / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "analyses.json").write_text(json.dumps(entries, indent=2), encoding="utf-8")
+    return {"analyses": names, "figures": n_fig, "viz_dir": viz_root, "n_tp": n_tp}
+
+
 def land_remote_run(
     study_dir: Path,
     *,
@@ -188,6 +256,7 @@ def land_remote_run(
     n_steps: int | None = None,
     expected_seeds: int | None = None,
     base_url: str | None = None,
+    client=None,
 ) -> str:
     """Extract tar_path, place the native store(s) in study_dir, record runs_meta; return run_id.
 
@@ -255,47 +324,74 @@ def land_remote_run(
 
     with tempfile.TemporaryDirectory() as td:
         extract_root = Path(td)
-        with tarfile.open(tar_path, "r:gz") as tar:
-            tar.extractall(extract_root, filter="data")  # noqa: S202 — trusted internal artifact from our own API
-        kind, sources = _detect_and_locate_all(extract_root)
+        store_exc: Exception | None = None
+        try:
+            with tarfile.open(tar_path, "r:gz") as tar:
+                tar.extractall(extract_root, filter="data")  # noqa: S202 — trusted internal artifact from our own API
+            kind, sources = _detect_and_locate_all(extract_root)
+        except (tarfile.ReadError, FileNotFoundError) as exc:
+            # No per-seed native store in the tar. A multi-node composite (colony)
+            # dispatch has none -- POST /data returns an EMPTY tar and the run's
+            # output lives in the analysis-flush id-space (figures), recovered via
+            # the client's analysis-figures API. Land that instead of failing.
+            store_exc = exc
 
-        landed_seeds = len(sources)
-        provenance["landed_seeds"] = landed_seeds
-        if expected_seeds is not None and landed_seeds != expected_seeds:
-            raise RemoteRunSeedCountMismatch(
-                f"simulation {simulation_id}: landed {landed_seeds} seed(s)/"
-                f"lineage(s) but {expected_seeds} were requested — refusing "
-                "to record this as a completed run (sms-api may still be "
-                "writing output, or a seed's dispatch failed silently)"
+        if store_exc is not None:
+            # Fall back to colony landing. Re-raise the original store error when
+            # there is no client, no workspace, or no recoverable analyses (a
+            # genuinely empty/failed run, not a colony) -- never record a hollow run.
+            colony = (
+                _land_colony_analyses(study_dir, ws_root, client, int(simulation_id), run_id)
+                if client is not None and ws_root is not None
+                else None
             )
-
-        if kind == "zarr":
-            dest = study_dir / f"runs.{run_id}.zarr"
-            if dest.exists():
-                shutil.rmtree(dest)
-            dest.mkdir(parents=True)
-            # Merge every seed/lineage's store into one root -- see _merge_zarr_tree
-            # for why this recurses into collisions rather than skipping them.
-            for src in sources:
-                _merge_zarr_tree(src, dest)
-        else:
-            dest = study_dir / "parquet-runs" / experiment_id
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if dest.exists():
-                shutil.rmtree(dest)
-            shutil.copytree(sources[0], dest)
+            if not colony or not colony["analyses"]:
+                raise store_exc
+            kind = "analysis"
+            dest = colony["viz_dir"]
+            provenance["landed_seeds"] = 0
+            provenance["colony_analyses"] = colony["analyses"]
+            provenance["colony_figures"] = colony["figures"]
             if n_steps is None:
-                n_steps = _count_parquet_rows(dest)
+                n_steps = colony["n_tp"]
+        else:
+            landed_seeds = len(sources)
+            provenance["landed_seeds"] = landed_seeds
+            if expected_seeds is not None and landed_seeds != expected_seeds:
+                raise RemoteRunSeedCountMismatch(
+                    f"simulation {simulation_id}: landed {landed_seeds} seed(s)/"
+                    f"lineage(s) but {expected_seeds} were requested — refusing "
+                    "to record this as a completed run (sms-api may still be "
+                    "writing output, or a seed's dispatch failed silently)"
+                )
 
-        if ws_root is not None:
-            remote_run_landing.fold_analyses(extract_root, ws_root, run_id)
-            # The landed run's own folder inside the study (the same name the parquet store uses):
-            # where the Pathway Tools viewer looks and the workbench will serve from. A name that is
-            # not one plain path component skips the study copy rather than failing the landing.
-            remote_run_landing.land_ptools_tsvs(
-                extract_root, ws_root, run_id,
-                study_dest=study_dir / experiment_id if is_plain_name(experiment_id) else None,
-            )
+            if kind == "zarr":
+                dest = study_dir / f"runs.{run_id}.zarr"
+                if dest.exists():
+                    shutil.rmtree(dest)
+                dest.mkdir(parents=True)
+                # Merge every seed/lineage's store into one root -- see _merge_zarr_tree
+                # for why this recurses into collisions rather than skipping them.
+                for src in sources:
+                    _merge_zarr_tree(src, dest)
+            else:
+                dest = study_dir / "parquet-runs" / experiment_id
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if dest.exists():
+                    shutil.rmtree(dest)
+                shutil.copytree(sources[0], dest)
+                if n_steps is None:
+                    n_steps = _count_parquet_rows(dest)
+
+            if ws_root is not None:
+                remote_run_landing.fold_analyses(extract_root, ws_root, run_id)
+                # The landed run's own folder inside the study (the same name the parquet store uses):
+                # where the Pathway Tools viewer looks and the workbench will serve from. A name that is
+                # not one plain path component skips the study copy rather than failing the landing.
+                remote_run_landing.land_ptools_tsvs(
+                    extract_root, ws_root, run_id,
+                    study_dest=study_dir / experiment_id if is_plain_name(experiment_id) else None,
+                )
 
     provenance["store_path"] = str(dest)
     resolved_n_steps = n_steps if n_steps is not None else 0
