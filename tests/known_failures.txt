@@ -55,10 +55,11 @@ tests/test_remote_run_panel.py::test_view_run_button_routes_to_visualizations_no
 tests/test_visualization_endpoints.py::test_post_create_from_composite_creates_v2_spec
 
 # ── Snapshot/publish + loom serving ───────────────────────────────────────────
-tests/test_data_endpoints.py::test_snapshot_css_hides_switcher_and_shows_label
-tests/test_loom_explore_serve.py::test_loom_explore_index_served
-tests/test_loom_explore_serve.py::test_loom_explore_root_redirects_to_index
-tests/test_loom_explore_serve.py::test_ui_config_default_is_loom_explore
+# RETIRED (fixed): test_snapshot_css_* and the three test_loom_explore_serve
+# entries were stale assertions against product that moved — the snapshot repo
+# label was superseded (not shown) and loom-explore was renamed bigraph-loom
+# (served at /bigraph-loom/). Their assertions were updated to the new structure
+# and they now pass, so they re-join the blocking gate.
 tests/test_publish.py::test_walkthrough_composite_popout_is_snapshot_aware
 
 # ── Emitter/store selection — asserts sqlite where the default is now xarray/zarr

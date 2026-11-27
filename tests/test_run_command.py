@@ -20,6 +20,33 @@ from vivarium_workbench.lib.run_command import CommandRefused, Plan, build_plan
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 
 
+def _git_supports_attr_source() -> bool:
+    """Whether the local git is new enough (≥ 2.40) for ``--attr-source``.
+
+    ``run_command`` REFUSES any git without ``--attr-source`` (it is load-bearing
+    for the attribute/filter hardening — see ``_empty_tree`` / ``build_plan``), so
+    on an older git the git-op tests below can only ever observe that refusal, not
+    the behavior they mean to assert. Skip them there, exactly as ``needs_git``
+    skips when git is absent entirely. (Returns False when git is missing too.)
+    """
+    import re
+    git = shutil.which("git")
+    if git is None:
+        return False
+    try:
+        out = subprocess.run([git, "--version"], capture_output=True, text=True, timeout=5)
+    except Exception:  # noqa: BLE001 — any probe failure → treat as unusable
+        return False
+    m = re.search(r"\b(\d+)\.(\d+)", out.stdout)
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (2, 40)
+
+
+needs_modern_git = pytest.mark.skipif(
+    not _git_supports_attr_source(),
+    reason="git < 2.40 (no --attr-source); run_command refuses it, so these git-op tests can't exercise real behavior",
+)
+
+
 @pytest.fixture
 def ws(tmp_path: Path) -> Path:
     root = tmp_path / "ws"
@@ -259,7 +286,7 @@ def test_an_unstartable_program_is_reported_not_raised(ws):
 # --- git: the repository's own configuration must not run anything -------------------------------------------
 
 
-@needs_git
+@needs_modern_git
 def test_git_cannot_be_made_to_run_a_program_by_the_repositorys_own_config(ws):
     marker = ws.parent / "ran"
     hook = ws.parent / "hook.sh"
@@ -411,7 +438,7 @@ def test_git_whose_directory_was_redirected_outside_the_workspace_is_refused(tmp
         build_plan(ws, ["git", "status"])
 
 
-@needs_git
+@needs_modern_git
 def test_git_branch_cannot_create_a_branch(ws):
     _git(ws, "init", "-q", "-b", "main")
     _git(ws, "add", "-A")
@@ -424,7 +451,7 @@ def test_git_branch_cannot_create_a_branch(ws):
     assert "newbranch" not in _git(ws, "branch").stdout
 
 
-@needs_git
+@needs_modern_git
 def test_a_repositorys_attributes_cannot_make_git_run_a_filter(ws):
     marker = ws.parent / "filter-ran"
     hook = ws.parent / "filter.sh"
@@ -448,7 +475,7 @@ def test_a_repositorys_attributes_cannot_make_git_run_a_filter(ws):
     assert not marker.exists(), "git ran a filter named by the repository's own attributes and config"
 
 
-@needs_git
+@needs_modern_git
 def test_history_and_diffs_leave_out_tracked_secrets(ws):
     (ws / "keys").mkdir()
     (ws / "keys" / "id_rsa").write_text("PRIVATE-KEY-ONE\n")
