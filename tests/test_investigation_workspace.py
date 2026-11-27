@@ -315,12 +315,14 @@ def test_investigation_overview_collapsed_by_default_graph_prominent():
     # line); with the prose collapsed by default, the visible order is the toolbar
     # (toggle) directly above the graph. The prose (#investigation-intro) is a
     # separate block, hidden by the collapse CSS.
-    assert 'id="inv-overview-toggle"' in TPL
+    # The standalone #inv-overview-toggle button was removed: the overview now
+    # collapses by DRAG (the handle below the Details brief) to a slim
+    # "Investigation details" re-expand bar, which sits above the graph and still
+    # calls _toggleInvOverview to pop back open.
+    assert 'id="inv-intro-collapsed-bar"' in TPL
     assert "_toggleInvOverview()" in TPL
-    # The toggle now lives in the investigation HEADER bar (above the graph), not
-    # in the graph toolbar, and the overview is OPEN by default on entry.
-    assert TPL.index('id="inv-overview-toggle"') < TPL.index('id="investigation-dag-fs"'), \
-        "overview toggle should be in the header, above the graph"
+    assert TPL.index('id="inv-intro-collapsed-bar"') < TPL.index('id="investigation-dag-fs"'), \
+        "the overview collapse bar should be above the graph"
 
     # CSS: collapsed hides the prose blocks (intro + decision cockpit).
     css = (ROOT / "vivarium_workbench/static/style.css").read_text(encoding="utf-8")
