@@ -785,7 +785,17 @@
     // '/studies/<name>' 404s there. Address the shell file explicitly in snapshot
     // mode. (The live server's /studies/<name> route is unaffected: mode is not
     // 'snapshot' there.)
-    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') href += '/index.html';
+    if ((window.__DASH_CONFIG__ || {}).mode === 'snapshot') return href + '/index.html';
+    // The Study panel loads this href in an IFRAME — a plain document navigation
+    // that cannot send the X-VW-Session header, so under session-per-tab it would
+    // fall back to the browser-wide vw_session COOKIE, which another tab may have
+    // re-pointed → the iframe resolves to the WRONG workspace and 404s (the blank
+    // study panel). Carry this tab's own session id on the URL so the navigation
+    // resolves the right workspace without touching the shared cookie.
+    try {
+      var sid = window.vivSession && window.vivSession.ensureId && window.vivSession.ensureId();
+      if (sid) href += (href.indexOf('?') >= 0 ? '&' : '?') + 'vw_session=' + encodeURIComponent(sid);
+    } catch (e) { /* no session module (tests) — the cookie fallback still applies */ }
     return href;
   }
   window._studyHref = _studyHref;
