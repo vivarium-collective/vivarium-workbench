@@ -70,6 +70,8 @@
       ".inv-narrative-mount,.inv-claims-mount{font-size:0.92em}"
       + ".ag-unit{display:flex;gap:12px;align-items:flex-start;padding:11px 0;border-top:1px solid #f1f5f9}"
       + ".ag-unit:first-child{border-top:none}"
+      + ".ag-lens-bar{margin:0 0 12px;font-size:0.9em;color:#475569;display:flex;gap:7px;align-items:center;flex-wrap:wrap}"
+      + ".ag-lens-sel{font:inherit;font-size:0.95em;padding:3px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;max-width:100%;color:#1e293b;cursor:pointer}"
       + ".ag-ord{color:#94a3b8;font-variant-numeric:tabular-nums;min-width:1.6em;text-align:right;padding-top:2px}"
       + ".ag-body{flex:1}.ag-prop{line-height:1.45}"
       + ".ag-head{display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}"
@@ -140,10 +142,9 @@
     return rel;
   }
 
-  function _renderNarrative(host, data) {
-    var claims = (data && data.claims) || {}, nar = (data && data.narrative) || {}, units = nar.units || [], gaps = (data && data.gaps) || [];
-    if (!units.length) { host.innerHTML = '<div class="ag-empty">No narrative derived yet.</div>'; return; }
-    var gapBy = {}; gaps.forEach(function (g) { gapBy[g.from + "|" + g.to] = g; });
+  // Render the ordered narrative units (one reading). Pulled out so a question
+  // lens can re-render a filtered subset without refetching.
+  function _narrUnitsHtml(units, claims, gapBy) {
     var out = "";
     units.forEach(function (u, i) {
       var c = claims[u.claim_id] || {}, prop = u.proposition || c.proposition || u.claim_id;
@@ -194,10 +195,45 @@
           + " — " + _esc(g.missing_evidence || "no supporting link") + "</div>";
       }
     });
+    return out;
+  }
+
+  function _renderNarrative(host, data) {
+    var claims = (data && data.claims) || {}, nar = (data && data.narrative) || {}, units = nar.units || [], gaps = (data && data.gaps) || [];
+    if (!units.length) { host.innerHTML = '<div class="ag-empty">No narrative derived yet.</div>'; return; }
+    var gapBy = {}; gaps.forEach(function (g) { gapBy[g.from + "|" + g.to] = g; });
+    var lenses = (data && data.narrative_questions) || [];
+
+    // Question lens bar (RFC-0005 §5): authored questions re-scope the reading to
+    // the claims that answer them. "All findings" shows the whole narrative.
+    var bar = lenses.length
+      ? '<div class="ag-lens-bar">Reading for: <select class="ag-lens-sel" title="Scope the narrative to one question">'
+        + '<option value="">All findings</option>'
+        + lenses.map(function (l, i) { return '<option value="' + i + '">' + _esc(l.question) + "</option>"; }).join("")
+        + "</select></div>"
+      : "";
+    // Investigation-wide limitations + open questions sit below the (lens-scoped) units.
     var lim = (nar.limitations || []), oq = (nar.open_questions || []);
-    if (lim.length) out += '<div class="ag-sec"><h5>Limitations</h5><ul class="ag-list">' + lim.map(function (l) { return "<li>" + _esc(l) + "</li>"; }).join("") + "</ul></div>";
-    if (oq.length) out += '<div class="ag-sec"><h5>Open questions</h5><ul class="ag-list">' + oq.map(function (q) { return "<li>" + _esc(q.proposition || q.claim_id) + "</li>"; }).join("") + "</ul></div>";
-    host.innerHTML = out;
+    var extra = "";
+    if (lim.length) extra += '<div class="ag-sec"><h5>Limitations</h5><ul class="ag-list">' + lim.map(function (l) { return "<li>" + _esc(l) + "</li>"; }).join("") + "</ul></div>";
+    if (oq.length) extra += '<div class="ag-sec"><h5>Open questions</h5><ul class="ag-list">' + oq.map(function (q) { return "<li>" + _esc(q.proposition || q.claim_id) + "</li>"; }).join("") + "</ul></div>";
+
+    host.innerHTML = bar + '<div class="ag-units"></div>' + extra;
+    var uHost = host.querySelector(".ag-units");
+    function paint(focusSet) {
+      var shown = focusSet ? units.filter(function (u) { return focusSet[u.claim_id]; }) : units;
+      uHost.innerHTML = shown.length ? _narrUnitsHtml(shown, claims, gapBy)
+        : '<div class="ag-empty">No findings for this question.</div>';
+    }
+    paint(null);
+    if (lenses.length) {
+      var sel = host.querySelector(".ag-lens-sel");
+      sel.onchange = function () {
+        if (this.value === "") { paint(null); return; }
+        var focus = {}; (lenses[this.value].focus || []).forEach(function (c) { focus[c] = 1; });
+        paint(focus);
+      };
+    }
   }
 
   function _renderClaims(host, data) {
