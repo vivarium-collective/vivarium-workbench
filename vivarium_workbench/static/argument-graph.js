@@ -39,6 +39,17 @@
     var k = _vk(v);
     return '<span class="ag-badge" style="background:' + k.bg + ";color:" + k.bd + '">' + k.mk + " " + _esc(v || "unassessed") + "</span>";
   }
+  // A short, human headline for a finding: the proposition itself when it is
+  // already concise, otherwise its first sentence/clause (up to the first em-dash,
+  // sentence end, or colon). Returns {head, body}: body holds the full proposition
+  // to tuck behind a "Full finding" expander, and is empty when the finding is short.
+  function _findingHeadline(prop) {
+    prop = String(prop == null ? "" : prop).trim();
+    if (prop.length <= 120) return { head: prop, body: "" };
+    var m = prop.match(/^([\s\S]{24,150}?)(\s[—–-]\s|[.?!]\s|:\s)/);
+    var head = (m ? m[1] : prop.slice(0, 117)).trim().replace(/[\s—–:;,.]+$/, "");
+    return { head: head, body: prop };
+  }
   // Escape a value for embedding inside a single-quoted inline JS string.
   function _js(s) { return String(s == null ? "" : s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
   // One click toggles a narrative point's evidence-refs list (bound once).
@@ -61,7 +72,15 @@
       + ".ag-unit:first-child{border-top:none}"
       + ".ag-ord{color:#94a3b8;font-variant-numeric:tabular-nums;min-width:1.6em;text-align:right;padding-top:2px}"
       + ".ag-body{flex:1}.ag-prop{line-height:1.45}"
-      + ".ag-meta{margin-top:4px;color:#94a3b8;font-size:0.82em}"
+      + ".ag-head{display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}"
+      + ".ag-headline{font-weight:650;color:#1e293b;font-size:1.04em;line-height:1.4}"
+      + ".ag-detail{margin:5px 0 2px}"
+      + ".ag-detail-sum{cursor:pointer;color:#2563eb;font-size:0.85em;font-weight:600;list-style:none;user-select:none}"
+      + ".ag-detail-sum::-webkit-details-marker{display:none}"
+      + '.ag-detail-sum::before{content:"\\25B8 "}'
+      + '.ag-detail[open] .ag-detail-sum::before{content:"\\25BE "}'
+      + ".ag-detail .ag-prop{margin-top:6px;color:#475569;line-height:1.5}"
+      + ".ag-meta{margin-top:5px;color:#94a3b8;font-size:0.82em}"
       + ".ag-meta a.ag-link,.ag-ev-toggle{color:#2563eb;text-decoration:none;cursor:pointer;white-space:nowrap}"
       + ".ag-meta a.ag-link:hover,.ag-ev-toggle:hover{text-decoration:underline}"
       + ".ag-sep{color:#cbd5e1;margin:0 7px}"
@@ -155,9 +174,19 @@
           + '<a href="#" class="ag-link" title="Open the study behind this point" onclick="' + openJs + '">open study ↗</a>'
           + ' <a href="#" class="ag-link" title="Jump to this study’s figures" onclick="' + figJs + '">figures ↗</a>'
         : "";
+      // Human-readable: a short headline + the verdict badge up front, the dense
+      // proposition tucked behind a "Full finding" expander (only when it is long).
+      var hd = _findingHeadline(prop);
+      var detail = hd.body
+        ? '<details class="ag-detail"><summary class="ag-detail-sum">Full finding</summary>'
+          + '<div class="ag-prop">' + _esc(hd.body) + "</div></details>"
+        : "";
       out += '<div class="ag-unit"><div class="ag-ord">' + (i + 1) + "</div>"
-        + '<div class="ag-body"><div class="ag-prop">' + _esc(prop) + "</div>"
-        + '<div class="ag-meta">' + _badge(u.verdict || c.verdict) + " &nbsp; " + toggle + scope + links + "</div>"
+        + '<div class="ag-body">'
+        + '<div class="ag-head">' + _badge(u.verdict || c.verdict)
+        + '<span class="ag-headline">' + _esc(hd.head) + "</span></div>"
+        + detail
+        + '<div class="ag-meta">' + toggle + scope + links + "</div>"
         + evList + "</div></div>";
       if (i + 1 < units.length) {
         var g = gapBy[u.claim_id + "|" + units[i + 1].claim_id];
