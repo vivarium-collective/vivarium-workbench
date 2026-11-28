@@ -251,6 +251,145 @@ def resolve_decision(ws_root: Path, body: dict) -> "tuple[dict, int]":
     return {"ok": True, "index": index, **result}, 200
 
 
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _apply_investigation_mutation(target: Path, mutate) -> "tuple[dict | None, int]":
+    """Load investigation.yaml (ruamel round-trip, safe_dump fallback), apply
+    ``mutate(spec) -> (mutated_spec_or_None, (err_msg, code) | None)`` and persist.
+    Returns ``(None, 200)`` on success or ``({"error": ...}, code)`` on failure."""
+    try:
+        from ruamel.yaml import YAML as _RYAML
+
+        _ry = _RYAML()
+        _ry.preserve_quotes = True
+        _ry.width = 4096
+        spec = _ry.load(target.read_text(encoding="utf-8")) or {}
+        mutated, err = mutate(spec)
+        if err is not None:
+            return {"error": err[0]}, err[1]
+        with target.open("w", encoding="utf-8") as _fh:
+            _ry.dump(mutated, _fh)
+    except ImportError:
+        spec = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        mutated, err = mutate(spec)
+        if err is not None:
+            return {"error": err[0]}, err[1]
+        target.write_text(yaml.safe_dump(mutated, sort_keys=False), encoding="utf-8")
+    return None, 200
+
+
+def _find_by_id_or_index(items: "list", ident, index) -> "tuple[Any, tuple | None]":
+    """Locate an entry in ``items`` by ``id`` (preferred) or integer ``index``.
+    Returns ``(entry, None)`` or ``(None, (err_msg, code))``."""
+    if not isinstance(items, list):
+        return None, ("list missing", 404)
+    if ident:
+        for it in items:
+            if isinstance(it, dict) and str(it.get("id")) == str(ident):
+                return it, None
+        return None, (f"entry id {ident!r} not found", 404)
+    if index is None:
+        return None, ("id or index required", 400)
+    try:
+        i = int(index)
+    except (TypeError, ValueError):
+        return None, ("index must be an integer", 400)
+    if i < 0 or i >= len(items):
+        return None, (f"index {i} out of range (0..{len(items) - 1})", 404)
+    entry = items[i]
+    if not isinstance(entry, dict):
+        return None, ("entry is not a mapping", 404)
+    return entry, None
+
+
+def resolve_revision_proposal(ws_root: Path, body: dict) -> "tuple[dict, int]":
+    """POST /api/investigation-revision-proposal-resolve: approve or reject a
+    discovery-engine model-revision proposal.
+
+    Sets ``revision_proposals[*].status`` to ``approved`` / ``rejected`` (from
+    ``proposed``) and records the reviewer + timestamp + optional note. Approving
+    is a signal the engine applies on its next cycle; this does NOT itself mutate
+    any model. Body: ``{investigation, id?|index?, decision: approve|reject, note?}``.
+    """
+    inv = body.get("investigation") or ""
+    decision = (body.get("decision") or "").strip().lower()
+    note = (body.get("note") or "").strip()
+    if not inv:
+        return {"error": "investigation name required"}, 400
+    if decision not in ("approve", "reject"):
+        return {"error": "decision must be 'approve' or 'reject'"}, 400
+    target = _invstatus.investigation_yaml_path(ws_root, inv)
+    if target is None:
+        return {"error": f"no investigation.yaml for {inv!r}"}, 404
+
+    status = "approved" if decision == "approve" else "rejected"
+    result: dict = {}
+
+    def _mutate(spec: dict) -> "tuple[Any, tuple | None]":
+        entry, err = _find_by_id_or_index(
+            spec.get("revision_proposals"), body.get("id"), body.get("index"))
+        if err is not None:
+            return None, err
+        if entry.get("status") not in (None, "proposed"):
+            return None, (f"proposal already {entry.get('status')}", 409)
+        entry["status"] = status
+        entry["reviewed_by"] = "human"
+        entry["reviewed_at"] = _now_iso()
+        if note:
+            entry["review_note"] = note
+        result["id"] = entry.get("id")
+        result["status"] = status
+        return spec, None
+
+    err, code = _apply_investigation_mutation(target, _mutate)
+    if err is not None:
+        return err, code
+    return {"ok": True, **result}, 200
+
+
+def resolve_reconciliation(ws_root: Path, body: dict) -> "tuple[dict, int]":
+    """POST /api/investigation-reconciliation-resolve: mark an open reconciliation
+    item resolved.
+
+    Sets ``reconciliation_log[*].status`` to ``resolved`` (from ``open``) and
+    records who/when + an optional resolution note. Body:
+    ``{investigation, id?|index?, note?}``.
+    """
+    inv = body.get("investigation") or ""
+    note = (body.get("note") or "").strip()
+    if not inv:
+        return {"error": "investigation name required"}, 400
+    target = _invstatus.investigation_yaml_path(ws_root, inv)
+    if target is None:
+        return {"error": f"no investigation.yaml for {inv!r}"}, 404
+
+    result: dict = {}
+
+    def _mutate(spec: dict) -> "tuple[Any, tuple | None]":
+        entry, err = _find_by_id_or_index(
+            spec.get("reconciliation_log"), body.get("id"), body.get("index"))
+        if err is not None:
+            return None, err
+        if entry.get("status") not in (None, "open"):
+            return None, (f"item already {entry.get('status')}", 409)
+        entry["status"] = "resolved"
+        entry["resolved_by"] = "human"
+        entry["resolved_at"] = _now_iso()
+        if note:
+            entry["resolution"] = note
+        result["id"] = entry.get("id")
+        result["status"] = "resolved"
+        return spec, None
+
+    err, code = _apply_investigation_mutation(target, _mutate)
+    if err is not None:
+        return err, code
+    return {"ok": True, **result}, 200
+
+
 def study_seed_followup(ws_root: Path, body: dict) -> "tuple[dict, int]":
     """POST /api/study-seed-followup: seed a child study from a parent.
 

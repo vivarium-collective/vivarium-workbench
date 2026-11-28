@@ -1935,6 +1935,25 @@ class ResolveDecisionBody(_Passthrough):
     question: Optional[str] = None
 
 
+class ResolveRevisionProposalBody(_Passthrough):
+    """POST /api/investigation-revision-proposal-resolve {investigation, id?|index?, decision, note?}"""
+
+    investigation: Optional[str] = None
+    id: Optional[str] = None
+    index: Optional[Any] = None
+    decision: Optional[str] = None
+    note: Optional[str] = None
+
+
+class ResolveReconciliationBody(_Passthrough):
+    """POST /api/investigation-reconciliation-resolve {investigation, id?|index?, note?}"""
+
+    investigation: Optional[str] = None
+    id: Optional[str] = None
+    index: Optional[Any] = None
+    note: Optional[str] = None
+
+
 class StudySeedFollowupBody(_Passthrough):
     """POST /api/study-seed-followup {parent, finding_id?, followup_idx?, proposal_id?, proposal_idx?, study_type?}"""
 

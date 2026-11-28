@@ -12193,6 +12193,22 @@
     var kclaims    = Array.isArray(d.key_claims) ? d.key_claims : [];
     var sciArg     = d.scientific_argument || {};
     var frameworks = Array.isArray(d.competing_frameworks) ? d.competing_frameworks : [];
+    var evFor      = Array.isArray(sciArg.evidence_for) ? sciArg.evidence_for : [];
+    var evAgainst  = Array.isArray(sciArg.evidence_against) ? sciArg.evidence_against : [];
+    var caveats    = Array.isArray(sciArg.caveats) ? sciArg.caveats : [];
+    var keyFigs    = Array.isArray(sciArg.key_figures) ? sciArg.key_figures : [];
+    // A labelled list of plain strings (evidence for/against, caveats), colour-accented.
+    function _invStrList(items, accent) {
+      return '<ul style="list-style:none;padding:0;margin:0;display:grid;gap:8px">' +
+        items.map(function(s) {
+          return '<li style="padding-left:12px;border-left:2px solid ' + accent + '">' +
+            _invInline(oneline(String(s))) + '</li>';
+        }).join('') + '</ul>';
+    }
+    function _invSubsec(label, inner) {
+      return '<div style="margin-top:12px"><div class="inv-brief-frameworks-label">' +
+        _escInv(label) + '</div>' + inner + '</div>';
+    }
     function _evidenceBody() {
       var evBody = '';
       if (sciArg.main_claim)
@@ -12207,6 +12223,18 @@
               (counter ? '#d97706' : '#cbd5e1') + '">' +
               _escInv(c.claim || c.text || '') + _invCite(c.cites) + '</li>';
           }).join('') + '</ul>';
+      // The structured argument: evidence for / against / caveats / key figures
+      // (scientific_argument sub-fields — previously only main_claim was shown).
+      if (evFor.length)     evBody += _invSubsec('Evidence for', _invStrList(evFor, '#16a34a'));
+      if (evAgainst.length) evBody += _invSubsec('Evidence against', _invStrList(evAgainst, '#d97706'));
+      if (caveats.length)   evBody += _invSubsec('Caveats', _invStrList(caveats, '#94a3b8'));
+      if (keyFigs.length)
+        evBody += _invSubsec('Key figures',
+          '<ul style="list-style:none;padding:0;margin:0;display:grid;gap:4px">' +
+          keyFigs.map(function(f) {
+            return '<li style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;' +
+              'font-size:12px;color:#475569">' + _escInv(String(f)) + '</li>';
+          }).join('') + '</ul>');
       if (frameworks.length)
         evBody += '<div class="inv-brief-frameworks-fold">' +
           '<div class="inv-brief-frameworks-label">Competing frameworks adjudicated</div>' +
@@ -12218,21 +12246,40 @@
       return evBody;
     }
 
-    // 1. Overview — the lean landing tab (DEFAULT): a one-paragraph what-is-this +
-    // the verdict in brief (status pill + opening sentence). Deliberately short so
-    // the investigation graph sits high on the page; depth lives in the tabs below.
+    // 1. Overview — the lean landing tab (DEFAULT): a one-paragraph what-is-this,
+    // the campaign framing (objective / central gap / mandate), the at-a-glance
+    // study roles, and a STATUS CHIP only. The full verdict + ordered narrative
+    // live in Findings — not repeated here (de-duplicated).
     var whatIsLede = whatIs ? whatIs.split(/\n\s*\n/)[0].trim() : '';
+    var _frame = [];
+    if (ex.objective)   _frame.push(['Objective', ex.objective]);
+    if (ex.central_gap) _frame.push(['Central gap', ex.central_gap]);
+    if (ex.mandate)     _frame.push(['Mandate', ex.mandate]);
+    var ataglance = Array.isArray(d.at_a_glance) ? d.at_a_glance : [];
     var ovParts = [];
     if (whatIsLede)
       ovParts.push('<div class="inv-brief-prose inv-brief-overview-lede"' +
         _ieAttrs('executive.what_is_this', whatIs, 'Overview', true) + '>' +
         _renderInvLeadMarkdown(whatIsLede) + '</div>');
-    if (verdict)
-      ovParts.push('<div class="inv-brief-overview-verdict inv-vs-' + vsClass + '" ' +
-        'style="margin-top:10px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">' +
-        '<span class="inv-vs-pill"' + (vsDerived ? ' title="Derived from member studies\' graded tests (not authored)"' : '') + '>' + _esc(vsLabel) + '</span> ' +
-        '<span class="inv-brief-overview-verdict-text" style="color:#475569">' +
-        _invInline(headlineOf(verdict)) + '</span></div>');
+    // Status chip only (the verdict text + narrative are Findings' job).
+    if (vsLabel)
+      ovParts.push('<div class="inv-brief-overview-verdict inv-vs-' + vsClass + '" style="margin-top:10px">' +
+        '<span class="inv-vs-pill"' + (vsDerived ? ' title="Derived from member studies\' graded tests (not authored)"' : '') + '>' + _esc(vsLabel) + '</span></div>');
+    if (_frame.length)
+      ovParts.push('<dl class="inv-brief-frame" style="margin:14px 0 0;display:grid;gap:10px">' +
+        _frame.map(function(p) {
+          return '<div><dt style="font-size:11px;text-transform:uppercase;letter-spacing:0.04em;' +
+            'color:#64748b;font-weight:600">' + _escInv(p[0]) + '</dt>' +
+            '<dd style="margin:3px 0 0">' + _invInline(oneline(p[1])) + '</dd></div>';
+        }).join('') + '</dl>');
+    if (ataglance.length)
+      ovParts.push('<div class="inv-brief-ataglance" style="margin-top:16px">' +
+        '<div class="inv-brief-frameworks-label">At a glance</div>' +
+        '<dl style="margin:6px 0 0;display:grid;gap:8px">' + ataglance.map(function(a) {
+          a = a || {};
+          return '<div><dt style="font-weight:600">' + _escInv(a.study || a.slug || '') + '</dt>' +
+            '<dd style="margin:1px 0 0;color:#475569">' + _escInv(a.role || a.summary || '') + '</dd></div>';
+        }).join('') + '</dl></div>');
     if (ovParts.length)
       tabs.push({ id:'overview', label:'Overview', html: ovParts.join('') });
 
@@ -12386,7 +12433,16 @@
     var readOnly = !!d.read_only || (window.__DASH_CONFIG__ || {}).mode === 'snapshot';
     var invName = d.name || window._currentIset || '';
 
-    if (!needed.length && !resolved.length && !docs.length) return '';
+    // Engine decisions awaiting human input (discovery-engine authored these on
+    // disk): model-revision proposals still `proposed`, and `open` reconciliation
+    // items. Rendered above the authored expert decisions as approve/reject cards.
+    var revProps = (Array.isArray(d.revision_proposals) ? d.revision_proposals : [])
+      .filter(function (p) { return p && (p.status === 'proposed' || p.status == null); });
+    var recon = (Array.isArray(d.reconciliation_log) ? d.reconciliation_log : [])
+      .filter(function (r) { return r && (r.status === 'open' || r.status == null); });
+    var hasEngine = revProps.length || recon.length;
+
+    if (!needed.length && !resolved.length && !docs.length && !hasEngine) return '';
 
     // Decisions the cycle already resolved (server: ex.decisions_engine_resolved)
     // are hidden/uncounted; data-index keeps pointing at the authored list.
@@ -12395,7 +12451,67 @@
     var accent = n ? '#b45309' : '#16a34a';      // amber when open, green when all clear
     var H = [];
     H.push('<div style="padding:2px 0 4px">');
-    H.push('<div class="muted" style="font-size:0.84em;margin:0 0 12px">Expert decisions steering this campaign</div>');
+
+    // --- Engine decisions awaiting you (above the authored expert decisions) ----
+    if (hasEngine) {
+      H.push('<div style="margin:0 0 18px">');
+      H.push('<div style="font-weight:700;color:#7c3aed;font-size:0.82em;letter-spacing:0.04em;margin:0 0 3px">⚙ ENGINE DECISIONS AWAITING YOU</div>');
+      H.push('<div class="muted" style="font-size:0.82em;margin:0 0 10px">The discovery engine proposed these. Approving a model revision signals the engine to apply it on its next cycle — it does not change the model now.</div>');
+      H.push('<div style="display:grid;gap:10px">');
+      revProps.forEach(function (p) {
+        p = p || {};
+        var changes = (Array.isArray(p.candidate_changes) ? p.candidate_changes : []).map(function (c) {
+          c = c || {};
+          var to = Array.isArray(c.to) ? '[' + c.to.join(', ') + ']' : String(c.to);
+          return _escInv((c.name || c.kind || 'change') + ': ' + String(c.from) + ' → ' + to);
+        });
+        var src = p.source;
+        var srcLabel = (src && typeof src === 'object')
+          ? (src.study || src.observable || src.finding || src.kind || '')
+          : (src || '');
+        var title = srcLabel ? ('Revise ' + _escInv(String(srcLabel))) : 'Model revision';
+        H.push('<div class="eng-decision" data-ekind="revision" data-id="' + _esc(p.id || '') +
+          '" data-investigation="' + _esc(invName) + '" style="background:#fff;border:1px solid #ddd6fe;border-radius:7px;padding:10px 12px">');
+        H.push('<div style="font-weight:650;color:#5b21b6;line-height:1.4">⚙ ' + title + '</div>');
+        if (changes.length)
+          H.push('<ul style="margin:6px 0 0;padding:0;list-style:none;display:grid;gap:3px">' +
+            changes.map(function (c) { return '<li style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#334155">' + c + '</li>'; }).join('') + '</ul>');
+        if (p.inadequacy)
+          H.push('<div class="muted" style="font-size:0.85em;line-height:1.5;margin-top:6px"><strong style="color:#475569">why</strong> ' + _escInv(String(p.inadequacy)) + '</div>');
+        var dt = p.discriminating_test || {};
+        if (dt.pass_if)
+          H.push('<div class="muted" style="font-size:0.85em;line-height:1.5;margin-top:3px"><strong style="color:#475569">test</strong> ' + _escInv(String(dt.pass_if)) + '</div>');
+        if (!readOnly) {
+          H.push('<div style="margin-top:8px">');
+          H.push('<textarea rows="1" placeholder="note (optional)…" style="width:100%;box-sizing:border-box;font:inherit;font-size:0.84em;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical"></textarea>');
+          H.push('<div style="margin-top:6px;display:flex;gap:8px;justify-content:flex-end">');
+          H.push('<button type="button" class="action-btn" onclick="_resolveEngineRevision(this,\'approve\')" style="font-size:0.82em;padding:3px 12px;font-weight:600;background:#16a34a;color:#fff;border:none">✓ Approve</button>');
+          H.push('<button type="button" class="action-btn" onclick="_resolveEngineRevision(this,\'reject\')" style="font-size:0.82em;padding:3px 12px;font-weight:600;background:#e11d48;color:#fff;border:none">✕ Reject</button>');
+          H.push('</div></div>');
+        }
+        H.push('</div>');
+      });
+      recon.forEach(function (r) {
+        r = r || {};
+        var sevColor = r.severity === 'blocking' ? '#dc2626' : (r.severity === 'high' ? '#d97706' : '#94a3b8');
+        H.push('<div class="eng-decision" data-ekind="reconciliation" data-id="' + _esc(r.id || '') +
+          '" data-investigation="' + _esc(invName) + '" style="background:#fff;border:1px solid #e2e8f0;border-radius:7px;padding:10px 12px">');
+        H.push('<div style="display:flex;gap:7px;align-items:baseline">' +
+          '<span style="flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:' + sevColor + ';display:inline-block;transform:translateY(-1px)"></span>' +
+          '<div style="flex:1;min-width:0"><div style="font-weight:600;color:#1e293b;line-height:1.4">' + _escInv(String(r.observation || r.id || 'Reconcile')) + '</div>');
+        if (r.request)
+          H.push('<div class="muted" style="font-size:0.85em;line-height:1.5;margin-top:3px">' + _escInv(String(r.request)) + '</div>');
+        if (!readOnly) {
+          H.push('<div style="margin-top:8px"><textarea rows="1" placeholder="resolution note (optional)…" style="width:100%;box-sizing:border-box;font:inherit;font-size:0.84em;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical"></textarea>');
+          H.push('<div style="margin-top:6px;text-align:right"><button type="button" class="action-btn" onclick="_resolveEngineReconciliation(this)" style="font-size:0.82em;padding:3px 12px;font-weight:600;background:#16a34a;color:#fff;border:none">✓ Resolve</button></div></div>');
+        }
+        H.push('</div></div>');
+      });
+      H.push('</div></div>');
+    }
+
+    if (needed.length || resolved.length || docs.length)
+      H.push('<div class="muted" style="font-size:0.84em;margin:0 0 12px">Expert decisions steering this campaign</div>');
 
     // Campaign-plan docs — the plan the decisions act on (links to e.g. the
     // Scientific Enrichment Plan). Served at /<path> from the workspace root.
@@ -12436,9 +12552,24 @@
         if (context)
           H.push('<div class="muted" style="font-size:0.86em;line-height:1.5;margin-top:4px">' +
             _renderInvLeadMarkdown(context) + '</div>');
+        // Derived evidence chips (referenced hypotheses + gates) and pick-one
+        // options parsed from the decision text — so the card connects to the
+        // material and offers a one-click choice instead of a blank note.
+        var _ev = _decisionEvidenceHtml(question + ' ' + context, d);
+        if (_ev) H.push(_ev);
+        var _opts = _decisionOptions(question);
+        if (!_opts.length) _opts = _decisionOptions(context);
+        if (!readOnly && _opts.length)
+          H.push('<div class="inv-dec-opts" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">' +
+            '<span class="muted" style="font-size:0.82em;margin-right:1px">Pick one:</span>' +
+            _opts.map(function (o) {
+              return '<button type="button" class="inv-dec-opt" data-opt="' + _esc(o) + '" onclick="_pickDecisionOption(this)" ' +
+                'style="font-size:0.82em;padding:2px 11px;border-radius:12px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155;cursor:pointer">' +
+                _escInv(o) + '</button>';
+            }).join('') + '</div>');
         if (!readOnly) {
           H.push('<div style="margin-top:8px">');
-          H.push('<textarea rows="2" placeholder="Resolution note — the call you made and why…" ' +
+          H.push('<textarea rows="2" placeholder="' + (_opts.length ? 'Pick an option above, or write the call you made…' : 'Resolution note — the call you made and why…') + '" ' +
             'style="width:100%;box-sizing:border-box;font:inherit;font-size:0.86em;padding:6px 8px;' +
             'border:1px solid #cbd5e1;border-radius:6px;resize:vertical"></textarea>');
           H.push('<div style="margin-top:6px;text-align:right">');
@@ -12478,6 +12609,130 @@
   }
   window._renderInvDecisionCockpit = _renderInvDecisionCockpit;
   window._invDecisionTabHtml = _invDecisionTabHtml;
+
+  // Approve/reject/resolve an engine decision (revision proposal or reconciliation
+  // item). POSTs to the write endpoint, hides the card on success, refreshes the
+  // discovery views. The optional note is read from the card's textarea.
+  function _postEngineDecision(url, payload, btn, okMsg) {
+    var card = btn.closest ? btn.closest('.eng-decision') : null;
+    var ta = card && card.querySelector('textarea');
+    payload.note = ta ? ta.value.trim() : '';
+    var btns = card ? card.querySelectorAll('button') : [];
+    Array.prototype.forEach.call(btns, function (b) { b.disabled = true; });
+    fetch((window.__BASE_PATH__ || '') + url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; });
+    }).then(function (res) {
+      if (!res.ok || res.j.ok !== true) {
+        Array.prototype.forEach.call(btns, function (b) { b.disabled = false; });
+        _naToast('Failed: ' + (res.j.error || res.j.detail || 'error'), true);
+        return;
+      }
+      if (card) card.style.display = 'none';
+      try { if (typeof window._vivRefreshDiscoveryViews === 'function') window._vivRefreshDiscoveryViews(payload.investigation); } catch (e) {}
+      _naToast(okMsg(res.j));
+    }).catch(function (e) {
+      Array.prototype.forEach.call(btns, function (b) { b.disabled = false; });
+      _naToast('Failed: ' + e, true);
+    });
+  }
+  function _resolveEngineRevision(btn, decision) {
+    var card = btn.closest('.eng-decision'); if (!card) return;
+    _postEngineDecision('/api/investigation-revision-proposal-resolve',
+      { investigation: card.getAttribute('data-investigation'), id: card.getAttribute('data-id'), decision: decision },
+      btn, function (j) { return 'Revision ' + (j.status || decision) + '.'; });
+  }
+  function _resolveEngineReconciliation(btn) {
+    var card = btn.closest('.eng-decision'); if (!card) return;
+    _postEngineDecision('/api/investigation-reconciliation-resolve',
+      { investigation: card.getAttribute('data-investigation'), id: card.getAttribute('data-id') },
+      btn, function () { return 'Reconciliation resolved.'; });
+  }
+  window._resolveEngineRevision = _resolveEngineRevision;
+  window._resolveEngineReconciliation = _resolveEngineReconciliation;
+
+  // --- Part D: authored-decision evidence chips + pick-one options -------------
+  // Parse named alternatives out of a decision's text: "A vs B vs C" or a short
+  // parenthetical comma list "(x, y, z)". Conservative — returns [] when unsure.
+  function _decisionOptions(text) {
+    text = String(text || '');
+    var m = text.match(/\b([A-Za-z0-9][\w\-]*(?:\s+vs\.?\s+[A-Za-z0-9][\w\-]*)+)\b/i);
+    if (m) {
+      var parts = m[1].split(/\s+vs\.?\s+/i).map(function (s) { return s.trim(); }).filter(Boolean);
+      if (parts.length >= 2 && parts.length <= 6) return parts;
+    }
+    // Scan every parenthetical and return the first that reads as a short comma
+    // list of options (a leading "(e.g. …)" with no commas is skipped).
+    var parens = text.match(/\(([^()]{3,90})\)/g) || [];
+    for (var pi = 0; pi < parens.length; pi++) {
+      var inner = parens[pi].slice(1, -1);
+      if (inner.indexOf(',') === -1) continue;
+      var items = inner.replace(/^\s*(e\.?g\.?|i\.?e\.?|hypotheses)\s*/i, '').split(',')
+        .map(function (s) { return s.trim(); })
+        .filter(function (s) { return s && /[A-Za-z]/.test(s) && s.split(/\s+/).length <= 3; });
+      if (items.length >= 2 && items.length <= 6) return items;
+    }
+    return [];
+  }
+  // Evidence chips: referenced hypotheses (hover shows statement + prediction, from
+  // d.hypotheses) and gate ids (informational). Returns '' when nothing is found.
+  function _decisionEvidenceHtml(text, d) {
+    text = String(text || '');
+    var chips = [];
+    var hyps = Array.isArray(d.hypotheses) ? d.hypotheses : [];
+    var byId = {};
+    // Hypothesis ids are slugs (e.g. "H1-syntrophy-first@study-…"); key them by the
+    // leading H<n>/C<n> label the decision text actually references.
+    hyps.forEach(function (h) {
+      if (!h || !h.id) return;
+      var k = (String(h.id).match(/([HC]\d+)/i) || [])[1];
+      if (k) byId[k.toUpperCase()] = h;
+    });
+    var seen = {};
+    (text.match(/\b[HC]\d+\b/g) || []).forEach(function (id) {
+      id = id.toUpperCase();
+      if (seen[id] || !byId[id]) return; seen[id] = 1;
+      var h = byId[id];
+      var pred = Array.isArray(h.predictions) ? h.predictions.join('; ') : (h.prediction || h.predictions || '');
+      var tip = (h.statement || '') + (pred ? ' — predicts: ' + pred : '');
+      chips.push('<span class="inv-dec-ev" title="' + _esc(tip) + '" ' +
+        'style="font-size:0.8em;font-weight:600;padding:1px 8px;border-radius:9px;background:#eef2ff;color:#4338ca;cursor:help">' +
+        _esc(id) + '</span>');
+    });
+    var gseen = {};
+    (text.match(/\bG\d+[·.\-][A-Za-z0-9]+/g) || []).forEach(function (g) {
+      if (gseen[g]) return; gseen[g] = 1;
+      chips.push('<span style="font-size:0.8em;font-weight:600;padding:1px 8px;border-radius:9px;background:#f1f5f9;color:#475569">' + _escInv(g) + '</span>');
+    });
+    if (!chips.length) return '';
+    return '<div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:5px;align-items:center">' +
+      '<span class="muted" style="font-size:0.8em;margin-right:1px">Evidence:</span>' + chips.join('') + '</div>';
+  }
+  // Pick an option: highlight the chosen chip and prefill the resolution note so
+  // Resolve is one click (the note stays editable to add a "why").
+  function _pickDecisionOption(btn) {
+    var wrap = btn.closest ? btn.closest('.inv-decision') : null;
+    var ta = wrap && wrap.querySelector('textarea');
+    if (!ta) return;
+    var opt = btn.getAttribute('data-opt') || '';
+    var chips = wrap.querySelectorAll('.inv-dec-opt');
+    Array.prototype.forEach.call(chips, function (c) {
+      var on = c === btn;
+      c.style.background = on ? '#1d4ed8' : '#f8fafc';
+      c.style.color = on ? '#fff' : '#334155';
+      c.style.borderColor = on ? '#1d4ed8' : '#cbd5e1';
+    });
+    var cur = ta.value.trim();
+    var md = cur.match(/—\s*(.*)$/);
+    var why = md ? md[1].trim() : '';
+    ta.value = 'Chose: ' + opt + ' — ' + why;
+    ta.focus();
+    try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) {}
+  }
+  window._pickDecisionOption = _pickDecisionOption;
 
   // Resolve one open decision: read the note from the card, POST, then refresh
   // the investigation detail so the cockpit re-renders with the moved decision.
@@ -12757,7 +13012,22 @@
     var passingCount = checks.length - flaggedChecks.length;
     var _quiet = _naQuietState(summary);
 
-    if (total === 0 || flaggedChecks.length === 0) {
+    // Item kinds the scan flags that have NO corresponding check row (e.g.
+    // viz_broken) still count toward the badge (summary.total) but, without this,
+    // never render — so the tab reads "all clear" while the badge shows N. Build a
+    // synthetic section for each orphan kind from its items.
+    var _checkKinds = {};
+    checks.forEach(function (c) { _checkKinds[c.kind] = 1; });
+    var _orphanLabels = { viz_broken: 'Broken figures' };
+    var orphanChecks = Object.keys(byKindItems)
+      .filter(function (k) { return !_checkKinds[k]; })
+      .map(function (k) {
+        var its = byKindItems[k] || [];
+        return { kind: k, issue_label: _orphanLabels[k] || k.replace(/_/g, ' '),
+                 flagged: its.length, severity: (its[0] || {}).severity || 'medium' };
+      });
+
+    if (total === 0 || (flaggedChecks.length === 0 && orphanChecks.length === 0)) {
       // Nothing to fix — honest quiet / all-clear, no green wall.
       return '<div style="font-weight:700;color:' + _quiet.color + '">' + _esc(_quiet.label) + '</div>'
         + (checks.length ? '<div class="muted" style="font-size:0.9em;margin-top:4px">✓ all ' + checks.length + ' checks clear'
@@ -12773,7 +13043,7 @@
     // an expander (0=high, 1=medium, 2=low).
     var _SR = { high: 0, medium: 1, low: 2 };
     var copyLines = [];
-    var sections = flaggedChecks.map(function (c) {
+    var sections = flaggedChecks.concat(orphanChecks).map(function (c) {
       var help = HELP[c.kind] || '';
       var items = byKindItems[c.kind] || [];
       var flagged = c.flagged || items.length || 0;

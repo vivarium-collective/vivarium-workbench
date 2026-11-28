@@ -1439,6 +1439,10 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         # Open/Closed: {closed, source: authored|derived|None, unaddressed_criteria, ...}
         "closure":             _marks["closure"],
         "scientific_argument": spec.get("scientific_argument") or {},
+        # The competing hypotheses (each {id, statement, prediction}) — referenced
+        # by authored decisions (e.g. "H1 vs H4 vs H5"); the Decisions tab links
+        # them as evidence chips.
+        "hypotheses":          spec.get("hypotheses") or [],
         # Comparative framing for the rigor scorecard — the interpretive lenses
         # this investigation adjudicates among (each {name, relation}). Dropped
         # before this passthrough, so the investigation page never showed it.
@@ -1453,6 +1457,15 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         "references_resolved": _resolve_bib_references(ws_root),
         "proposed_inputs":     spec.get("proposed_inputs") or {},
         "plan_board":          plan_board,
+        # Engine decisions awaiting human input — surfaced in the Decisions tab as
+        # approve/reject/resolve cards. These are authored on disk by the discovery
+        # cycle but were dropped from this payload, so the tab never saw them:
+        #   revision_proposals — model-change proposals (status proposed|approved|rejected)
+        #   reconciliation_log — flagged divergences to resolve (status open|resolved)
+        #   executed_actions   — after-the-fact log of auto-executed ops
+        "revision_proposals":  spec.get("revision_proposals") or [],
+        "reconciliation_log":  spec.get("reconciliation_log") or [],
+        "executed_actions":    spec.get("executed_actions") or [],
         "studies":             studies_out,
         # Investigation-level run length hint (the longest member study's baseline
         # composite run) → the `vwb run investigation <slug> --steps N` chip.

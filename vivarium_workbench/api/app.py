@@ -287,6 +287,8 @@ from vivarium_workbench.lib.models import (
     StudyRenameBody,
     ProposedInputDecisionBody,
     ResolveDecisionBody,
+    ResolveRevisionProposalBody,
+    ResolveReconciliationBody,
     StudySeedFollowupBody,
     # Batch 21: request-body models for investigation scaffold mutations
     InvestigationCreateRequest,
@@ -5523,6 +5525,45 @@ def create_app() -> FastAPI:
         remaining}`` on success.
         """
         body, status = _lifecycle_mut.resolve_decision(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-revision-proposal-resolve",
+        tags=["Investigations"],
+        summary="Approve or reject a discovery-engine model-revision proposal",
+    )
+    def investigation_revision_proposal_resolve(
+        req: ResolveRevisionProposalBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Set ``revision_proposals[*].status`` to ``approved``/``rejected`` (from
+        ``proposed``) + reviewer/timestamp/note. Approving is a signal the engine
+        applies next cycle; it does NOT itself mutate any model.
+
+        Body: ``{investigation, id?|index?, decision: approve|reject, note?}``.
+        400 bad args; 404 missing; 409 already reviewed; 200 ``{ok, id, status}``.
+        """
+        body, status = _lifecycle_mut.resolve_revision_proposal(ws, req.model_dump())
+        if status != 200:
+            return JSONResponse(status_code=status, content=body)
+        return body
+
+    @app.post(
+        "/api/investigation-reconciliation-resolve",
+        tags=["Investigations"],
+        summary="Mark an open reconciliation item resolved",
+    )
+    def investigation_reconciliation_resolve(
+        req: ResolveReconciliationBody,
+        ws: Path = Depends(get_workspace),
+    ) -> dict:
+        """Set ``reconciliation_log[*].status`` to ``resolved`` (from ``open``) +
+        who/when/note. Body: ``{investigation, id?|index?, note?}``.
+        400 bad args; 404 missing; 409 already resolved; 200 ``{ok, id, status}``.
+        """
+        body, status = _lifecycle_mut.resolve_reconciliation(ws, req.model_dump())
         if status != 200:
             return JSONResponse(status_code=status, content=body)
         return body
