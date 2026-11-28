@@ -1446,7 +1446,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         # Comparative framing for the rigor scorecard — the interpretive lenses
         # this investigation adjudicates among (each {name, relation}). Dropped
         # before this passthrough, so the investigation page never showed it.
-        "competing_frameworks": spec.get("competing_frameworks") or [],
+        "competing_frameworks": (spec.get("scientific_argument") or {}).get("competing_frameworks") or spec.get("competing_frameworks") or [],
         # The origin-of-cells thesis as cited claims (each {claim, cites}); the
         # investigation page renders these with citation chips so the top-level
         # argument traces to its sources.

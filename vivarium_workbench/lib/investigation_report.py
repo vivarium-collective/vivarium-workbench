@@ -1219,7 +1219,7 @@ def _build_synthesis(inv, studies, spine):
                     "detail": _syn_first_sentence((f or {}).get("statement") or (f or {}).get("summary") or "", 300),
                     "studies": [{"slug": r["slug"], "title": r["title"], "grade": r["grade"]}],
                 })
-    for cf in (inv.get("competing_frameworks") or []):
+    for cf in ((inv.get("scientific_argument") or {}).get("competing_frameworks") or inv.get("competing_frameworks") or []):
         if isinstance(cf, dict) and cf.get("name"):
             contradictions.append({
                 "kind": "competing-framework", "topic": cf.get("name"),
@@ -1679,7 +1679,7 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         "how_to_read": inv.get("how_to_read"),
         "created": inv.get("created"),
         "key_claims": inv.get("key_claims"),
-        "competing_frameworks": inv.get("competing_frameworks"),
+        "competing_frameworks": (inv.get("scientific_argument") or {}).get("competing_frameworks") or inv.get("competing_frameworks"),
         "at_a_glance": inv.get("at_a_glance"),
         "acceptance_criteria": inv.get("acceptance_criteria"),
         "spine": spine,
