@@ -12411,7 +12411,13 @@
           '">' + _esc(t.badge) + '</span>' : '';
         return '<button type="button" class="' + _cls +
           '" onclick="_invBriefTab(this,\'' + t.id + '\')">' + _esc(t.label) + _badge + '</button>';
-      }).join('') + '</div>');
+      }).join('')
+        // Collapse control pinned to the RIGHT end of the tab strip — collapse the
+        // Details panel from the TOP without scrolling down to the drag-bar button.
+        + '<button type="button" class="inv-brief-collapse" title="Collapse the investigation details"'
+        + ' aria-label="Collapse the investigation details"'
+        + ' onclick="window._toggleInvOverview&&window._toggleInvOverview()">&#9652;</button>'
+        + '</div>');
       H.push('<div class="inv-brief-panels">' + tabs.map(function(t, i) {
         return '<div class="inv-brief-panel" data-panel="' + t.id + '"' + (i === 0 ? '' : ' style="display:none"') + '>' + t.html + '</div>';
       }).join('') + '</div>');

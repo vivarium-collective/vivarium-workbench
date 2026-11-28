@@ -3137,6 +3137,14 @@ body.pcard-splitting iframe{ pointer-events:none; }
 }
 .inv-brief-tab:hover { color: #334155; background: #f8fafc; }
 .inv-brief-tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+/* Collapse-from-top control: pinned to the right end of the tab strip so the
+   Details panel can be collapsed without scrolling down to the drag-bar button. */
+.inv-brief-collapse {
+  appearance: none; margin-left: auto; align-self: center;
+  border: 1px solid #e2e8f0; background: #fff; color: #64748b; cursor: pointer;
+  font-size: 10px; line-height: 1; padding: 3px 8px; border-radius: 5px;
+}
+.inv-brief-collapse:hover { background: #e2e8f0; color: #334155; }
 /* Decisions tab — highlighted (amber) to draw attention when decisions are open. */
 .inv-brief-tab-attn { color: #b45309; }
 .inv-brief-tab-attn:hover { color: #92400e; background: #fffbeb; }
@@ -5980,6 +5988,8 @@ button:hover > .aig-tb-blabel { color: #3730a3; }
 :root[data-theme="dark"] .inv-brief-frameworks-label{ color:var(--text-muted); }
 :root[data-theme="dark"] .inv-brief-tabs{ border-bottom-color:var(--border); }
 :root[data-theme="dark"] .inv-brief-tab{ color:var(--text-muted); }
+:root[data-theme="dark"] .inv-brief-collapse{ background:var(--panel, #1e293b); border-color:var(--border); color:var(--text-muted); }
+:root[data-theme="dark"] .inv-brief-collapse:hover{ background:var(--border); color:var(--text); }
 :root[data-theme="dark"] .inv-brief-tab:hover{ color:var(--text); background:var(--hover); }
 :root[data-theme="dark"] .inv-brief-tab.active{ color:var(--link); border-bottom-color:var(--link); }
 :root[data-theme="dark"] .inv-brief-prose{ color:var(--text); }

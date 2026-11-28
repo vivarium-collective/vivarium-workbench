@@ -75,6 +75,19 @@ def test_style_defines_expand_button():
     assert ".bar-expand-btn.on" in css  # the expanded-state marker
 
 
+def test_tab_strip_has_top_collapse_control():
+    # A collapse control at the TOP (in the tab strip) so the panel can be
+    # collapsed without scrolling down to the drag-bar button.
+    js = (STATIC / "walkthrough.js").read_text()
+    i = js.index('class="inv-brief-tabs"')
+    seg = js[i:i + 1600]
+    assert "inv-brief-collapse" in seg, "no top collapse control in the tab strip"
+    assert "_toggleInvOverview" in seg, "top collapse control not wired to the collapse toggle"
+    css = (STATIC / "style.css").read_text()
+    assert ".inv-brief-collapse" in css
+    assert "margin-left: auto" in css[css.index(".inv-brief-collapse"):css.index(".inv-brief-collapse") + 200]
+
+
 def test_walkthrough_node_syntax():
     node = shutil.which("node")
     if not node:  # pragma: no cover
