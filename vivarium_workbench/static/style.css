@@ -3049,7 +3049,8 @@ body.pcard-splitting iframe{ pointer-events:none; }
   font-size: 0.9em; line-height: 1.55; color: #475569; margin: 0 0 16px;
 }
 .inv-brief-meta-item em { font-style: normal; font-weight: 700; color: #334155; margin-right: 5px; }
-.inv-brief-meta-item + .inv-brief-meta-item::before { content: "·"; margin: 0 9px; color: #cbd5e1; }
+/* .inv-brief-meta is a stacked column (see below), so each meta item (Question,
+   Hypothesis, …) is its own block — no inline "·" separator before later items. */
 
 /* Plan-progress board — cumulative gates A→E, live status (lib/plan_board) */
 .inv-plan-board { margin: 4px 0 18px; }
@@ -5972,7 +5973,6 @@ button:hover > .aig-tb-blabel { color: #3730a3; }
 :root[data-theme="dark"] .inv-gate-branch-tag{ color:var(--text-muted); }
 :root[data-theme="dark"] .inv-brief-frameworks-fold{ border-top-color:var(--border); }
 :root[data-theme="dark"] .inv-brief-frameworks-label{ color:var(--text-muted); }
-:root[data-theme="dark"] .inv-brief-meta-item + .inv-brief-meta-item::before{ color:var(--border-2); }
 :root[data-theme="dark"] .inv-brief-tabs{ border-bottom-color:var(--border); }
 :root[data-theme="dark"] .inv-brief-tab{ color:var(--text-muted); }
 :root[data-theme="dark"] .inv-brief-tab:hover{ color:var(--text); background:var(--hover); }

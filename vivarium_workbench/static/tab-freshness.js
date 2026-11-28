@@ -1,8 +1,8 @@
-// tab-freshness.js — derived "expired — refresh" affordance on the investigation
+// tab-freshness.js — a quiet, read-only "may be stale" note on the investigation
 // Verdict and Narrative top tabs. Freshness is computed by the engine
-// (GET /api/investigation/{slug}/freshness); the only writes are the rationale-gated
-// POST accept-verdict / refresh-narrative. Mirrors the viz Accept form in
-// discovery-cycle.js. Decisions has no affordance (it is mechanically reconciled).
+// (GET /api/investigation/{slug}/freshness) and shown as a single muted line; there
+// is no user-facing refresh form or required rationale — re-stamping is the engine's
+// job (the divergence is surfaced, not turned into a chore).
 // Mounts: <div class="inv-fresh-mount" data-fresh-tab="verdict|narrative">.
 (function (global) {
   "use strict";
@@ -19,21 +19,12 @@
     return fetch(base() + "/api/investigation/" + encodeURIComponent(slug) + "/freshness",
       { headers: { "Accept": "application/json" } }).then(function (r) { return r.json(); });
   }
-  function post(slug, verb, rationale) {
-    return fetch(base() + "/api/investigation/" + encodeURIComponent(slug) + "/" + verb, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify({ rationale: rationale }),
-    }).then(function (r) { return r.json().catch(function () { return {}; }); });
-  }
-
   var SPEC = {
-    verdict: { verb: "accept-verdict", label: "Refresh ▸",
+    verdict: {
       msg: function (f) {
-        return "⚠ expired — authored verdict diverges from the computed " + esc(f.computed || "verdict");
+        return "authored verdict may predate the latest runs · computed: " + esc(f.computed || "in-progress");
       } },
-    narrative: { verb: "refresh-narrative", label: "Refresh ▸",
-      msg: function () { return "⚠ expired — narrative basis changed since it was written"; } },
+    narrative: { msg: function () { return "narrative may predate the latest runs"; } },
   };
 
   function render(mount, f) {
@@ -42,35 +33,10 @@
     mount.setAttribute("data-done", "1");
     if (!sp || !f || readonly()) { mount.innerHTML = ""; return; }
     if (f.state === "expired") {
+      // A quiet, informational note — no banner, no action, no rationale. The
+      // divergence is surfaced honestly; re-stamping stays the engine's job.
       mount.innerHTML =
-        '<div class="tfr-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;' +
-        'padding:6px 10px;border:1px solid #d97706;border-radius:6px;background:rgba(217,119,6,.08);font-size:.9em">' +
-        '<span class="tfr-msg">' + sp.msg(f) + '</span>' +
-        '<button type="button" class="tfr-open" title="Refresh (rationale required)">' + sp.label + '</button></div>' +
-        '<div class="tfr-form" style="display:none;margin:0 0 10px">' +
-        '<textarea class="tfr-why" rows="2" style="width:100%" placeholder="Rationale (required) — what you re-read and why this is now correct"></textarea>' +
-        '<div style="margin-top:4px;display:flex;gap:8px;align-items:center">' +
-        '<button type="button" class="tfr-go">Confirm refresh</button>' +
-        '<button type="button" class="tfr-cancel">Cancel</button>' +
-        '<span class="tfr-status muted"></span></div></div>';
-      var form = mount.querySelector(".tfr-form");
-      var status = mount.querySelector(".tfr-status");
-      mount.querySelector(".tfr-open").onclick = function () {
-        form.style.display = ""; var t = mount.querySelector(".tfr-why"); if (t) t.focus();
-      };
-      mount.querySelector(".tfr-cancel").onclick = function () { form.style.display = "none"; };
-      mount.querySelector(".tfr-go").onclick = function () {
-        var why = mount.querySelector(".tfr-why");
-        var rationale = why ? why.value.trim() : "";
-        if (!rationale) { status.textContent = "Enter a rationale."; if (why) why.focus(); return; }
-        status.textContent = "Refreshing…";
-        post(slugNow(mount), sp.verb, rationale).then(function (r) {
-          if (!r || r.ok !== true) { status.textContent = "Failed: " + ((r && (r.detail || r.error)) || "error"); return; }
-          try { if (typeof global._vivRefreshDiscoveryViews === "function") global._vivRefreshDiscoveryViews(slugNow(mount)); } catch (e) {}
-          mount.removeAttribute("data-done");   // re-read FRESH on the next tick
-          mount.innerHTML = '<div class="muted" style="margin:0 0 10px">Refreshed.</div>';
-        }).catch(function (e) { status.textContent = "Failed: " + e; });
-      };
+        '<div class="muted tfr-note" style="margin:0 0 10px;font-size:.85em">ℹ ' + sp.msg(f) + '</div>';
     } else if (f.state === "unstamped" && tab === "narrative") {
       mount.innerHTML = '<div class="muted" style="margin:0 0 10px;font-size:.85em">not yet stamped</div>';
     } else {
