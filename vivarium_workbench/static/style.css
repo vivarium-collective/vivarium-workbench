@@ -5011,6 +5011,11 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 #aig-resize-bar { position: relative; overflow: visible; }
 .bar-collapse-btn { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); z-index: 3; border: 1px solid #e2e8f0; background: #fff; color: #64748b; cursor: pointer; font-size: 10px; line-height: 1; padding: 2px 6px; border-radius: 5px; }
 .bar-collapse-btn:hover { background: #e2e8f0; color: #334155; }
+/* Expand-to-full button — sits just left of the collapse button on the Details
+   drag bar. `.on` marks the expanded (show-everything) state. */
+.bar-expand-btn { position: absolute; right: 34px; top: 50%; transform: translateY(-50%); z-index: 3; border: 1px solid #e2e8f0; background: #fff; color: #64748b; cursor: pointer; font-size: 10px; line-height: 1; padding: 2px 6px; border-radius: 5px; }
+.bar-expand-btn:hover { background: #e2e8f0; color: #334155; }
+.bar-expand-btn.on { background: #e0e7ff; border-color: #c7d2fe; color: #4338ca; }
 /* Collapsed re-expand bars — Details + graph share one height so the one-row view
    is tidy (matches .aig-collapsed-bar: padding 7/12, 0.85em, border-box). */
 .inv-intro-collapsed-bar { display: none; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; margin: 0 0 8px; padding: 7px 12px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px; color: #475569; font-size: 0.85em; font-weight: 600; cursor: pointer; text-align: left; }
