@@ -3137,6 +3137,14 @@ body.pcard-splitting iframe{ pointer-events:none; }
 }
 .inv-brief-tab:hover { color: #334155; background: #f8fafc; }
 .inv-brief-tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+/* Collapse-from-top control: pinned to the right end of the tab strip so the
+   Details panel can be collapsed without scrolling down to the drag-bar button. */
+.inv-brief-collapse {
+  appearance: none; margin-left: auto; align-self: center;
+  border: 1px solid #e2e8f0; background: #fff; color: #64748b; cursor: pointer;
+  font-size: 10px; line-height: 1; padding: 3px 8px; border-radius: 5px;
+}
+.inv-brief-collapse:hover { background: #e2e8f0; color: #334155; }
 /* Decisions tab — highlighted (amber) to draw attention when decisions are open. */
 .inv-brief-tab-attn { color: #b45309; }
 .inv-brief-tab-attn:hover { color: #92400e; background: #fffbeb; }
@@ -5011,6 +5019,11 @@ details.res-martini[open] > summary { margin-bottom: 5px; }
 #aig-resize-bar { position: relative; overflow: visible; }
 .bar-collapse-btn { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); z-index: 3; border: 1px solid #e2e8f0; background: #fff; color: #64748b; cursor: pointer; font-size: 10px; line-height: 1; padding: 2px 6px; border-radius: 5px; }
 .bar-collapse-btn:hover { background: #e2e8f0; color: #334155; }
+/* Expand-to-full button — sits just left of the collapse button on the Details
+   drag bar. `.on` marks the expanded (show-everything) state. */
+.bar-expand-btn { position: absolute; right: 34px; top: 50%; transform: translateY(-50%); z-index: 3; border: 1px solid #e2e8f0; background: #fff; color: #64748b; cursor: pointer; font-size: 10px; line-height: 1; padding: 2px 6px; border-radius: 5px; }
+.bar-expand-btn:hover { background: #e2e8f0; color: #334155; }
+.bar-expand-btn.on { background: #e0e7ff; border-color: #c7d2fe; color: #4338ca; }
 /* Collapsed re-expand bars — Details + graph share one height so the one-row view
    is tidy (matches .aig-collapsed-bar: padding 7/12, 0.85em, border-box). */
 .inv-intro-collapsed-bar { display: none; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; margin: 0 0 8px; padding: 7px 12px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px; color: #475569; font-size: 0.85em; font-weight: 600; cursor: pointer; text-align: left; }
@@ -5975,6 +5988,8 @@ button:hover > .aig-tb-blabel { color: #3730a3; }
 :root[data-theme="dark"] .inv-brief-frameworks-label{ color:var(--text-muted); }
 :root[data-theme="dark"] .inv-brief-tabs{ border-bottom-color:var(--border); }
 :root[data-theme="dark"] .inv-brief-tab{ color:var(--text-muted); }
+:root[data-theme="dark"] .inv-brief-collapse{ background:var(--panel, #1e293b); border-color:var(--border); color:var(--text-muted); }
+:root[data-theme="dark"] .inv-brief-collapse:hover{ background:var(--border); color:var(--text); }
 :root[data-theme="dark"] .inv-brief-tab:hover{ color:var(--text); background:var(--hover); }
 :root[data-theme="dark"] .inv-brief-tab.active{ color:var(--link); border-bottom-color:var(--link); }
 :root[data-theme="dark"] .inv-brief-prose{ color:var(--text); }
