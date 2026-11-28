@@ -1659,6 +1659,8 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         _synthesis["validation"]["report_lint"] = []
     references = _load_references(ws_root, wp)
 
+    from vivarium_workbench.lib.report_views import _key_claims
+
     return {
         "slug": inv.get("name") or inv_slug,
         "title": inv.get("title") or inv_slug,
@@ -1678,7 +1680,7 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         "guidelines": inv.get("guidelines"),
         "how_to_read": inv.get("how_to_read"),
         "created": inv.get("created"),
-        "key_claims": inv.get("key_claims"),
+        "key_claims": _key_claims(inv),
         "competing_frameworks": (inv.get("scientific_argument") or {}).get("competing_frameworks") or inv.get("competing_frameworks"),
         "at_a_glance": inv.get("at_a_glance"),
         "acceptance_criteria": inv.get("acceptance_criteria"),

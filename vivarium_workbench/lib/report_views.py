@@ -919,6 +919,24 @@ def _acceptance_freshness(studies_by_name: dict) -> Optional[str]:
     return "fresh" if saw_graded else None
 
 
+def _key_claims(spec: dict) -> list:
+    """The cited-claim ledger for display. Prefer the consolidated
+    ``scientific_argument.claims``, normalized to the legacy ``{claim, cites}``
+    shape so the renderers need no change; else the legacy top-level
+    ``key_claims``."""
+    nested = (spec.get("scientific_argument") or {}).get("claims")
+    if nested:
+        out = []
+        for c in nested:
+            if isinstance(c, dict):
+                out.append({"claim": c.get("statement") or c.get("claim") or "",
+                            "cites": c.get("cites")})
+            else:
+                out.append({"claim": str(c)})
+        return out
+    return spec.get("key_claims") or []
+
+
 def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
     """GET /api/investigation/<name> builder.
 
@@ -1450,7 +1468,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         # The origin-of-cells thesis as cited claims (each {claim, cites}); the
         # investigation page renders these with citation chips so the top-level
         # argument traces to its sources.
-        "key_claims":          spec.get("key_claims") or [],
+        "key_claims":          _key_claims(spec),
         "references":          (spec.get("inputs") or {}).get("references") or [],
         # Resolved bibkey → {label, title, author, year, url} from references/
         # papers.bib, so citation chips read "Kelley 2001" and link to a source.
