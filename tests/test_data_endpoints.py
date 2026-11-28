@@ -245,6 +245,24 @@ def test_iset_detail_data_returns_none_for_missing(tmp_workspace_with_inv):
     assert result is None
 
 
+def test_iset_detail_background_backcompat(tmp_path):
+    """The detail payload emits the canonical `background`, preferring it and
+    falling back to legacy `biological_story` during the deprecation window."""
+    def _mk(ws_name, inv_fields):
+        ws = tmp_path / ws_name
+        inv = ws / "investigations" / "inv"
+        inv.mkdir(parents=True)
+        inv.joinpath("investigation.yaml").write_text(yaml.safe_dump(
+            {"name": "inv", "title": "I", "studies": [], **inv_fields}))
+        return ws
+
+    new = build_iset_detail(_mk("a", {"background": "the mechanism"}), "inv")
+    assert new["background"] == "the mechanism"
+
+    legacy = build_iset_detail(_mk("b", {"biological_story": "legacy mechanism"}), "inv")
+    assert legacy["background"] == "legacy mechanism"
+
+
 def test_iset_detail_competing_frameworks_nested(tmp_path):
     """The detail payload resolves competing_frameworks from the consolidated
     `scientific_argument.competing_frameworks`, falling back to the legacy

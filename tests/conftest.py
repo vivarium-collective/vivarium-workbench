@@ -891,6 +891,20 @@ def forget_backend_caches() -> None:
                 cache.clear()
         else:
             cache.clear()
+    # The provider registry itself is process-global state that BACKEND_CACHES does
+    # not cover: _registry() caches resolved backends in _BY_KIND, and
+    # backends.__getattr__ caches each kind's backend in the module globals,
+    # falling back to the inert _SENTINELS when a kind is not registered. So a test
+    # that runs with providers off (or a config lacking a kind) leaves an _Inert
+    # backend cached; a later test then resolves it instead of the real one
+    # (AttributeError: _Inert has no attribute 'status_many' — the run_jobs/SMS
+    # tests). This leak is order/shard dependent: it only bites when the leaker and
+    # a run_jobs/SMS test land in the same xdist shard. reset_registry() forgets
+    # _BY_KIND and those attr-globals; it keeps provider-built backends (module
+    # singletons), so it only forces re-resolution.
+    backends_mod = sys.modules.get("vivarium_workbench.lib.backends")
+    if backends_mod is not None:
+        backends_mod.reset_registry()
 
 
 def forget_the_github_session() -> None:

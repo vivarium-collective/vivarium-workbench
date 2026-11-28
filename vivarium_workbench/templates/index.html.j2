@@ -1690,7 +1690,9 @@ a.viv-bs-commit:hover { text-decoration: underline; }
        hidden while Details is collapsed. #}
     <div id="inv-intro-resize" class="inv-intro-resize" role="separator" aria-orientation="horizontal"
          tabindex="-1" aria-label="Resize the investigation details (drag up to collapse)"
-         title="Drag to resize the details — drag to the top to collapse"><button type="button" class="bar-collapse-btn"
+         title="Drag to resize the details — drag to the top to collapse"><button type="button" class="bar-expand-btn"
+            aria-pressed="false" title="Expand the details to show the whole tab" aria-label="Expand the investigation details to show the whole current tab"
+            onpointerdown="event.stopPropagation()" onclick="event.stopPropagation(); window._toggleInvIntroExpand&&window._toggleInvIntroExpand()">&#9662;</button><button type="button" class="bar-collapse-btn"
             title="Collapse the details" aria-label="Collapse the investigation details"
             onpointerdown="event.stopPropagation()" onclick="event.stopPropagation(); window._toggleInvOverview&&window._toggleInvOverview()">&#9652;</button></div>
     <!-- Decision cockpit: the open expert decisions (executive.decisions_needed)

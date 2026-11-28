@@ -10682,6 +10682,7 @@
           return;
         }
         m.innerHTML = _vpRender(d);
+        try { _autofitInvIntroIfActive('validation'); } catch (e) { /* best-effort */ }
       }).catch(function () { /* leave the loading note in place */ });
   }
   window._vivLoadValidationPanel = _vivLoadValidationPanel;
@@ -12121,7 +12122,7 @@
     var q   = oneline(d.question);
     var hyp = oneline(d.hypothesis);
     var leadProse = (d.lead || d.description || '').trim();
-    var bio       = (d.biological_story || '').trim();
+    var bio       = (d.background || d.biological_story || '').trim();
     var glossary  = Array.isArray(d.glossary) ? d.glossary : [];
     var howto     = d.how_to_read;  // string (prose) or array (tips) — both render.
     var hasHowto  = Array.isArray(howto) ? howto.length : String(howto || '').trim().length;
@@ -12317,7 +12318,7 @@
     // into Background as a section rather than its own tab (per the owner).
     if (bio)
       bgParts.push('<div class="inv-brief-biology">' +
-        '<div class="inv-brief-frameworks-label">Biology</div>' +
+        '<div class="inv-brief-frameworks-label">Mechanism</div>' +
         '<div class="inv-brief-prose">' + _renderInvLeadMarkdown(bio) + '</div></div>');
     if (bgParts.length)
       tabs.push({ id:'background', label:'Background', html: bgParts.join('') });
@@ -12410,7 +12411,13 @@
           '">' + _esc(t.badge) + '</span>' : '';
         return '<button type="button" class="' + _cls +
           '" onclick="_invBriefTab(this,\'' + t.id + '\')">' + _esc(t.label) + _badge + '</button>';
-      }).join('') + '</div>');
+      }).join('')
+        // Collapse control pinned to the RIGHT end of the tab strip — collapse the
+        // Details panel from the TOP without scrolling down to the drag-bar button.
+        + '<button type="button" class="inv-brief-collapse" title="Collapse the investigation details"'
+        + ' aria-label="Collapse the investigation details"'
+        + ' onclick="window._toggleInvOverview&&window._toggleInvOverview()">&#9652;</button>'
+        + '</div>');
       H.push('<div class="inv-brief-panels">' + tabs.map(function(t, i) {
         return '<div class="inv-brief-panel" data-panel="' + t.id + '"' + (i === 0 ? '' : ' style="display:none"') + '>' + t.html + '</div>';
       }).join('') + '</div>');
@@ -12884,6 +12891,13 @@
     brief.querySelectorAll('.inv-brief-panel').forEach(function(p) {
       p.style.display = (p.getAttribute('data-panel') === id) ? '' : 'none';
     });
+    // Switching tabs re-fits the panel to the newly-shown tab (clears any sticky
+    // "show everything" so each tab gets its own fit). Deferred one frame so the
+    // just-revealed panel has laid out before we measure it.
+    var intro = document.getElementById('investigation-intro');
+    if (intro) intro._invExpandedFull = false;
+    if (window.requestAnimationFrame) requestAnimationFrame(function () { _autofitInvIntro(); _syncInvIntroExpandBtn(); });
+    else { _autofitInvIntro(); _syncInvIntroExpandBtn(); }
   }
   window._invBriefTab = _invBriefTab;
 
@@ -12955,6 +12969,10 @@
         // Decisions) — all from `d`. The plan-progress board now lives inside its
         // own compact tab (not appended as a separate board below).
         leadEl.innerHTML = _renderInvOpening(d);
+        // Fit the Details panel to the default (Overview) tab, deferred one frame
+        // so the brief has laid out. Each later tab switch re-fits (_invBriefTab).
+        if (window.requestAnimationFrame) requestAnimationFrame(function () { try { _autofitInvIntro(); _syncInvIntroExpandBtn(); } catch (_) {} });
+        else { try { _autofitInvIntro(); } catch (_) {} }
 
         // Decision cockpit: the open expert decisions + campaign plan, surfaced
         // prominently directly under the brief (built from d.executive).
@@ -13365,6 +13383,7 @@
         _naLoadFixRequests(name).then(function () {
           var m = document.getElementById('inv-attention-mount');
           if (m) m.innerHTML = _aigScanBodyHtml(d);
+          try { _autofitInvIntroIfActive('attention'); } catch (e) { /* best-effort */ }
         });
         // Reflect the flagged count on the tab button (amber badge when > 0),
         // and never let a quiet/never-run investigation read as a validated pass.
@@ -13988,6 +14007,80 @@
       document.addEventListener('pointerup', up);
     });
   }
+
+  // Per-tab auto-fit for the Details panel (#investigation-intro). The panel
+  // shows ONE brief tab at a time (Overview / Findings / Decisions / Validation /
+  // Needs attention …), and the tabs differ wildly in length. A single fixed
+  // height therefore leaves whitespace under a short tab and cuts off (or forces
+  // a scroll through) a long one. `_autofitInvIntro` sizes the panel to the
+  // ACTIVE tab: short tabs shrink to their content (no whitespace); tall tabs are
+  // capped at a viewport fraction and scroll within (no cut-off). The ▼ expand
+  // button removes the cap for the current tab (show-everything inline).
+  function _invIntroCap() { return Math.round(Math.min((window.innerHeight || 800) * 0.72, 760)); }
+
+  function _autofitInvIntro() {
+    var intro = document.getElementById('investigation-intro');
+    if (!intro) return;
+    if (_invOverviewCollapsed()) return;            // collapsed → nothing to size
+    if (intro._invExpandedFull) return;             // user chose "show everything" → honor until next switch
+    // Measure the active tab's natural height unconstrained, then fit-or-cap.
+    intro.style.height = 'auto';
+    intro.style.overflow = 'visible';
+    var natural = intro.scrollHeight;
+    var cap = _invIntroCap();
+    if (natural <= cap + 4) {
+      intro.style.height = '';                      // fits → natural height (no whitespace, no scrollbar)
+      intro.style.overflow = '';
+    } else {
+      intro.style.height = cap + 'px';              // too tall → cap + scroll (no cut-off)
+      intro.style.overflow = 'auto';
+    }
+  }
+  window._autofitInvIntro = _autofitInvIntro;
+
+  // Fit after an async tab fill (Validation / Needs attention load their bodies
+  // after the brief renders), but only when that tab is the one on screen.
+  function _autofitInvIntroIfActive(panelId) {
+    var p = document.querySelector('.inv-brief-panel[data-panel="' + panelId + '"]');
+    if (p && p.style.display !== 'none') _autofitInvIntro();
+  }
+  window._autofitInvIntroIfActive = _autofitInvIntroIfActive;
+
+  // ▼ expand toggle: grow the panel to show the FULL current tab inline (drop the
+  // viewport cap), or — when already expanded — return it to the per-tab fit.
+  // Expanding implies opening a collapsed panel first. The expanded state is
+  // sticky (survives async re-fits) until the next tab switch or a toggle back.
+  function _toggleInvIntroExpand() {
+    var intro = document.getElementById('investigation-intro');
+    if (!intro) return;
+    if (_invOverviewCollapsed()) {                  // expand implies "show it"
+      try { localStorage.setItem('inv-overview-collapsed', '0'); } catch (e) { /* ignore */ }
+      _applyInvOverviewState();
+    }
+    if (intro._invExpandedFull) {
+      intro._invExpandedFull = false;               // back to the capped per-tab fit
+      _autofitInvIntro();
+    } else {
+      intro._invExpandedFull = true;                // show the whole tab inline
+      intro.style.height = '';
+      intro.style.overflow = '';
+      try { localStorage.removeItem('inv-overview-height'); } catch (e) { /* ignore */ }
+    }
+    _syncInvIntroExpandBtn();
+  }
+  window._toggleInvIntroExpand = _toggleInvIntroExpand;
+
+  // Reflect expanded/fit state on the ▼ button (title + pressed look).
+  function _syncInvIntroExpandBtn() {
+    var intro = document.getElementById('investigation-intro');
+    var btn = document.querySelector('.bar-expand-btn');
+    if (!btn) return;
+    var full = !!(intro && intro._invExpandedFull);
+    btn.classList.toggle('on', full);
+    btn.setAttribute('aria-pressed', full ? 'true' : 'false');
+    btn.title = full ? 'Fit the details to the current tab' : 'Expand the details to show the whole tab';
+  }
+  window._syncInvIntroExpandBtn = _syncInvIntroExpandBtn;
 
   function _applyInvOverviewState() {
     var view = document.getElementById('investigation-detail-view');
