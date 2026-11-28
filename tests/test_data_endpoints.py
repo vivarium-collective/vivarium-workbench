@@ -245,6 +245,45 @@ def test_iset_detail_data_returns_none_for_missing(tmp_workspace_with_inv):
     assert result is None
 
 
+def test_iset_detail_competing_frameworks_nested(tmp_path):
+    """The detail payload resolves competing_frameworks from the consolidated
+    `scientific_argument.competing_frameworks`, falling back to the legacy
+    top-level field."""
+    def _mk(ws_name, inv_fields):
+        ws = tmp_path / ws_name
+        inv = ws / "investigations" / "inv"
+        inv.mkdir(parents=True)
+        inv.joinpath("investigation.yaml").write_text(yaml.safe_dump(
+            {"name": "inv", "title": "I", "studies": [], **inv_fields}))
+        return ws
+
+    nested = build_iset_detail(
+        _mk("a", {"scientific_argument": {"competing_frameworks": [{"name": "A"}]}}), "inv")
+    assert nested["competing_frameworks"] == [{"name": "A"}]
+
+    legacy = build_iset_detail(_mk("b", {"competing_frameworks": [{"name": "B"}]}), "inv")
+    assert legacy["competing_frameworks"] == [{"name": "B"}]
+
+
+def test_iset_detail_key_claims_from_scientific_argument(tmp_path):
+    """key_claims come from the consolidated scientific_argument.claims,
+    normalized to the legacy {claim, cites} display shape; legacy fallback."""
+    def _mk(ws_name, inv_fields):
+        ws = tmp_path / ws_name
+        inv = ws / "investigations" / "inv"
+        inv.mkdir(parents=True)
+        inv.joinpath("investigation.yaml").write_text(yaml.safe_dump(
+            {"name": "inv", "title": "I", "studies": [], **inv_fields}))
+        return ws
+
+    nested = build_iset_detail(_mk("a", {"scientific_argument": {
+        "claims": [{"id": "c1", "statement": "X holds", "cites": ["r1"]}]}}), "inv")
+    assert nested["key_claims"] == [{"claim": "X holds", "cites": ["r1"]}]
+
+    legacy = build_iset_detail(_mk("b", {"key_claims": [{"claim": "Y", "cites": []}]}), "inv")
+    assert legacy["key_claims"] == [{"claim": "Y", "cites": []}]
+
+
 # ---------------------------------------------------------------------------
 # Sub-project #2 — Task 2: data-source.js snapshot mode
 # ---------------------------------------------------------------------------
