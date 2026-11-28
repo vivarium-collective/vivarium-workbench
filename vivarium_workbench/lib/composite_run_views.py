@@ -28,6 +28,8 @@ from vivarium_workbench.lib.remote_run import STOPPED_LOG_MARK
 from vivarium_workbench.lib.workspace_paths import WorkspacePaths
 
 _TERMINAL_STATUSES = {"completed", "failed", "orphaned", "cancelled"}
+# A run that ended before its end; the card shows what its history kept (``stopped`` on the status route).
+_STOPPED_STATUSES = frozenset({"failed", "cancelled"})
 
 
 def _db_file(ws_root: Path) -> Path:
@@ -169,6 +171,10 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
       stopped locally ends with a faulthandler dump, which is not shown.
     * ``downloadable``: ``completed`` or ``cancelled`` (``/download`` serves a
       cancelled run's directory, e.g. a stopped remote run's landed results).
+    * ``stopped``: ``{rows, last_time}``, for a ``failed`` or ``cancelled`` run
+      whose ``history`` holds rows (a stopped remote run's landed results, or a
+      local run that failed partway): how many, and the largest ``global_time``.
+      Absent when it recorded none.
     * ``completed``: reads ``viz_html`` from
       ``.pbg/runs/<run_id>/viz.json`` when the file exists; skipped on
       ``JSONDecodeError``.
@@ -217,6 +223,8 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
     conn = cr.connect(db)
     try:
         meta = cr.query_run_meta(conn, run_id=run_id)
+        landed = (cr.run_history_extent(conn, run_id=run_id)
+                  if meta and meta["status"] in _STOPPED_STATUSES else (0, None))
     finally:
         conn.close()
     if meta is None:
@@ -233,6 +241,8 @@ def build_composite_run_status(ws_root: Path, run_id: str) -> tuple[dict, int]:
         "phase": meta.get("phase") if meta["status"] == "running" else None,
     }
     resp["downloadable"] = meta["status"] in ("completed", "cancelled")
+    if landed[0]:
+        resp["stopped"] = {"rows": landed[0], "last_time": landed[1]}
     if meta["status"] in ("failed", "orphaned", "cancelled"):
         log_rel = meta.get("log_path")
         if log_rel:

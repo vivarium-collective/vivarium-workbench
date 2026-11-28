@@ -836,6 +836,27 @@ def query_run(conn: sqlite3.Connection, *, run_id: str,
     return out
 
 
+def run_history_extent(conn: sqlite3.Connection, *, run_id: str) -> tuple[int, float | None]:
+    """``(rows, last_time)`` of the ``history`` recorded for one run.
+
+    ``rows`` is the row count and ``last_time`` the largest ``global_time``. Both
+    are ``(0, None)`` when the table doesn't exist (no SQLiteEmitter ever wrote to
+    this DB — e.g. a zarr/parquet run) or when the run has no rows; ``last_time`` is
+    also ``None`` when no row carries a ``global_time``. ``MAX(global_time)`` reads every
+    row of the run, which ``count_run_history_rows`` (the primary-key index alone) does
+    not: use that where only the count is needed.
+    """
+    has_history = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='history'"
+    ).fetchone()
+    if not has_history:
+        return 0, None
+    row = conn.execute(
+        "SELECT COUNT(*), MAX(global_time) FROM history WHERE simulation_id=?", (run_id,)
+    ).fetchone()
+    return (int(row[0]), row[1]) if row else (0, None)
+
+
 def count_run_history_rows(conn: sqlite3.Connection, *, run_id: str) -> int:
     """Number of ``history`` rows recorded for one run (0 if none).
 
