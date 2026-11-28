@@ -621,11 +621,19 @@ def cmd_warm_catalog(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    """Report on framework-dependency health; exit non-zero if any are stale."""
+    """Report on framework-dependency health; exit non-zero if any are stale.
+
+    With --workspace, also check that every composite package the workspace
+    references actually imports here — catches a stale venv after a sim-split,
+    where the registry silently resolves no composites."""
     from vivarium_workbench.lib import dep_doctor
 
-    print(dep_doctor.format_report())
-    return 1 if dep_doctor.problems() else 0
+    findings = dep_doctor.check_framework_deps()
+    ws = getattr(args, "workspace", None)
+    if ws:
+        findings += dep_doctor.check_workspace_composites(ws)
+    print(dep_doctor.format_report(findings))
+    return 1 if dep_doctor.problems(findings) else 0
 
 
 def cmd_workspace_trust(args: argparse.Namespace) -> int:
@@ -1619,6 +1627,9 @@ def _build_parser(commands: "Sequence[Command] | None" = None) -> argparse.Argum
 
     p_doctor = sub.add_parser(
         "doctor", help="Check framework-dependency health (stale process-bigraph / viva-superpowers)")
+    p_doctor.add_argument(
+        "--workspace", default=None,
+        help="also check the workspace's composite packages import (catches a stale venv after a sim-split)")
     p_doctor.set_defaults(func=cmd_doctor)
 
     p_trust = sub.add_parser(

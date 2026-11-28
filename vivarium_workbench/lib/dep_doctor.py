@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import importlib.util
 import re
+from pathlib import Path
 from typing import Any
 
 # (import target, why it matters, how to fix) — the framework deps whose
@@ -129,6 +131,44 @@ def check_framework_deps() -> list[dict[str, Any]]:
                         "detail": f"{type(e).__name__}: {e}", "fix": fix})
     out.extend(_check_version_floors())
     out.append(_check_loom_bundle())
+    return out
+
+
+def _workspace_composite_packages(ws_root: "str | Path") -> set[str]:
+    """Package prefixes the workspace's composites reference as ``<pkg>.composites.<name>``,
+    gathered from its study / investigation / composite specs. These are the packages the
+    registry must import to resolve the workspace's composites."""
+    ws = Path(ws_root)
+    pat = re.compile(r"\b([a-z_][a-z0-9_]+)\.composites\.")
+    pkgs: set[str] = set()
+    for pattern in ("**/study.yaml", "**/investigation.yaml", "**/*.composite.yaml"):
+        for f in ws.glob(pattern):
+            try:
+                pkgs.update(pat.findall(f.read_text(encoding="utf-8")))
+            except Exception:  # noqa: BLE001 — an unreadable spec is not a doctor crash
+                continue
+    return pkgs
+
+
+def check_workspace_composites(ws_root: "str | Path") -> list[dict[str, Any]]:
+    """Does every composite package the workspace references actually import here? A
+    missing one is almost always a **stale venv after a sim-split**: the workspace pins
+    the sim/composite package but it was never installed into this venv, so the registry
+    silently resolves **no** composites from it. Never raises."""
+    out: list[dict[str, Any]] = []
+    for pkg in sorted(_workspace_composite_packages(ws_root)):
+        try:
+            ok = importlib.util.find_spec(pkg) is not None
+        except Exception:  # noqa: BLE001 — a broken parent package counts as not importable
+            ok = False
+        if ok:
+            out.append({"ok": True, "target": pkg, "why": "workspace composites",
+                        "detail": "importable", "fix": ""})
+        else:
+            out.append({"ok": False, "target": pkg, "why": "workspace composites",
+                        "detail": "cannot import — the workspace registry resolves NO composites from it",
+                        "fix": "stale venv? re-sync the workspace so its pinned sim/composite package "
+                               "installs: `uv pip install -e .` (or `uv sync`) in the workspace root"})
     return out
 
 
