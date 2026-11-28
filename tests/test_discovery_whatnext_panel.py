@@ -33,6 +33,13 @@ def test_suggestions_are_promoted_as_the_real_signal():
 
 
 def test_ranked_view_is_preserved_when_scores_vary():
-    # the non-degenerate branch still renders the ranked opportunities + Decide tables
-    assert "Most valuable to investigate" in JS
-    assert "Decide — the next action" in JS
+    # The three old blocks (Most valuable / Decide / Suggested) were merged into a
+    # single "Recommended next steps" scored table (#1813 Decisions-tab redesign);
+    # the separate headings are gone. The ranked view is still preserved when
+    # scores vary — the degenerate "No priority ranking yet" note is added only
+    # when they don't (guarded by test_degenerate_ranking_is_detected_and_summarized).
+    assert "Recommended next steps" in JS
+    assert "Most valuable to investigate" not in JS  # merged away
+    assert "Decide — the next action" not in JS  # merged away
+    assert "disc-tbl" in JS  # the ranked, scored table still renders
+    assert "var degenerate" in JS  # ranked-vs-degenerate distinction retained

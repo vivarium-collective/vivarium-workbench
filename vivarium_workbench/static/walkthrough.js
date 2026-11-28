@@ -12439,8 +12439,195 @@
   // The open expert decisions, rendered as the body of the "Decisions" brief tab
   // (added to the tabs[] array below), not a space-consuming always-open card.
   // Returns '' when there is nothing to show.
+  // ---- Decisions tab · Zone A — "Awaiting your decision" uniform queue --------
+  // Every actionable decision renders through ONE card shell {kind badge · title ·
+  // body · action row}, so the tab reads as a single uniform queue instead of four
+  // differently-shaped sections. Each card keeps its original class
+  // (.eng-decision / .inv-decision), data-attributes and <textarea>, so the POST
+  // handlers (_postEngineDecision / _resolveInvDecision) work unchanged — the
+  // redesign is presentation only.
+  function _decCardShell(o) {
+    return '<div class="dec-card ' + o.cls + '" ' + (o.attrs || '') + '>'
+      + '<div class="dec-card-top"><span class="dec-badge ' + (o.badgeCls || '') + '">' + _esc(o.badge) + '</span>'
+      + '<span class="dec-card-title">' + o.title + '</span></div>'
+      + (o.body ? '<div class="dec-card-body">' + o.body + '</div>' : '')
+      + (o.actions || '')
+      + '</div>';
+  }
+  function _decBtn(label, js, color) {
+    return '<button type="button" class="action-btn" onclick="' + js + '" '
+      + 'style="font-size:0.82em;padding:3px 12px;font-weight:600;background:' + color + ';color:#fff;border:none">' + _esc(label) + '</button>';
+  }
+  function _decActions(placeholder, buttonsHtml, rows) {
+    return '<div class="dec-card-act">'
+      + '<textarea rows="' + (rows || 1) + '" class="dec-note" placeholder="' + _esc(placeholder) + '"></textarea>'
+      + '<div class="dec-btns">' + buttonsHtml + '</div></div>';
+  }
+  // ---- Decisions tab · connect each entity to its studies + make it actionable --
+  // A decision is only decidable if you can see where the study it concerns stands
+  // and act on it without leaving the tab. These helpers join every decision entity
+  // to the live study index (status + verdict, linked into the Study window) and
+  // attach the two in-tab actions: ▶ Run (re-run a study's baseline) and + Add study
+  // (seed a follow-up). Both reuse the existing global handlers + POST endpoints —
+  // _vivRunStudyFromRow → /api/study-run-baseline, _openDagFollowupsPopover →
+  // /api/study-seed-followup — so there is NO new backend. The index is published
+  // on window so argument-graph.js's Zone B rows (a separate projection) join by
+  // name too — a pure frontend join, no projection-shape change.
+  function _decIndexStudies(d) {
+    var idx = {};
+    (Array.isArray(d && d.studies) ? d.studies : []).forEach(function (s) {
+      if (s && s.name) idx[String(s.name)] = s;
+    });
+    window._invDecStudyIndex = idx;
+    return idx;
+  }
+  function _decPill(meta) {
+    if (!meta) return '';
+    return '<span class="dec-pill" style="color:' + meta.color + ';background:' + meta.color + '14;'
+      + 'border:1px solid ' + meta.color + '40"><span class="dec-pill-ic">' + meta.icon + '</span>'
+      + _esc(meta.label) + (meta.derived ? '<sup>*</sup>' : '') + '</span>';
+  }
+  // A clickable study reference with its live status + verdict pills. Unknown name
+  // (a study not yet created) → plain label, no link. Shared with Zone B via window.
+  function _decStudyRef(name) {
+    if (!name) return '';
+    var s = (window._invDecStudyIndex || {})[String(name)];
+    var label = _escInv(String(name));
+    if (!s) return '<span class="dec-studyref dec-studyref-new" title="not yet created">' + label + '</span>';
+    return '<a href="#" class="dec-studyref" title="open study" '
+      + 'onclick="_openStudyInsideInvestigation(\'' + _esc(name) + '\',\'conclusions\');return false;">'
+      + label + ' ↗</a>'
+      + _decPill(_studyStatusMeta(s)) + _decPill(_verdictMeta(s));
+  }
+  window._decStudyRefHtml = _decStudyRef;
+  // ▶ Run — re-run a study's current baseline spec (live only). Reuses the same
+  // handler + endpoint the Studies rows use; only shown for a study that exists.
+  function _decRunBtn(slug) {
+    if (!slug || !(window._invDecStudyIndex || {})[String(slug)]) return '';
+    return '<button type="button" class="dec-act-btn dec-run" title="run this study’s baseline now" '
+      + 'onclick="_vivRunStudyFromRow(event,\'' + _esc(slug) + '\')">▶ Run</button>';
+  }
+  // + Add study — open the follow-ups picker for a study and seed a child via
+  // /api/study-seed-followup. Reuses the existing popover.
+  function _decAddBtn(parent, label) {
+    if (!parent) return '';
+    return '<button type="button" class="dec-act-btn dec-add" title="seed a follow-up study from this study" '
+      + 'onclick="event.stopPropagation();_openDagFollowupsPopover(\'' + _esc(parent) + '\',this)">'
+      + _esc(label || '+ Add study') + '</button>';
+  }
+  function _decCardRecon(r, invName, readOnly) {
+    r = r || {};
+    var sev = r.severity === 'blocking' ? ' · blocking' : (r.severity === 'high' ? ' · high' : '');
+    return _decCardShell({
+      cls: 'eng-decision dec-k-reconcile' + (r.severity === 'blocking' ? ' dec-blocking' : ''),
+      attrs: 'data-ekind="reconciliation" data-id="' + _esc(r.id || '') + '" data-investigation="' + _esc(invName) + '"',
+      badge: 'Reconcile' + sev, badgeCls: 'b-reconcile',
+      title: _escInv(String(r.observation || r.id || 'Reconcile')),
+      body: r.request ? '<div class="dec-sub">' + _escInv(String(r.request)) + '</div>' : '',
+      actions: readOnly ? '' : _decActions('resolution note (optional)…',
+        _decBtn('✓ Resolve', '_resolveEngineReconciliation(this)', '#16a34a'))
+    });
+  }
+  function _decCardRevision(p, invName, readOnly) {
+    p = p || {};
+    var changes = (Array.isArray(p.candidate_changes) ? p.candidate_changes : []).map(function (c) {
+      c = c || {}; var to = Array.isArray(c.to) ? '[' + c.to.join(', ') + ']' : String(c.to);
+      return _escInv((c.name || c.kind || 'change') + ': ' + String(c.from) + ' → ' + to);
+    });
+    var src = p.source;
+    var srcStudy = (src && typeof src === 'object') ? src.study : '';
+    var srcLabel = (src && typeof src === 'object') ? (src.study || src.observable || src.finding || src.kind || '') : (src || '');
+    var body = '';
+    // The study this revision concerns — linked, with its live status + verdict,
+    // so the expert can judge the change against where the study actually stands.
+    if (srcStudy) body += '<div class="dec-sub dec-sub-study"><b>study</b> ' + _decStudyRef(srcStudy) + '</div>';
+    if (changes.length) body += '<ul class="dec-changes">' + changes.map(function (c) { return '<li>' + c + '</li>'; }).join('') + '</ul>';
+    if (p.inadequacy) body += '<div class="dec-sub"><b>why</b> ' + _escInv(String(p.inadequacy)) + '</div>';
+    var dt = p.discriminating_test || {};
+    if (dt.pass_if) body += '<div class="dec-sub"><b>test</b> ' + _escInv(String(dt.pass_if)) + '</div>';
+    // Approve/Reject record the call; ▶ Run re-runs the concerned study's baseline
+    // so the expert can see the effect of the proposed change directly from here.
+    var runBtn = readOnly ? '' : _decRunBtn(srcStudy);
+    return _decCardShell({
+      cls: 'eng-decision dec-k-revision',
+      attrs: 'data-ekind="revision" data-id="' + _esc(p.id || '') + '" data-investigation="' + _esc(invName) + '"',
+      badge: 'Engine · revision', badgeCls: 'b-revision',
+      title: srcLabel ? ('Revise ' + _escInv(String(srcLabel))) : 'Model revision',
+      body: body,
+      actions: readOnly ? '' : _decActions('note (optional)…',
+        _decBtn('✓ Approve', "_resolveEngineRevision(this,'approve')", '#16a34a')
+        + _decBtn('✕ Reject', "_resolveEngineRevision(this,'reject')", '#e11d48')
+        + runBtn)
+    });
+  }
+  function _decCardProposed(p, invName, readOnly) {
+    p = p || {};
+    var kind = p.kind || 'reference';
+    var txt = (kind === 'mechanism') ? (p.summary || p.citation || '') : (p.citation || p.summary || '');
+    var body = '';
+    if (p.rationale) body += '<div class="dec-sub"><b>used for</b> ' + _escInv(String(p.rationale)) + '</div>';
+    if (p.related_study) body += '<div class="dec-sub dec-sub-study"><b>study</b> ' + _decStudyRef(p.related_study) + '</div>';
+    if (p.provenance) body += '<div class="dec-sub dec-prov">' + _escInv(String(p.provenance)) + '</div>';
+    var runBtn = readOnly ? '' : _decRunBtn(p.related_study);
+    return _decCardShell({
+      cls: 'eng-decision dec-k-input',
+      attrs: 'data-ekind="proposed-input" data-id="' + _esc(p.id || '') + '" data-investigation="' + _esc(invName) + '"',
+      badge: 'Input · ' + String(kind), badgeCls: 'b-input',
+      title: _escInv(String(txt || p.id || 'Proposed input')),
+      body: body,
+      actions: readOnly ? '' : _decActions('note (optional)…',
+        _decBtn('✓ Accept', "_resolveProposedInput(this,'accept')", '#16a34a')
+        + _decBtn('✕ Decline', "_resolveProposedInput(this,'decline')", '#e11d48')
+        + runBtn)
+    });
+  }
+  function _decCardExpert(dec, i, d, invName, readOnly) {
+    dec = dec || {};
+    var question = (typeof dec === 'string') ? dec : (dec.question || dec.title || '');
+    var context = (typeof dec === 'string') ? '' : (dec.context || dec.detail || '');
+    var body = '';
+    if (context) body += '<div class="dec-sub">' + _renderInvLeadMarkdown(context) + '</div>';
+    // Surface any study the question/context names (by exact slug) as a linked
+    // ref with its status + verdict, so the expert can inspect it before deciding.
+    var _hay = ' ' + String(question) + ' ' + String(context) + ' ';
+    var _named = Object.keys(window._invDecStudyIndex || {}).filter(function (n) {
+      return n.length >= 4 && _hay.indexOf(n) !== -1;
+    });
+    if (_named.length) body += '<div class="dec-sub dec-sub-study"><b>studies</b> '
+      + _named.map(function (n) { return _decStudyRef(n); }).join(' ') + '</div>';
+    var _ev = _decisionEvidenceHtml(question + ' ' + context, d);
+    if (_ev) body += _ev;
+    var _opts = _decisionOptions(question); if (!_opts.length) _opts = _decisionOptions(context);
+    var actions = '';
+    if (!readOnly) {
+      var pick = '';
+      if (_opts.length) pick = '<div class="inv-dec-opts dec-pick"><span class="dec-pick-label">Pick one:</span>'
+        + _opts.map(function (o) {
+          return '<button type="button" class="inv-dec-opt" data-opt="' + _esc(o) + '" onclick="_pickDecisionOption(this)" '
+            + 'style="font-size:0.82em;padding:2px 11px;border-radius:12px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155;cursor:pointer">'
+            + _escInv(o) + '</button>';
+        }).join('') + '</div>';
+      actions = '<div class="dec-card-act">' + pick
+        + '<textarea rows="2" class="dec-note" placeholder="'
+        + (_opts.length ? 'Pick an option above, or write the call you made…' : 'Resolution note — the call you made and why…') + '"></textarea>'
+        + '<div class="dec-btns">' + _decBtn('✓ Resolve', '_resolveInvDecision(this,' + i + ')', '#b45309') + '</div></div>';
+      // keep the js-authoring hook the original Resolve button carried
+      actions = actions.replace('class="action-btn"', 'class="action-btn js-authoring"');
+    }
+    return _decCardShell({
+      cls: 'inv-decision dec-k-expert',
+      attrs: 'data-index="' + i + '" data-investigation="' + _esc(invName) + '" data-question="' + _esc(question) + '"',
+      badge: 'Expert · ' + (i + 1), badgeCls: 'b-expert',
+      title: _escInv(question),
+      body: body,
+      actions: actions
+    });
+  }
+
   function _invDecisionTabHtml(d) {
     d = d || {};
+    // Build the name→study lookup FIRST — the card builders + Zone B join on it.
+    _decIndexStudies(d);
     var ex = d.executive || {};
     var needed = Array.isArray(ex.decisions_needed) ? ex.decisions_needed : [];
     var resolved = Array.isArray(ex.decisions_resolved) ? ex.decisions_resolved : [];
@@ -12449,210 +12636,58 @@
     // or a published snapshot (no live backend); the decisions still display.
     var readOnly = !!d.read_only || (window.__DASH_CONFIG__ || {}).mode === 'snapshot';
     var invName = d.name || window._currentIset || '';
-
-    // Engine decisions awaiting human input (discovery-engine authored these on
-    // disk): model-revision proposals still `proposed`, and `open` reconciliation
-    // items. Rendered above the authored expert decisions as approve/reject cards.
     var revProps = (Array.isArray(d.revision_proposals) ? d.revision_proposals : [])
       .filter(function (p) { return p && (p.status === 'proposed' || p.status == null); });
     var recon = (Array.isArray(d.reconciliation_log) ? d.reconciliation_log : [])
       .filter(function (r) { return r && (r.status === 'open' || r.status == null); });
-    var hasEngine = revProps.length || recon.length;
-
-    // Agent-proposed inputs the expert has not yet accepted/declined — the
-    // integrity guard: an outside reference/mechanism the agent used but was not
-    // given. Accept sanctions it (a reference is promoted into inputs.references);
-    // decline leaves it out. Backend: POST /api/proposed-input-decision.
     var propItems = (d.proposed_inputs && Array.isArray(d.proposed_inputs.items) ? d.proposed_inputs.items : [])
       .filter(function (p) { return p && (p.status === 'pending' || p.status == null); });
-    var hasProposed = propItems.length;
-
-    if (!needed.length && !resolved.length && !docs.length && !hasEngine && !hasProposed) return '';
-
-    // Decisions the cycle already resolved (server: ex.decisions_engine_resolved)
-    // are hidden/uncounted; data-index keeps pointing at the authored list.
     var engRes = Array.isArray(ex.decisions_engine_resolved) ? ex.decisions_engine_resolved : [];
-    var n = needed.length - engRes.filter(function (k) { return k >= 0 && k < needed.length; }).length;
-    var accent = n ? '#b45309' : '#16a34a';      // amber when open, green when all clear
-    var H = [];
-    H.push('<div style="padding:2px 0 4px">');
+    var openExpert = needed.map(function (dec, i) { return { dec: dec, i: i }; })
+      .filter(function (x) { return engRes.indexOf(x.i) === -1; });
 
-    // --- Engine decisions awaiting you (above the authored expert decisions) ----
-    if (hasEngine) {
-      H.push('<div style="margin:0 0 18px">');
-      H.push('<div style="font-weight:700;color:#7c3aed;font-size:0.82em;letter-spacing:0.04em;margin:0 0 3px">⚙ ENGINE DECISIONS AWAITING YOU</div>');
-      H.push('<div class="muted" style="font-size:0.82em;margin:0 0 10px">The discovery engine proposed these. Approving a model revision signals the engine to apply it on its next cycle — it does not change the model now.</div>');
-      H.push('<div style="display:grid;gap:10px">');
-      revProps.forEach(function (p) {
-        p = p || {};
-        var changes = (Array.isArray(p.candidate_changes) ? p.candidate_changes : []).map(function (c) {
-          c = c || {};
-          var to = Array.isArray(c.to) ? '[' + c.to.join(', ') + ']' : String(c.to);
-          return _escInv((c.name || c.kind || 'change') + ': ' + String(c.from) + ' → ' + to);
-        });
-        var src = p.source;
-        var srcLabel = (src && typeof src === 'object')
-          ? (src.study || src.observable || src.finding || src.kind || '')
-          : (src || '');
-        var title = srcLabel ? ('Revise ' + _escInv(String(srcLabel))) : 'Model revision';
-        H.push('<div class="eng-decision" data-ekind="revision" data-id="' + _esc(p.id || '') +
-          '" data-investigation="' + _esc(invName) + '" style="background:#fff;border:1px solid #ddd6fe;border-radius:7px;padding:10px 12px">');
-        H.push('<div style="font-weight:650;color:#5b21b6;line-height:1.4">⚙ ' + title + '</div>');
-        if (changes.length)
-          H.push('<ul style="margin:6px 0 0;padding:0;list-style:none;display:grid;gap:3px">' +
-            changes.map(function (c) { return '<li style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#334155">' + c + '</li>'; }).join('') + '</ul>');
-        if (p.inadequacy)
-          H.push('<div class="muted" style="font-size:0.85em;line-height:1.5;margin-top:6px"><strong style="color:#475569">why</strong> ' + _escInv(String(p.inadequacy)) + '</div>');
-        var dt = p.discriminating_test || {};
-        if (dt.pass_if)
-          H.push('<div class="muted" style="font-size:0.85em;line-height:1.5;margin-top:3px"><strong style="color:#475569">test</strong> ' + _escInv(String(dt.pass_if)) + '</div>');
-        if (!readOnly) {
-          H.push('<div style="margin-top:8px">');
-          H.push('<textarea rows="1" placeholder="note (optional)…" style="width:100%;box-sizing:border-box;font:inherit;font-size:0.84em;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical"></textarea>');
-          H.push('<div style="margin-top:6px;display:flex;gap:8px;justify-content:flex-end">');
-          H.push('<button type="button" class="action-btn" onclick="_resolveEngineRevision(this,\'approve\')" style="font-size:0.82em;padding:3px 12px;font-weight:600;background:#16a34a;color:#fff;border:none">✓ Approve</button>');
-          H.push('<button type="button" class="action-btn" onclick="_resolveEngineRevision(this,\'reject\')" style="font-size:0.82em;padding:3px 12px;font-weight:600;background:#e11d48;color:#fff;border:none">✕ Reject</button>');
-          H.push('</div></div>');
-        }
-        H.push('</div>');
-      });
-      recon.forEach(function (r) {
-        r = r || {};
-        var sevColor = r.severity === 'blocking' ? '#dc2626' : (r.severity === 'high' ? '#d97706' : '#94a3b8');
-        H.push('<div class="eng-decision" data-ekind="reconciliation" data-id="' + _esc(r.id || '') +
-          '" data-investigation="' + _esc(invName) + '" style="background:#fff;border:1px solid #e2e8f0;border-radius:7px;padding:10px 12px">');
-        H.push('<div style="display:flex;gap:7px;align-items:baseline">' +
-          '<span style="flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:' + sevColor + ';display:inline-block;transform:translateY(-1px)"></span>' +
-          '<div style="flex:1;min-width:0"><div style="font-weight:600;color:#1e293b;line-height:1.4">' + _escInv(String(r.observation || r.id || 'Reconcile')) + '</div>');
-        if (r.request)
-          H.push('<div class="muted" style="font-size:0.85em;line-height:1.5;margin-top:3px">' + _escInv(String(r.request)) + '</div>');
-        if (!readOnly) {
-          H.push('<div style="margin-top:8px"><textarea rows="1" placeholder="resolution note (optional)…" style="width:100%;box-sizing:border-box;font:inherit;font-size:0.84em;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical"></textarea>');
-          H.push('<div style="margin-top:6px;text-align:right"><button type="button" class="action-btn" onclick="_resolveEngineReconciliation(this)" style="font-size:0.82em;padding:3px 12px;font-weight:600;background:#16a34a;color:#fff;border:none">✓ Resolve</button></div></div>');
-        }
-        H.push('</div></div>');
-      });
+    if (!openExpert.length && !resolved.length && !docs.length && !revProps.length && !recon.length && !propItems.length) return '';
+
+    var H = ['<div class="dec-wrap">'];
+
+    // Zone A — one uniform, urgency-sorted queue of everything that needs a call.
+    var cards = [];
+    recon.forEach(function (r) { cards.push({ rank: r.severity === 'blocking' ? 0 : (r.severity === 'high' ? 1 : 4), html: _decCardRecon(r, invName, readOnly) }); });
+    revProps.forEach(function (p) { cards.push({ rank: 2, html: _decCardRevision(p, invName, readOnly) }); });
+    openExpert.forEach(function (x) { cards.push({ rank: 3, html: _decCardExpert(x.dec, x.i, d, invName, readOnly) }); });
+    propItems.forEach(function (p) { cards.push({ rank: 5, html: _decCardProposed(p, invName, readOnly) }); });
+    cards.sort(function (a, b) { return a.rank - b.rank; });
+
+    if (cards.length) {
+      H.push('<div class="dec-group">');
+      H.push('<div class="dec-group-head">Awaiting your decision <span class="dec-count">' + cards.length + '</span></div>');
+      H.push('<div class="dec-group-sub">Each item needs your call — resolve, approve, accept or decline. Ordered by urgency.</div>');
+      H.push('<div class="dec-cards">');
+      cards.forEach(function (c) { H.push(c.html); });
       H.push('</div></div>');
     }
 
-    // --- Proposed inputs awaiting your review (agent-suggested, not expert-provided) ---
-    if (hasProposed) {
-      H.push('<div style="margin:0 0 18px">');
-      H.push('<div style="font-weight:700;color:#0e7490;font-size:0.82em;letter-spacing:0.04em;margin:0 0 3px">✚ PROPOSED INPUTS AWAITING REVIEW</div>');
-      H.push('<div class="muted" style="font-size:0.82em;margin:0 0 10px">The agent used these sources but you did not provide them. Accept to sanction it — a reference is added to this investigation\'s inputs; decline to leave it out.</div>');
-      H.push('<div style="display:grid;gap:10px">');
-      propItems.forEach(function (p) {
-        p = p || {};
-        var kind = p.kind || 'reference';
-        var body = (kind === 'mechanism') ? (p.summary || p.citation || '') : (p.citation || p.summary || '');
-        H.push('<div class="eng-decision" data-ekind="proposed-input" data-id="' + _esc(p.id || '') +
-          '" data-investigation="' + _esc(invName) + '" style="background:#fff;border:1px solid #cffafe;border-radius:7px;padding:10px 12px">');
-        H.push('<div style="display:flex;gap:7px;align-items:baseline">' +
-          '<span style="flex:0 0 auto;font-size:0.7em;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#0e7490;background:#ecfeff;border-radius:4px;padding:1px 6px">' + _esc(String(kind)) + '</span>' +
-          '<div style="flex:1;min-width:0;font-weight:600;color:#164e63;line-height:1.4">' + _escInv(String(body || p.id || 'Proposed input')) + '</div></div>');
-        if (p.rationale)
-          H.push('<div class="muted" style="font-size:0.85em;line-height:1.5;margin-top:6px"><strong style="color:#475569">used for</strong> ' + _escInv(String(p.rationale)) + '</div>');
-        if (p.related_study)
-          H.push('<div class="muted" style="font-size:0.85em;line-height:1.5;margin-top:3px"><strong style="color:#475569">study</strong> ' + _escInv(String(p.related_study)) + '</div>');
-        if (p.provenance)
-          H.push('<div class="muted" style="font-size:0.8em;line-height:1.5;margin-top:3px;font-style:italic">' + _escInv(String(p.provenance)) + '</div>');
-        if (!readOnly) {
-          H.push('<div style="margin-top:8px">');
-          H.push('<textarea rows="1" placeholder="note (optional)…" style="width:100%;box-sizing:border-box;font:inherit;font-size:0.84em;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical"></textarea>');
-          H.push('<div style="margin-top:6px;display:flex;gap:8px;justify-content:flex-end">');
-          H.push('<button type="button" class="action-btn" onclick="_resolveProposedInput(this,\'accept\')" style="font-size:0.82em;padding:3px 12px;font-weight:600;background:#16a34a;color:#fff;border:none">✓ Accept</button>');
-          H.push('<button type="button" class="action-btn" onclick="_resolveProposedInput(this,\'decline\')" style="font-size:0.82em;padding:3px 12px;font-weight:600;background:#e11d48;color:#fff;border:none">✕ Decline</button>');
-          H.push('</div></div>');
-        }
-        H.push('</div>');
-      });
-      H.push('</div></div>');
-    }
-
-    if (needed.length || resolved.length || docs.length)
-      H.push('<div class="muted" style="font-size:0.84em;margin:0 0 12px">Expert decisions steering this campaign</div>');
-
-    // Campaign-plan docs — the plan the decisions act on (links to e.g. the
-    // Scientific Enrichment Plan). Served at /<path> from the workspace root.
+    // Campaign-plan docs — the plan the decisions act on (kept, compact).
     if (docs.length) {
-      H.push('<div style="margin:0 0 12px;font-size:0.9em">');
-      H.push('<span class="muted" style="font-weight:600">Campaign plan:</span> ');
+      H.push('<div class="dec-docs"><span class="dec-docs-label">Campaign plan:</span> ');
       H.push(docs.map(function (doc) {
-        doc = doc || {};
-        var label = _escInv(doc.name || doc.path || '(unnamed)');
+        doc = doc || {}; var label = _escInv(doc.name || doc.path || '(unnamed)');
         if (doc.path) {
           var href = '/' + String(doc.path).replace(/^\/+/, '');
           var ttl = doc.description ? ' title="' + _escInv(doc.description) + '"' : '';
-          return '<a href="' + _esc(href) + '" target="_blank" rel="noopener"' + ttl +
-            ' style="display:inline-block;margin:2px 6px 2px 0;padding:2px 10px;border-radius:12px;' +
-            'background:#eff6ff;color:#1d4ed8;font-weight:600;text-decoration:none">📄 ' + label + '</a>';
+          return '<a class="dec-doc" href="' + _esc(href) + '" target="_blank" rel="noopener"' + ttl + '>📄 ' + label + '</a>';
         }
-        return '<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 10px;border-radius:12px;' +
-          'background:#f1f5f9;color:#475569;font-weight:600">📄 ' + label + '</span>';
+        return '<span class="dec-doc dec-doc-plain">📄 ' + label + '</span>';
       }).join(''));
-      H.push('</div>');
-    }
-
-    // Open decisions — each an actionable card.
-    if (n) {
-      H.push('<div style="display:grid;gap:10px">');
-      needed.forEach(function (dec, i) {
-        if (engRes.indexOf(i) !== -1) return;
-        dec = dec || {};
-        var question = (typeof dec === 'string') ? dec : (dec.question || dec.title || '');
-        var context = (typeof dec === 'string') ? '' : (dec.context || dec.detail || '');
-        H.push('<div class="inv-decision" data-index="' + i + '" data-investigation="' + _esc(invName) +
-          '" data-question="' + _esc(question) + '"' +
-          ' style="background:#fff;border:1px solid #fde68a;border-radius:7px;padding:10px 12px">');
-        H.push('<div style="display:flex;gap:8px;align-items:flex-start">');
-        H.push('<span style="color:' + accent + ';font-weight:800;font-size:0.95em;line-height:1.5">' + (i + 1) + '.</span>');
-        H.push('<div style="flex:1;min-width:0">');
-        H.push('<div style="font-weight:650;color:#1e293b;line-height:1.4">' + _escInv(question) + '</div>');
-        if (context)
-          H.push('<div class="muted" style="font-size:0.86em;line-height:1.5;margin-top:4px">' +
-            _renderInvLeadMarkdown(context) + '</div>');
-        // Derived evidence chips (referenced hypotheses + gates) and pick-one
-        // options parsed from the decision text — so the card connects to the
-        // material and offers a one-click choice instead of a blank note.
-        var _ev = _decisionEvidenceHtml(question + ' ' + context, d);
-        if (_ev) H.push(_ev);
-        var _opts = _decisionOptions(question);
-        if (!_opts.length) _opts = _decisionOptions(context);
-        if (!readOnly && _opts.length)
-          H.push('<div class="inv-dec-opts" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">' +
-            '<span class="muted" style="font-size:0.82em;margin-right:1px">Pick one:</span>' +
-            _opts.map(function (o) {
-              return '<button type="button" class="inv-dec-opt" data-opt="' + _esc(o) + '" onclick="_pickDecisionOption(this)" ' +
-                'style="font-size:0.82em;padding:2px 11px;border-radius:12px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155;cursor:pointer">' +
-                _escInv(o) + '</button>';
-            }).join('') + '</div>');
-        if (!readOnly) {
-          H.push('<div style="margin-top:8px">');
-          H.push('<textarea rows="2" placeholder="' + (_opts.length ? 'Pick an option above, or write the call you made…' : 'Resolution note — the call you made and why…') + '" ' +
-            'style="width:100%;box-sizing:border-box;font:inherit;font-size:0.86em;padding:6px 8px;' +
-            'border:1px solid #cbd5e1;border-radius:6px;resize:vertical"></textarea>');
-          H.push('<div style="margin-top:6px;text-align:right">');
-          H.push('<button type="button" class="action-btn js-authoring" onclick="_resolveInvDecision(this,' + i + ')" ' +
-            'style="font-size:0.82em;padding:3px 12px;font-weight:600;background:' + accent + ';color:#fff;border:none">' +
-            '✓ Resolve</button>');
-          H.push('</div>');
-          H.push('</div>');
-        }
-        H.push('</div></div></div>');
-      });
       H.push('</div>');
     }
 
     // Resolved-decision log — folded by default.
     if (resolved.length) {
-      H.push('<details style="margin-top:' + (n ? '12px' : '0') + '">');
-      H.push('<summary style="cursor:pointer;font-size:0.88em;font-weight:600;color:#15803d">' +
-        '✓ Resolved decisions (' + resolved.length + ')</summary>');
-      H.push('<ul style="margin:8px 0 0;padding:0;list-style:none;display:grid;gap:6px">');
+      H.push('<details class="dec-resolved"><summary>✓ Resolved decisions (' + resolved.length + ')</summary><ul>');
       H.push(resolved.map(function (r) {
         var txt = (typeof r === 'string') ? r : (r && (r.decision || r.question || r.text) || '');
-        return '<li style="font-size:0.86em;line-height:1.5;color:#334155;padding-left:12px;' +
-          'border-left:2px solid #86efac">' + _escInv(txt) + '</li>';
+        return '<li>' + _escInv(txt) + '</li>';
       }).join(''));
       H.push('</ul></details>');
     }
