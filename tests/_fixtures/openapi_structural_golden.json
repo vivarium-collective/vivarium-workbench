@@ -5254,6 +5254,49 @@
         ]
       }
     },
+    "/api/investigation-reconciliation-resolve": {
+      "post": {
+        "operationId": "investigation_reconciliation_resolve_api_investigation_reconciliation_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveReconciliationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Investigation Reconciliation Resolve Api Investigation Reconciliation Resolve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark an open reconciliation item resolved",
+        "tags": [
+          "Investigations"
+        ]
+      }
+    },
     "/api/investigation-render-viz": {
       "post": {
         "operationId": "investigation_render_viz_api_investigation_render_viz_post",
@@ -5427,6 +5470,49 @@
           }
         },
         "summary": "Opt-in topological pull-or-compute resolve for an investigation",
+        "tags": [
+          "Investigations"
+        ]
+      }
+    },
+    "/api/investigation-revision-proposal-resolve": {
+      "post": {
+        "operationId": "investigation_revision_proposal_resolve_api_investigation_revision_proposal_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveRevisionProposalBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Investigation Revision Proposal Resolve Api Investigation Revision Proposal Resolve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve or reject a discovery-engine model-revision proposal",
         "tags": [
           "Investigations"
         ]
@@ -18414,6 +18500,117 @@
         }
       },
       "title": "ResolveDecisionBody",
+      "type": "object"
+    },
+    "ResolveReconciliationBody": {
+      "additionalProperties": true,
+      "description": "POST /api/investigation-reconciliation-resolve {investigation, id?|index?, note?}",
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "index": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Index"
+        },
+        "investigation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Investigation"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Note"
+        }
+      },
+      "title": "ResolveReconciliationBody",
+      "type": "object"
+    },
+    "ResolveRevisionProposalBody": {
+      "additionalProperties": true,
+      "description": "POST /api/investigation-revision-proposal-resolve {investigation, id?|index?, decision, note?}",
+      "properties": {
+        "decision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Decision"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "index": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Index"
+        },
+        "investigation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Investigation"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Note"
+        }
+      },
+      "title": "ResolveRevisionProposalBody",
       "type": "object"
     },
     "RunDeleteRequest": {
