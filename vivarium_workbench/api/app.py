@@ -1117,7 +1117,18 @@ def create_app() -> FastAPI:
         from vivarium_workbench.lib import _root, workspace_context
         header_key = request.headers.get(session_registry.SESSION_HEADER)
         cookie_key = request.cookies.get(session_registry.SESSION_COOKIE)
-        existing = header_key or cookie_key
+        # A plain document navigation — an embedded study IFRAME, a reload, a
+        # window.open first paint — cannot send the X-VW-Session header, so it would
+        # otherwise fall back to the browser-wide ``vw_session`` COOKIE. That cookie
+        # is shared across tabs, and any OTHER tab's source switch may have re-pointed
+        # it, so the navigation lands on the wrong workspace and 404s (e.g. the study
+        # panel iframe rendered blank). A ``?vw_session=<id>`` query param lets such a
+        # navigation carry THIS tab's own session id explicitly. Unlike ``?workspace=``
+        # (below), it only RESOLVES that session's existing binding — it never rebinds
+        # — so it cannot steal another tab's session. Highest precedence: a request
+        # that bothers to name its session on the URL means it.
+        nav_key = request.query_params.get(session_registry.SESSION_COOKIE)
+        existing = nav_key or header_key or cookie_key
         # The effective key is the header, the cookie, or one minted now. Stash it on
         # request.state so handlers (e.g. /api/source/switch's per-session rebind) can
         # act on the session even on its FIRST request — before the id round-trips.

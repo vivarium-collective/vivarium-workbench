@@ -235,6 +235,26 @@ def test_session_header_takes_precedence_for_binding(client, tmp_path, monkeypat
     assert entry is not None and entry.source_path == Path(str(ws))
 
 
+def test_vw_session_query_param_overrides_shared_cookie(client):
+    """A plain document navigation — the study-panel IFRAME, a reload, window.open
+    first paint — cannot send the X-VW-Session header, so it would fall back to the
+    browser-wide vw_session COOKIE, which another tab may have re-pointed → it
+    resolves the WRONG workspace and 404s (the blank study-panel bug). A
+    ``?vw_session=<tab-id>`` query param carries the tab's OWN session id and wins
+    over the stale cookie: a header-less request echoes the EFFECTIVE id back, and
+    it must be the nav param, not the cookie."""
+    r = client.get("/api/simulations?vw_session=tab-A",
+                   cookies={"vw_session": "tab-B-stale"})
+    assert r.headers.get("X-VW-Session") == "tab-A"
+
+
+def test_navigation_without_vw_session_still_uses_cookie(client):
+    """Baseline: with no header and no ?vw_session param, the shared cookie is still
+    the session (unchanged behavior for ordinary navigations)."""
+    r = client.get("/api/simulations", cookies={"vw_session": "tab-B"})
+    assert r.headers.get("X-VW-Session") == "tab-B"
+
+
 def test_simulations_empty_workspace(client):
     """An empty workspace yields the typed empty payload, not a 500."""
     r = client.get("/api/simulations")
