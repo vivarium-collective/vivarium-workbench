@@ -12515,7 +12515,14 @@
           H.push('<div style="margin-top:8px"><textarea rows="1" placeholder="resolution note (optional)…" style="width:100%;box-sizing:border-box;font:inherit;font-size:0.84em;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical"></textarea>');
           H.push('<div style="margin-top:6px;text-align:right"><button type="button" class="action-btn" onclick="_resolveEngineReconciliation(this)" style="font-size:0.82em;padding:3px 12px;font-weight:600;background:#16a34a;color:#fff;border:none">✓ Resolve</button></div></div>');
         }
-        H.push('</div></div>');
+        // Close ALL THREE wrappers opened above: the flex:1 column (12511), the
+        // flex row (12509), AND the .eng-decision card (12507). A prior version
+        // closed only two, so each reconciliation card leaked one open <div> —
+        // with N recon items the Decisions tab emitted N unbalanced <div>s, and
+        // the browser balanced them by nesting the *following* brief tabs
+        // (Validation, Needs attention) INSIDE the decision cards, collapsing
+        // them to zero height (they rendered blank despite having content).
+        H.push('</div></div></div>');
       });
       H.push('</div></div>');
     }
