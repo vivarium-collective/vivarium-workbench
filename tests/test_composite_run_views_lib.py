@@ -315,3 +315,61 @@ class TestBuildCompositeRunStatus:
         body, status = build_composite_run_status(ws, "r1")
         assert len(body["error"]) == 2000
         assert body["error"].endswith("TAIL")
+
+    # --- #1783: what a run that ended early landed --------------------------------------------------------------
+
+    @pytest.mark.parametrize("ended", ["failed", "cancelled"])
+    def test_a_run_that_ended_early_reports_the_history_it_kept(self, tmp_path, ended):
+        """Falsifies: the status of a failed or cancelled run says nothing of the history rows it kept (the card then
+        shows a bare failure), or counts another run's rows."""
+        ws = _make_ws(tmp_path)
+        db = _seed_db(ws, run_id="r1", status=ended, n_steps=50)
+        for step in range(40):
+            _seed_history(db, "r1", step, {"x": step})
+        _seed_history(db, "other", 99, {"x": 0})
+        body, status = build_composite_run_status(ws, "r1")
+        assert status == 200
+        assert body["stopped"] == {"rows": 40, "last_time": 39.0}
+
+    def test_a_run_that_ended_early_with_no_history_table_reports_nothing(self, tmp_path):
+        """Falsifies: a run whose database never got a history table (a zarr or parquet run) breaks the status route
+        or is shown as stopped."""
+        ws = _make_ws(tmp_path)
+        _seed_db(ws, run_id="r1", status="cancelled")
+        body, status = build_composite_run_status(ws, "r1")
+        assert status == 200
+        assert "stopped" not in body
+
+    def test_a_run_that_ended_early_with_no_rows_of_its_own_reports_nothing(self, tmp_path):
+        """Falsifies: a history table holding only other runs' rows makes this run look stopped with results."""
+        ws = _make_ws(tmp_path)
+        db = _seed_db(ws, run_id="r1", status="failed")
+        _seed_history(db, "other", 0, {"x": 0})
+        body, status = build_composite_run_status(ws, "r1")
+        assert status == 200
+        assert "stopped" not in body
+
+    def test_a_run_whose_rows_carry_no_time_reports_none_for_it(self, tmp_path):
+        """Falsifies: rows without a global_time are reported with an invented last time, or not reported."""
+        ws = _make_ws(tmp_path)
+        db = _seed_db(ws, run_id="r1", status="failed")
+        conn = cr.connect(db)
+        try:
+            cr.ensure_history_table(conn)
+            conn.executemany(
+                "INSERT INTO history (simulation_id, step, global_time, state) VALUES ('r1', ?, NULL, '{}')",
+                [(0,), (1,)])
+            conn.commit()
+        finally:
+            conn.close()
+        body, _ = build_composite_run_status(ws, "r1")
+        assert body["stopped"] == {"rows": 2, "last_time": None}
+
+    @pytest.mark.parametrize("state", ["completed", "running", "orphaned"])
+    def test_only_a_failed_or_cancelled_run_reports_stopped(self, tmp_path, state):
+        """Falsifies: a run that is finished, still going or orphaned, with history rows, is reported as stopped."""
+        ws = _make_ws(tmp_path)
+        db = _seed_db(ws, run_id="r1", status=state)
+        _seed_history(db, "r1", 0, {"x": 0})
+        body, _ = build_composite_run_status(ws, "r1")
+        assert "stopped" not in body

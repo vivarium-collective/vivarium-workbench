@@ -216,10 +216,13 @@ log says `stopped (<status>) at t=<last time landed> of <requested>; the results
 A run in an older environment version, or one whose node was lost, lists no such dataset, and a results directory
 (`*.zarr`, `*.fenics`) is not read here: those fail as before, naming the status.
 
-The card shows no Results panel for a stopped run: it shows the run's status and the log line above as its error. The
-landed rows are reached through ⬇ Raw data in the Runs table, and `/api/composite-run/<id>/download` serves the run's
-directory (the landed archive and its log) for a `cancelled` run as for a `failed` one. Showing the rows on the card is
-a change of its own.
+The card shows no Results panel for a stopped run. Its status route answers `stopped: {rows, last_time}` when the run's
+history kept rows (a `cancelled` or `failed` run), and the card then shows the completed run's header marked as a stop,
+`■ stopped (<status>) · results up to t=<last time> · Download ZIP · open in Runs`, with the log line above under it. A
+stopped run that kept nothing, and any other failure, shows `✗ <status>` and its log as before. The landed rows are also
+reached through ⬇ Raw data in the Runs table, and `/api/composite-run/<id>/download` serves the run's directory (the
+landed archive and its log) for a `cancelled` run as for a `failed` one. Drawing the landed rows as a chart is a change of
+its own: a completed remote run shows none either.
 
 Run ids are `compose-<simulation id>`. compose-api's ids are integers, which the other routes read as legacy
 simulation ids, so the compose check runs before them.

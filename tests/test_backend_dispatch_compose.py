@@ -2116,7 +2116,7 @@ def test_a_cancelled_run_lands_its_results_up_to_the_last_snapshot(ws, stub, bac
     assert stub.calls_to("get-simulation-results-file") == []
 
 
-def test_a_timed_out_run_lands_its_results_and_is_recorded_failed(ws, stub, backend_env):
+def test_a_timed_out_run_lands_its_results_and_is_recorded_failed(ws, stub, backend_env, dashboard_client):
     """ASSUMED SHAPE: no real timed-out run's file exists yet. compose-api's time limit sends the same SIGTERM a
     cancel does (#581), so this serves 12966's cancelled file as a timed-out run's; it checks only the workbench's
     handling of the status, not what a real timeout keeps."""
@@ -2128,6 +2128,10 @@ def test_a_timed_out_run_lands_its_results_and_is_recorded_failed(ws, stub, back
     assert row == ("failed", 1721)
     assert times[2] == 1721
     assert f"compose-api run {RUN_ID} stopped (timeout) at t=1720 of 3000" in log
+    # A `failed` run that landed rows says so on the status route too, not only a `cancelled` one.
+    status = dashboard_client(ws).get("/api/composite-run/card-1/status").json()
+    assert status["status"] == "failed"
+    assert status["stopped"] == {"rows": 1721, "last_time": 1720.0}
 
 
 def test_a_stopped_run_that_kept_nothing_fails_as_before(ws, stub, backend_env):
@@ -2221,6 +2225,31 @@ def test_a_cancelled_card_run_says_where_its_results_are_and_its_zip_downloads(w
     assert inner.read(inner.namelist()[0]) == (FIX / PARTIAL).read_bytes()
 
 
+def test_a_cancelled_card_runs_status_says_how_much_landed(ws, stub, backend_env, dashboard_client):
+    """Falsifies: the status of the card's cancelled run, whose results the runner landed from 12966's real file,
+    says nothing of them (the card then shows a bare failure), or reports a count other than the file's 1,721 states
+    and the time it reached."""
+    _register_fixture_workspace(stub)
+    _stopped(stub, "cancelled")
+    _name(backend_env, stub.url)
+    _card_run(ws, 3000)
+    status = dashboard_client(ws).get("/api/composite-run/card-1/status").json()
+    assert status["status"] == "cancelled"
+    assert status["stopped"] == {"rows": 1721, "last_time": 1720.0}
+
+
+def test_a_stopped_card_run_that_kept_nothing_reports_no_stopped(ws, stub, backend_env, dashboard_client):
+    """A guard, not evidence the feature works (the run is recorded failed with no rows, so this passes without it): a
+    stopped run with no `results` dataset must not be reported as stopped with results."""
+    _register_fixture_workspace(stub)
+    _stopped(stub, "cancelled", kept=False)
+    _name(backend_env, stub.url)
+    _card_run(ws, 3000)
+    status = dashboard_client(ws).get("/api/composite-run/card-1/status").json()
+    assert status["status"] == "failed"
+    assert "stopped" not in status
+
+
 def test_a_completed_card_runs_status_is_unchanged(ws, stub, backend_env, dashboard_client):
     _register_fixture_workspace(stub)
     _completed(stub)
@@ -2229,3 +2258,4 @@ def test_a_completed_card_runs_status_is_unchanged(ws, stub, backend_env, dashbo
     status = dashboard_client(ws).get("/api/composite-run/card-1/status").json()
     assert status["status"] == "completed" and status["downloadable"] is True
     assert "error" not in status and status["has_report"] is False and status["has_analyses"] is False
+    assert "stopped" not in status

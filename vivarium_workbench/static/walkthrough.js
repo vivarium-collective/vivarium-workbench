@@ -4315,6 +4315,16 @@
             if (htmls.length) { var f = panel.querySelector('.pcard-out-viz'); if (f) f.srcdoc = htmls.join('\n<hr>\n'); }
             _endRunIndicator(card, '✓ done — see Outputs');
             _openOutputsSection(card);   // drop Outputs open now that results are ready
+          } else if (j.stopped && typeof j.stopped === 'object') {
+            // Cancelled / failed, with the results its history kept ({rows, last_time}): the completed run's
+            // header, marked as a stop, and the runner's line saying where they are (the zip serves them).
+            var lt = j.stopped.last_time == null ? NaN : Number(j.stopped.last_time);
+            var upTo = isFinite(lt) ? ' · results up to t=' + String(+lt.toPrecision(10)) : '';   // 0.1+0.2 -> 0.3, 1720 -> 1720
+            panel.innerHTML = '<div class="pcard-out-runhead">■ stopped (' + _esc(st) + ')' + upTo + ' · ' +
+              '<a href="' + _esc(dl) + '" target="_blank" rel="noopener">Download ZIP</a> · open in ' + runsLink + '</div>' +
+              (j.error ? '<pre class="loom-run-pre">' + _esc(String(j.error)) + '</pre>' : '');
+            _endRunIndicator(card, '■ stopped — see Outputs');
+            _openOutputsSection(card);
           } else {   // failed / orphaned / error
             panel.innerHTML = '<div class="pcard-out-run"><p class="pcard-out-empty-title loom-run-err">✗ ' + _esc(st) + '</p>' +
               (j.error ? '<pre class="loom-run-pre">' + _esc(String(j.error)) + '</pre>' : '') +
