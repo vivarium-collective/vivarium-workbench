@@ -49,6 +49,60 @@ def test_render_exception_never_overwrites_existing_but_stubs_when_absent(tmp_pa
     assert "Failed to render" in (inv / "viz" / "b.html").read_text()
 
 
+_STUB = ('<p style="color:#991b1b">Failed to render <code>a</code>: '
+         "<code>KeyError: 'address'</code></p>")
+
+
+def test_render_skip_deletes_stale_error_stub(tmp_path):
+    # An addressless (status:stub) viz whose on-disk file is a STALE error stub
+    # from an older renderer must be DELETED on skip — not preserved — so it stops
+    # persisting and publishing as a red "Failed to render" block.
+    from vivarium_workbench.lib.investigations import render_visualizations
+    inv = tmp_path / "s"
+    (inv / "viz").mkdir(parents=True)
+    stub = inv / "viz" / "a.html"
+    stub.write_text(_STUB)
+    skipped: list = []
+    out = render_visualizations(_spec([{"name": "a"}]), inv, "s",
+                                core_registry={}, build_and_run=lambda d, r: "<p>x</p>",
+                                skipped=skipped)
+    assert not stub.exists()           # stale stub removed
+    assert stub not in out
+    assert any("removed stale error-stub" in s["reason"] for s in skipped), skipped
+
+
+def test_render_skip_keeps_real_figure_but_drops_only_stubs(tmp_path):
+    # Guard: the stub-cleanup must NOT touch a real figure (the preserve-on-skip
+    # rule still protects real native figures).
+    from vivarium_workbench.lib.investigations import render_visualizations
+    inv = tmp_path / "s"
+    (inv / "viz").mkdir(parents=True)
+    real = inv / "viz" / "real.html"
+    real.write_text("<p>REAL NATIVE FIGURE</p>")
+    render_visualizations(_spec([{"name": "real"}]), inv, "s",
+                          core_registry={}, build_and_run=lambda d, r: "<p>x</p>")
+    assert real.read_text() == "<p>REAL NATIVE FIGURE</p>"
+
+
+def test_render_failure_drops_pre_existing_stub(tmp_path):
+    # When a render raises AND the only thing on disk is a stale stub, drop it
+    # rather than republish the old "Failed to render" block.
+    from vivarium_workbench.lib.investigations import render_visualizations
+    inv = tmp_path / "s"
+    (inv / "viz").mkdir(parents=True)
+    stub = inv / "viz" / "a.html"
+    stub.write_text(_STUB)
+
+    class _V:
+        def inputs(self): return {}
+
+    def boom(doc, reg):
+        raise RuntimeError("kaboom")
+    render_visualizations(_spec([{"name": "a", "address": "local:V"}]), inv, "s",
+                          core_registry={"V": _V}, build_and_run=boom)
+    assert not stub.exists()
+
+
 def test_successful_class_render_stamps_meta(tmp_path):
     from vivarium_workbench.lib.investigations import render_visualizations
     inv = tmp_path / "s"
