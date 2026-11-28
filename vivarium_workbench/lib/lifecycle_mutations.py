@@ -281,7 +281,7 @@ def _apply_investigation_mutation(target: Path, mutate) -> "tuple[dict | None, i
     return None, 200
 
 
-def _find_by_id_or_index(items: "list", ident, index) -> "tuple[Any, tuple | None]":
+def _find_by_id_or_index(items: Any, ident: Any, index: Any) -> "tuple[Any, tuple | None]":
     """Locate an entry in ``items`` by ``id`` (preferred) or integer ``index``.
     Returns ``(entry, None)`` or ``(None, (err_msg, code))``."""
     if not isinstance(items, list):
