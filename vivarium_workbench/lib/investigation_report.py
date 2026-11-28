@@ -1673,7 +1673,7 @@ def build_report_data(ws_root, inv_slug: str, *, loom_embed: "dict | None" = Non
         # no-op when absent (other workspaces won't carry them): the Background /
         # "simulated world" prose, an accessibility glossary, reader guidelines,
         # and an explicit "how to read" note.
-        "biological_story": inv.get("biological_story"),
+        "biological_story": inv.get("background") or inv.get("biological_story"),
         "glossary": inv.get("glossary"),
         "guidelines": inv.get("guidelines"),
         "how_to_read": inv.get("how_to_read"),

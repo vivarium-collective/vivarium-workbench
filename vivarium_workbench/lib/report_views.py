@@ -1422,6 +1422,7 @@ def build_iset_detail(ws_root: Path, name: str) -> Optional[dict]:
         "at_a_glance":         spec.get("at_a_glance") or [],
         "how_to_read":         spec.get("how_to_read") or [],
         "glossary":            spec.get("glossary") or [],
+        "background":          spec.get("background") or spec.get("biological_story", ""),
         "biological_story":    spec.get("biological_story", ""),
         "question":            spec.get("question", ""),
         "hypothesis":          spec.get("hypothesis", ""),
