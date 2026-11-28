@@ -49,7 +49,8 @@ def _study_upstreams(ws: WorkspacePaths, slug: str) -> list[str]:
     return study_upstreams(ws, slug)
 
 
-def build_investigation_composite(ws_root: Path | str, inv_slug: str) -> dict:
+def build_investigation_composite(ws_root: Path | str, inv_slug: str, *,
+                                   include_knowledge: bool = False) -> dict:
     """Compile ``investigations/<inv_slug>/investigation.yaml`` into a composite
     state dict: one ``StudyStep`` per member study (prerequisite-ordered, real or
     synthetic-serial) + one ``InvestigationAnalysisStep`` per ``analyses:`` entry
@@ -138,6 +139,22 @@ def build_investigation_composite(ws_root: Path | str, inv_slug: str) -> dict:
         }
         state[f"analysis_{name}_written"] = {}
 
+    if include_knowledge:
+        # A read-only KnowledgeStep derives the Concept/verdict projection for the
+        # whole investigation (discovery_engine.projection.knowledge.derive_knowledge)
+        # and writes it to a ``knowledge`` node. It reads the workspace, not the
+        # run's result stores, so it is out of the biological schedule and affects no
+        # study -- it makes the knowledge projection a first-class product of an
+        # investigation run (the transaction boundary WP4 later formalizes).
+        state["knowledge_step"] = {
+            "_type": "step",
+            "address": "local:KnowledgeStep",
+            "config": {"workspace": ws_root_str, "investigation_slug": inv_slug},
+            "inputs": {},
+            "outputs": {"knowledge": ["knowledge"]},
+        }
+        state["knowledge"] = {}
+
     return state
 
 
@@ -197,10 +214,12 @@ def run_investigation_composite(ws_root: Path | str, inv_slug: str, *,
     from vivarium_workbench.lib import investigation_steps as _steps
     from vivarium_workbench.lib.investigation_steps import (
         InvestigationAnalysisStep, StudyStep)
+    from vivarium_workbench.lib.knowledge_step import KnowledgeStep
 
-    state = build_investigation_composite(ws_root, inv_slug)
+    state = build_investigation_composite(ws_root, inv_slug, include_knowledge=True)
     core = allocate_core(top={
-        "StudyStep": StudyStep, "InvestigationAnalysisStep": InvestigationAnalysisStep})
+        "StudyStep": StudyStep, "InvestigationAnalysisStep": InvestigationAnalysisStep,
+        "KnowledgeStep": KnowledgeStep})
 
     studies_ran: list[str] = []
     analyses_ran: list[str] = []
@@ -230,11 +249,13 @@ def run_investigation_composite(ws_root: Path | str, inv_slug: str, *,
     # otherwise clobber each other's hooks mid-flight. v1 is serial so this only
     # enforces mutual exclusion (no behavior change for the single-caller path),
     # closing the re-entrancy window if an in-process concurrent caller is added.
+    knowledge_out = None
     with _HOOK_SWAP_LOCK:
         _steps._run_study_hook = _study_hook
         _steps._run_analysis_hook = _analysis_hook
         try:
-            Composite({"state": state, "run_steps_on_init": True}, core=core)
+            comp = Composite({"state": state, "run_steps_on_init": True}, core=core)
+            knowledge_out = comp.state.get("knowledge")
         finally:
             _steps._run_study_hook = _orig_study_hook
             _steps._run_analysis_hook = _orig_analysis_hook
@@ -245,4 +266,5 @@ def run_investigation_composite(ws_root: Path | str, inv_slug: str, *,
         "analyses": analyses_ran,
         "errors": errors,
         "study_results": study_results,
+        "knowledge": knowledge_out,
     }
