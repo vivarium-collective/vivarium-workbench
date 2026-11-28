@@ -12122,7 +12122,7 @@
     var q   = oneline(d.question);
     var hyp = oneline(d.hypothesis);
     var leadProse = (d.lead || d.description || '').trim();
-    var bio       = (d.biological_story || '').trim();
+    var bio       = (d.background || d.biological_story || '').trim();
     var glossary  = Array.isArray(d.glossary) ? d.glossary : [];
     var howto     = d.how_to_read;  // string (prose) or array (tips) — both render.
     var hasHowto  = Array.isArray(howto) ? howto.length : String(howto || '').trim().length;
@@ -12318,7 +12318,7 @@
     // into Background as a section rather than its own tab (per the owner).
     if (bio)
       bgParts.push('<div class="inv-brief-biology">' +
-        '<div class="inv-brief-frameworks-label">Biology</div>' +
+        '<div class="inv-brief-frameworks-label">Mechanism</div>' +
         '<div class="inv-brief-prose">' + _renderInvLeadMarkdown(bio) + '</div></div>');
     if (bgParts.length)
       tabs.push({ id:'background', label:'Background', html: bgParts.join('') });
