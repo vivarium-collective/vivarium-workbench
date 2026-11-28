@@ -111,6 +111,12 @@
       + ".ag-gate-crit{color:#475569;font-size:0.88em;margin:5px 0 0}"
       + ".ag-gate-mem{margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 10px;font-size:0.82em;color:#64748b}"
       + ".ag-mini{font-weight:700;margin-left:3px}"
+      + ".ag-audit{margin-top:16px;border-top:1px solid #eef2f7;padding-top:10px}"
+      + ".ag-audit>summary{cursor:pointer;font-weight:600;color:#64748b;font-size:0.9em;list-style:none;user-select:none}"
+      + ".ag-audit>summary::-webkit-details-marker{display:none}"
+      + ".ag-audit>summary::before{content:'\\25b8 ';color:#94a3b8}"
+      + ".ag-audit[open]>summary::before{content:'\\25be '}"
+      + ".ag-audit-hint{font-weight:400;color:#94a3b8;font-size:0.92em}"
       + ".ag-dgroup{margin-top:14px}.ag-dgroup h5{margin:0 0 6px;font-size:0.9em;color:#334155}"
       + ".ag-dcall{border-left:3px solid #cbd5e1;padding:6px 12px;margin:5px 0;background:#f8fafc;border-radius:0 7px 7px 0}"
       + ".ag-dc-narrative_gap{border-left-color:#f59e0b;background:#fffbeb}"
@@ -281,25 +287,31 @@
   }
 
   function _renderDecisions(host, data) {
-    // authored decisions keep their interactive cockpit above; surface the derived items here.
+    // authored decisions keep their interactive cockpit above; surface the derived
+    // items here as a COLLAPSED "background audit" — they are computed inputs to the
+    // "what to do next" ranking (largely duplicating it) and carry no action of
+    // their own, so they are reference-only, tucked away by default.
     var calls = ((data && data.decisions) || []).filter(function (c) { return c.kind !== "decision"; });
     if (!calls.length) { host.innerHTML = '<div class="ag-dec-empty" hidden></div>'; return; }
     var groups = {
-      narrative_gap: { label: "Narrative gaps — unsupported transitions", items: [] },
-      divergence: { label: "Verdict divergences — authored vs. coded roll-up", items: [] },
-      open_question: { label: "Open questions — unassessed / inconclusive claims", items: [] }
+      narrative_gap: { label: "Narrative gaps \u2014 unsupported transitions", items: [] },
+      divergence: { label: "Verdict divergences \u2014 authored vs. coded roll-up", items: [] },
+      open_question: { label: "Open questions \u2014 unassessed / inconclusive claims", items: [] }
     };
     calls.forEach(function (c) { if (groups[c.kind]) groups[c.kind].items.push(c); });
-    var out = '<div class="ag-sec-lead" style="margin-top:18px">Derived open items — surfaced from the argument graph and the narrative audit.</div>';
+    var total = calls.length;
+    var out = '<details class="ag-audit"><summary>Background audit \u2014 ' + total
+      + ' derived item' + (total === 1 ? '' : 's') + ' <span class="ag-audit-hint">(reference only; computed from the argument graph + narrative audit)</span></summary>';
     Object.keys(groups).forEach(function (k) {
       var g = groups[k]; if (!g.items.length) return;
       out += '<div class="ag-dgroup"><h5>' + _esc(g.label) + " (" + g.items.length + ")</h5>";
       g.items.forEach(function (c) {
         out += '<div class="ag-dcall ag-dc-' + k + '"><div class="ag-dc-title">' + _esc(c.title) + "</div>"
-          + '<div class="ag-dc-act">→ ' + _esc(c.action) + "</div></div>";
+          + '<div class="ag-dc-act">\u2192 ' + _esc(c.action) + "</div></div>";
       });
       out += "</div>";
     });
+    out += "</details>";
     host.innerHTML = out;
   }
 
@@ -421,60 +433,38 @@
       H.push("</ul>");
     }
 
-    // Degeneracy guard: when every opportunity scores the same, the
-    // "value-ranked" table ranks nothing (no argument-graph edges → downstream
-    // impact is 0 for all; the engine itself flags `argument_disconnected`).
-    // Presenting identical scores as a ranking — and repeating the same study
-    // list across "Most valuable" and "Decide" — is noise, so summarize instead.
-    var _sc = opps.map(function (o) { return Number(o.score); })
-                  .filter(function (x) { return isFinite(x); });
+    // One ranked "Recommended next steps" list — merges the old three blocks
+    // (Most valuable / Decide / Suggested) into a single actionable table. Rows
+    // come from the execution plan (they carry run commands + consequence); the
+    // score is looked up from the opportunity ranking by target. When every score
+    // ties, the ranking is meaningless, so we SAY so rather than imply a priority.
+    var _sc = opps.map(function (o) { return Number(o.score); }).filter(function (x) { return isFinite(x); });
     var _hasVariance = _sc.length > 1 && (Math.max.apply(null, _sc) - Math.min.apply(null, _sc) > 1e-9);
     var degenerate = opps.length > 1 && !_hasVariance;
-
-    if (degenerate) {
-      _pushSuggestions("Suggested next studies", 8, 180);   // lead with the real signal
-      var n = opps.length;
-      H.push('<div class="disc-note">ⓘ No priority ranking yet — '
-        + n + " " + (n === 1 ? "study is" : "studies are")
-        + " ready to re-test, but none outranks another: the argument graph has no "
-        + "epistemic edges, so downstream impact is 0 for all. Add relations "
-        + "(<code>discover relate</code> or the investigation graph) to get a real ranking.</div>");
-      // Ready studies + run commands behind a disclosure — merges the old
-      // redundant "Most valuable" + "Decide" tables into one actionable list.
-      var rows = (plan && plan.length) ? plan : opps;
-      if (rows.length) {
-        H.push('<details class="disc-det"><summary>show ' + rows.length + " ready "
-          + (rows.length === 1 ? "study" : "studies") + "</summary>");
-        H.push('<table class="disc-tbl"><thead><tr><th>study</th><th>run</th></tr></thead><tbody>');
-        rows.slice(0, 20).forEach(function (p) {
-          var cmd = p.command ? '<span class="disc-cmd">' + _esc(p.command) + "</span>" : "—";
-          H.push("<tr><td>" + _esc(_strip(p.source || p.target || p.action)) + "</td><td>" + cmd + "</td></tr>");
-        });
-        H.push("</tbody></table></details>");
+    var scoreByTarget = {};
+    opps.forEach(function (o) { scoreByTarget[_strip(o.source)] = o.score; });
+    var rows = (plan && plan.length) ? plan.slice() : opps.slice();
+    if (rows.length) {
+      H.push('<div class="disc-sub">Recommended next steps</div>');
+      if (degenerate) {
+        H.push('<div class="disc-note">\u24d8 No priority ranking yet \u2014 ' + opps.length
+          + ' studies are ready to re-test but none outranks another: the argument graph has no '
+          + 'epistemic edges, so downstream impact is 0 for all. Add relations '
+          + '(<code>discover relate</code> or the investigation graph) for a real ranking.</div>');
       }
-    } else {
-      if (opps.length) {
-        H.push('<div class="disc-sub">Most valuable to investigate</div>');
-        H.push('<table class="disc-tbl"><thead><tr><th>score</th><th>action</th><th>target</th></tr></thead><tbody>');
-        opps.slice(0, 8).forEach(function (o) {
-          H.push('<tr><td class="sc">' + _esc(_num(o.score)) + "</td><td>" + _esc(o.action)
-            + "</td><td>" + _esc(_strip(o.source)) + "</td></tr>");
-        });
-        H.push("</tbody></table>");
-      }
-      if (plan && plan.length) {
-        H.push('<div class="disc-sub">Decide — the next action &amp; how it runs (gated)</div>');
-        H.push('<table class="disc-tbl"><thead><tr><th>action</th><th>target</th><th>consequence</th><th>command</th></tr></thead><tbody>');
-        plan.slice(0, 8).forEach(function (p) {
-          var cons = String(p.consequence || "").replace(/[^a-z]/g, "");
-          H.push("<tr><td>" + _esc(p.action) + "</td><td>" + _esc(_strip(p.source))
-            + '</td><td><span class="disc-cons ' + cons + '">' + _esc(p.consequence) + "</span></td><td>"
-            + (p.command ? '<span class="disc-cmd">' + _esc(p.command) + "</span>" : "—") + "</td></tr>");
-        });
-        H.push("</tbody></table>");
-      }
-      _pushSuggestions("Suggested studies (awaiting expert input)", 6, 130);
+      H.push('<table class="disc-tbl"><thead><tr><th>score</th><th>action</th><th>target</th><th>run</th></tr></thead><tbody>');
+      rows.slice(0, 12).forEach(function (p) {
+        var tgt = _strip(p.source || p.target || p.action);
+        var sc = (p.score != null) ? p.score : scoreByTarget[tgt];
+        var cons = String(p.consequence || "").replace(/[^a-z]/g, "");
+        var consHtml = p.consequence ? ' <span class="disc-cons ' + cons + '">' + _esc(p.consequence) + "</span>" : "";
+        var cmd = p.command ? '<span class="disc-cmd">' + _esc(p.command) + "</span>" : "\u2014";
+        H.push('<tr><td class="sc">' + (sc != null ? _esc(_num(sc)) : "\u00b7") + "</td><td>" + _esc(p.action) + consHtml
+          + "</td><td>" + _esc(tgt) + "</td><td>" + cmd + "</td></tr>");
+      });
+      H.push("</tbody></table>");
     }
+    _pushSuggestions("Suggested next studies (awaiting expert input)", 8, 150);
     H.push("</div>");
     host.innerHTML = H.join("");
   }
