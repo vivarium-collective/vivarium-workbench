@@ -451,7 +451,7 @@ def _frameworks_md(inv: dict) -> str:
     study is evaluated within)."""
     if not isinstance(inv, dict):
         return ""
-    frameworks = inv.get("competing_frameworks") or inv.get("frameworks") or []
+    frameworks = (inv.get("scientific_argument") or {}).get("competing_frameworks") or inv.get("competing_frameworks") or inv.get("frameworks") or []
     if not frameworks:
         return ""
     lines = ["**Competing frameworks**", ""]

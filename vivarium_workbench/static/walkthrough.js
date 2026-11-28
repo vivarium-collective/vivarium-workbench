@@ -12452,7 +12452,15 @@
       .filter(function (r) { return r && (r.status === 'open' || r.status == null); });
     var hasEngine = revProps.length || recon.length;
 
-    if (!needed.length && !resolved.length && !docs.length && !hasEngine) return '';
+    // Agent-proposed inputs the expert has not yet accepted/declined — the
+    // integrity guard: an outside reference/mechanism the agent used but was not
+    // given. Accept sanctions it (a reference is promoted into inputs.references);
+    // decline leaves it out. Backend: POST /api/proposed-input-decision.
+    var propItems = (d.proposed_inputs && Array.isArray(d.proposed_inputs.items) ? d.proposed_inputs.items : [])
+      .filter(function (p) { return p && (p.status === 'pending' || p.status == null); });
+    var hasProposed = propItems.length;
+
+    if (!needed.length && !resolved.length && !docs.length && !hasEngine && !hasProposed) return '';
 
     // Decisions the cycle already resolved (server: ex.decisions_engine_resolved)
     // are hidden/uncounted; data-index keeps pointing at the authored list.
@@ -12516,6 +12524,40 @@
           H.push('<div style="margin-top:6px;text-align:right"><button type="button" class="action-btn" onclick="_resolveEngineReconciliation(this)" style="font-size:0.82em;padding:3px 12px;font-weight:600;background:#16a34a;color:#fff;border:none">✓ Resolve</button></div></div>');
         }
         H.push('</div></div>');
+      });
+      H.push('</div></div>');
+    }
+
+    // --- Proposed inputs awaiting your review (agent-suggested, not expert-provided) ---
+    if (hasProposed) {
+      H.push('<div style="margin:0 0 18px">');
+      H.push('<div style="font-weight:700;color:#0e7490;font-size:0.82em;letter-spacing:0.04em;margin:0 0 3px">✚ PROPOSED INPUTS AWAITING REVIEW</div>');
+      H.push('<div class="muted" style="font-size:0.82em;margin:0 0 10px">The agent used these sources but you did not provide them. Accept to sanction it — a reference is added to this investigation\'s inputs; decline to leave it out.</div>');
+      H.push('<div style="display:grid;gap:10px">');
+      propItems.forEach(function (p) {
+        p = p || {};
+        var kind = p.kind || 'reference';
+        var body = (kind === 'mechanism') ? (p.summary || p.citation || '') : (p.citation || p.summary || '');
+        H.push('<div class="eng-decision" data-ekind="proposed-input" data-id="' + _esc(p.id || '') +
+          '" data-investigation="' + _esc(invName) + '" style="background:#fff;border:1px solid #cffafe;border-radius:7px;padding:10px 12px">');
+        H.push('<div style="display:flex;gap:7px;align-items:baseline">' +
+          '<span style="flex:0 0 auto;font-size:0.7em;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#0e7490;background:#ecfeff;border-radius:4px;padding:1px 6px">' + _esc(String(kind)) + '</span>' +
+          '<div style="flex:1;min-width:0;font-weight:600;color:#164e63;line-height:1.4">' + _escInv(String(body || p.id || 'Proposed input')) + '</div></div>');
+        if (p.rationale)
+          H.push('<div class="muted" style="font-size:0.85em;line-height:1.5;margin-top:6px"><strong style="color:#475569">used for</strong> ' + _escInv(String(p.rationale)) + '</div>');
+        if (p.related_study)
+          H.push('<div class="muted" style="font-size:0.85em;line-height:1.5;margin-top:3px"><strong style="color:#475569">study</strong> ' + _escInv(String(p.related_study)) + '</div>');
+        if (p.provenance)
+          H.push('<div class="muted" style="font-size:0.8em;line-height:1.5;margin-top:3px;font-style:italic">' + _escInv(String(p.provenance)) + '</div>');
+        if (!readOnly) {
+          H.push('<div style="margin-top:8px">');
+          H.push('<textarea rows="1" placeholder="note (optional)…" style="width:100%;box-sizing:border-box;font:inherit;font-size:0.84em;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical"></textarea>');
+          H.push('<div style="margin-top:6px;display:flex;gap:8px;justify-content:flex-end">');
+          H.push('<button type="button" class="action-btn" onclick="_resolveProposedInput(this,\'accept\')" style="font-size:0.82em;padding:3px 12px;font-weight:600;background:#16a34a;color:#fff;border:none">✓ Accept</button>');
+          H.push('<button type="button" class="action-btn" onclick="_resolveProposedInput(this,\'decline\')" style="font-size:0.82em;padding:3px 12px;font-weight:600;background:#e11d48;color:#fff;border:none">✕ Decline</button>');
+          H.push('</div></div>');
+        }
+        H.push('</div>');
       });
       H.push('</div></div>');
     }
@@ -12661,8 +12703,18 @@
       { investigation: card.getAttribute('data-investigation'), id: card.getAttribute('data-id') },
       btn, function () { return 'Reconciliation resolved.'; });
   }
+  function _resolveProposedInput(btn, decision) {
+    var card = btn.closest('.eng-decision'); if (!card) return;
+    _postEngineDecision('/api/proposed-input-decision',
+      { investigation: card.getAttribute('data-investigation'), item_id: card.getAttribute('data-id'), decision: decision },
+      btn, function (j) {
+        return 'Input ' + (j.status || (decision === 'accept' ? 'accepted' : 'declined')) +
+          (j.added_reference ? ' → added to inputs' : '') + '.';
+      });
+  }
   window._resolveEngineRevision = _resolveEngineRevision;
   window._resolveEngineReconciliation = _resolveEngineReconciliation;
+  window._resolveProposedInput = _resolveProposedInput;
 
   // --- Part D: authored-decision evidence chips + pick-one options -------------
   // Parse named alternatives out of a decision's text: "A vs B vs C" or a short
