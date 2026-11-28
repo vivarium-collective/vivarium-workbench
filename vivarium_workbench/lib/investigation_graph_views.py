@@ -325,11 +325,27 @@ def build_argument_overlay(ws_root, inv_slug, *, derive_fn=None, narrate_fn=None
     except Exception:  # noqa: BLE001
         pass
 
+    # Question-directed narrative lenses (RFC-0005 §5): authored {question, studies}
+    # the reader can pick to re-scope the narrative to one question. Tolerant — an
+    # engine without narrative_questions just omits them; a lens whose focus names
+    # no present claim is dropped so the selector never offers an empty reading.
+    narrative_lenses: list = []
+    try:
+        from discovery_engine.projection.narrative import narrative_questions as _nq
+        _claim_ids = set(graph.get("claims", {}))
+        for lens in _nq(spec):
+            keep = [c for c in (lens.get("focus") or []) if c in _claim_ids]
+            if keep:
+                narrative_lenses.append({**lens, "focus": keep})
+    except Exception:  # noqa: BLE001
+        pass
+
     return {
         "investigation": inv_slug,
         "claims": graph.get("claims", {}),
         "edges": graph.get("edges", []),
         "narrative": narrative,
+        "narrative_questions": narrative_lenses,
         "gaps": gaps,
         "gates": gates,
         "decisions": decisions,
