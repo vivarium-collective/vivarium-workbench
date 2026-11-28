@@ -2190,7 +2190,11 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
                 doc = build_viz_composite(viz_spec, gathered, core_registry or {},
                                           inputs_by_class=inputs_by_class)
             except VizSpecError as e:
-                if skipped is not None:
+                # Unaddressable viz (e.g. a status:stub scaffold entry): skip,
+                # but drop any stale error-stub left on disk by an older renderer
+                # so it never persists and publishes as a red failure block.
+                if not _drop_stale_error_stub(target, skipped, vname, str(e)) \
+                        and skipped is not None:
                     skipped.append({"name": vname, "reason": str(e)})
                 continue
             except Exception as e:
@@ -2201,14 +2205,21 @@ def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
                     if not (html or "").strip():
                         # empty output == a failed render (e.g. env worker down); never
                         # write it over a real figure or stamp it fresh.
-                        if skipped is not None:
+                        if not _drop_stale_error_stub(
+                                target, skipped, vname, "render produced empty output") \
+                                and skipped is not None:
                             skipped.append({"name": vname, "reason": "render produced empty output"})
                         continue
                     stamp = True
                 except Exception as e:
                     html = _viz_error_stub(vname, e)
             if not stamp and target.exists():
-                if skipped is not None:
+                # Render failed. Keep an existing REAL figure, but a pre-existing
+                # error-stub is not worth keeping over the fresh failure — drop it
+                # rather than republish a stale "Failed to render" block.
+                if not _drop_stale_error_stub(
+                        target, skipped, vname, "render failed; kept existing figure") \
+                        and skipped is not None:
                     skipped.append({"name": vname, "reason": "render failed; kept existing figure"})
                 continue
         target.write_text(html, encoding="utf-8")
@@ -2272,6 +2283,34 @@ def _viz_error_stub(name, e) -> str:
     return (f'<p style="color:#991b1b">Failed to render '
             f'<code>{name or "?"}</code>: '
             f'<code>{type(e).__name__}: {e}</code></p>')
+
+
+def _is_error_stub_file(target: Path) -> bool:
+    """True if ``target`` holds a baked ``_viz_error_stub`` (a leading ``<p>``
+    whose head says "Failed to render"), not a real figure. Used to decide
+    whether a skipped/failed render may delete the file on disk."""
+    try:
+        head = target.read_text(encoding="utf-8", errors="replace")[:400]
+    except OSError:
+        return False
+    return head.lstrip().startswith("<p") and "Failed to render" in head
+
+
+def _drop_stale_error_stub(target: Path, skipped: "list | None", vname, reason: str) -> bool:
+    """When a viz can't be rendered, an EXISTING error-stub on disk must be
+    removed, not preserved — the preserve-on-skip rule protects *real* figures,
+    and a committed stub otherwise persists forever (a current renderer skips an
+    unaddressable viz, so it never overwrites the stub) and publishes as a red
+    "Failed to render" block. Returns True if a stub was deleted."""
+    if target.exists() and _is_error_stub_file(target):
+        try:
+            target.unlink()
+        except OSError:
+            return False
+        if skipped is not None:
+            skipped.append({"name": vname, "reason": f"{reason}; removed stale error-stub"})
+        return True
+    return False
 
 
 # Static-figure address schemes (mirrors study_charts._FIGURE_ADDR_SCHEMES): a
