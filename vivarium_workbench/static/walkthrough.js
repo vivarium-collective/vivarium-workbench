@@ -12456,6 +12456,58 @@
       + '<textarea rows="' + (rows || 1) + '" class="dec-note" placeholder="' + _esc(placeholder) + '"></textarea>'
       + '<div class="dec-btns">' + buttonsHtml + '</div></div>';
   }
+  // ---- Decisions tab · connect each entity to its studies + make it actionable --
+  // A decision is only decidable if you can see where the study it concerns stands
+  // and act on it without leaving the tab. These helpers join every decision entity
+  // to the live study index (status + verdict, linked into the Study window) and
+  // attach the two in-tab actions: ▶ Run (re-run a study's baseline) and + Add study
+  // (seed a follow-up). Both reuse the existing global handlers + POST endpoints —
+  // _vivRunStudyFromRow → /api/study-run-baseline, _openDagFollowupsPopover →
+  // /api/study-seed-followup — so there is NO new backend. The index is published
+  // on window so argument-graph.js's Zone B rows (a separate projection) join by
+  // name too — a pure frontend join, no projection-shape change.
+  function _decIndexStudies(d) {
+    var idx = {};
+    (Array.isArray(d && d.studies) ? d.studies : []).forEach(function (s) {
+      if (s && s.name) idx[String(s.name)] = s;
+    });
+    window._invDecStudyIndex = idx;
+    return idx;
+  }
+  function _decPill(meta) {
+    if (!meta) return '';
+    return '<span class="dec-pill" style="color:' + meta.color + ';background:' + meta.color + '14;'
+      + 'border:1px solid ' + meta.color + '40"><span class="dec-pill-ic">' + meta.icon + '</span>'
+      + _esc(meta.label) + (meta.derived ? '<sup>*</sup>' : '') + '</span>';
+  }
+  // A clickable study reference with its live status + verdict pills. Unknown name
+  // (a study not yet created) → plain label, no link. Shared with Zone B via window.
+  function _decStudyRef(name) {
+    if (!name) return '';
+    var s = (window._invDecStudyIndex || {})[String(name)];
+    var label = _escInv(String(name));
+    if (!s) return '<span class="dec-studyref dec-studyref-new" title="not yet created">' + label + '</span>';
+    return '<a href="#" class="dec-studyref" title="open study" '
+      + 'onclick="_openStudyInsideInvestigation(\'' + _esc(name) + '\',\'conclusions\');return false;">'
+      + label + ' ↗</a>'
+      + _decPill(_studyStatusMeta(s)) + _decPill(_verdictMeta(s));
+  }
+  window._decStudyRefHtml = _decStudyRef;
+  // ▶ Run — re-run a study's current baseline spec (live only). Reuses the same
+  // handler + endpoint the Studies rows use; only shown for a study that exists.
+  function _decRunBtn(slug) {
+    if (!slug || !(window._invDecStudyIndex || {})[String(slug)]) return '';
+    return '<button type="button" class="dec-act-btn dec-run" title="run this study’s baseline now" '
+      + 'onclick="_vivRunStudyFromRow(event,\'' + _esc(slug) + '\')">▶ Run</button>';
+  }
+  // + Add study — open the follow-ups picker for a study and seed a child via
+  // /api/study-seed-followup. Reuses the existing popover.
+  function _decAddBtn(parent, label) {
+    if (!parent) return '';
+    return '<button type="button" class="dec-act-btn dec-add" title="seed a follow-up study from this study" '
+      + 'onclick="event.stopPropagation();_openDagFollowupsPopover(\'' + _esc(parent) + '\',this)">'
+      + _esc(label || '+ Add study') + '</button>';
+  }
   function _decCardRecon(r, invName, readOnly) {
     r = r || {};
     var sev = r.severity === 'blocking' ? ' · blocking' : (r.severity === 'high' ? ' · high' : '');
@@ -12476,12 +12528,19 @@
       return _escInv((c.name || c.kind || 'change') + ': ' + String(c.from) + ' → ' + to);
     });
     var src = p.source;
+    var srcStudy = (src && typeof src === 'object') ? src.study : '';
     var srcLabel = (src && typeof src === 'object') ? (src.study || src.observable || src.finding || src.kind || '') : (src || '');
     var body = '';
+    // The study this revision concerns — linked, with its live status + verdict,
+    // so the expert can judge the change against where the study actually stands.
+    if (srcStudy) body += '<div class="dec-sub dec-sub-study"><b>study</b> ' + _decStudyRef(srcStudy) + '</div>';
     if (changes.length) body += '<ul class="dec-changes">' + changes.map(function (c) { return '<li>' + c + '</li>'; }).join('') + '</ul>';
     if (p.inadequacy) body += '<div class="dec-sub"><b>why</b> ' + _escInv(String(p.inadequacy)) + '</div>';
     var dt = p.discriminating_test || {};
     if (dt.pass_if) body += '<div class="dec-sub"><b>test</b> ' + _escInv(String(dt.pass_if)) + '</div>';
+    // Approve/Reject record the call; ▶ Run re-runs the concerned study's baseline
+    // so the expert can see the effect of the proposed change directly from here.
+    var runBtn = readOnly ? '' : _decRunBtn(srcStudy);
     return _decCardShell({
       cls: 'eng-decision dec-k-revision',
       attrs: 'data-ekind="revision" data-id="' + _esc(p.id || '') + '" data-investigation="' + _esc(invName) + '"',
@@ -12490,7 +12549,8 @@
       body: body,
       actions: readOnly ? '' : _decActions('note (optional)…',
         _decBtn('✓ Approve', "_resolveEngineRevision(this,'approve')", '#16a34a')
-        + _decBtn('✕ Reject', "_resolveEngineRevision(this,'reject')", '#e11d48'))
+        + _decBtn('✕ Reject', "_resolveEngineRevision(this,'reject')", '#e11d48')
+        + runBtn)
     });
   }
   function _decCardProposed(p, invName, readOnly) {
@@ -12499,8 +12559,9 @@
     var txt = (kind === 'mechanism') ? (p.summary || p.citation || '') : (p.citation || p.summary || '');
     var body = '';
     if (p.rationale) body += '<div class="dec-sub"><b>used for</b> ' + _escInv(String(p.rationale)) + '</div>';
-    if (p.related_study) body += '<div class="dec-sub"><b>study</b> ' + _escInv(String(p.related_study)) + '</div>';
+    if (p.related_study) body += '<div class="dec-sub dec-sub-study"><b>study</b> ' + _decStudyRef(p.related_study) + '</div>';
     if (p.provenance) body += '<div class="dec-sub dec-prov">' + _escInv(String(p.provenance)) + '</div>';
+    var runBtn = readOnly ? '' : _decRunBtn(p.related_study);
     return _decCardShell({
       cls: 'eng-decision dec-k-input',
       attrs: 'data-ekind="proposed-input" data-id="' + _esc(p.id || '') + '" data-investigation="' + _esc(invName) + '"',
@@ -12509,7 +12570,8 @@
       body: body,
       actions: readOnly ? '' : _decActions('note (optional)…',
         _decBtn('✓ Accept', "_resolveProposedInput(this,'accept')", '#16a34a')
-        + _decBtn('✕ Decline', "_resolveProposedInput(this,'decline')", '#e11d48'))
+        + _decBtn('✕ Decline', "_resolveProposedInput(this,'decline')", '#e11d48')
+        + runBtn)
     });
   }
   function _decCardExpert(dec, i, d, invName, readOnly) {
@@ -12518,6 +12580,14 @@
     var context = (typeof dec === 'string') ? '' : (dec.context || dec.detail || '');
     var body = '';
     if (context) body += '<div class="dec-sub">' + _renderInvLeadMarkdown(context) + '</div>';
+    // Surface any study the question/context names (by exact slug) as a linked
+    // ref with its status + verdict, so the expert can inspect it before deciding.
+    var _hay = ' ' + String(question) + ' ' + String(context) + ' ';
+    var _named = Object.keys(window._invDecStudyIndex || {}).filter(function (n) {
+      return n.length >= 4 && _hay.indexOf(n) !== -1;
+    });
+    if (_named.length) body += '<div class="dec-sub dec-sub-study"><b>studies</b> '
+      + _named.map(function (n) { return _decStudyRef(n); }).join(' ') + '</div>';
     var _ev = _decisionEvidenceHtml(question + ' ' + context, d);
     if (_ev) body += _ev;
     var _opts = _decisionOptions(question); if (!_opts.length) _opts = _decisionOptions(context);
@@ -12549,6 +12619,8 @@
 
   function _invDecisionTabHtml(d) {
     d = d || {};
+    // Build the name→study lookup FIRST — the card builders + Zone B join on it.
+    _decIndexStudies(d);
     var ex = d.executive || {};
     var needed = Array.isArray(ex.decisions_needed) ? ex.decisions_needed : [];
     var resolved = Array.isArray(ex.decisions_resolved) ? ex.decisions_resolved : [];

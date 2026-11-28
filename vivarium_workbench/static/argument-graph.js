@@ -394,7 +394,14 @@
       + ".disc-det>summary{cursor:pointer;color:#2563eb;font-size:0.84em;padding:3px 0;list-style:none;user-select:none}"
       + ".disc-det>summary::-webkit-details-marker{display:none}"
       + ".disc-det>summary::before{content:'\\25b8 ';color:#94a3b8}"
-      + ".disc-det[open]>summary::before{content:'\\25be '}";
+      + ".disc-det[open]>summary::before{content:'\\25be '}"
+      // In-tab action buttons (▶ Run / + Add study) on the recommended-steps rows.
+      + ".disc-act-btn{font-size:0.78em;font-weight:600;padding:2px 10px;border-radius:6px;cursor:pointer;white-space:nowrap;border:1px solid transparent}"
+      + ".disc-run{background:#16a34a;color:#fff;border-color:#16a34a}"
+      + ".disc-run:hover{background:#15803d}"
+      + ".disc-add{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}"
+      + ".disc-add:hover{background:#dbeafe}"
+      + ".disc-tgt{line-height:1.9}";
     var el = document.createElement("style"); el.id = "disc-style"; el.textContent = css;
     document.head.appendChild(el);
   }
@@ -422,13 +429,39 @@
     var plan = d.execution_plan || [];
     var sugg = (d.suggestions || []).filter(function (s) { return s.status === "awaiting_expert"; });
 
+    // Live only — resolving/running writes to disk; a published snapshot has no
+    // backend, so the in-tab actions below are hidden there (the list still reads).
+    var isSnap = (window.__DASH_CONFIG__ || {}).mode === "snapshot";
+    // Join a target study name to its live status + verdict via the index
+    // walkthrough.js publishes when it renders the Decisions tab (same tab, built
+    // together). Falls back to the plain name before the index exists.
+    function _tgtHtml(name) {
+      if (name && typeof window._decStudyRefHtml === "function") {
+        var h = window._decStudyRefHtml(name);
+        if (h) return h;
+      }
+      return _esc(name);
+    }
+    // The in-tab action for a recommended step: ▶ Run a ready study's baseline
+    // (action "test"), or + Add a follow-up study (action "branch"). Both reuse
+    // the existing global handlers + POST endpoints — no new backend.
+    function _actBtn(action, tgt) {
+      if (isSnap || !tgt) return "";
+      if (action === "test" && typeof window._vivRunStudyFromRow === "function")
+        return '<button type="button" class="disc-act-btn disc-run" title="run this study’s baseline now" onclick="_vivRunStudyFromRow(event,\'' + _esc(tgt) + '\')">▶ Run</button>';
+      if (action === "branch" && typeof window._openDagFollowupsPopover === "function")
+        return '<button type="button" class="disc-act-btn disc-add" title="seed a follow-up study from this study" onclick="event.stopPropagation();_openDagFollowupsPopover(\'' + _esc(tgt) + '\',this)">+ Add study</button>';
+      return "";
+    }
     // The suggestions list carries the real signal when the value-ranking is
     // flat — each suggestion has a distinct rationale. Shared by both branches.
     function _pushSuggestions(heading, limit, needsLen) {
       if (!sugg.length) return;
       H.push('<div class="disc-sub">' + heading + '</div><ul class="ag-list">');
       sugg.slice(0, limit).forEach(function (s) {
-        H.push("<li>on <b>" + _esc(s.parent) + "</b>: " + _esc(String(s.needs || "").slice(0, needsLen)) + "</li>");
+        var on = s.parent ? ("on " + _tgtHtml(s.parent) + ": ") : "";
+        var add = s.parent ? (" " + _actBtn("branch", s.parent)) : "";
+        H.push("<li>" + on + _esc(String(s.needs || "").slice(0, needsLen)) + add + "</li>");
       });
       H.push("</ul>");
     }
@@ -452,15 +485,20 @@
           + 'epistemic edges, so downstream impact is 0 for all. Add relations '
           + '(<code>discover relate</code> or the investigation graph) for a real ranking.</div>');
       }
-      H.push('<table class="disc-tbl"><thead><tr><th>score</th><th>action</th><th>target</th><th>run</th></tr></thead><tbody>');
+      H.push('<table class="disc-tbl"><thead><tr><th>score</th><th>action</th><th>target</th><th>do</th></tr></thead><tbody>');
       rows.slice(0, 12).forEach(function (p) {
         var tgt = _strip(p.source || p.target || p.action);
         var sc = (p.score != null) ? p.score : scoreByTarget[tgt];
         var cons = String(p.consequence || "").replace(/[^a-z]/g, "");
         var consHtml = p.consequence ? ' <span class="disc-cons ' + cons + '">' + _esc(p.consequence) + "</span>" : "";
-        var cmd = p.command ? '<span class="disc-cmd">' + _esc(p.command) + "</span>" : "\u2014";
+        // Prefer a real in-tab action button over the copy-paste command string;
+        // keep the command as the button's tooltip (or show it when no action fits).
+        var act = _actBtn(p.action, tgt);
+        var doCell = act
+          ? (p.command ? act.replace('title="', 'title="' + _esc(p.command) + ' \u2014 ') : act)
+          : (p.command ? '<span class="disc-cmd">' + _esc(p.command) + "</span>" : "\u2014");
         H.push('<tr><td class="sc">' + (sc != null ? _esc(_num(sc)) : "\u00b7") + "</td><td>" + _esc(p.action) + consHtml
-          + "</td><td>" + _esc(tgt) + "</td><td>" + cmd + "</td></tr>");
+          + '</td><td class="disc-tgt">' + _tgtHtml(tgt) + "</td><td>" + doCell + "</td></tr>");
       });
       H.push("</tbody></table>");
     }
